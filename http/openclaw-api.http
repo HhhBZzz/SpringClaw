@@ -1,0 +1,281 @@
+@baseUrl = http://127.0.0.1:18080
+@sessionKey = demo-session-{{$timestamp}}
+@username = hb_{{$timestamp}}
+@password = 123456
+@token =
+@providerId = coding-plan
+
+### 0) 首页
+GET {{baseUrl}}/
+Accept: application/json
+
+### 1) 健康检查
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+### 2) 注册（首次跑）
+POST {{baseUrl}}/api/auth/register
+Content-Type: application/json
+
+{
+  "username": "{{username}}",
+  "password": "{{password}}"
+}
+
+> {%
+  if (response.body && response.body.data && response.body.data.token) {
+    client.global.set("token", response.body.data.token);
+    client.log("token set from register");
+  }
+%}
+
+### 3) 登录（重复跑推荐用这个）
+POST {{baseUrl}}/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "{{username}}",
+  "password": "{{password}}"
+}
+
+> {%
+  if (response.body && response.body.data && response.body.data.token) {
+    client.global.set("token", response.body.data.token);
+    client.log("token set from login");
+  }
+%}
+
+### 4) 当前登录态
+GET {{baseUrl}}/api/auth/me
+Authorization: Bearer {{token}}
+Accept: application/json
+
+### 5) 聊天（同步）
+POST {{baseUrl}}/api/chat/send
+Content-Type: application/json
+
+{
+  "sessionKey": "{{sessionKey}}",
+  "userId": "{{username}}",
+  "message": "你好，介绍一下你能做什么",
+  "channel": "api"
+}
+
+### 5.1) 聊天（JVM 参数，验证自动工具获取）
+POST {{baseUrl}}/api/chat/send
+Content-Type: application/json
+
+{
+  "sessionKey": "{{sessionKey}}",
+  "userId": "{{username}}",
+  "message": "帮我获取当前进程的JVM启动参数，直接给参数列表",
+  "channel": "api"
+}
+
+### 6) 聊天（触发项目检索技能）
+POST {{baseUrl}}/api/chat/send
+Content-Type: application/json
+
+{
+  "sessionKey": "{{sessionKey}}",
+  "userId": "{{username}}",
+  "message": "我不知道路径，帮我找 ChatServiceImpl 在哪个文件，并给我核心方法名",
+  "channel": "api"
+}
+
+### 6.1) 聊天（触发工作区任务分析，更像 Agent 找实现）
+POST {{baseUrl}}/api/chat/send
+Content-Type: application/json
+
+{
+  "sessionKey": "{{sessionKey}}",
+  "userId": "{{username}}",
+  "message": "帮我分析 ChatServiceImpl 的核心实现在哪，顺便给我关键代码片段",
+  "channel": "api"
+}
+
+### 6.2) 聊天（验证“项目中是否存在某文件/配置”不会再退回要路径）
+POST {{baseUrl}}/api/chat/send
+Content-Type: application/json
+
+{
+  "sessionKey": "{{sessionKey}}",
+  "userId": "{{username}}",
+  "message": "项目中是否存在 Spring AI 相关文件，请直接告诉我有哪些",
+  "channel": "api"
+}
+
+### 7) 聊天（触发天气技能）
+POST {{baseUrl}}/api/chat/send
+Content-Type: application/json
+
+{
+  "sessionKey": "{{sessionKey}}",
+  "userId": "{{username}}",
+  "message": "帮我查一下北京今天天气",
+  "channel": "api"
+}
+
+### 8) 聊天（触发汇率技能）
+POST {{baseUrl}}/api/chat/send
+Content-Type: application/json
+
+{
+  "sessionKey": "{{sessionKey}}",
+  "userId": "{{username}}",
+  "message": "帮我查 1 美元等于多少人民币",
+  "channel": "api"
+}
+
+### 9) 聊天（触发新闻技能）
+POST {{baseUrl}}/api/chat/send
+Content-Type: application/json
+
+{
+  "sessionKey": "{{sessionKey}}",
+  "userId": "{{username}}",
+  "message": "帮我查今天 AI 相关新闻，给我 3 条",
+  "channel": "api"
+}
+
+### 10) 聊天（列出可用脚本技能）
+POST {{baseUrl}}/api/chat/send
+Content-Type: application/json
+
+{
+  "sessionKey": "{{sessionKey}}",
+  "userId": "{{username}}",
+  "message": "有哪些 skill 可以直接帮我做事？",
+  "channel": "api"
+}
+
+### 10.1) 查询脚本 skill 目录（热发现）
+GET {{baseUrl}}/api/admin/manage/script-skills
+Accept: application/json
+
+### 10.1.1) 查询模型提供方与当前活动模型
+GET {{baseUrl}}/api/admin/manage/model-providers
+Accept: application/json
+
+### 10.1.2) 切换活动模型提供方（例如 coding-plan / qwen / primary）
+POST {{baseUrl}}/api/admin/manage/model-providers/switch
+Content-Type: application/json
+
+{
+  "providerId": "{{providerId}}"
+}
+
+### 10.1.3) 切换指定 provider 内的具体 model（例如 coding-plan -> qwen3-coder-plus）
+POST {{baseUrl}}/api/admin/manage/model-providers/switch
+Content-Type: application/json
+
+{
+  "providerId": "coding-plan",
+  "model": "qwen3-coder-plus"
+}
+
+### 10.2) 重载脚本 skill 目录（新增/修改 skill 后调用）
+POST {{baseUrl}}/api/admin/manage/script-skills/reload
+Accept: application/json
+
+### 10.3) 聊天（脚本技能：项目分析）
+POST {{baseUrl}}/api/chat/send
+Content-Type: application/json
+
+{
+  "sessionKey": "{{sessionKey}}",
+  "userId": "{{username}}",
+  "message": "请用 repo_inspector 帮我分析 Spring AI 相关文件",
+  "channel": "api"
+}
+
+### 10.4) 聊天（脚本技能：运行诊断）
+POST {{baseUrl}}/api/chat/send
+Content-Type: application/json
+
+{
+  "sessionKey": "{{sessionKey}}",
+  "userId": "{{username}}",
+  "message": "请用 runtime_probe 看看 18080 端口被谁占用了",
+  "channel": "api"
+}
+
+### 10.5) 聊天（脚本技能：天气兜底）
+POST {{baseUrl}}/api/chat/send
+Content-Type: application/json
+
+{
+  "sessionKey": "{{sessionKey}}",
+  "userId": "{{username}}",
+  "message": "如果天气工具失败，就改用 weather_fallback 查北京天气",
+  "channel": "api"
+}
+
+### 11) 聊天（流式）
+POST {{baseUrl}}/api/chat/stream
+Content-Type: application/json
+Accept: text/event-stream
+
+{
+  "sessionKey": "{{sessionKey}}",
+  "userId": "{{username}}",
+  "message": "请总结你刚才查到的信息",
+  "channel": "api"
+}
+
+### 12) 记忆检索（按会话）
+GET {{baseUrl}}/api/memory/search?sessionKey={{sessionKey}}&query=天气&topK=6
+Accept: application/json
+
+### 13) 审计日志分页
+GET {{baseUrl}}/api/admin/audit/logs?page=1&size=20&userId={{username}}
+Accept: application/json
+
+### 14) 审计统计
+GET {{baseUrl}}/api/admin/audit/stats?recentLimit=500
+Accept: application/json
+
+### 15) 后台总览
+GET {{baseUrl}}/api/admin/manage/overview
+Accept: application/json
+
+### 16) 查询用户（需 db-enabled=true）
+GET {{baseUrl}}/api/admin/manage/users
+Accept: application/json
+
+### 17) 写入工具权限（需 db-enabled=true）
+POST {{baseUrl}}/api/admin/manage/tool-permissions/upsert
+Content-Type: application/json
+
+{
+  "roleCode": "USER",
+  "toolName": "WebSearchToolPack.webSearch",
+  "allow": true,
+  "priority": 10,
+  "enabled": true
+}
+
+### 18) 重载 SOUL
+POST {{baseUrl}}/api/admin/soul/reload
+Accept: application/json
+
+### 19) 模拟飞书 Webhook（本地）
+POST {{baseUrl}}/api/webhook/feishu
+Content-Type: application/json
+
+{
+  "event": {
+    "sender": {
+      "sender_id": {
+        "open_id": "ou_test_user_001"
+      },
+      "sender_type": "user"
+    },
+    "message": {
+      "chat_id": "oc_test_chat_001",
+      "message_id": "om_test_msg_{{$timestamp}}",
+      "message_type": "text",
+      "content": "{\"text\":\"你好，来自飞书 webhook\"}"
+    }
+  }
+}

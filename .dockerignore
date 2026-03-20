@@ -1,0 +1,8 @@
+target
+.idea
+.run
+.DS_Store
+classpath.txt
+*.log
+.git
+

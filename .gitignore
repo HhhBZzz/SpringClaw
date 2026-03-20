@@ -1,0 +1,21 @@
+# Build output
+target/
+cp.txt
+classpath.txt
+
+# IDE
+.idea/
+.run/
+*.iml
+
+# macOS
+.DS_Store
+
+# Local env and notes
+.env
+.env.*
+!*.example
+docs/PROJECT_MEMORY.md
+
+# Logs
+*.log

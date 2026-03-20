@@ -1,0 +1,125 @@
+package com.openclaw.tool.runtime;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.openclaw.service.skill.SkillService;
+import com.openclaw.service.skill.script.ScriptSkillCatalogService;
+import com.openclaw.service.workspace.WorkspaceTaskService;
+import com.openclaw.tool.pack.ExchangeRateToolPack;
+import com.openclaw.tool.pack.FileToolPack;
+import com.openclaw.tool.pack.NewsToolPack;
+import com.openclaw.tool.pack.ScriptSkillToolPack;
+import com.openclaw.tool.pack.SystemToolPack;
+import com.openclaw.tool.pack.WebSearchToolPack;
+import com.openclaw.tool.pack.WeatherToolPack;
+import com.openclaw.tool.pack.WorkspaceSearchToolPack;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.Set;
+
+class ToolOrchestratorTest {
+
+    @TempDir
+    Path tempDir;
+
+    @Test
+    void shouldIncludeWorkspaceToolForProjectFileExistenceQuestion() {
+        ToolFixture fixture = buildFixture();
+        Object[] tools = fixture.orchestrator.selectTools(
+                "api",
+                "u1",
+                "项目中是否存在 Spring AI 相关文件",
+                "先确认配置和类是否存在"
+        );
+
+        Assertions.assertTrue(Arrays.asList(tools).contains(fixture.workspaceSearchToolPack));
+    }
+
+    @Test
+    void shouldIncludeFileToolForExplicitPathReadQuestion() {
+        ToolFixture fixture = buildFixture();
+        Object[] tools = fixture.orchestrator.selectTools(
+                "api",
+                "u1",
+                "读取 src/main/resources/application.yml 文件",
+                "直接读取指定路径"
+        );
+
+        Assertions.assertTrue(Arrays.asList(tools).contains(fixture.fileToolPack));
+    }
+
+    private ToolFixture buildFixture() {
+        FileToolPack fileToolPack = new FileToolPack(tempDir.toString(), 12000);
+        SystemToolPack systemToolPack = new SystemToolPack(false, "pwd,ls", 5, 2000);
+        WorkspaceTaskService workspaceTaskService = new WorkspaceTaskService(tempDir.toString(), 8, 4, 6, 1200, 512);
+        WorkspaceSearchToolPack workspaceSearchToolPack = new WorkspaceSearchToolPack(
+                workspaceTaskService,
+                tempDir.toString(),
+                8,
+                4000,
+                30,
+                5000,
+                512
+        );
+        WebSearchToolPack webSearchToolPack = new WebSearchToolPack(false, "https://example.com?q={query}", true, 3, 2000);
+        WeatherToolPack weatherToolPack = new WeatherToolPack(
+                false,
+                "https://example.com/{city}",
+                3,
+                "https://www.weather.com.cn/data/sk/{cityCode}.html",
+                webSearchToolPack
+        );
+        ExchangeRateToolPack exchangeRateToolPack = new ExchangeRateToolPack(false, "https://example.com/{base}", 3);
+        NewsToolPack newsToolPack = new NewsToolPack(false, "https://example.com/{query}", 5, 3);
+        ScriptSkillCatalogService scriptSkillCatalogService = new ScriptSkillCatalogService(false, tempDir.toString(), "echo", new ObjectMapper());
+        ScriptSkillToolPack scriptSkillToolPack = new ScriptSkillToolPack(false, scriptSkillCatalogService, "python3", 3, 1000, new ObjectMapper());
+        SkillService skillService = new StubSkillService();
+
+        ToolOrchestrator orchestrator = new ToolOrchestrator(
+                fileToolPack,
+                systemToolPack,
+                workspaceSearchToolPack,
+                webSearchToolPack,
+                weatherToolPack,
+                exchangeRateToolPack,
+                newsToolPack,
+                scriptSkillToolPack,
+                skillService,
+                "文件,目录,path,read,write,list,保存,读取",
+                "找文件,搜代码,在哪个文件,关键词检索,不知道路径,search file,find file,grep",
+                "联网,搜索,查一下,网页,新闻,官网,web search,google,bing",
+                "天气,气温,温度,下雨,weather",
+                "汇率,美元,人民币,欧元,exchange,usd,cny,eur",
+                "新闻,热点,头条,资讯,news",
+                "脚本,skill,执行技能,python,run skill"
+        );
+
+        return new ToolFixture(orchestrator, fileToolPack, workspaceSearchToolPack);
+    }
+
+    private record ToolFixture(ToolOrchestrator orchestrator,
+                               FileToolPack fileToolPack,
+                               WorkspaceSearchToolPack workspaceSearchToolPack) {
+    }
+
+    private static class StubSkillService implements SkillService {
+
+        @Override
+        public Set<String> resolveAllowedToolPacks(String channel, String userId) {
+            return Set.of("system", "file", "workspace", "web", "weather", "exchange", "news", "script");
+        }
+
+        @Override
+        public String describeAvailableSkills(String channel, String userId) {
+            return "";
+        }
+
+        @Override
+        public String describeCoreSkills(String channel, String userId) {
+            return "";
+        }
+    }
+}

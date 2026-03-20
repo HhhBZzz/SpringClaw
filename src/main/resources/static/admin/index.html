@@ -1,0 +1,1509 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SpringClaw Admin Console</title>
+  <style>
+    :root {
+      --bg: #f2ede6;
+      --bg-deep: #e7dfd2;
+      --surface: rgba(255, 251, 245, 0.9);
+      --surface-strong: #fffdf8;
+      --text: #17211d;
+      --muted: #66736c;
+      --line: rgba(23, 33, 29, 0.1);
+      --accent: #0f766e;
+      --accent-strong: #0a4f4a;
+      --accent-soft: rgba(15, 118, 110, 0.12);
+      --warn: #b45309;
+      --danger: #b42318;
+      --ok: #0f766e;
+      --shadow: 0 18px 50px rgba(40, 30, 20, 0.09);
+      --radius: 22px;
+      --radius-sm: 16px;
+      --mono: "SFMono-Regular", "JetBrains Mono", "Menlo", monospace;
+      --sans: "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--sans);
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 28%),
+        radial-gradient(circle at 82% 10%, rgba(180, 83, 9, 0.12), transparent 24%),
+        linear-gradient(180deg, #f8f4ee 0%, #efe8de 52%, #e8dfd3 100%);
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(23, 33, 29, 0.022) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(23, 33, 29, 0.022) 1px, transparent 1px);
+      background-size: 22px 22px;
+      mask-image: linear-gradient(180deg, rgba(0,0,0,0.32), transparent 85%);
+    }
+
+    .shell {
+      position: relative;
+      z-index: 1;
+      width: min(1480px, calc(100% - 28px));
+      margin: 18px auto 36px;
+      display: grid;
+      gap: 20px;
+    }
+
+    .hero,
+    .panel {
+      border-radius: 30px;
+      border: 1px solid rgba(23, 33, 29, 0.08);
+      box-shadow: var(--shadow);
+      background: linear-gradient(180deg, rgba(255,255,255,0.74), rgba(255,250,244,0.92));
+      backdrop-filter: blur(10px);
+    }
+
+    .hero {
+      padding: 26px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(360px, 0.9fr);
+      gap: 18px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 340px;
+      height: 340px;
+      right: -120px;
+      top: -140px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(15, 118, 110, 0.14), transparent 70%);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.68);
+      border: 1px solid rgba(23, 33, 29, 0.08);
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 18px 0 10px;
+      font-size: clamp(34px, 4.2vw, 58px);
+      line-height: 0.95;
+      letter-spacing: -0.05em;
+      max-width: 9ch;
+    }
+
+    .subhead {
+      margin: 0;
+      max-width: 60ch;
+      color: var(--muted);
+      line-height: 1.7;
+      font-size: 15px;
+    }
+
+    .hero-grid {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .hero-card,
+    .auth-box,
+    .metric,
+    .mini-card,
+    .table-shell,
+    .stack,
+    .helper,
+    .toolbar,
+    .field,
+    .status-strip,
+    .quick-card {
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(23, 33, 29, 0.08);
+      background: rgba(255,255,255,0.72);
+    }
+
+    .hero-card {
+      padding: 14px 16px;
+    }
+
+    .hero-card label,
+    .metric label,
+    .mini-card label,
+    .field label,
+    .token-box small,
+    th {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .hero-card strong,
+    .metric strong {
+      font-size: 18px;
+      letter-spacing: -0.03em;
+    }
+
+    .auth-box {
+      padding: 20px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .panel {
+      padding: 20px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 20px;
+      grid-template-columns: 1.15fr 0.85fr;
+    }
+
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .panel-head h2,
+    .panel-head h3 {
+      margin: 0;
+      font-size: 20px;
+      letter-spacing: -0.03em;
+    }
+
+    .panel-note {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .toolbar,
+    .helper,
+    .status-strip {
+      padding: 14px 16px;
+    }
+
+    .toolbar,
+    .button-row,
+    .inline-actions,
+    .actions,
+    .status-strip {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .status-strip {
+      justify-content: space-between;
+    }
+
+    .helper {
+      color: var(--accent-strong);
+      background: linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(15, 118, 110, 0.03));
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .metric {
+      padding: 16px;
+      min-height: 104px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .metric strong {
+      font-size: 30px;
+    }
+
+    .metric span,
+    .mini-card span,
+    .row-sub,
+    .muted {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .stack {
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .fields-2,
+    .fields-3 {
+      display: grid;
+      gap: 12px;
+    }
+
+    .fields-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .fields-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    .field {
+      padding: 12px 14px;
+    }
+
+    input,
+    select,
+    textarea,
+    button {
+      font: inherit;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      border: none;
+      outline: none;
+      background: transparent;
+      color: var(--text);
+      padding: 0;
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 96px;
+      line-height: 1.6;
+    }
+
+    button {
+      border: none;
+      cursor: pointer;
+      border-radius: 14px;
+      padding: 11px 15px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      transition: transform 140ms ease, opacity 140ms ease;
+    }
+
+    button:hover { transform: translateY(-1px); }
+    button:disabled { opacity: 0.45; cursor: wait; transform: none; }
+
+    .btn-primary {
+      color: #f5fffe;
+      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+    }
+
+    .btn-secondary {
+      color: var(--text);
+      background: rgba(255,255,255,0.82);
+      border: 1px solid rgba(23, 33, 29, 0.1);
+    }
+
+    .btn-danger {
+      color: white;
+      background: linear-gradient(135deg, #d92d20, #b42318);
+    }
+
+    .btn-tiny {
+      padding: 7px 10px;
+      border-radius: 10px;
+      font-size: 12px;
+    }
+
+    .status-pill,
+    .role-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    .status-pill {
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+    }
+
+    .status-pill.warn {
+      background: rgba(180, 83, 9, 0.12);
+      color: var(--warn);
+    }
+
+    .status-pill.danger {
+      background: rgba(180, 35, 24, 0.12);
+      color: var(--danger);
+    }
+
+    .role-pill.admin { background: rgba(15, 118, 110, 0.12); color: var(--accent-strong); }
+    .role-pill.developer { background: rgba(37, 99, 235, 0.12); color: #1d4ed8; }
+    .role-pill.user { background: rgba(100, 116, 139, 0.12); color: #475569; }
+
+    .token-box,
+    .output {
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(23, 33, 29, 0.08);
+      background: rgba(255,255,255,0.78);
+    }
+
+    .token-box {
+      padding: 14px 16px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .token-value,
+    .output,
+    code {
+      font-family: var(--mono);
+    }
+
+    .token-value,
+    code {
+      word-break: break-all;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .quick-grid,
+    .provider-grid,
+    .ops-grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .quick-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .provider-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ops-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+    .quick-card,
+    .mini-card {
+      padding: 16px;
+    }
+
+    .provider-card {
+      padding: 16px;
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(23, 33, 29, 0.08);
+      background: rgba(255,255,255,0.78);
+      display: grid;
+      gap: 12px;
+    }
+
+    .provider-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: start;
+    }
+
+    .provider-card h4,
+    .quick-card h4,
+    .mini-card h4 {
+      margin: 0 0 4px;
+      font-size: 16px;
+      letter-spacing: -0.02em;
+    }
+
+    .model-buttons,
+    .role-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .table-shell {
+      overflow: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 12px 14px;
+      border-bottom: 1px solid rgba(23, 33, 29, 0.08);
+      vertical-align: top;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      background: rgba(255,255,255,0.96);
+      z-index: 1;
+    }
+
+    tr:last-child td { border-bottom: none; }
+
+    .output {
+      min-height: 160px;
+      max-height: 420px;
+      overflow: auto;
+      padding: 16px;
+      font-size: 12px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+    }
+
+    .hidden { display: none !important; }
+
+    .fade-in {
+      animation: rise 380ms ease both;
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 1180px) {
+      .hero,
+      .grid,
+      .provider-grid,
+      .ops-grid,
+      .quick-grid,
+      .metrics {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .shell { width: min(100% - 16px, 1480px); margin-top: 10px; }
+      .hero, .panel { padding: 16px; border-radius: 24px; }
+      .fields-2, .fields-3 { grid-template-columns: 1fr; }
+      h1 { max-width: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell fade-in">
+    <section class="hero">
+      <div>
+        <div class="eyebrow">SpringClaw / Admin Console</div>
+        <h1>管理员工作台。</h1>
+        <p class="subhead">
+          默认只保留最常用的后台动作：登录、看系统状态、管理用户角色、切换模型、检查记忆与队列、查审计日志。
+          复杂原始数据仍然能看，但不再让你先手填一堆表单。
+        </p>
+        <div class="hero-grid">
+          <div class="hero-card">
+            <label>访问权限</label>
+            <strong>ADMIN only</strong>
+          </div>
+          <div class="hero-card">
+            <label>飞书接入</label>
+            <strong>用户名直接填飞书 userId</strong>
+          </div>
+          <div class="hero-card">
+            <label>默认主链路</label>
+            <strong>simplified</strong>
+          </div>
+        </div>
+      </div>
+
+      <aside class="auth-box">
+        <div class="panel-head" style="margin-bottom: 0;">
+          <div>
+            <h2>登录与初始化</h2>
+            <p class="panel-note">先登录管理员账号。若系统还没有任何用户，首个注册账号会自动成为 ADMIN。</p>
+          </div>
+          <span id="authBadge" class="status-pill warn">未登录</span>
+        </div>
+
+        <div class="fields-2">
+          <div class="field">
+            <label for="loginUsername">Username</label>
+            <input id="loginUsername" placeholder="admin 或 ou_xxx" />
+          </div>
+          <div class="field">
+            <label for="loginPassword">Password</label>
+            <input id="loginPassword" type="password" placeholder="输入密码" />
+          </div>
+        </div>
+
+        <div class="button-row">
+          <button class="btn-primary" id="loginBtn">登录</button>
+          <button class="btn-secondary" id="registerBtn">注册</button>
+          <button class="btn-secondary" id="refreshMeBtn">刷新身份</button>
+          <button class="btn-danger" id="logoutBtn">退出</button>
+        </div>
+
+        <div class="status-strip">
+          <span class="muted">当前账号</span>
+          <strong id="meUsername">-</strong>
+          <span id="meRolePill" class="role-pill user">-</span>
+        </div>
+
+        <div class="helper" id="bootstrapHint">正在检查初始化状态。</div>
+
+        <div class="token-box">
+          <small>Bearer Token</small>
+          <div id="tokenValue" class="token-value">未保存</div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>系统快照</h2>
+          <p class="panel-note">管理员登录后，这里会自动刷新健康状态、当前模型、记忆模式、缓存和队列概况。</p>
+        </div>
+        <div class="actions">
+          <button class="btn-primary" id="refreshAllBtn">刷新全部</button>
+          <span id="overviewStatus" class="status-pill warn">等待管理员登录</span>
+        </div>
+      </div>
+
+      <div class="metrics" id="overviewMetrics">
+        <div class="metric"><label>Users</label><strong>-</strong><span>账号数量</span></div>
+        <div class="metric"><label>Tools</label><strong>-</strong><span>工具权限规则</span></div>
+        <div class="metric"><label>Skills</label><strong>-</strong><span>技能条目</span></div>
+        <div class="metric"><label>Policies</label><strong>-</strong><span>技能策略</span></div>
+      </div>
+
+      <div class="quick-grid" style="margin-top: 14px;" id="quickCards">
+        <div class="quick-card"><h4>应用健康</h4><div class="muted">等待加载</div></div>
+        <div class="quick-card"><h4>当前模型</h4><div class="muted">等待加载</div></div>
+        <div class="quick-card"><h4>长期记忆</h4><div class="muted">等待加载</div></div>
+        <div class="quick-card"><h4>活跃会话</h4><div class="muted">等待加载</div></div>
+      </div>
+    </section>
+
+    <div class="grid">
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h3>用户与角色</h3>
+            <p class="panel-note">创建账号后，直接在用户表里一键切角色。飞书用户直接用 `ou_xxx` 作为用户名。</p>
+          </div>
+          <div class="actions">
+            <button class="btn-secondary" id="listUsersBtn">刷新用户</button>
+          </div>
+        </div>
+
+        <div class="stack">
+          <div class="fields-3">
+            <div class="field">
+              <label for="createUsername">新用户名</label>
+              <input id="createUsername" placeholder="admin 或 ou_xxx" />
+            </div>
+            <div class="field">
+              <label for="createPassword">初始密码</label>
+              <input id="createPassword" type="password" placeholder="至少 6 位" />
+            </div>
+            <div class="field">
+              <label for="createRole">初始角色</label>
+              <select id="createRole">
+                <option value="USER">USER</option>
+                <option value="DEVELOPER">DEVELOPER</option>
+                <option value="ADMIN">ADMIN</option>
+              </select>
+            </div>
+          </div>
+          <div class="button-row">
+            <button class="btn-primary" id="createUserBtn">创建用户</button>
+          </div>
+          <div class="output" id="userActionOut">等待操作</div>
+        </div>
+
+        <div class="table-shell" id="usersTableWrap" style="margin-top: 14px;"></div>
+        <div class="output" id="tokenStatsOut" style="margin-top: 14px;">等待 token 统计</div>
+        <div class="table-shell" id="sessionsTableWrap" style="margin-top: 14px;"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h3>模型控制</h3>
+            <p class="panel-note">默认显示所有 provider 和可切换模型。点击卡片按钮即可切换，不再手工拼 provider/model。</p>
+          </div>
+          <div class="actions">
+            <button class="btn-secondary" id="loadModelsBtn">刷新模型</button>
+          </div>
+        </div>
+        <div class="provider-grid" id="providerGrid">
+          <div class="provider-card"><h4>等待加载</h4><div class="muted">登录后自动加载模型状态。</div></div>
+        </div>
+        <div class="output" id="modelActionOut" style="margin-top: 14px;">等待操作</div>
+      </section>
+    </div>
+
+    <div class="grid">
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h3>运维与记忆</h3>
+            <p class="panel-note">这里聚合健康、缓存、RabbitMQ 和记忆运行态；需要原始结构时仍保留完整输出。</p>
+          </div>
+          <div class="actions">
+            <button class="btn-secondary" id="loadHealthBtn">健康</button>
+            <button class="btn-secondary" id="loadCacheBtn">缓存</button>
+            <button class="btn-secondary" id="loadRabbitBtn">队列</button>
+            <button class="btn-secondary" id="loadMemoryStatusBtn">记忆</button>
+          </div>
+        </div>
+
+        <div class="ops-grid" id="opsCards">
+          <div class="mini-card"><label>Health</label><h4>等待加载</h4><span>应用和基础依赖状态</span></div>
+          <div class="mini-card"><label>Cache</label><h4>等待加载</h4><span>天气/汇率/新闻缓存</span></div>
+          <div class="mini-card"><label>Memory</label><h4>等待加载</h4><span>Redis 向量记忆或本地回退</span></div>
+        </div>
+
+        <div class="fields-3" style="margin-top: 14px;">
+          <div class="field">
+            <label for="memorySessionKey">SessionKey</label>
+            <input id="memorySessionKey" placeholder="可选" />
+          </div>
+          <div class="field">
+            <label for="memoryUserId">UserId</label>
+            <input id="memoryUserId" placeholder="可选" />
+          </div>
+          <div class="field">
+            <label for="memoryQuery">检索词</label>
+            <input id="memoryQuery" placeholder="如 当前模型" />
+          </div>
+        </div>
+        <div class="button-row" style="margin-top: 12px;">
+          <button class="btn-primary" id="searchMemoryBtn">搜索记忆</button>
+        </div>
+        <div class="output" id="memoryStatusOut" style="margin-top: 14px;">等待加载</div>
+        <div class="output" id="memorySearchOut" style="margin-top: 14px;">等待搜索</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h3>权限与技能策略</h3>
+            <p class="panel-note">保留高级配置，但尽量简化成最少字段。常用场景是放开某个角色的某个工具，或给某个飞书用户定向放行 skill。</p>
+          </div>
+          <div class="actions">
+            <button class="btn-secondary" id="listPermissionsBtn">工具权限</button>
+            <button class="btn-secondary" id="listPoliciesBtn">技能策略</button>
+          </div>
+        </div>
+
+        <div class="stack">
+          <div class="fields-3">
+            <div class="field">
+              <label for="permRole">角色</label>
+              <select id="permRole">
+                <option value="USER">USER</option>
+                <option value="DEVELOPER">DEVELOPER</option>
+                <option value="ADMIN">ADMIN</option>
+                <option value="*">*</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="permTool">工具名</label>
+              <input id="permTool" placeholder="如 WorkspaceSearchToolPack.findFilesByName" />
+            </div>
+            <div class="field">
+              <label for="permAllow">是否允许</label>
+              <select id="permAllow">
+                <option value="true">allow = true</option>
+                <option value="false">allow = false</option>
+              </select>
+            </div>
+          </div>
+          <div class="button-row">
+            <button class="btn-primary" id="savePermissionBtn">保存工具权限</button>
+          </div>
+          <div class="output" id="permissionActionOut">等待操作</div>
+          <div class="table-shell" id="permissionsTableWrap"></div>
+        </div>
+
+        <div class="stack" style="margin-top: 14px;">
+          <div class="fields-3">
+            <div class="field">
+              <label for="policyChannel">Channel</label>
+              <select id="policyChannel">
+                <option value="feishu">feishu</option>
+                <option value="api">api</option>
+                <option value="*">*</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="policyUserId">UserId</label>
+              <input id="policyUserId" placeholder="如 ou_xxx" />
+            </div>
+            <div class="field">
+              <label for="policySkillId">SkillId</label>
+              <input id="policySkillId" placeholder="如 workspace-search" />
+            </div>
+          </div>
+          <div class="button-row">
+            <button class="btn-primary" id="savePolicyBtn">保存技能策略</button>
+          </div>
+          <div class="output" id="policyActionOut">等待操作</div>
+          <div class="table-shell" id="policiesTableWrap"></div>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h3>审计日志</h3>
+          <p class="panel-note">只保留最常用的筛选条件。统计和最近 30 条日志可以直接一键刷新。</p>
+        </div>
+        <div class="actions">
+          <button class="btn-secondary" id="auditStatsBtn">统计</button>
+          <button class="btn-primary" id="auditLogsBtn">最近日志</button>
+        </div>
+      </div>
+
+      <div class="fields-3">
+        <div class="field">
+          <label for="auditSessionKey">SessionKey</label>
+          <input id="auditSessionKey" placeholder="可选" />
+        </div>
+        <div class="field">
+          <label for="auditUserId">UserId</label>
+          <input id="auditUserId" placeholder="可选" />
+        </div>
+        <div class="field">
+          <label for="auditEventType">EventType</label>
+          <input id="auditEventType" placeholder="如 CHAT / OPAR" />
+        </div>
+      </div>
+
+      <div class="output" id="auditStatsOut" style="margin-top: 14px;">等待统计</div>
+      <div class="table-shell" id="auditTableWrap" style="margin-top: 14px;"></div>
+    </section>
+  </div>
+
+  <script>
+    const state = {
+      token: localStorage.getItem("openclaw.admin.token") || "",
+      me: null,
+      bootstrap: null,
+      overview: null,
+      providers: null,
+      memoryStatus: null,
+      health: null,
+      cache: null,
+      rabbit: null,
+    };
+
+    const nodes = {
+      authBadge: document.getElementById("authBadge"),
+      meUsername: document.getElementById("meUsername"),
+      meRolePill: document.getElementById("meRolePill"),
+      bootstrapHint: document.getElementById("bootstrapHint"),
+      tokenValue: document.getElementById("tokenValue"),
+      overviewStatus: document.getElementById("overviewStatus"),
+      overviewMetrics: document.getElementById("overviewMetrics"),
+      quickCards: document.getElementById("quickCards"),
+      userActionOut: document.getElementById("userActionOut"),
+      usersTableWrap: document.getElementById("usersTableWrap"),
+      tokenStatsOut: document.getElementById("tokenStatsOut"),
+      sessionsTableWrap: document.getElementById("sessionsTableWrap"),
+      providerGrid: document.getElementById("providerGrid"),
+      modelActionOut: document.getElementById("modelActionOut"),
+      opsCards: document.getElementById("opsCards"),
+      memoryStatusOut: document.getElementById("memoryStatusOut"),
+      memorySearchOut: document.getElementById("memorySearchOut"),
+      permissionActionOut: document.getElementById("permissionActionOut"),
+      permissionsTableWrap: document.getElementById("permissionsTableWrap"),
+      policyActionOut: document.getElementById("policyActionOut"),
+      policiesTableWrap: document.getElementById("policiesTableWrap"),
+      auditStatsOut: document.getElementById("auditStatsOut"),
+      auditTableWrap: document.getElementById("auditTableWrap"),
+    };
+
+    function escapeHtml(text) {
+      return String(text)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function formatJson(value) {
+      return JSON.stringify(value, null, 2);
+    }
+
+    function renderOutput(node, value) {
+      node.textContent = typeof value === "string" ? value : formatJson(value);
+    }
+
+    function isAdmin() {
+      return !!(state.me && String(state.me.roleCode || "").toUpperCase() === "ADMIN");
+    }
+
+    function setRolePill(role) {
+      const normalized = String(role || "-").toUpperCase();
+      const lower = normalized === "ADMIN" ? "admin" : normalized === "DEVELOPER" ? "developer" : "user";
+      nodes.meRolePill.className = `role-pill ${lower}`;
+      nodes.meRolePill.textContent = normalized;
+    }
+
+    function setToken(token) {
+      state.token = token || "";
+      if (state.token) {
+        localStorage.setItem("openclaw.admin.token", state.token);
+      } else {
+        localStorage.removeItem("openclaw.admin.token");
+      }
+      nodes.tokenValue.textContent = state.token || "未保存";
+    }
+
+    function setStatus(text, kind = "warn") {
+      nodes.overviewStatus.className = kind === "danger"
+        ? "status-pill danger"
+        : kind === "ok"
+          ? "status-pill"
+          : "status-pill warn";
+      nodes.overviewStatus.textContent = text;
+    }
+
+    function setAdminUiEnabled(enabled) {
+      document.querySelectorAll(
+        "#refreshAllBtn, #listUsersBtn, #createUserBtn, #loadModelsBtn, #loadHealthBtn, #loadCacheBtn, #loadRabbitBtn, #loadMemoryStatusBtn, #searchMemoryBtn, #listPermissionsBtn, #savePermissionBtn, #listPoliciesBtn, #savePolicyBtn, #auditStatsBtn, #auditLogsBtn, #usersTableWrap button, #providerGrid button"
+      ).forEach((node) => {
+        node.disabled = !enabled;
+      });
+      document.querySelectorAll(
+        ".panel input, .panel select, .panel textarea"
+      ).forEach((node) => {
+        node.disabled = !enabled;
+      });
+    }
+
+    async function api(url, { method = "GET", body, auth = true, raw = false } = {}) {
+      const headers = { "Content-Type": "application/json" };
+      if (auth && state.token) {
+        headers.Authorization = `Bearer ${state.token}`;
+      }
+      const response = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const payload = await response.json().catch(() => ({ code: response.status, message: "响应不是合法 JSON" }));
+      if (raw && response.ok) {
+        return payload;
+      }
+      if (!response.ok || payload.code !== 0) {
+        throw new Error(payload && payload.message ? payload.message : `请求失败 (${response.status})`);
+      }
+      return payload.data;
+    }
+
+    async function loadBootstrapStatus() {
+      try {
+        state.bootstrap = await api("/api/auth/bootstrap-status", { auth: false });
+        if (!state.bootstrap.authEnabled) {
+          nodes.bootstrapHint.innerHTML = "认证模块未启用。";
+          return;
+        }
+        if (state.bootstrap.dbEnabled && state.bootstrap.userCount === 0 && state.bootstrap.firstRegistrationWillBeAdmin) {
+          nodes.bootstrapHint.innerHTML = "当前还没有任何账号。直接注册首个账号，它会自动成为 <code>ADMIN</code>。";
+          return;
+        }
+        if (state.bootstrap.dbEnabled && state.bootstrap.userCount > 0) {
+          nodes.bootstrapHint.innerHTML = `当前已有 <code>${escapeHtml(state.bootstrap.userCount)}</code> 个账号。请使用管理员账号登录。`;
+          return;
+        }
+        nodes.bootstrapHint.innerHTML = "当前无法从数据库读取账号初始化状态，请直接使用管理员账号登录。";
+      } catch (error) {
+        nodes.bootstrapHint.textContent = error.message;
+      }
+    }
+
+    function renderAuth() {
+      if (!state.me) {
+        nodes.authBadge.className = "status-pill warn";
+        nodes.authBadge.textContent = state.token ? "待校验" : "未登录";
+        nodes.meUsername.textContent = "-";
+        setRolePill("-");
+        setAdminUiEnabled(false);
+        return;
+      }
+      nodes.meUsername.textContent = state.me.username || "-";
+      setRolePill(state.me.roleCode || "-");
+      if (isAdmin()) {
+        nodes.authBadge.className = "status-pill";
+        nodes.authBadge.textContent = "管理员已登录";
+        setAdminUiEnabled(true);
+      } else {
+        nodes.authBadge.className = "status-pill warn";
+        nodes.authBadge.textContent = "非管理员";
+        setAdminUiEnabled(false);
+        renderOutput(nodes.userActionOut, { error: "当前账号不是 ADMIN，后台操作已锁定。" });
+      }
+    }
+
+    async function loadMe() {
+      if (!state.token) {
+        state.me = null;
+        renderAuth();
+        setStatus("等待管理员登录", "warn");
+        return;
+      }
+      try {
+        state.me = await api("/api/auth/me");
+        renderAuth();
+      } catch (error) {
+        state.me = null;
+        setToken("");
+        renderAuth();
+        renderOutput(nodes.userActionOut, { error: error.message });
+      }
+    }
+
+    async function doLogin(mode) {
+      const username = document.getElementById("loginUsername").value.trim();
+      const password = document.getElementById("loginPassword").value;
+      if (!username || !password) {
+        renderOutput(nodes.userActionOut, { error: "请先填写用户名和密码。" });
+        return;
+      }
+      try {
+        const data = await api(`/api/auth/${mode}`, {
+          method: "POST",
+          body: { username, password },
+          auth: false,
+        });
+        setToken(data.token);
+        state.me = { username: data.username, roleCode: data.roleCode, expireAt: data.expireAt };
+        renderAuth();
+        renderOutput(nodes.userActionOut, { message: mode === "login" ? "登录成功" : "注册成功", user: state.me });
+        if (isAdmin()) {
+          await refreshAll();
+        }
+      } catch (error) {
+        state.me = null;
+        setToken("");
+        renderAuth();
+        renderOutput(nodes.userActionOut, { error: error.message });
+      }
+    }
+
+    function renderOverviewMetrics(data = {}) {
+      const stats = [
+        { label: "Users", value: data.userCount ?? "-", note: "账号数量" },
+        { label: "Tools", value: data.toolPermissionCount ?? "-", note: "工具权限规则" },
+        { label: "Skills", value: data.skillDescriptorCount ?? "-", note: "技能条目" },
+        { label: "Policies", value: data.skillPolicyCount ?? "-", note: "技能策略" },
+      ];
+      nodes.overviewMetrics.innerHTML = stats.map((item) => `
+        <div class="metric">
+          <label>${escapeHtml(item.label)}</label>
+          <strong>${escapeHtml(item.value)}</strong>
+          <span>${escapeHtml(item.note)}</span>
+        </div>
+      `).join("");
+    }
+
+    function renderQuickCards() {
+      const healthStatus = state.health?.status || "未加载";
+      const activeModel = state.providers?.activeDisplay || state.overview?.providers?.activeDisplay || "未加载";
+      const memoryMode = state.memoryStatus?.activeMode || "未加载";
+      const tokenStats = state.overview?.tokenStats || {};
+      nodes.quickCards.innerHTML = `
+        <div class="quick-card">
+          <h4>应用健康</h4>
+          <div class="status-pill ${healthStatus === "UP" ? "" : "warn"}">${escapeHtml(healthStatus)}</div>
+          <div class="row-sub">MySQL / Redis / RabbitMQ / 应用健康一眼确认。</div>
+        </div>
+        <div class="quick-card">
+          <h4>当前模型</h4>
+          <div><strong>${escapeHtml(activeModel)}</strong></div>
+          <div class="row-sub">当前活动 provider + model。</div>
+        </div>
+        <div class="quick-card">
+          <h4>长期记忆</h4>
+          <div><strong>${escapeHtml(memoryMode)}</strong></div>
+          <div class="row-sub">判断当前是 Redis 向量索引还是本地回退。</div>
+        </div>
+        <div class="quick-card">
+          <h4>活跃会话</h4>
+          <div><strong>${escapeHtml(tokenStats.activeTokenCount ?? "-")}</strong></div>
+          <div class="row-sub">活跃用户 ${escapeHtml(tokenStats.activeUserCount ?? "-")} / 即将过期 ${escapeHtml(tokenStats.expiringSoonCount ?? "-")}</div>
+        </div>
+      `;
+    }
+
+    function renderOpsCards() {
+      const health = state.health?.status || "未加载";
+      const cacheHits = state.cache
+        ? `weather ${Number(state.cache.weather?.hitRate || 0).toFixed(2)} / exchange ${Number(state.cache.exchange?.hitRate || 0).toFixed(2)} / news ${Number(state.cache.news?.hitRate || 0).toFixed(2)}`
+        : "等待加载";
+      const memory = state.memoryStatus
+        ? `${state.memoryStatus.activeMode} / write ${state.memoryStatus.lastWriteRoute}`
+        : "等待加载";
+      const rabbit = state.rabbit
+        ? `req ${state.rabbit.requestQueue?.messageCount ?? 0} / resp ${state.rabbit.responseQueue?.messageCount ?? 0}`
+        : "未加载或未启用";
+      nodes.opsCards.innerHTML = `
+        <div class="mini-card">
+          <label>Health</label>
+          <h4>${escapeHtml(health)}</h4>
+          <span>${escapeHtml(JSON.stringify(state.health?.components || {}))}</span>
+        </div>
+        <div class="mini-card">
+          <label>Cache</label>
+          <h4>${state.cache ? "已加载" : "未加载"}</h4>
+          <span>${escapeHtml(cacheHits)}</span>
+        </div>
+        <div class="mini-card">
+          <label>Memory / Queue</label>
+          <h4>${escapeHtml(state.memoryStatus?.vectorStoreType || "未加载")}</h4>
+          <span>${escapeHtml(memory)} | ${escapeHtml(rabbit)}</span>
+        </div>
+      `;
+    }
+
+    async function loadOverview() {
+      state.overview = await api("/api/admin/manage/dashboard");
+      renderOverviewMetrics(state.overview);
+      renderTokenStats(state.overview.tokenStats || {});
+      renderSessionsTable(state.overview.activeSessions || []);
+      if (state.overview.providers) {
+        state.providers = state.overview.providers;
+        renderProviders(state.providers);
+      }
+      renderQuickCards();
+    }
+
+    async function loadHealth() {
+      state.health = await api("/actuator/health", { raw: true });
+      renderOpsCards();
+      renderQuickCards();
+    }
+
+    async function loadModels() {
+      state.providers = await api("/api/admin/manage/model-providers");
+      renderProviders(state.providers);
+      renderQuickCards();
+    }
+
+    async function loadCacheStats() {
+      state.cache = await api("/api/cache/stats");
+      renderOpsCards();
+    }
+
+    async function loadRabbitStats() {
+      try {
+        state.rabbit = await api("/api/rabbitmq/stats");
+      } catch (error) {
+        state.rabbit = { unavailable: true, reason: error.message };
+      }
+      renderOpsCards();
+    }
+
+    async function loadMemoryStatus() {
+      state.memoryStatus = await api("/api/memory/status");
+      renderOutput(nodes.memoryStatusOut, state.memoryStatus);
+      renderOpsCards();
+      renderQuickCards();
+    }
+
+    function renderProviders(data) {
+      const providers = Array.isArray(data?.providers) ? data.providers : [];
+      if (!providers.length) {
+        nodes.providerGrid.innerHTML = '<div class="provider-card"><h4>暂无 provider</h4><div class="muted">接口没有返回可用模型。</div></div>';
+        return;
+      }
+      nodes.providerGrid.innerHTML = providers.map((provider) => {
+        const models = Array.isArray(provider.availableModels) ? provider.availableModels : [];
+        return `
+          <article class="provider-card">
+            <div class="provider-head">
+              <div>
+                <h4>${escapeHtml(provider.providerId)}</h4>
+                <div class="row-sub">当前 ${escapeHtml(provider.model || "-")} / 默认 ${escapeHtml(provider.defaultModel || "-")}</div>
+              </div>
+              <span class="status-pill ${provider.available ? "" : "danger"}">${provider.active ? "ACTIVE" : provider.available ? "READY" : "DOWN"}</span>
+            </div>
+            <div class="row-sub">${escapeHtml(provider.baseUrl || "")}</div>
+            <div class="inline-actions">
+              <button class="btn-primary btn-tiny js-provider-switch" data-provider="${escapeHtml(provider.providerId)}">切换到这个 provider</button>
+            </div>
+            <div class="model-buttons">
+              ${models.map((model) => `<button class="btn-secondary btn-tiny js-model-switch" data-provider="${escapeHtml(provider.providerId)}" data-model="${escapeHtml(model)}">${escapeHtml(model)}</button>`).join("") || '<span class="muted">没有可切换模型</span>'}
+            </div>
+            ${provider.available ? "" : `<div class="row-sub">${escapeHtml(provider.unavailableReason || "不可用")}</div>`}
+          </article>
+        `;
+      }).join("");
+    }
+
+    async function switchProvider(providerId, model) {
+      try {
+        const data = await api("/api/admin/manage/model-providers/switch", {
+          method: "POST",
+          body: { providerId, model: model || null },
+        });
+        renderOutput(nodes.modelActionOut, data);
+        state.providers = data;
+        renderProviders(data);
+        renderQuickCards();
+      } catch (error) {
+        renderOutput(nodes.modelActionOut, { error: error.message, providerId, model });
+      }
+    }
+
+    async function listUsers() {
+      try {
+        const rows = await api("/api/admin/manage/users");
+        renderUsersTable(rows);
+      } catch (error) {
+        renderOutput(nodes.usersTableWrap, { error: error.message });
+      }
+    }
+
+    function renderUsersTable(rows) {
+      if (!Array.isArray(rows) || !rows.length) {
+        nodes.usersTableWrap.innerHTML = '<div class="quick-card"><h4>暂无用户</h4><div class="muted">先创建管理员或飞书账号映射用户。</div></div>';
+        return;
+      }
+      nodes.usersTableWrap.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Active Tokens</th>
+              <th>Recent Events</th>
+              <th>Last Seen</th>
+              <th>CreateTime</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => {
+              const role = String(row.roleCode || "USER").toUpperCase();
+              const roleClass = role === "ADMIN" ? "admin" : role === "DEVELOPER" ? "developer" : "user";
+              return `
+                <tr>
+                  <td><strong>${escapeHtml(row.username || "-")}</strong></td>
+                  <td><span class="role-pill ${roleClass}">${escapeHtml(role)}</span></td>
+                  <td>${escapeHtml(row.status || "-")}</td>
+                  <td>${escapeHtml(row.activeTokenCount ?? 0)}</td>
+                  <td>${escapeHtml(row.recentEventCount ?? 0)}</td>
+                  <td>${escapeHtml(row.lastSeenAt || "-")}</td>
+                  <td>${escapeHtml(row.createTime || "-")}</td>
+                  <td>
+                    <div class="role-actions">
+                      <button class="btn-secondary btn-tiny js-role-set" data-username="${escapeHtml(row.username || "")}" data-role="USER">USER</button>
+                      <button class="btn-secondary btn-tiny js-role-set" data-username="${escapeHtml(row.username || "")}" data-role="DEVELOPER">DEV</button>
+                      <button class="btn-primary btn-tiny js-role-set" data-username="${escapeHtml(row.username || "")}" data-role="ADMIN">ADMIN</button>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      `;
+    }
+
+    function renderTokenStats(stats) {
+      renderOutput(nodes.tokenStatsOut, stats);
+    }
+
+    function renderSessionsTable(rows) {
+      if (!Array.isArray(rows) || !rows.length) {
+        nodes.sessionsTableWrap.innerHTML = '<div class="quick-card"><h4>暂无活跃 token</h4><div class="muted">当前没有可展示的活跃会话。</div></div>';
+        return;
+      }
+      nodes.sessionsTableWrap.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Role</th>
+              <th>ExpireAt</th>
+              <th>Token</th>
+              <th>Storage</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr>
+                <td>${escapeHtml(row.username || "-")}</td>
+                <td>${escapeHtml(row.roleCode || "-")}</td>
+                <td>${escapeHtml(row.expireAt ? new Date(row.expireAt).toLocaleString("zh-CN", { hour12: false }) : "-")}</td>
+                <td><code>${escapeHtml(row.tokenPreview || "-")}</code></td>
+                <td>${escapeHtml(row.storage || "-")}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      `;
+    }
+
+    async function createUser() {
+      try {
+        const data = await api("/api/admin/manage/users/create", {
+          method: "POST",
+          body: {
+            username: document.getElementById("createUsername").value.trim(),
+            password: document.getElementById("createPassword").value,
+            roleCode: document.getElementById("createRole").value,
+          },
+        });
+        renderOutput(nodes.userActionOut, data);
+        await Promise.allSettled([listUsers(), loadOverview()]);
+      } catch (error) {
+        renderOutput(nodes.userActionOut, { error: error.message });
+      }
+    }
+
+    async function updateUserRole(username, roleCode) {
+      try {
+        const data = await api("/api/admin/manage/users/role", {
+          method: "POST",
+          body: { username, roleCode },
+        });
+        renderOutput(nodes.userActionOut, data);
+        await listUsers();
+      } catch (error) {
+        renderOutput(nodes.userActionOut, { error: error.message, username, roleCode });
+      }
+    }
+
+    async function listPermissions() {
+      try {
+        const rows = await api("/api/admin/manage/tool-permissions");
+        renderSimpleTable(nodes.permissionsTableWrap, rows, ["roleCode", "toolName", "allow", "priority", "enabled"]);
+      } catch (error) {
+        renderOutput(nodes.permissionsTableWrap, { error: error.message });
+      }
+    }
+
+    async function savePermission() {
+      try {
+        const data = await api("/api/admin/manage/tool-permissions/upsert", {
+          method: "POST",
+          body: {
+            roleCode: document.getElementById("permRole").value,
+            toolName: document.getElementById("permTool").value.trim(),
+            allow: document.getElementById("permAllow").value === "true",
+            priority: 0,
+            enabled: true,
+          },
+        });
+        renderOutput(nodes.permissionActionOut, data);
+        await listPermissions();
+      } catch (error) {
+        renderOutput(nodes.permissionActionOut, { error: error.message });
+      }
+    }
+
+    async function listPolicies() {
+      try {
+        const rows = await api("/api/admin/manage/skill-policies");
+        renderSimpleTable(nodes.policiesTableWrap, rows, ["channel", "userId", "skillId", "allow"]);
+      } catch (error) {
+        renderOutput(nodes.policiesTableWrap, { error: error.message });
+      }
+    }
+
+    async function savePolicy() {
+      try {
+        const data = await api("/api/admin/manage/skill-policies/upsert", {
+          method: "POST",
+          body: {
+            channel: document.getElementById("policyChannel").value,
+            userId: document.getElementById("policyUserId").value.trim(),
+            skillId: document.getElementById("policySkillId").value.trim(),
+            allow: true,
+          },
+        });
+        renderOutput(nodes.policyActionOut, data);
+        await listPolicies();
+      } catch (error) {
+        renderOutput(nodes.policyActionOut, { error: error.message });
+      }
+    }
+
+    function renderSimpleTable(node, rows, keys) {
+      if (!Array.isArray(rows) || !rows.length) {
+        node.innerHTML = '<div class="quick-card"><h4>暂无数据</h4><div class="muted">当前接口没有返回记录。</div></div>';
+        return;
+      }
+      node.innerHTML = `
+        <table>
+          <thead><tr>${keys.map((key) => `<th>${escapeHtml(key)}</th>`).join("")}</tr></thead>
+          <tbody>
+            ${rows.map((row) => `<tr>${keys.map((key) => `<td>${escapeHtml(row?.[key] ?? "-")}</td>`).join("")}</tr>`).join("")}
+          </tbody>
+        </table>
+      `;
+    }
+
+    async function searchMemory() {
+      try {
+        const params = new URLSearchParams();
+        const query = document.getElementById("memoryQuery").value.trim();
+        const sessionKey = document.getElementById("memorySessionKey").value.trim();
+        const userId = document.getElementById("memoryUserId").value.trim();
+        if (!query) {
+          renderOutput(nodes.memorySearchOut, { error: "请先填写检索词。" });
+          return;
+        }
+        params.set("query", query);
+        params.set("topK", "6");
+        if (sessionKey) params.set("sessionKey", sessionKey);
+        if (userId) params.set("userId", userId);
+        const data = await api(`/api/memory/search?${params.toString()}`);
+        renderOutput(nodes.memorySearchOut, data);
+      } catch (error) {
+        renderOutput(nodes.memorySearchOut, { error: error.message });
+      }
+    }
+
+    async function loadAuditStats() {
+      try {
+        const data = await api("/api/admin/audit/stats?recentLimit=500");
+        renderOutput(nodes.auditStatsOut, data);
+      } catch (error) {
+        renderOutput(nodes.auditStatsOut, { error: error.message });
+      }
+    }
+
+    async function loadAuditLogs() {
+      try {
+        const params = new URLSearchParams({ page: "1", size: "30" });
+        const sessionKey = document.getElementById("auditSessionKey").value.trim();
+        const userId = document.getElementById("auditUserId").value.trim();
+        const eventType = document.getElementById("auditEventType").value.trim();
+        if (sessionKey) params.set("sessionKey", sessionKey);
+        if (userId) params.set("userId", userId);
+        if (eventType) params.set("eventType", eventType);
+        const data = await api(`/api/admin/audit/logs?${params.toString()}`);
+        const rows = Array.isArray(data.records) ? data.records : [];
+        renderSimpleTable(nodes.auditTableWrap, rows, ["createTime", "userId", "role", "eventType", "content"]);
+      } catch (error) {
+        renderOutput(nodes.auditTableWrap, { error: error.message });
+      }
+    }
+
+    async function refreshAll() {
+      if (!isAdmin()) {
+        setStatus("当前账号不是管理员", "warn");
+        return;
+      }
+      setStatus("正在刷新后台数据", "warn");
+      const tasks = await Promise.allSettled([
+        loadOverview(),
+        loadHealth(),
+        loadModels(),
+        loadMemoryStatus(),
+        loadCacheStats(),
+        loadRabbitStats(),
+        listUsers(),
+        listPermissions(),
+        listPolicies(),
+        loadAuditStats(),
+      ]);
+      const failed = tasks.filter((item) => item.status === "rejected");
+      if (failed.length) {
+        setStatus(`已刷新，但有 ${failed.length} 项失败`, "warn");
+      } else {
+        setStatus("后台已连接", "ok");
+      }
+    }
+
+    function bindEvents() {
+      document.getElementById("loginBtn").addEventListener("click", () => doLogin("login"));
+      document.getElementById("registerBtn").addEventListener("click", () => doLogin("register"));
+      document.getElementById("refreshMeBtn").addEventListener("click", loadMe);
+      document.getElementById("logoutBtn").addEventListener("click", () => {
+        state.me = null;
+        setToken("");
+        renderAuth();
+        setStatus("等待管理员登录", "warn");
+      });
+      document.getElementById("refreshAllBtn").addEventListener("click", refreshAll);
+      document.getElementById("listUsersBtn").addEventListener("click", listUsers);
+      document.getElementById("createUserBtn").addEventListener("click", createUser);
+      document.getElementById("loadModelsBtn").addEventListener("click", loadModels);
+      document.getElementById("loadHealthBtn").addEventListener("click", loadHealth);
+      document.getElementById("loadCacheBtn").addEventListener("click", loadCacheStats);
+      document.getElementById("loadRabbitBtn").addEventListener("click", loadRabbitStats);
+      document.getElementById("loadMemoryStatusBtn").addEventListener("click", loadMemoryStatus);
+      document.getElementById("searchMemoryBtn").addEventListener("click", searchMemory);
+      document.getElementById("listPermissionsBtn").addEventListener("click", listPermissions);
+      document.getElementById("savePermissionBtn").addEventListener("click", savePermission);
+      document.getElementById("listPoliciesBtn").addEventListener("click", listPolicies);
+      document.getElementById("savePolicyBtn").addEventListener("click", savePolicy);
+      document.getElementById("auditStatsBtn").addEventListener("click", loadAuditStats);
+      document.getElementById("auditLogsBtn").addEventListener("click", loadAuditLogs);
+
+      nodes.usersTableWrap.addEventListener("click", (event) => {
+        const button = event.target.closest(".js-role-set");
+        if (!button) return;
+        updateUserRole(button.dataset.username || "", button.dataset.role || "USER");
+      });
+
+      nodes.providerGrid.addEventListener("click", (event) => {
+        const providerButton = event.target.closest(".js-provider-switch");
+        if (providerButton) {
+          switchProvider(providerButton.dataset.provider || "", "");
+          return;
+        }
+        const modelButton = event.target.closest(".js-model-switch");
+        if (modelButton) {
+          switchProvider(modelButton.dataset.provider || "", modelButton.dataset.model || "");
+        }
+      });
+    }
+
+    async function bootstrap() {
+      setToken(state.token);
+      renderAuth();
+      bindEvents();
+      renderOverviewMetrics({});
+      renderQuickCards();
+      renderOpsCards();
+      await loadBootstrapStatus();
+      if (state.token) {
+        await loadMe();
+        if (isAdmin()) {
+          await refreshAll();
+        }
+      } else {
+        setStatus("等待管理员登录", "warn");
+      }
+    }
+
+    bootstrap();
+  </script>
+</body>
+</html>

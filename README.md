@@ -247,6 +247,7 @@ curl -X POST http://127.0.0.1:18080/api/webhook/feishu \
 - 仓库：[HhhBZzz/SpringClaw](https://github.com/HhhBZzz/SpringClaw)
 - 当前工作分支：[codex/bootstrap-github](https://github.com/HhhBZzz/SpringClaw/tree/codex/bootstrap-github)
 - 提交记录：[Commits](https://github.com/HhhBZzz/SpringClaw/commits/codex/bootstrap-github)
+- 变更日志：[CHANGELOG.md](/Users/hanbingzheng/springclaw/CHANGELOG.md)
 
 ## 面试资料
 

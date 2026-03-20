@@ -123,6 +123,7 @@ Skill 本质上是：
 - 仓库：[HhhBZzz/SpringClaw](https://github.com/HhhBZzz/SpringClaw)
 - 当前分支：[codex/bootstrap-github](https://github.com/HhhBZzz/SpringClaw/tree/codex/bootstrap-github)
 - 提交记录：[Commits](https://github.com/HhhBZzz/SpringClaw/commits/codex/bootstrap-github)
+- 变更日志：[CHANGELOG.md](/Users/hanbingzheng/springclaw/CHANGELOG.md)
 
 ## 文档入口
 

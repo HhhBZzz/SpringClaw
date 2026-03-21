@@ -390,6 +390,37 @@ class LocalSkillFallbackServiceTest {
     }
 
     @Test
+    void shouldAnswerCurrentModelForMuQianPhraseFromControlPlane() {
+        LocalSkillFallbackService service = new LocalSkillFallbackService(
+                true,
+                new SystemToolPack(false, "pwd,ls", 5, 2000),
+                new WorkspaceSearchToolPack(
+                        new WorkspaceTaskService(tempDir.toString(), 8, 4, 6, 1200, 512),
+                        tempDir.toString(),
+                        8,
+                        4000,
+                        30,
+                        5000,
+                        512
+                ),
+                new WebSearchToolPack(false, "https://example.com?q={query}", true, 3, 2000),
+                new StubWeatherToolPack(),
+                new ExchangeRateToolPack(false, "https://example.com/{base}", 3),
+                new NewsToolPack(false, "https://example.com/{query}", 5, 3),
+                new ScriptSkillToolPack(false,
+                        new ScriptSkillCatalogService(false, tempDir.toString(), "echo", new ObjectMapper()),
+                        "python3", 3, 1000, new ObjectMapper()),
+                new ScriptSkillCatalogService(false, tempDir.toString(), "echo", new ObjectMapper()),
+                newAiProviderService()
+        );
+
+        LocalSkillFallbackService.LocalSkillResult result = service.tryHandleControlPlane("目前是什么模型").orElseThrow();
+
+        Assertions.assertEquals("MODEL_PROVIDER_QUERY", result.route());
+        Assertions.assertTrue(result.fallbackAnswer().contains("我当前使用的是"));
+    }
+
+    @Test
     void dateQuestionShouldNotBeInterceptedByControlPlaneButShouldRemainAvailableForDegradedFallback() {
         LocalSkillFallbackService service = new LocalSkillFallbackService(
                 true,

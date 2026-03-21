@@ -108,8 +108,9 @@ final class LocalSkillModelControlSupport {
 
     private boolean looksLikeModelProviderQuestion(String text) {
         return containsAny(text,
-                "当前模型", "现在用什么模型", "现在是什么模型", "用的什么模型",
-                "你是什么模型", "你现在是什么模型", "你现在用什么模型",
+                "当前模型", "目前模型", "目前是什么模型", "目前用什么模型", "目前是哪个模型",
+                "现在用什么模型", "现在是什么模型", "用的什么模型",
+                "你是什么模型", "你现在是什么模型", "你现在用什么模型", "你目前是什么模型",
                 "当前provider", "当前 provider", "active provider", "当前通道",
                 "当前是 claude 还是千问", "当前是 qwen 还是 claude");
     }

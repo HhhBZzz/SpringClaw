@@ -432,8 +432,7 @@ public class OparLoopEngine {
             String response = modelControlIntentService.classify(activeClient, assembled, requestId);
             return dispatchAiModelControlCommand(response);
         } catch (Exception ex) {
-            modelTransportGuardService.markFailure(activeClient.providerId(), ex);
-            log.warn("模型辅助 provider 意图识别失败，reason={}", ex.getMessage());
+            log.warn("模型辅助 provider 意图识别失败，已跳过辅助分类，不影响后续规划。reason={}", ex.getMessage());
             return null;
         }
     }

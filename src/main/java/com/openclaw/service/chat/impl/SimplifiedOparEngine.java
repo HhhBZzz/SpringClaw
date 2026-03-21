@@ -196,8 +196,7 @@ public class SimplifiedOparEngine {
             String response = modelControlIntentService.classify(activeClient, assembled, requestId);
             return dispatchAiModelControlCommand(response);
         } catch (Exception ex) {
-            modelTransportGuardService.markFailure(activeClient.providerId(), ex);
-            log.warn("简化模式下模型辅助 provider 意图识别失败，reason={}", ex.getMessage());
+            log.warn("简化模式下模型辅助 provider 意图识别失败，已跳过辅助分类，不影响主回答。reason={}", ex.getMessage());
             return null;
         }
     }

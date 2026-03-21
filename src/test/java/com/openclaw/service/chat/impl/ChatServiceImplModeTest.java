@@ -10,6 +10,7 @@ import com.openclaw.service.guard.ChatGuardService;
 import com.openclaw.service.memory.MemoryService;
 import com.openclaw.service.prompt.SoulPromptService;
 import com.openclaw.service.session.AgentSessionService;
+import com.openclaw.service.usage.LlmUsageRecordService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 
@@ -64,6 +65,7 @@ class ChatServiceImplModeTest {
         private final ModelTransportGuardService modelTransportGuardService = mock(ModelTransportGuardService.class);
         private final ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
         private final ConversationAdvisorSupport conversationAdvisorSupport = mock(ConversationAdvisorSupport.class);
+        private final LlmUsageRecordService llmUsageRecordService = mock(LlmUsageRecordService.class);
         private final AgentSession session = new AgentSession();
         private final AssembledContext assembled = new AssembledContext(
                 "s1",
@@ -109,6 +111,7 @@ class ChatServiceImplModeTest {
                     modelTransportGuardService,
                     modelCallExecutor,
                     conversationAdvisorSupport,
+                    llmUsageRecordService,
                     false,
                     0,
                     agentMode

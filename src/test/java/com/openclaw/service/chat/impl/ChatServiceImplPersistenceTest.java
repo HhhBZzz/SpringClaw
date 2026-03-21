@@ -11,6 +11,7 @@ import com.openclaw.service.guard.ChatGuardService;
 import com.openclaw.service.memory.MemoryService;
 import com.openclaw.service.prompt.SoulPromptService;
 import com.openclaw.service.session.AgentSessionService;
+import com.openclaw.service.usage.LlmUsageRecordService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 
@@ -38,6 +39,7 @@ class ChatServiceImplPersistenceTest {
         ModelTransportGuardService modelTransportGuardService = mock(ModelTransportGuardService.class);
         ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
         ConversationAdvisorSupport conversationAdvisorSupport = mock(ConversationAdvisorSupport.class);
+        LlmUsageRecordService llmUsageRecordService = mock(LlmUsageRecordService.class);
 
         AgentSession session = new AgentSession();
         session.setId(1L);
@@ -92,6 +94,7 @@ class ChatServiceImplPersistenceTest {
                 modelTransportGuardService,
                 modelCallExecutor,
                 conversationAdvisorSupport,
+                llmUsageRecordService,
                 false,
                 0,
                 "opar"

@@ -13,6 +13,7 @@ import com.openclaw.service.guard.ChatGuardService;
 import com.openclaw.service.memory.MemoryService;
 import com.openclaw.service.prompt.SoulPromptService;
 import com.openclaw.service.session.AgentSessionService;
+import com.openclaw.service.usage.LlmUsageRecordService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -47,6 +48,7 @@ public class ChatServiceImpl implements ChatService {
     private final ModelTransportGuardService modelTransportGuardService;
     private final ModelCallExecutor modelCallExecutor;
     private final ConversationAdvisorSupport conversationAdvisorSupport;
+    private final LlmUsageRecordService llmUsageRecordService;
     private final boolean metaGuardEnabled;
     private final int metaGuardRetryTimes;
     private final String agentMode;
@@ -64,6 +66,7 @@ public class ChatServiceImpl implements ChatService {
                            ModelTransportGuardService modelTransportGuardService,
                            ModelCallExecutor modelCallExecutor,
                            ConversationAdvisorSupport conversationAdvisorSupport,
+                           LlmUsageRecordService llmUsageRecordService,
                            @Value("${openclaw.chat.meta-guard.enabled:true}") boolean metaGuardEnabled,
                            @Value("${openclaw.chat.meta-guard.retry-times:1}") int metaGuardRetryTimes,
                            @Value("${openclaw.chat.agent-mode:simplified}") String agentMode) {
@@ -80,6 +83,7 @@ public class ChatServiceImpl implements ChatService {
         this.modelTransportGuardService = modelTransportGuardService;
         this.modelCallExecutor = modelCallExecutor;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
+        this.llmUsageRecordService = llmUsageRecordService;
         this.metaGuardEnabled = metaGuardEnabled;
         this.metaGuardRetryTimes = Math.max(0, metaGuardRetryTimes);
         this.agentMode = normalizeAgentMode(agentMode);
@@ -128,6 +132,7 @@ public class ChatServiceImpl implements ChatService {
 
         AiProviderService.ActiveChatClient reflectClient = aiProviderService.activeClient();
         String reflectPrompt = oparLoopEngine.renderReflectPrompt(context.assembled(), executionResult.plan(), executionResult.action());
+        final org.springframework.ai.chat.model.ChatResponse[] latestStreamResponse = new org.springframework.ai.chat.model.ChatResponse[1];
         Disposable disposable = conversationAdvisorSupport.apply(
                         reflectClient.chatClient().prompt()
                                 .system(context.systemPrompt())
@@ -135,12 +140,32 @@ public class ChatServiceImpl implements ChatService {
                         context.assembled().sessionKey(),
                         context.assembled().userId())
                 .stream()
-                .content()
-                .doOnNext(token -> {
-                    fullAnswer.append(token);
-                    sendToken(emitter, token);
+                .chatClientResponse()
+                .doOnNext(response -> {
+                    if (response != null && response.chatResponse() != null) {
+                        latestStreamResponse[0] = response.chatResponse();
+                        String token = ModelCallExecutor.extractText(response.chatResponse());
+                        if (StringUtils.hasText(token)) {
+                            fullAnswer.append(token);
+                            sendToken(emitter, token);
+                        }
+                    }
                 })
                 .doOnComplete(() -> {
+                    if (latestStreamResponse[0] != null) {
+                        llmUsageRecordService.recordChatResponse(
+                                new LlmUsageRecordService.ChatResponseContext(
+                                        context.requestId(),
+                                        context.assembled().sessionKey(),
+                                        context.assembled().channel(),
+                                        context.assembled().userId(),
+                                        reflectClient.providerId(),
+                                        reflectClient.model(),
+                                        "stream-final-answer"
+                                ),
+                                latestStreamResponse[0]
+                        );
+                    }
                     String answer = fullAnswer.toString();
                     if (chatResponsePolicyService.looksLikeMetaRefusal(answer)
                             || chatResponsePolicyService.looksLikeProjectAccessRefusal(answer)
@@ -231,18 +256,30 @@ public class ChatServiceImpl implements ChatService {
                                            String action) throws Exception {
         String prompt = oparLoopEngine.renderReflectPrompt(context.assembled(), plan, action);
         AiProviderService.ActiveChatClient currentClient = aiProviderService.activeClient();
-        ModelCallExecutor.ModelCallResult<String> answerResult = modelCallExecutor.execute(
+        ModelCallExecutor.ModelCallResult<String> answerResult = modelCallExecutor.executeChat(
                 currentClient,
                 "final-answer",
+                new ModelCallExecutor.ChatRequestContext(
+                        context.requestId(),
+                        context.assembled().sessionKey(),
+                        context.assembled().channel(),
+                        context.assembled().userId()
+                ),
                 true,
-                client -> conversationAdvisorSupport.apply(
-                                client.chatClient().prompt()
-                                        .system(context.systemPrompt())
-                                        .user(prompt),
-                                context.assembled().sessionKey(),
-                                context.assembled().userId())
-                        .call()
-                        .content()
+                client -> {
+                    var response = conversationAdvisorSupport.apply(
+                                    client.chatClient().prompt()
+                                            .system(context.systemPrompt())
+                                            .user(prompt),
+                                    context.assembled().sessionKey(),
+                                    context.assembled().userId())
+                            .call()
+                            .chatResponse();
+                    return new ModelCallExecutor.ChatOperationResult<>(
+                            ModelCallExecutor.extractText(response),
+                            response
+                    );
+                }
         );
         String answer = answerResult.value();
         currentClient = answerResult.client();
@@ -255,18 +292,30 @@ public class ChatServiceImpl implements ChatService {
         String repaired = answer;
         for (int i = 0; i < metaGuardRetryTimes; i++) {
             String retryPrompt = oparLoopEngine.renderMetaRepairPrompt(context.assembled(), plan, action, repaired);
-            ModelCallExecutor.ModelCallResult<String> retryResult = modelCallExecutor.execute(
+            ModelCallExecutor.ModelCallResult<String> retryResult = modelCallExecutor.executeChat(
                     currentClient,
                     "meta-repair",
+                    new ModelCallExecutor.ChatRequestContext(
+                            context.requestId(),
+                            context.assembled().sessionKey(),
+                            context.assembled().channel(),
+                            context.assembled().userId()
+                    ),
                     true,
-                    client -> conversationAdvisorSupport.apply(
-                                    client.chatClient().prompt()
-                                            .system(context.systemPrompt())
-                                            .user(retryPrompt),
-                                    context.assembled().sessionKey(),
-                                    context.assembled().userId())
-                            .call()
-                            .content()
+                    client -> {
+                        var response = conversationAdvisorSupport.apply(
+                                        client.chatClient().prompt()
+                                                .system(context.systemPrompt())
+                                                .user(retryPrompt),
+                                        context.assembled().sessionKey(),
+                                        context.assembled().userId())
+                                .call()
+                                .chatResponse();
+                        return new ModelCallExecutor.ChatOperationResult<>(
+                                ModelCallExecutor.extractText(response),
+                                response
+                        );
+                    }
             );
             repaired = retryResult.value();
             currentClient = retryResult.client();

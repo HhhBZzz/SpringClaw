@@ -37,15 +37,27 @@ public class LocalExecutionNarrator {
             return localResult.fallbackAnswer();
         }
         try {
-            ModelCallExecutor.ModelCallResult<String> narrationResult = modelCallExecutor.execute(
+            ModelCallExecutor.ModelCallResult<String> narrationResult = modelCallExecutor.executeChat(
                     narrationClient,
                     "local-narration",
+                    new ModelCallExecutor.ChatRequestContext(
+                            "",
+                            assembled.sessionKey(),
+                            assembled.channel(),
+                            assembled.userId()
+                    ),
                     false,
-                    client -> client.chatClient().prompt()
-                            .system(systemPrompt)
-                            .user(renderPrompt(assembled, localResult))
-                            .call()
-                            .content()
+                    client -> {
+                        var response = client.chatClient().prompt()
+                                .system(systemPrompt)
+                                .user(renderPrompt(assembled, localResult))
+                                .call()
+                                .chatResponse();
+                        return new ModelCallExecutor.ChatOperationResult<>(
+                                ModelCallExecutor.extractText(response),
+                                response
+                        );
+                    }
             );
             String response = narrationResult.value();
             if (!StringUtils.hasText(response)

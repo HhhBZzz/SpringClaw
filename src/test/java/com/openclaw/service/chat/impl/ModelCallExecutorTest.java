@@ -3,6 +3,7 @@ package com.openclaw.service.chat.impl;
 import com.openclaw.config.ai.OpenClawAiProperties;
 import com.openclaw.service.ai.AiProviderService;
 import com.openclaw.service.ai.AiProviderStateService;
+import com.openclaw.service.usage.LlmUsageRecordService;
 import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.model.tool.ToolCallingManager;
@@ -30,6 +31,7 @@ class ModelCallExecutorTest {
         ModelCallExecutor executor = new ModelCallExecutor(
                 providerService,
                 new ModelTransportGuardService(new ChatResponsePolicyService(""), 30),
+                mock(LlmUsageRecordService.class),
                 2
         );
 
@@ -61,6 +63,7 @@ class ModelCallExecutorTest {
         ModelCallExecutor executor = new ModelCallExecutor(
                 providerService,
                 guardService,
+                mock(LlmUsageRecordService.class),
                 1
         );
 

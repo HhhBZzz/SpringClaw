@@ -658,6 +658,28 @@
       </section>
     </div>
 
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h3>模型用量</h3>
+          <p class="panel-note">按用户、provider、model 和调用阶段统计模型用量。这里看的是真实模型调用 usage，不是登录 token。</p>
+        </div>
+        <div class="actions">
+          <button class="btn-secondary" id="loadUsageBtn">刷新用量</button>
+        </div>
+      </div>
+
+      <div class="metrics" id="usageMetrics">
+        <div class="metric"><label>Calls</label><strong>-</strong><span>总调用次数</span></div>
+        <div class="metric"><label>Total Tokens</label><strong>-</strong><span>总 token 消耗</span></div>
+        <div class="metric"><label>Known Usage</label><strong>-</strong><span>provider 返回 usage 的记录数</span></div>
+        <div class="metric"><label>Top Provider</label><strong>-</strong><span>当前最高 provider</span></div>
+      </div>
+
+      <div class="output" id="usageSummaryOut" style="margin-top: 14px;">等待加载</div>
+      <div class="table-shell" id="usageTableWrap" style="margin-top: 14px;"></div>
+    </section>
+
     <div class="grid">
       <section class="panel">
         <div class="panel-head">
@@ -809,6 +831,8 @@
       bootstrap: null,
       overview: null,
       providers: null,
+      usageSummary: null,
+      recentUsage: [],
       memoryStatus: null,
       health: null,
       cache: null,
@@ -830,6 +854,9 @@
       sessionsTableWrap: document.getElementById("sessionsTableWrap"),
       providerGrid: document.getElementById("providerGrid"),
       modelActionOut: document.getElementById("modelActionOut"),
+      usageMetrics: document.getElementById("usageMetrics"),
+      usageSummaryOut: document.getElementById("usageSummaryOut"),
+      usageTableWrap: document.getElementById("usageTableWrap"),
       opsCards: document.getElementById("opsCards"),
       memoryStatusOut: document.getElementById("memoryStatusOut"),
       memorySearchOut: document.getElementById("memorySearchOut"),
@@ -890,7 +917,7 @@
 
     function setAdminUiEnabled(enabled) {
       document.querySelectorAll(
-        "#refreshAllBtn, #listUsersBtn, #createUserBtn, #loadModelsBtn, #loadHealthBtn, #loadCacheBtn, #loadRabbitBtn, #loadMemoryStatusBtn, #searchMemoryBtn, #listPermissionsBtn, #savePermissionBtn, #listPoliciesBtn, #savePolicyBtn, #auditStatsBtn, #auditLogsBtn, #usersTableWrap button, #providerGrid button"
+        "#refreshAllBtn, #listUsersBtn, #createUserBtn, #loadModelsBtn, #loadUsageBtn, #loadHealthBtn, #loadCacheBtn, #loadRabbitBtn, #loadMemoryStatusBtn, #searchMemoryBtn, #listPermissionsBtn, #savePermissionBtn, #listPoliciesBtn, #savePolicyBtn, #auditStatsBtn, #auditLogsBtn, #usersTableWrap button, #providerGrid button"
       ).forEach((node) => {
         node.disabled = !enabled;
       });
@@ -1032,6 +1059,7 @@
       const activeModel = state.providers?.activeDisplay || state.overview?.providers?.activeDisplay || "未加载";
       const memoryMode = state.memoryStatus?.activeMode || "未加载";
       const tokenStats = state.overview?.tokenStats || {};
+      const usageSummary = state.usageSummary || state.overview?.llmUsage || {};
       nodes.quickCards.innerHTML = `
         <div class="quick-card">
           <h4>应用健康</h4>
@@ -1049,9 +1077,9 @@
           <div class="row-sub">判断当前是 Redis 向量索引还是本地回退。</div>
         </div>
         <div class="quick-card">
-          <h4>活跃会话</h4>
-          <div><strong>${escapeHtml(tokenStats.activeTokenCount ?? "-")}</strong></div>
-          <div class="row-sub">活跃用户 ${escapeHtml(tokenStats.activeUserCount ?? "-")} / 即将过期 ${escapeHtml(tokenStats.expiringSoonCount ?? "-")}</div>
+          <h4>模型用量</h4>
+          <div><strong>${escapeHtml(usageSummary.totalTokens ?? "-")}</strong></div>
+          <div class="row-sub">总调用 ${escapeHtml(usageSummary.totalCalls ?? "-")} / 活跃会话 ${escapeHtml(tokenStats.activeTokenCount ?? "-")}</div>
         </div>
       `;
     }
@@ -1088,9 +1116,13 @@
 
     async function loadOverview() {
       state.overview = await api("/api/admin/manage/dashboard");
+      state.usageSummary = state.overview.llmUsage || state.usageSummary;
+      state.recentUsage = Array.isArray(state.overview.recentLlmUsage) ? state.overview.recentLlmUsage : state.recentUsage;
       renderOverviewMetrics(state.overview);
       renderTokenStats(state.overview.tokenStats || {});
       renderSessionsTable(state.overview.activeSessions || []);
+      renderUsageSummary(state.usageSummary || {});
+      renderUsageTable(state.recentUsage || []);
       if (state.overview.providers) {
         state.providers = state.overview.providers;
         renderProviders(state.providers);
@@ -1128,6 +1160,14 @@
       state.memoryStatus = await api("/api/memory/status");
       renderOutput(nodes.memoryStatusOut, state.memoryStatus);
       renderOpsCards();
+      renderQuickCards();
+    }
+
+    async function loadUsage() {
+      state.usageSummary = await api("/api/admin/manage/llm-usage/summary");
+      state.recentUsage = await api("/api/admin/manage/llm-usage/recent");
+      renderUsageSummary(state.usageSummary || {});
+      renderUsageTable(state.recentUsage || []);
       renderQuickCards();
     }
 
@@ -1260,6 +1300,75 @@
                 <td>${escapeHtml(row.expireAt ? new Date(row.expireAt).toLocaleString("zh-CN", { hour12: false }) : "-")}</td>
                 <td><code>${escapeHtml(row.tokenPreview || "-")}</code></td>
                 <td>${escapeHtml(row.storage || "-")}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      `;
+    }
+
+    function renderUsageSummary(summary) {
+      const totalCalls = summary.totalCalls ?? "-";
+      const totalTokens = summary.totalTokens ?? "-";
+      const usageKnownCount = summary.usageKnownCount ?? "-";
+      const usageUnknownCount = summary.usageUnknownCount ?? "-";
+      const topProvider = summary.topProvider || "未加载";
+      const topModel = summary.topModel || "未加载";
+      nodes.usageMetrics.innerHTML = `
+        <div class="metric">
+          <label>Calls</label>
+          <strong>${escapeHtml(totalCalls)}</strong>
+          <span>总调用次数</span>
+        </div>
+        <div class="metric">
+          <label>Total Tokens</label>
+          <strong>${escapeHtml(totalTokens)}</strong>
+          <span>prompt ${escapeHtml(summary.totalPromptTokens ?? "-")} / completion ${escapeHtml(summary.totalCompletionTokens ?? "-")}</span>
+        </div>
+        <div class="metric">
+          <label>Known Usage</label>
+          <strong>${escapeHtml(usageKnownCount)}</strong>
+          <span>未知 usage ${escapeHtml(usageUnknownCount)}</span>
+        </div>
+        <div class="metric">
+          <label>Top Provider</label>
+          <strong>${escapeHtml(topProvider)}</strong>
+          <span>Top model ${escapeHtml(topModel)}</span>
+        </div>
+      `;
+      renderOutput(nodes.usageSummaryOut, summary);
+    }
+
+    function renderUsageTable(rows) {
+      if (!Array.isArray(rows) || !rows.length) {
+        nodes.usageTableWrap.innerHTML = '<div class="quick-card"><h4>暂无模型用量</h4><div class="muted">还没有可展示的模型调用记录。</div></div>';
+        return;
+      }
+      nodes.usageTableWrap.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>CreateTime</th>
+              <th>User</th>
+              <th>Provider / Model</th>
+              <th>Source</th>
+              <th>Prompt</th>
+              <th>Completion</th>
+              <th>Total</th>
+              <th>Usage</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr>
+                <td>${escapeHtml(row.createTime || "-")}</td>
+                <td>${escapeHtml(row.userId || "-")}</td>
+                <td><strong>${escapeHtml(row.providerId || "-")}</strong><div class="row-sub">${escapeHtml(row.model || "-")}</div></td>
+                <td>${escapeHtml(row.source || "-")}</td>
+                <td>${escapeHtml(row.promptTokens ?? "-")}</td>
+                <td>${escapeHtml(row.completionTokens ?? "-")}</td>
+                <td>${escapeHtml(row.totalTokens ?? "-")}</td>
+                <td>${row.usageKnown === 1 ? '<span class="status-pill">KNOWN</span>' : '<span class="status-pill warn">UNKNOWN</span>'}</td>
               </tr>
             `).join("")}
           </tbody>
@@ -1425,6 +1534,7 @@
         loadHealth(),
         loadModels(),
         loadMemoryStatus(),
+        loadUsage(),
         loadCacheStats(),
         loadRabbitStats(),
         listUsers(),
@@ -1454,6 +1564,7 @@
       document.getElementById("listUsersBtn").addEventListener("click", listUsers);
       document.getElementById("createUserBtn").addEventListener("click", createUser);
       document.getElementById("loadModelsBtn").addEventListener("click", loadModels);
+      document.getElementById("loadUsageBtn").addEventListener("click", loadUsage);
       document.getElementById("loadHealthBtn").addEventListener("click", loadHealth);
       document.getElementById("loadCacheBtn").addEventListener("click", loadCacheStats);
       document.getElementById("loadRabbitBtn").addEventListener("click", loadRabbitStats);
@@ -1490,6 +1601,8 @@
       renderAuth();
       bindEvents();
       renderOverviewMetrics({});
+      renderUsageSummary({});
+      renderUsageTable([]);
       renderQuickCards();
       renderOpsCards();
       await loadBootstrapStatus();

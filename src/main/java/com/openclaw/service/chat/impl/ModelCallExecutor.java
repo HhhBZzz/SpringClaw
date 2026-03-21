@@ -1,8 +1,11 @@
 package com.openclaw.service.chat.impl;
 
 import com.openclaw.service.ai.AiProviderService;
+import com.openclaw.service.usage.LlmUsageRecordService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -20,13 +23,16 @@ public class ModelCallExecutor {
 
     private final AiProviderService aiProviderService;
     private final ModelTransportGuardService modelTransportGuardService;
+    private final LlmUsageRecordService llmUsageRecordService;
     private final int maxFailoverAttempts;
 
     public ModelCallExecutor(AiProviderService aiProviderService,
                              ModelTransportGuardService modelTransportGuardService,
+                             LlmUsageRecordService llmUsageRecordService,
                              @Value("${openclaw.ai.max-failover-attempts:1}") int maxFailoverAttempts) {
         this.aiProviderService = aiProviderService;
         this.modelTransportGuardService = modelTransportGuardService;
+        this.llmUsageRecordService = llmUsageRecordService;
         this.maxFailoverAttempts = Math.max(0, maxFailoverAttempts);
     }
 
@@ -34,6 +40,43 @@ public class ModelCallExecutor {
                                           String source,
                                           boolean allowFailover,
                                           ModelOperation<T> operation) throws Exception {
+        return executeInternal(activeClient, source, allowFailover, operation);
+    }
+
+    public <T> ModelCallResult<T> executeChat(AiProviderService.ActiveChatClient activeClient,
+                                              String source,
+                                              ChatRequestContext requestContext,
+                                              boolean allowFailover,
+                                              ChatOperation<T> operation) throws Exception {
+        return executeInternal(
+                activeClient,
+                source,
+                allowFailover,
+                client -> {
+                    ChatOperationResult<T> result = operation.execute(client);
+                    if (result != null && result.chatResponse() != null) {
+                        llmUsageRecordService.recordChatResponse(
+                                new LlmUsageRecordService.ChatResponseContext(
+                                        requestContext == null ? "" : requestContext.requestId(),
+                                        requestContext == null ? "" : requestContext.sessionKey(),
+                                        requestContext == null ? "" : requestContext.channel(),
+                                        requestContext == null ? "" : requestContext.userId(),
+                                        client.providerId(),
+                                        client.model(),
+                                        source
+                                ),
+                                result.chatResponse()
+                        );
+                    }
+                    return result == null ? null : result.value();
+                }
+        );
+    }
+
+    private <T> ModelCallResult<T> executeInternal(AiProviderService.ActiveChatClient activeClient,
+                                                   String source,
+                                                   boolean allowFailover,
+                                                   ModelOperation<T> operation) throws Exception {
         List<String> attemptedModels = new ArrayList<>();
         AiProviderService.ActiveChatClient currentClient = resolveInitialClient(activeClient, source, attemptedModels);
         boolean failedOver = !sameModel(activeClient.model(), currentClient.model());
@@ -83,6 +126,17 @@ public class ModelCallExecutor {
         throw new IllegalStateException("未找到可用模型执行请求");
     }
 
+    public static String extractText(ChatResponse chatResponse) {
+        if (chatResponse == null || chatResponse.getResult() == null) {
+            return "";
+        }
+        Generation generation = chatResponse.getResult();
+        if (generation.getOutput() == null) {
+            return "";
+        }
+        return generation.getOutput().getText();
+    }
+
     private AiProviderService.ActiveChatClient resolveInitialClient(AiProviderService.ActiveChatClient activeClient,
                                                                     String source,
                                                                     List<String> attemptedModels) {
@@ -123,9 +177,23 @@ public class ModelCallExecutor {
         T execute(AiProviderService.ActiveChatClient client) throws Exception;
     }
 
+    @FunctionalInterface
+    public interface ChatOperation<T> {
+        ChatOperationResult<T> execute(AiProviderService.ActiveChatClient client) throws Exception;
+    }
+
     public record ModelCallResult<T>(T value,
                                      AiProviderService.ActiveChatClient client,
                                      List<String> attemptedModels,
                                      boolean failedOver) {
+    }
+
+    public record ChatOperationResult<T>(T value, ChatResponse chatResponse) {
+    }
+
+    public record ChatRequestContext(String requestId,
+                                     String sessionKey,
+                                     String channel,
+                                     String userId) {
     }
 }

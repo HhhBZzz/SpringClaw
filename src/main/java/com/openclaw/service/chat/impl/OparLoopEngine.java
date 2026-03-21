@@ -96,7 +96,7 @@ public class OparLoopEngine {
                         "本地执行完成，已整理真实结果。"
                 );
             }
-            LocalSkillFallbackService.LocalSkillResult aiControlResult = tryAiAssistedModelControl(activeClient, assembled);
+            LocalSkillFallbackService.LocalSkillResult aiControlResult = tryAiAssistedModelControl(activeClient, assembled, requestId);
             if (aiControlResult != null) {
                 return buildLocalExecutionResult(
                         systemPrompt,
@@ -126,7 +126,7 @@ public class OparLoopEngine {
         String observePrompt = assembled.observePrompt();
         List<AgentStep> steps = new ArrayList<>();
         for (int stepNo = 1; stepNo <= maxAgentSteps; stepNo++) {
-            PlanCallResult planCall = runPlan(currentClient, systemPrompt, assembled, steps, stepNo);
+            PlanCallResult planCall = runPlan(currentClient, systemPrompt, assembled, requestId, steps, stepNo);
             currentClient = planCall.client();
             PlanResult plan = planCall.plan();
             if (planCall.degraded()) {
@@ -221,6 +221,7 @@ public class OparLoopEngine {
     private PlanCallResult runPlan(AiProviderService.ActiveChatClient activeClient,
                                    String systemPrompt,
                                    AssembledContext assembled,
+                                   String requestId,
                                    List<AgentStep> history,
                                    int stepNo) {
         try {
@@ -230,18 +231,30 @@ public class OparLoopEngine {
                     stepNo,
                     planOutputConverter.getFormat()
             );
-            ModelCallExecutor.ModelCallResult<PlanResult> callResult = modelCallExecutor.execute(
+            ModelCallExecutor.ModelCallResult<PlanResult> callResult = modelCallExecutor.executeChat(
                     activeClient,
                     "plan",
+                    new ModelCallExecutor.ChatRequestContext(
+                            requestId,
+                            assembled.sessionKey(),
+                            assembled.channel(),
+                            assembled.userId()
+                    ),
                     true,
-                    client -> conversationAdvisorSupport.apply(
-                                    client.chatClient().prompt()
-                                            .system(systemPrompt)
-                                            .user(planPrompt),
-                                    assembled.sessionKey(),
-                                    assembled.userId())
-                            .call()
-                            .entity(PlanResult.class)
+                    client -> {
+                        var response = conversationAdvisorSupport.apply(
+                                        client.chatClient().prompt()
+                                                .system(systemPrompt)
+                                                .user(planPrompt),
+                                        assembled.sessionKey(),
+                                        assembled.userId())
+                                .call()
+                                .responseEntity(PlanResult.class);
+                        return new ModelCallExecutor.ChatOperationResult<>(
+                                response.entity(),
+                                response.response()
+                        );
+                    }
             );
             return new PlanCallResult(normalizePlanResult(callResult.value(), !history.isEmpty()), callResult.client(), false);
         } catch (Exception ex) {
@@ -277,19 +290,31 @@ public class OparLoopEngine {
 
         try (ToolExecutionContextHolder.Scope ignored = ToolExecutionContextHolder.open(context)) {
             String actionPrompt = promptSupport.renderActionPrompt(assembled, plan.planText(), renderHistory(history), stepNo);
-            ModelCallExecutor.ModelCallResult<String> callResult = modelCallExecutor.execute(
+            ModelCallExecutor.ModelCallResult<String> callResult = modelCallExecutor.executeChat(
                     activeClient,
                     "action",
+                    new ModelCallExecutor.ChatRequestContext(
+                            requestId,
+                            assembled.sessionKey(),
+                            assembled.channel(),
+                            assembled.userId()
+                    ),
                     allowFailover,
-                    client -> conversationAdvisorSupport.apply(
-                                    client.chatClient().prompt()
-                                            .system(systemPrompt)
-                                            .user(actionPrompt)
-                                            .tools(tools),
-                                    assembled.sessionKey(),
-                                    assembled.userId())
-                            .call()
-                            .content()
+                    client -> {
+                        var response = conversationAdvisorSupport.apply(
+                                        client.chatClient().prompt()
+                                                .system(systemPrompt)
+                                                .user(actionPrompt)
+                                                .tools(tools),
+                                        assembled.sessionKey(),
+                                        assembled.userId())
+                                .call()
+                                .chatResponse();
+                        return new ModelCallExecutor.ChatOperationResult<>(
+                                ModelCallExecutor.extractText(response),
+                                response
+                        );
+                    }
             );
             return new ActionCallResult(new ActionResult(safe(callResult.value()), false), callResult.client());
         } catch (Exception ex) {
@@ -398,12 +423,13 @@ public class OparLoopEngine {
     }
 
     private LocalSkillFallbackService.LocalSkillResult tryAiAssistedModelControl(AiProviderService.ActiveChatClient activeClient,
-                                                                                 AssembledContext assembled) {
+                                                                                 AssembledContext assembled,
+                                                                                 String requestId) {
         if (!modelTransportGuardService.isModelCallEnabled(activeClient)) {
             return null;
         }
         try {
-            String response = modelControlIntentService.classify(activeClient, assembled);
+            String response = modelControlIntentService.classify(activeClient, assembled, requestId);
             return dispatchAiModelControlCommand(response);
         } catch (Exception ex) {
             modelTransportGuardService.markFailure(activeClient.providerId(), ex);

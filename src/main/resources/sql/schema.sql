@@ -122,3 +122,28 @@ CREATE TABLE IF NOT EXISTS `tool_permission` (
   KEY `idx_tool_permission_role` (`role_code`),
   KEY `idx_tool_permission_tool` (`tool_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `llm_usage_record` (
+  `id` BIGINT NOT NULL,
+  `request_id` VARCHAR(64) NULL,
+  `session_key` VARCHAR(128) NULL,
+  `channel` VARCHAR(32) NOT NULL,
+  `user_id` VARCHAR(64) NOT NULL,
+  `provider_id` VARCHAR(64) NOT NULL,
+  `model` VARCHAR(128) NOT NULL,
+  `source` VARCHAR(64) NOT NULL,
+  `usage_known` TINYINT NOT NULL DEFAULT 0,
+  `prompt_tokens` INT NULL,
+  `completion_tokens` INT NULL,
+  `total_tokens` INT NULL,
+  `create_time` DATETIME NOT NULL,
+  `update_time` DATETIME NOT NULL,
+  `create_by` VARCHAR(64) NULL,
+  `update_by` VARCHAR(64) NULL,
+  `deleted` TINYINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  KEY `idx_llm_usage_request` (`request_id`),
+  KEY `idx_llm_usage_session` (`session_key`, `create_time`),
+  KEY `idx_llm_usage_user` (`user_id`, `create_time`),
+  KEY `idx_llm_usage_provider_model` (`provider_id`, `model`, `create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

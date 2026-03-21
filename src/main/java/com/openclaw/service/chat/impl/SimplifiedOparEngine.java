@@ -62,7 +62,7 @@ public class SimplifiedOparEngine {
             return buildLocalResult(systemPrompt, assembled, controlPlane, "SIMPLIFIED:CONTROL_PLANE");
         }
 
-        LocalSkillFallbackService.LocalSkillResult aiControl = tryAiAssistedModelControl(activeClient, assembled);
+        LocalSkillFallbackService.LocalSkillResult aiControl = tryAiAssistedModelControl(activeClient, assembled, requestId);
         if (aiControl != null) {
             return buildLocalResult(systemPrompt, assembled, aiControl, "SIMPLIFIED:AI_CONTROL");
         }
@@ -73,19 +73,31 @@ public class SimplifiedOparEngine {
 
         Object[] tools = toolOrchestrator.selectAgentTools(assembled.channel(), assembled.userId());
         try {
-            ModelCallExecutor.ModelCallResult<String> result = modelCallExecutor.execute(
+            ModelCallExecutor.ModelCallResult<String> result = modelCallExecutor.executeChat(
                     activeClient,
                     "simplified-answer",
+                    new ModelCallExecutor.ChatRequestContext(
+                            requestId,
+                            assembled.sessionKey(),
+                            assembled.channel(),
+                            assembled.userId()
+                    ),
                     true,
-                    client -> conversationAdvisorSupport.apply(
-                                    client.chatClient().prompt()
-                                            .system(systemPrompt)
-                                            .user(renderUserPrompt(assembled.question()))
-                                            .tools(tools),
-                                    assembled.sessionKey(),
-                                    assembled.userId())
-                            .call()
-                            .content()
+                    client -> {
+                        var response = conversationAdvisorSupport.apply(
+                                        client.chatClient().prompt()
+                                                .system(systemPrompt)
+                                                .user(renderUserPrompt(assembled.question()))
+                                                .tools(tools),
+                                        assembled.sessionKey(),
+                                        assembled.userId())
+                                .call()
+                                .chatResponse();
+                        return new ModelCallExecutor.ChatOperationResult<>(
+                                ModelCallExecutor.extractText(response),
+                                response
+                        );
+                    }
             );
             String answer = safe(result.value());
             if (!StringUtils.hasText(answer)) {
@@ -175,12 +187,13 @@ public class SimplifiedOparEngine {
     }
 
     private LocalSkillFallbackService.LocalSkillResult tryAiAssistedModelControl(AiProviderService.ActiveChatClient activeClient,
-                                                                                 AssembledContext assembled) {
+                                                                                 AssembledContext assembled,
+                                                                                 String requestId) {
         if (!modelTransportGuardService.isModelCallEnabled(activeClient)) {
             return null;
         }
         try {
-            String response = modelControlIntentService.classify(activeClient, assembled);
+            String response = modelControlIntentService.classify(activeClient, assembled, requestId);
             return dispatchAiModelControlCommand(response);
         } catch (Exception ex) {
             modelTransportGuardService.markFailure(activeClient.providerId(), ex);

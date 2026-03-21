@@ -15,6 +15,7 @@ import com.openclaw.service.auth.AuthService;
 import com.openclaw.service.event.MessageEventService;
 import com.openclaw.service.skill.script.ScriptSkillCatalogService;
 import com.openclaw.service.skill.script.ScriptSkillDefinition;
+import com.openclaw.service.usage.LlmUsageRecordService;
 import com.openclaw.web.auth.RequireRole;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.util.StringUtils;
@@ -46,6 +47,7 @@ public class AdminManageController {
     private final AuthService authService;
     private final ScriptSkillCatalogService scriptSkillCatalogService;
     private final AiProviderService aiProviderService;
+    private final LlmUsageRecordService llmUsageRecordService;
     private final boolean dbEnabled;
 
     public AdminManageController(UserAccountMapper userAccountMapper,
@@ -56,6 +58,7 @@ public class AdminManageController {
                                  AuthService authService,
                                  ScriptSkillCatalogService scriptSkillCatalogService,
                                  AiProviderService aiProviderService,
+                                 LlmUsageRecordService llmUsageRecordService,
                                  @Value("${openclaw.persistence.db-enabled:false}") boolean dbEnabled) {
         this.userAccountMapper = userAccountMapper;
         this.toolPermissionMapper = toolPermissionMapper;
@@ -65,6 +68,7 @@ public class AdminManageController {
         this.authService = authService;
         this.scriptSkillCatalogService = scriptSkillCatalogService;
         this.aiProviderService = aiProviderService;
+        this.llmUsageRecordService = llmUsageRecordService;
         this.dbEnabled = dbEnabled;
     }
 
@@ -79,7 +83,19 @@ public class AdminManageController {
         result.put("activeSessions", authService.listActiveSessions(20));
         result.put("recentUsers", buildRecentUserActivity());
         result.put("providers", aiProviderService.summary());
+        result.put("llmUsage", llmUsageRecordService.summary(300));
+        result.put("recentLlmUsage", llmUsageRecordService.listRecent(20));
         return ApiResponse.success(result);
+    }
+
+    @GetMapping("/llm-usage/summary")
+    public ApiResponse<Map<String, Object>> llmUsageSummary() {
+        return ApiResponse.success(llmUsageRecordService.summary(300));
+    }
+
+    @GetMapping("/llm-usage/recent")
+    public ApiResponse<List<com.openclaw.domain.entity.LlmUsageRecord>> llmUsageRecent() {
+        return ApiResponse.success(llmUsageRecordService.listRecent(50));
     }
 
     @GetMapping("/active-sessions")
@@ -126,6 +142,7 @@ public class AdminManageController {
         result.put("skillPolicyCount", safeCountSkillPolicies());
         result.put("roleCounts", safeRoleCounts());
         result.put("tokenStats", authService.tokenRuntimeStats());
+        result.put("llmUsage", llmUsageRecordService.summary(200));
         return result;
     }
 

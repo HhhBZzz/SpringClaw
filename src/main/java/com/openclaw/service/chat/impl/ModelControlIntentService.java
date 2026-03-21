@@ -2,6 +2,9 @@ package com.openclaw.service.chat.impl;
 
 import com.openclaw.service.ai.AiProviderService;
 import com.openclaw.service.context.AssembledContext;
+import com.openclaw.service.usage.LlmUsageRecordService;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -14,9 +17,17 @@ import java.util.List;
 public class ModelControlIntentService {
 
     private final AiProviderService aiProviderService;
+    private final LlmUsageRecordService llmUsageRecordService;
 
     public ModelControlIntentService(AiProviderService aiProviderService) {
+        this(aiProviderService, null);
+    }
+
+    @Autowired
+    public ModelControlIntentService(AiProviderService aiProviderService,
+                                     LlmUsageRecordService llmUsageRecordService) {
         this.aiProviderService = aiProviderService;
+        this.llmUsageRecordService = llmUsageRecordService;
     }
 
     public boolean looksLikeProviderIntentCandidate(String question, String eventContext) {
@@ -59,12 +70,18 @@ public class ModelControlIntentService {
     }
 
     public String classify(AiProviderService.ActiveChatClient activeClient, AssembledContext assembled) {
+        return classify(activeClient, assembled, "");
+    }
+
+    public String classify(AiProviderService.ActiveChatClient activeClient,
+                           AssembledContext assembled,
+                           String requestId) {
         if (!looksLikeProviderIntentCandidate(assembled.question(), assembled.eventContext())) {
             return null;
         }
         String switchOptions = renderModelControlOptions();
         String recentContext = renderRecentModelIntentContext(assembled.eventContext());
-        String response = activeClient.chatClient().prompt()
+        ChatResponse response = activeClient.chatClient().prompt()
                 .user("""
                         你是模型切换意图分类器。请判断用户是否在“查询当前模型”“请求切换模型提供方”或“请求切换具体模型”。
                         仅允许输出以下格式之一，不要输出其他文字：
@@ -93,8 +110,9 @@ public class ModelControlIntentService {
                         %s
                         """.formatted(switchOptions, recentContext, safe(assembled.question())))
                 .call()
-                .content();
-        return normalizeCommand(response);
+                .chatResponse();
+        recordUsage(activeClient, assembled, requestId, response);
+        return normalizeCommand(ModelCallExecutor.extractText(response));
     }
 
     private String normalizeCommand(String rawCommand) {
@@ -161,5 +179,26 @@ public class ModelControlIntentService {
 
     private static String safe(String text) {
         return text == null ? "" : text;
+    }
+
+    private void recordUsage(AiProviderService.ActiveChatClient activeClient,
+                             AssembledContext assembled,
+                             String requestId,
+                             ChatResponse response) {
+        if (llmUsageRecordService == null || response == null) {
+            return;
+        }
+        llmUsageRecordService.recordChatResponse(
+                new LlmUsageRecordService.ChatResponseContext(
+                        safe(requestId),
+                        assembled == null ? "" : safe(assembled.sessionKey()),
+                        assembled == null ? "" : safe(assembled.channel()),
+                        assembled == null ? "" : safe(assembled.userId()),
+                        activeClient == null ? "" : safe(activeClient.providerId()),
+                        activeClient == null ? "" : safe(activeClient.model()),
+                        "model-control-intent"
+                ),
+                response
+        );
     }
 }

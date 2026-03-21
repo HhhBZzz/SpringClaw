@@ -2,7 +2,7 @@
 
 一个基于 `Spring Boot 3.5 + Spring AI 1.1` 的企业内 AI Agent 后端。
 
-截至 `2026-03-20`，项目已经完成从“可跑 Demo”到“可持续演进的内部 Agent 服务”的第一轮收敛，具备多模型、短期/长期记忆、权限治理、飞书接入和管理后台能力。
+截至 `2026-03-21`，项目已经完成从“可跑 Demo”到“可持续演进的内部 Agent 服务”的第一轮收敛，具备多模型、短期/长期记忆、权限治理、飞书接入、管理后台和模型用量统计能力。
 
 ## 当前能力概览
 
@@ -23,7 +23,7 @@
    - 飞书长连接
 5. 管理后台
    - `/admin`
-   - 用户、角色、模型、缓存、记忆、审计、活跃 token 会话
+   - 用户、角色、模型、缓存、记忆、审计、活跃 token 会话、模型用量
 
 ## 截止今天的项目状态
 
@@ -41,7 +41,9 @@
    - 私聊和群聊分作用域
    - 群聊保留群共享记忆
    - 群聊不再补召回用户私聊/跨场景个人长期记忆
-5. 项目已接入 GitHub 记录
+5. 后台已支持模型用量统计
+   - 能查看总调用次数、总 tokens、top provider / model、最近调用样本
+6. 项目已接入 GitHub 记录
    - 仓库：[HhhBZzz/SpringClaw](https://github.com/HhhBZzz/SpringClaw)
    - 当前工作分支：[codex/bootstrap-github](https://github.com/HhhBZzz/SpringClaw/tree/codex/bootstrap-github)
 
@@ -176,6 +178,7 @@ curl -X POST http://127.0.0.1:18080/api/chat/send \
   - 缓存 / 记忆 / RabbitMQ
   - 审计日志
   - 活跃 token 会话
+  - 模型 token 用量
 - 访问控制：
   - 仅 `ADMIN` 可查看和操作后台数据
 

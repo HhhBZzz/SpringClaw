@@ -84,6 +84,10 @@ class OparContextAwareSupport {
             String shortAnswer = renderContextMemoryShortAnswer(assembled);
             return new LocalSkillFallbackService.LocalSkillResult("CONTEXT_MEMORY_QUERY", detail, shortAnswer, false);
         }
+        if (looksLikeDiagnosticAnalysisFollowUp(lower) && contextContainsDiagnosticMaterial(assembled.eventContext())) {
+            String detail = renderDiagnosticAnalysis(assembled.eventContext());
+            return new LocalSkillFallbackService.LocalSkillResult("RECENT_DIAGNOSTIC_ANALYSIS", detail, detail, false);
+        }
         if (looksLikeRecentFailureFollowUp(lower) && contextContainsRecentFailure(assembled.eventContext())) {
             String detail = renderRecentFailureExplanation(assembled.eventContext());
             return new LocalSkillFallbackService.LocalSkillResult("RECENT_FAILURE_QUERY", detail, detail, false);
@@ -158,14 +162,54 @@ class OparContextAwareSupport {
                 || lower.equals("现在可以了吗");
     }
 
+    private boolean looksLikeDiagnosticAnalysisFollowUp(String lower) {
+        return lower.equals("分析一下")
+                || lower.equals("分析一下他")
+                || lower.equals("分析分析")
+                || lower.equals("分析分析他")
+                || lower.equals("分析下")
+                || lower.equals("分析下他")
+                || lower.equals("帮我分析")
+                || lower.equals("帮我分析下")
+                || lower.equals("帮我看看")
+                || lower.equals("用代码分析")
+                || lower.equals("用代码分析下")
+                || lower.equals("用代码分析一下")
+                || lower.equals("用代码分析分析他")
+                || lower.equals("看看这个报错")
+                || lower.equals("看看这个错误")
+                || lower.equals("看看这段日志")
+                || lower.equals("分析这段日志")
+                || lower.equals("分析这个报错");
+    }
+
     private boolean contextContainsRecentFailure(String eventContext) {
         String lower = safe(eventContext).toLowerCase();
         return lower.contains("模型服务当前不可用")
                 || lower.contains("504")
                 || lower.contains("503")
                 || lower.contains("502")
+                || lower.contains("read timed out")
+                || lower.contains("sockettimeoutexception")
                 || lower.contains("unexpected end of file")
                 || lower.contains("请求超时");
+    }
+
+    private boolean contextContainsDiagnosticMaterial(String eventContext) {
+        String lower = safe(eventContext).toLowerCase();
+        return lower.contains("read timed out")
+                || lower.contains("sockettimeoutexception")
+                || lower.contains("unexpected end of file")
+                || lower.contains("caused by:")
+                || lower.contains("exception")
+                || lower.contains("error")
+                || lower.contains("tool=")
+                || lower.contains("status=success")
+                || lower.contains("status=failed")
+                || lower.contains(".java:")
+                || lower.contains("==> preparing:")
+                || lower.contains("sqlsession")
+                || lower.contains("dispatcherservlet");
     }
 
     private String renderContextMemoryDetail(AssembledContext assembled) {
@@ -202,7 +246,7 @@ class OparContextAwareSupport {
 
     private String renderRecentFailureExplanation(String eventContext) {
         String lower = safe(eventContext).toLowerCase();
-        if (lower.contains("504") || lower.contains("请求超时")) {
+        if (lower.contains("504") || lower.contains("请求超时") || lower.contains("read timed out")) {
             return "刚才是上游模型超时了。本地服务、飞书和数据库链路都正常，卡在远程模型响应。";
         }
         if (lower.contains("503")) {
@@ -215,6 +259,32 @@ class OparContextAwareSupport {
             return "刚才是模型服务在返回过程中断开了连接，问题在上游模型链路。";
         }
         return "刚才最近一次远程模型调用失败了，更像是模型接入链路故障，不是本地服务故障。";
+    }
+
+    private String renderDiagnosticAnalysis(String eventContext) {
+        String lower = safe(eventContext).toLowerCase();
+        boolean remoteTimeout = lower.contains("read timed out") || lower.contains("sockettimeoutexception");
+        boolean toolSucceeded = lower.contains("tool=") && lower.contains("status=success");
+        boolean toolContextMissing = lower.contains("tool-session") || lower.contains("tool-user");
+
+        if (remoteTimeout && toolSucceeded) {
+            String suffix = toolContextMissing
+                    ? "另外，工具审计里出现了 tool-session/tool-user，这说明当时工具调用没有绑定真实会话上下文，已经需要在简化模式里补上。"
+                    : "";
+            return "从最近日志看，这次不是工具没执行，而是工具执行成功后，远程模型在整理最终回答时 Read timed out。"
+                    + " 本地数据库、飞书链路和工具调用本身是通的，真正故障点在上游模型返回阶段。"
+                    + suffix;
+        }
+        if (remoteTimeout) {
+            return "从最近日志看，核心问题是上游模型 Read timed out。数据库查询、消息入库和主服务线程都还在，失败点在远程模型响应阶段。";
+        }
+        if (lower.contains("sqlsession") && !lower.contains("exception")) {
+            return "这些 SqlSession 日志本身不是故障，只是在提示当前读写没有放进 Spring 事务同步。真正要看的还是后面有没有超时、异常堆栈或模型调用失败。";
+        }
+        if (lower.contains("caused by:") || lower.contains("exception") || lower.contains("error")) {
+            return "从最近上下文看，这是一段异常/堆栈日志，真正根因要看最靠后的 Caused by 或第一个业务异常，而不是前面的框架调用栈。";
+        }
+        return "从最近上下文看，这是一次代码/日志诊断类追问。当前能确认是最近链路里出现了异常或工具执行记录，优先应先看最近失败原因和工具真实输出，再决定是否继续调用模型。";
     }
 
     private String safe(String text) {

@@ -81,6 +81,26 @@
    - 最近用量记录
 4. 这轮改动已经具备提交和持续记录条件
 
+### 今日追加修复
+
+#### 问题 4：日志/代码分析类追问在简化模式下仍可能整体退成 `Read timed out`
+
+- 现象：
+  - 用户先贴一段异常或工具日志，再追问 `用代码分析分析他`
+  - 简化模式没有把这类模糊跟进问题接到本地上下文分析
+  - 工具可能先执行成功，但最后远程模型整理答案时超时，最终只回一句失败
+- 根因：
+  - `SimplifiedOparEngine` 没有像 OPAR `Act` 阶段那样绑定 `ToolExecutionContext`
+  - 工具审计因此落到 `tool-session/tool-user`
+  - `OparContextAwareSupport` 只识别“怎么回事/现在呢”这类失败追问，不识别“分析分析他”这类日志诊断追问
+- 处理：
+  - 在简化模式的工具调用外层补上真实 `ToolExecutionContext`
+  - 新增“最近日志/报错/代码跟进分析”本地解释路线
+  - 把 `Read timed out` / `SocketTimeoutException` 纳入最近失败识别
+- 结果：
+  - 同类追问会优先本地解释，不再先走远程模型总结
+  - 工具审计会正确落到真实 `sessionKey/userId/requestId`
+
 ## 2026-03-20
 
 ### 今日完成

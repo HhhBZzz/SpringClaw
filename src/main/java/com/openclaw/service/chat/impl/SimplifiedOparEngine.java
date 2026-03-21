@@ -4,6 +4,8 @@ import com.openclaw.service.ai.AiProviderService;
 import com.openclaw.service.chat.LocalSkillFallbackService;
 import com.openclaw.service.context.AssembledContext;
 import com.openclaw.tool.runtime.ToolOrchestrator;
+import com.openclaw.tool.runtime.ToolExecutionContext;
+import com.openclaw.tool.runtime.ToolExecutionContextHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -72,7 +74,14 @@ public class SimplifiedOparEngine {
         }
 
         Object[] tools = toolOrchestrator.selectAgentTools(assembled.channel(), assembled.userId());
-        try {
+        ToolExecutionContext toolContext = new ToolExecutionContext(
+                assembled.sessionKey(),
+                assembled.channel(),
+                assembled.userId(),
+                requestId,
+                "ACT-SIMPLIFIED"
+        );
+        try (ToolExecutionContextHolder.Scope ignored = ToolExecutionContextHolder.open(toolContext)) {
             ModelCallExecutor.ModelCallResult<String> result = modelCallExecutor.executeChat(
                     activeClient,
                     "simplified-answer",

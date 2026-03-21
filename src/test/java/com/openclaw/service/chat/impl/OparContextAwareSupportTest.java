@@ -68,6 +68,46 @@ class OparContextAwareSupportTest {
         assertThat(result.fallbackAnswer()).contains("2026年3月13日 11:28:44");
     }
 
+    @Test
+    void shouldExplainRecentDiagnosticFollowUpFromContext() {
+        LocalSkillFallbackService.LocalSkillResult result = support.tryContextAwareLocalResult(new AssembledContext(
+                "s1",
+                "feishu",
+                "u1",
+                "用代码分析分析他",
+                """
+                - SYSTEM: tool=FileToolPack.listFiles, status=SUCCESS, phase=ACT, detail=[F] skills/runtime_probe.py
+                - SYSTEM: java.net.SocketTimeoutException: Read timed out
+                - SYSTEM: tool-session/tool-user
+                """,
+                "",
+                ""
+        ));
+
+        assertThat(result).isNotNull();
+        assertThat(result.route()).isEqualTo("RECENT_DIAGNOSTIC_ANALYSIS");
+        assertThat(result.fallbackAnswer()).contains("工具执行成功后");
+        assertThat(result.fallbackAnswer()).contains("Read timed out");
+        assertThat(result.fallbackAnswer()).contains("tool-session/tool-user");
+    }
+
+    @Test
+    void shouldTreatReadTimedOutAsRecentFailure() {
+        LocalSkillFallbackService.LocalSkillResult result = support.tryContextAwareLocalResult(new AssembledContext(
+                "s1",
+                "feishu",
+                "u1",
+                "怎么回事",
+                "- SYSTEM: java.net.SocketTimeoutException: Read timed out",
+                "",
+                ""
+        ));
+
+        assertThat(result).isNotNull();
+        assertThat(result.route()).isEqualTo("RECENT_FAILURE_QUERY");
+        assertThat(result.fallbackAnswer()).contains("上游模型超时");
+    }
+
     private AssembledContext context(String question) {
         return new AssembledContext(
                 "s1",

@@ -177,6 +177,8 @@ openclaw:
     local-fallback-first: true
     max-steps: 3
     model-transport-cooldown-seconds: ${OPENCLAW_MODEL_TRANSPORT_COOLDOWN_SECONDS:30}
+    routing:
+      auto-upgrade-enabled: ${OPENCLAW_CHAT_ROUTING_AUTO_UPGRADE_ENABLED:true}
     meta-guard:
       enabled: true
       retry-times: 1

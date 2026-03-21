@@ -4,6 +4,7 @@ import com.openclaw.domain.entity.AgentSession;
 import com.openclaw.dto.chat.ChatRequest;
 import com.openclaw.dto.chat.ChatResponse;
 import com.openclaw.service.ai.AiProviderService;
+import com.openclaw.service.auth.AuthService;
 import com.openclaw.service.chat.ChatService;
 import com.openclaw.service.chat.LocalSkillFallbackService;
 import com.openclaw.service.context.AssembledContext;
@@ -45,13 +46,17 @@ public class ChatServiceImpl implements ChatService {
     private final OparLoopEngine oparLoopEngine;
     private final SimplifiedOparEngine simplifiedOparEngine;
     private final ChatResponsePolicyService chatResponsePolicyService;
+    private final AuthService authService;
+    private final ChatRoutingStateService chatRoutingStateService;
+    private final ChatRoutingPolicyService chatRoutingPolicyService;
     private final ModelTransportGuardService modelTransportGuardService;
     private final ModelCallExecutor modelCallExecutor;
     private final ConversationAdvisorSupport conversationAdvisorSupport;
     private final LlmUsageRecordService llmUsageRecordService;
     private final boolean metaGuardEnabled;
     private final int metaGuardRetryTimes;
-    private final String agentMode;
+    private final String configuredAgentMode;
+    private final boolean routingAutoUpgradeEnabled;
 
     public ChatServiceImpl(AiProviderService aiProviderService,
                            SoulPromptService soulPromptService,
@@ -63,13 +68,17 @@ public class ChatServiceImpl implements ChatService {
                            OparLoopEngine oparLoopEngine,
                            SimplifiedOparEngine simplifiedOparEngine,
                            ChatResponsePolicyService chatResponsePolicyService,
+                           AuthService authService,
+                           ChatRoutingStateService chatRoutingStateService,
+                           ChatRoutingPolicyService chatRoutingPolicyService,
                            ModelTransportGuardService modelTransportGuardService,
                            ModelCallExecutor modelCallExecutor,
                            ConversationAdvisorSupport conversationAdvisorSupport,
                            LlmUsageRecordService llmUsageRecordService,
                            @Value("${openclaw.chat.meta-guard.enabled:true}") boolean metaGuardEnabled,
                            @Value("${openclaw.chat.meta-guard.retry-times:1}") int metaGuardRetryTimes,
-                           @Value("${openclaw.chat.agent-mode:simplified}") String agentMode) {
+                           @Value("${openclaw.chat.agent-mode:simplified}") String agentMode,
+                           @Value("${openclaw.chat.routing.auto-upgrade-enabled:true}") boolean routingAutoUpgradeEnabled) {
         this.aiProviderService = aiProviderService;
         this.soulPromptService = soulPromptService;
         this.agentSessionService = agentSessionService;
@@ -80,13 +89,17 @@ public class ChatServiceImpl implements ChatService {
         this.oparLoopEngine = oparLoopEngine;
         this.simplifiedOparEngine = simplifiedOparEngine;
         this.chatResponsePolicyService = chatResponsePolicyService;
+        this.authService = authService;
+        this.chatRoutingStateService = chatRoutingStateService;
+        this.chatRoutingPolicyService = chatRoutingPolicyService;
         this.modelTransportGuardService = modelTransportGuardService;
         this.modelCallExecutor = modelCallExecutor;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
         this.llmUsageRecordService = llmUsageRecordService;
         this.metaGuardEnabled = metaGuardEnabled;
         this.metaGuardRetryTimes = Math.max(0, metaGuardRetryTimes);
-        this.agentMode = normalizeAgentMode(agentMode);
+        this.configuredAgentMode = normalizeAgentMode(agentMode);
+        this.routingAutoUpgradeEnabled = routingAutoUpgradeEnabled;
     }
 
     @Override
@@ -120,7 +133,7 @@ public class ChatServiceImpl implements ChatService {
         SseEmitter emitter = new SseEmitter(120_000L);
         StringBuilder fullAnswer = new StringBuilder();
 
-        if (shouldSendImmediateAnswer(executionResult)) {
+        if (shouldSendImmediateAnswer(context, executionResult)) {
             String answer = resolveFinalAnswer(context, executionResult);
             fullAnswer.append(answer);
             sendToken(emitter, answer);
@@ -216,14 +229,50 @@ public class ChatServiceImpl implements ChatService {
         String channel = StringUtils.hasText(request.channel()) ? request.channel() : "api";
         AgentSession session = agentSessionService.getOrCreate(request.sessionKey(), channel, request.userId());
         String requestId = generateRequestId();
+        String roleCode = authService.resolveRoleByUserId(request.userId());
+        String effectiveDefaultMode = chatRoutingStateService.resolveDefaultMode(configuredAgentMode);
+        boolean effectiveAutoUpgrade = chatRoutingStateService.resolveAutoUpgrade(routingAutoUpgradeEnabled);
+        ChatRoutingPolicyService.RoutingDecision routingDecision = chatRoutingPolicyService.decide(
+                request.message(),
+                roleCode,
+                effectiveDefaultMode,
+                effectiveAutoUpgrade
+        );
+        if (routingDecision == null) {
+            routingDecision = new ChatRoutingPolicyService.RoutingDecision(
+                    request.message(),
+                    effectiveDefaultMode,
+                    false,
+                    false,
+                    "路由策略未返回结果，回退到当前默认链路。"
+            );
+        }
         String systemPrompt = soulPromptService.buildSystemPrompt(channel, request.userId());
-        AssembledContext assembled = contextAssembler.assemble(session.getSessionKey(), channel, request.userId(), request.message());
+        AssembledContext assembled = contextAssembler.assemble(
+                session.getSessionKey(),
+                channel,
+                request.userId(),
+                routingDecision.effectiveQuestion()
+        );
         AiProviderService.ActiveChatClient activeClient = aiProviderService.activeClient();
-        return new ChatContext(session, channel, request.userId(), request.message(), requestId, systemPrompt, assembled, activeClient);
+        return new ChatContext(
+                session,
+                channel,
+                request.userId(),
+                roleCode,
+                request.message(),
+                routingDecision.effectiveQuestion(),
+                requestId,
+                systemPrompt,
+                assembled,
+                activeClient,
+                routingDecision.executionMode(),
+                routingDecision.reason()
+        );
     }
 
     private ChatExecutionResult runAgentExecution(ChatContext context) {
-        return useSimplifiedMode()
+        return useSimplifiedMode(context.executionMode())
                 ? simplifiedOparEngine.run(context.activeClient(), context.systemPrompt(), context.assembled(), context.requestId(), this::fallbackAnswer)
                 : oparLoopEngine.runLoop(context.activeClient(), context.systemPrompt(), context.assembled(), context.requestId(), this::fallbackAnswer);
     }
@@ -358,7 +407,7 @@ public class ChatServiceImpl implements ChatService {
                                    ChatExecutionResult executionResult) {
         agentSessionService.persistConversation(
                 context.session(),
-                context.userMessage(),
+                context.effectiveUserMessage(),
                 assistantMessage,
                 soulPromptService.soulVersion()
         );
@@ -366,16 +415,29 @@ public class ChatServiceImpl implements ChatService {
                 context.session().getSessionKey(),
                 context.channel(),
                 context.userId(),
-                context.userMessage(),
+                context.effectiveUserMessage(),
                 normalizeAssistantForMemory(assistantMessage)
         );
         messageEventService.recordTurn(
                 context.session().getSessionKey(),
                 context.channel(),
                 context.userId(),
-                context.userMessage(),
+                context.effectiveUserMessage(),
                 "[REFLECT] " + truncate(normalizeAssistantForMemory(assistantMessage), 1600),
                 "CHAT",
+                context.requestId()
+        );
+        messageEventService.recordSingle(
+                context.session().getSessionKey(),
+                context.channel(),
+                context.userId(),
+                "SYSTEM",
+                "OPAR",
+                "ROUTING=mode=%s, role=%s, reason=%s".formatted(
+                        context.executionMode(),
+                        context.roleCode(),
+                        truncate(context.routingReason(), 300)
+                ),
                 context.requestId()
         );
         messageEventService.recordSingle(
@@ -398,14 +460,14 @@ public class ChatServiceImpl implements ChatService {
         );
     }
 
-    private boolean shouldSendImmediateAnswer(ChatExecutionResult executionResult) {
+    private boolean shouldSendImmediateAnswer(ChatContext context, ChatExecutionResult executionResult) {
         return !executionResult.modelEnabled()
                 || StringUtils.hasText(executionResult.reflect())
-                || useSimplifiedMode();
+                || useSimplifiedMode(context.executionMode());
     }
 
-    private boolean useSimplifiedMode() {
-        return "simplified".equals(agentMode);
+    private boolean useSimplifiedMode(String executionMode) {
+        return "simplified".equals(normalizeAgentMode(executionMode));
     }
 
     private String normalizeAgentMode(String rawAgentMode) {
@@ -464,10 +526,14 @@ public class ChatServiceImpl implements ChatService {
     private record ChatContext(AgentSession session,
                                String channel,
                                String userId,
+                               String roleCode,
                                String userMessage,
+                               String effectiveUserMessage,
                                String requestId,
                                String systemPrompt,
                                AssembledContext assembled,
-                               AiProviderService.ActiveChatClient activeClient) {
+                               AiProviderService.ActiveChatClient activeClient,
+                               String executionMode,
+                               String routingReason) {
     }
 }

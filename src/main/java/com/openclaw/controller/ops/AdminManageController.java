@@ -12,6 +12,7 @@ import com.openclaw.mapper.ToolPermissionMapper;
 import com.openclaw.mapper.UserAccountMapper;
 import com.openclaw.service.ai.AiProviderService;
 import com.openclaw.service.auth.AuthService;
+import com.openclaw.service.chat.impl.ChatRoutingStateService;
 import com.openclaw.service.event.MessageEventService;
 import com.openclaw.service.skill.script.ScriptSkillCatalogService;
 import com.openclaw.service.skill.script.ScriptSkillDefinition;
@@ -48,7 +49,10 @@ public class AdminManageController {
     private final ScriptSkillCatalogService scriptSkillCatalogService;
     private final AiProviderService aiProviderService;
     private final LlmUsageRecordService llmUsageRecordService;
+    private final ChatRoutingStateService chatRoutingStateService;
     private final boolean dbEnabled;
+    private final String configuredChatAgentMode;
+    private final boolean configuredChatRoutingAutoUpgrade;
 
     public AdminManageController(UserAccountMapper userAccountMapper,
                                  ToolPermissionMapper toolPermissionMapper,
@@ -59,7 +63,10 @@ public class AdminManageController {
                                  ScriptSkillCatalogService scriptSkillCatalogService,
                                  AiProviderService aiProviderService,
                                  LlmUsageRecordService llmUsageRecordService,
-                                 @Value("${openclaw.persistence.db-enabled:false}") boolean dbEnabled) {
+                                 ChatRoutingStateService chatRoutingStateService,
+                                 @Value("${openclaw.persistence.db-enabled:false}") boolean dbEnabled,
+                                 @Value("${openclaw.chat.agent-mode:simplified}") String configuredChatAgentMode,
+                                 @Value("${openclaw.chat.routing.auto-upgrade-enabled:true}") boolean configuredChatRoutingAutoUpgrade) {
         this.userAccountMapper = userAccountMapper;
         this.toolPermissionMapper = toolPermissionMapper;
         this.skillDescriptorMapper = skillDescriptorMapper;
@@ -69,7 +76,10 @@ public class AdminManageController {
         this.scriptSkillCatalogService = scriptSkillCatalogService;
         this.aiProviderService = aiProviderService;
         this.llmUsageRecordService = llmUsageRecordService;
+        this.chatRoutingStateService = chatRoutingStateService;
         this.dbEnabled = dbEnabled;
+        this.configuredChatAgentMode = configuredChatAgentMode;
+        this.configuredChatRoutingAutoUpgrade = configuredChatRoutingAutoUpgrade;
     }
 
     @GetMapping("/overview")
@@ -91,6 +101,23 @@ public class AdminManageController {
     @GetMapping("/llm-usage/summary")
     public ApiResponse<Map<String, Object>> llmUsageSummary() {
         return ApiResponse.success(llmUsageRecordService.summary(300));
+    }
+
+    @GetMapping("/chat-routing")
+    public ApiResponse<Map<String, Object>> chatRouting() {
+        return ApiResponse.success(chatRoutingStateService.summary(configuredChatAgentMode, configuredChatRoutingAutoUpgrade));
+    }
+
+    @PostMapping("/chat-routing")
+    public ApiResponse<Map<String, Object>> updateChatRouting(@RequestBody UpdateChatRoutingRequest request) {
+        if (request == null || !StringUtils.hasText(request.defaultMode())) {
+            throw new BusinessException(40104, "defaultMode 不能为空");
+        }
+        boolean autoUpgrade = request.autoUpgrade() == null
+                ? chatRoutingStateService.resolveAutoUpgrade(configuredChatRoutingAutoUpgrade)
+                : request.autoUpgrade();
+        chatRoutingStateService.persistState(request.defaultMode(), autoUpgrade, "admin-api");
+        return ApiResponse.success(chatRoutingStateService.summary(configuredChatAgentMode, configuredChatRoutingAutoUpgrade));
     }
 
     @GetMapping("/llm-usage/recent")
@@ -143,6 +170,7 @@ public class AdminManageController {
         result.put("roleCounts", safeRoleCounts());
         result.put("tokenStats", authService.tokenRuntimeStats());
         result.put("llmUsage", llmUsageRecordService.summary(200));
+        result.put("chatRouting", chatRoutingStateService.summary(configuredChatAgentMode, configuredChatRoutingAutoUpgrade));
         return result;
     }
 
@@ -479,6 +507,9 @@ public class AdminManageController {
     }
 
     public record SwitchModelProviderRequest(String providerId, String model) {
+    }
+
+    public record UpdateChatRoutingRequest(String defaultMode, Boolean autoUpgrade) {
     }
 
     public record UserView(String username,

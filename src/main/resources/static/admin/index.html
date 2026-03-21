@@ -645,12 +645,37 @@
         <div class="panel-head">
           <div>
             <h3>模型控制</h3>
-            <p class="panel-note">默认显示所有 provider 和可切换模型。点击卡片按钮即可切换，不再手工拼 provider/model。</p>
+            <p class="panel-note">管理员可以设置默认聊天链路，并查看所有 provider 和可切换模型。复杂任务默认仍建议自动升级到深度分析链路。</p>
           </div>
           <div class="actions">
             <button class="btn-secondary" id="loadModelsBtn">刷新模型</button>
           </div>
         </div>
+        <div class="fields-3" style="margin-bottom: 12px;">
+          <div class="field">
+            <label for="chatRoutingMode">默认聊天链路</label>
+            <select id="chatRoutingMode">
+              <option value="simplified">普通回答（simplified）</option>
+              <option value="opar">深度分析（opar）</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="chatRoutingUpgrade">复杂任务自动升级</label>
+            <select id="chatRoutingUpgrade">
+              <option value="true">开启</option>
+              <option value="false">关闭</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>说明</label>
+            <div class="helper">普通用户不直接看到链路名；管理员只负责定默认和自动升级策略。</div>
+          </div>
+        </div>
+        <div class="button-row" style="margin-bottom: 12px;">
+          <button class="btn-primary" id="saveChatRoutingBtn">保存聊天链路策略</button>
+          <button class="btn-secondary" id="loadChatRoutingBtn">刷新聊天链路策略</button>
+        </div>
+        <div class="output" id="chatRoutingOut" style="margin-bottom: 14px;">等待加载</div>
         <div class="provider-grid" id="providerGrid">
           <div class="provider-card"><h4>等待加载</h4><div class="muted">登录后自动加载模型状态。</div></div>
         </div>
@@ -837,6 +862,7 @@
       health: null,
       cache: null,
       rabbit: null,
+      chatRouting: null,
     };
 
     const nodes = {
@@ -852,6 +878,7 @@
       usersTableWrap: document.getElementById("usersTableWrap"),
       tokenStatsOut: document.getElementById("tokenStatsOut"),
       sessionsTableWrap: document.getElementById("sessionsTableWrap"),
+      chatRoutingOut: document.getElementById("chatRoutingOut"),
       providerGrid: document.getElementById("providerGrid"),
       modelActionOut: document.getElementById("modelActionOut"),
       usageMetrics: document.getElementById("usageMetrics"),
@@ -917,7 +944,7 @@
 
     function setAdminUiEnabled(enabled) {
       document.querySelectorAll(
-        "#refreshAllBtn, #listUsersBtn, #createUserBtn, #loadModelsBtn, #loadUsageBtn, #loadHealthBtn, #loadCacheBtn, #loadRabbitBtn, #loadMemoryStatusBtn, #searchMemoryBtn, #listPermissionsBtn, #savePermissionBtn, #listPoliciesBtn, #savePolicyBtn, #auditStatsBtn, #auditLogsBtn, #usersTableWrap button, #providerGrid button"
+        "#refreshAllBtn, #listUsersBtn, #createUserBtn, #loadModelsBtn, #loadUsageBtn, #loadHealthBtn, #loadCacheBtn, #loadRabbitBtn, #loadMemoryStatusBtn, #searchMemoryBtn, #listPermissionsBtn, #savePermissionBtn, #listPoliciesBtn, #savePolicyBtn, #auditStatsBtn, #auditLogsBtn, #saveChatRoutingBtn, #loadChatRoutingBtn, #usersTableWrap button, #providerGrid button"
       ).forEach((node) => {
         node.disabled = !enabled;
       });
@@ -1060,6 +1087,8 @@
       const memoryMode = state.memoryStatus?.activeMode || "未加载";
       const tokenStats = state.overview?.tokenStats || {};
       const usageSummary = state.usageSummary || state.overview?.llmUsage || {};
+      const routingMode = state.chatRouting?.effectiveDefaultMode || state.overview?.chatRouting?.effectiveDefaultMode || "未加载";
+      const autoUpgrade = state.chatRouting?.effectiveAutoUpgrade ?? state.overview?.chatRouting?.effectiveAutoUpgrade;
       nodes.quickCards.innerHTML = `
         <div class="quick-card">
           <h4>应用健康</h4>
@@ -1069,7 +1098,7 @@
         <div class="quick-card">
           <h4>当前模型</h4>
           <div><strong>${escapeHtml(activeModel)}</strong></div>
-          <div class="row-sub">当前活动 provider + model。</div>
+          <div class="row-sub">当前活动 provider + model / 默认链路 ${escapeHtml(routingMode)}</div>
         </div>
         <div class="quick-card">
           <h4>长期记忆</h4>
@@ -1079,7 +1108,7 @@
         <div class="quick-card">
           <h4>模型用量</h4>
           <div><strong>${escapeHtml(usageSummary.totalTokens ?? "-")}</strong></div>
-          <div class="row-sub">总调用 ${escapeHtml(usageSummary.totalCalls ?? "-")} / 活跃会话 ${escapeHtml(tokenStats.activeTokenCount ?? "-")}</div>
+          <div class="row-sub">总调用 ${escapeHtml(usageSummary.totalCalls ?? "-")} / 自动升级 ${escapeHtml(autoUpgrade === undefined ? "-" : autoUpgrade ? "开" : "关")} / 活跃会话 ${escapeHtml(tokenStats.activeTokenCount ?? "-")}</div>
         </div>
       `;
     }
@@ -1118,6 +1147,7 @@
       state.overview = await api("/api/admin/manage/dashboard");
       state.usageSummary = state.overview.llmUsage || state.usageSummary;
       state.recentUsage = Array.isArray(state.overview.recentLlmUsage) ? state.overview.recentLlmUsage : state.recentUsage;
+      state.chatRouting = state.overview.chatRouting || state.chatRouting;
       renderOverviewMetrics(state.overview);
       renderTokenStats(state.overview.tokenStats || {});
       renderSessionsTable(state.overview.activeSessions || []);
@@ -1127,7 +1157,40 @@
         state.providers = state.overview.providers;
         renderProviders(state.providers);
       }
+      renderChatRouting(state.chatRouting || {});
       renderQuickCards();
+    }
+
+    function renderChatRouting(data) {
+      state.chatRouting = data || null;
+      if (data && data.effectiveDefaultMode) {
+        document.getElementById("chatRoutingMode").value = data.effectiveDefaultMode;
+      }
+      if (data && typeof data.effectiveAutoUpgrade === "boolean") {
+        document.getElementById("chatRoutingUpgrade").value = data.effectiveAutoUpgrade ? "true" : "false";
+      }
+      renderOutput(nodes.chatRoutingOut, data || { message: "等待加载" });
+      renderQuickCards();
+    }
+
+    async function loadChatRouting() {
+      const data = await api("/api/admin/manage/chat-routing");
+      renderChatRouting(data);
+    }
+
+    async function saveChatRouting() {
+      try {
+        const data = await api("/api/admin/manage/chat-routing", {
+          method: "POST",
+          body: {
+            defaultMode: document.getElementById("chatRoutingMode").value,
+            autoUpgrade: document.getElementById("chatRoutingUpgrade").value === "true",
+          },
+        });
+        renderChatRouting(data);
+      } catch (error) {
+        renderOutput(nodes.chatRoutingOut, { error: error.message });
+      }
     }
 
     async function loadHealth() {
@@ -1533,6 +1596,7 @@
         loadOverview(),
         loadHealth(),
         loadModels(),
+        loadChatRouting(),
         loadMemoryStatus(),
         loadUsage(),
         loadCacheStats(),
@@ -1564,6 +1628,8 @@
       document.getElementById("listUsersBtn").addEventListener("click", listUsers);
       document.getElementById("createUserBtn").addEventListener("click", createUser);
       document.getElementById("loadModelsBtn").addEventListener("click", loadModels);
+      document.getElementById("saveChatRoutingBtn").addEventListener("click", saveChatRouting);
+      document.getElementById("loadChatRoutingBtn").addEventListener("click", loadChatRouting);
       document.getElementById("loadUsageBtn").addEventListener("click", loadUsage);
       document.getElementById("loadHealthBtn").addEventListener("click", loadHealth);
       document.getElementById("loadCacheBtn").addEventListener("click", loadCacheStats);

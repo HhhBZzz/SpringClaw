@@ -3,6 +3,7 @@ package com.openclaw.service.chat.impl;
 import com.openclaw.domain.entity.AgentSession;
 import com.openclaw.dto.chat.ChatRequest;
 import com.openclaw.service.ai.AiProviderService;
+import com.openclaw.service.auth.AuthService;
 import com.openclaw.service.context.AssembledContext;
 import com.openclaw.service.context.ContextAssembler;
 import com.openclaw.service.event.MessageEventService;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -27,6 +29,10 @@ class ChatServiceImplModeTest {
     @Test
     void shouldDefaultToSimplifiedWhenModeIsUnknown() {
         Fixture fixture = new Fixture();
+        when(fixture.chatRoutingStateService.resolveDefaultMode("simplified")).thenReturn("simplified");
+        when(fixture.chatRoutingStateService.resolveAutoUpgrade(false)).thenReturn(false);
+        when(fixture.chatRoutingPolicyService.decide(anyString(), any(), eq("simplified"), anyBoolean()))
+                .thenReturn(new ChatRoutingPolicyService.RoutingDecision("你好", "simplified", false, false, "默认"));
         when(fixture.simplifiedOparEngine.run(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any()))
                 .thenReturn(new ChatExecutionResult("observe", "SIMPLIFIED", "ACTION", "answer", true));
 
@@ -40,6 +46,10 @@ class ChatServiceImplModeTest {
     @Test
     void shouldUseOparWhenModeExplicitlyConfigured() {
         Fixture fixture = new Fixture();
+        when(fixture.chatRoutingStateService.resolveDefaultMode("opar")).thenReturn("opar");
+        when(fixture.chatRoutingStateService.resolveAutoUpgrade(false)).thenReturn(false);
+        when(fixture.chatRoutingPolicyService.decide(anyString(), any(), eq("opar"), anyBoolean()))
+                .thenReturn(new ChatRoutingPolicyService.RoutingDecision("你好", "opar", false, false, "默认"));
         when(fixture.oparLoopEngine.runLoop(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any()))
                 .thenReturn(new ChatExecutionResult("observe", "PLAN", "ACTION", "answer", true));
 
@@ -50,9 +60,33 @@ class ChatServiceImplModeTest {
         verify(fixture.simplifiedOparEngine, never()).run(any(), anyString(), any(), anyString(), any());
     }
 
+    @Test
+    void shouldUseOparWhenRoutingPolicyAutoUpgrades() {
+        Fixture fixture = new Fixture();
+        when(fixture.chatRoutingStateService.resolveDefaultMode("simplified")).thenReturn("simplified");
+        when(fixture.chatRoutingStateService.resolveAutoUpgrade(true)).thenReturn(true);
+        when(fixture.chatRoutingPolicyService.decide(anyString(), any(), eq("simplified"), anyBoolean()))
+                .thenReturn(new ChatRoutingPolicyService.RoutingDecision(
+                        "分析这个启动报错并给修复方案",
+                        "opar",
+                        false,
+                        true,
+                        "自动升级"
+                ));
+        when(fixture.oparLoopEngine.runLoop(eq(fixture.activeClient), eq("system"), any(AssembledContext.class), anyString(), any()))
+                .thenReturn(new ChatExecutionResult("observe", "PLAN", "ACTION", "answer", true));
+
+        ChatServiceImpl service = fixture.build("simplified", true);
+        service.chat(new ChatRequest("s1", "u1", "分析这个启动报错并给修复方案", "api"));
+
+        verify(fixture.oparLoopEngine).runLoop(eq(fixture.activeClient), eq("system"), any(AssembledContext.class), anyString(), any());
+        verify(fixture.simplifiedOparEngine, never()).run(any(), anyString(), any(), anyString(), any());
+    }
+
     private static final class Fixture {
 
         private final AiProviderService aiProviderService = mock(AiProviderService.class);
+        private final AuthService authService = mock(AuthService.class);
         private final SoulPromptService soulPromptService = mock(SoulPromptService.class);
         private final AgentSessionService agentSessionService = mock(AgentSessionService.class);
         private final MessageEventService messageEventService = mock(MessageEventService.class);
@@ -62,6 +96,8 @@ class ChatServiceImplModeTest {
         private final OparLoopEngine oparLoopEngine = mock(OparLoopEngine.class);
         private final SimplifiedOparEngine simplifiedOparEngine = mock(SimplifiedOparEngine.class);
         private final ChatResponsePolicyService chatResponsePolicyService = mock(ChatResponsePolicyService.class);
+        private final ChatRoutingStateService chatRoutingStateService = mock(ChatRoutingStateService.class);
+        private final ChatRoutingPolicyService chatRoutingPolicyService = mock(ChatRoutingPolicyService.class);
         private final ModelTransportGuardService modelTransportGuardService = mock(ModelTransportGuardService.class);
         private final ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
         private final ConversationAdvisorSupport conversationAdvisorSupport = mock(ConversationAdvisorSupport.class);
@@ -90,13 +126,29 @@ class ChatServiceImplModeTest {
             session.setSessionKey("s1");
             when(chatGuardService.acquireSessionLock("s1")).thenReturn("lock");
             when(agentSessionService.getOrCreate("s1", "api", "u1")).thenReturn(session);
+            when(authService.resolveRoleByUserId("u1")).thenReturn("USER");
             when(soulPromptService.buildSystemPrompt("api", "u1")).thenReturn("system");
             when(soulPromptService.soulVersion()).thenReturn("v1");
             when(contextAssembler.assemble("s1", "api", "u1", "你好")).thenReturn(assembled);
+            when(contextAssembler.assemble("s1", "api", "u1", "分析这个启动报错并给修复方案")).thenReturn(
+                    new AssembledContext(
+                            "s1",
+                            "api",
+                            "u1",
+                            "分析这个启动报错并给修复方案",
+                            "- USER: 分析这个启动报错并给修复方案",
+                            "（暂无长期语义记忆）",
+                            "# 当前问题\n分析这个启动报错并给修复方案"
+                    )
+            );
             when(aiProviderService.activeClient()).thenReturn(activeClient);
         }
 
         private ChatServiceImpl build(String agentMode) {
+            return build(agentMode, false);
+        }
+
+        private ChatServiceImpl build(String agentMode, boolean autoUpgrade) {
             return new ChatServiceImpl(
                     aiProviderService,
                     soulPromptService,
@@ -108,13 +160,17 @@ class ChatServiceImplModeTest {
                     oparLoopEngine,
                     simplifiedOparEngine,
                     chatResponsePolicyService,
+                    authService,
+                    chatRoutingStateService,
+                    chatRoutingPolicyService,
                     modelTransportGuardService,
                     modelCallExecutor,
                     conversationAdvisorSupport,
                     llmUsageRecordService,
                     false,
                     0,
-                    agentMode
+                    agentMode,
+                    autoUpgrade
             );
         }
     }

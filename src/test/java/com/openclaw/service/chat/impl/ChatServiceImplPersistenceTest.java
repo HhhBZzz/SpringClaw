@@ -3,7 +3,7 @@ package com.openclaw.service.chat.impl;
 import com.openclaw.domain.entity.AgentSession;
 import com.openclaw.dto.chat.ChatRequest;
 import com.openclaw.service.ai.AiProviderService;
-import com.openclaw.service.chat.LocalSkillFallbackService;
+import com.openclaw.service.auth.AuthService;
 import com.openclaw.service.context.AssembledContext;
 import com.openclaw.service.context.ContextAssembler;
 import com.openclaw.service.event.MessageEventService;
@@ -36,6 +36,9 @@ class ChatServiceImplPersistenceTest {
         OparLoopEngine oparLoopEngine = mock(OparLoopEngine.class);
         SimplifiedOparEngine simplifiedOparEngine = mock(SimplifiedOparEngine.class);
         ChatResponsePolicyService chatResponsePolicyService = mock(ChatResponsePolicyService.class);
+        AuthService authService = mock(AuthService.class);
+        ChatRoutingStateService chatRoutingStateService = mock(ChatRoutingStateService.class);
+        ChatRoutingPolicyService chatRoutingPolicyService = mock(ChatRoutingPolicyService.class);
         ModelTransportGuardService modelTransportGuardService = mock(ModelTransportGuardService.class);
         ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
         ConversationAdvisorSupport conversationAdvisorSupport = mock(ConversationAdvisorSupport.class);
@@ -67,6 +70,11 @@ class ChatServiceImplPersistenceTest {
 
         when(chatGuardService.acquireSessionLock("s1")).thenReturn("lock");
         when(agentSessionService.getOrCreate("s1", "feishu", "u1")).thenReturn(session);
+        when(authService.resolveRoleByUserId("u1")).thenReturn("USER");
+        when(chatRoutingStateService.resolveDefaultMode("opar")).thenReturn("opar");
+        when(chatRoutingStateService.resolveAutoUpgrade(false)).thenReturn(false);
+        when(chatRoutingPolicyService.decide("在么", "USER", "opar", false))
+                .thenReturn(new ChatRoutingPolicyService.RoutingDecision("在么", "opar", false, false, "默认"));
         when(soulPromptService.buildSystemPrompt("feishu", "u1")).thenReturn("system");
         when(soulPromptService.soulVersion()).thenReturn("v1");
         when(contextAssembler.assemble("s1", "feishu", "u1", "在么")).thenReturn(assembled);
@@ -91,13 +99,17 @@ class ChatServiceImplPersistenceTest {
                 oparLoopEngine,
                 simplifiedOparEngine,
                 chatResponsePolicyService,
+                authService,
+                chatRoutingStateService,
+                chatRoutingPolicyService,
                 modelTransportGuardService,
                 modelCallExecutor,
                 conversationAdvisorSupport,
                 llmUsageRecordService,
                 false,
                 0,
-                "opar"
+                "opar",
+                false
         );
 
         service.chat(new ChatRequest("s1", "u1", "在么", "feishu"));

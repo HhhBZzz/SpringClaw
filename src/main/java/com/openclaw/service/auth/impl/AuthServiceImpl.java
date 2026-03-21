@@ -152,7 +152,7 @@ public class AuthServiceImpl extends ServiceImpl<UserAccountMapper, UserAccount>
                     if (parts.length == 3) {
                         long expireAt = parseLong(parts[2], 0L);
                         if (expireAt > System.currentTimeMillis()) {
-                            return new UserIdentity(parts[0], normalizeRole(parts[1], defaultRole), expireAt);
+                            return buildValidatedIdentity(parts[0], parts[1], expireAt);
                         }
                     }
                 }
@@ -169,7 +169,7 @@ public class AuthServiceImpl extends ServiceImpl<UserAccountMapper, UserAccount>
             localTokens.remove(raw);
             throw new BusinessException(40104, "token 已过期");
         }
-        return new UserIdentity(localToken.username(), localToken.roleCode(), localToken.expireAt());
+        return buildValidatedIdentity(localToken.username(), localToken.roleCode(), localToken.expireAt());
     }
 
     @Override
@@ -273,9 +273,13 @@ public class AuthServiceImpl extends ServiceImpl<UserAccountMapper, UserAccount>
             if (token.expireAt() <= now) {
                 continue;
             }
+            UserAccount account = findUserByUsername(token.username());
+            if (account == null || !"ACTIVE".equalsIgnoreCase(nullToEmpty(account.getStatus()))) {
+                continue;
+            }
             sessions.add(new ActiveSession(
-                    token.username(),
-                    token.roleCode(),
+                    normalizeUsername(account.getUsername()),
+                    normalizeRole(account.getRoleCode(), token.roleCode()),
                     token.expireAt(),
                     previewToken(entry.getKey()),
                     "LOCAL"
@@ -297,12 +301,31 @@ public class AuthServiceImpl extends ServiceImpl<UserAccountMapper, UserAccount>
             return null;
         }
         String rawToken = key.startsWith(tokenPrefix) ? key.substring(tokenPrefix.length()) : key;
+        UserAccount account = findUserByUsername(parts[0]);
+        if (account == null || !"ACTIVE".equalsIgnoreCase(nullToEmpty(account.getStatus()))) {
+            return null;
+        }
         return new ActiveSession(
-                normalizeUsername(parts[0]),
-                normalizeRole(parts[1], defaultRole),
+                normalizeUsername(account.getUsername()),
+                normalizeRole(account.getRoleCode(), normalizeRole(parts[1], defaultRole)),
                 expireAt,
                 previewToken(rawToken),
                 storage
+        );
+    }
+
+    private UserIdentity buildValidatedIdentity(String username, String fallbackRole, long expireAt) {
+        UserAccount account = findUserByUsername(username);
+        if (account == null) {
+            throw new BusinessException(40103, "token 无效或已过期");
+        }
+        if (!"ACTIVE".equalsIgnoreCase(nullToEmpty(account.getStatus()))) {
+            throw new BusinessException(40321, "账号已被禁用");
+        }
+        return new UserIdentity(
+                normalizeUsername(account.getUsername()),
+                normalizeRole(account.getRoleCode(), normalizeRole(fallbackRole, defaultRole)),
+                expireAt
         );
     }
 

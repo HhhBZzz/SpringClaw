@@ -4,6 +4,10 @@ import com.openclaw.service.auth.impl.AuthServiceImpl;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.concurrent.ConcurrentMap;
+
 class AuthServiceImplTest {
 
     @Test
@@ -118,5 +122,50 @@ class AuthServiceImplTest {
         Assertions.assertEquals(24 * 3600L, stats.tokenTtlSeconds());
         Assertions.assertFalse(stats.redisBacked());
         Assertions.assertFalse(service.listActiveSessions(10).isEmpty());
+    }
+
+    @Test
+    void shouldRejectTokenWhenLocalUserDisabled() throws Exception {
+        AuthServiceImpl service = new AuthServiceImpl(
+                null,
+                true,
+                false,
+                false,
+                "USER",
+                "USER",
+                false,
+                24,
+                "",
+                "openclaw:auth:token:"
+        );
+
+        AuthService.LoginSession session = service.register("disabled_user", "123456");
+        disableLocalUser(service, "disabled_user");
+
+        Assertions.assertThrows(
+                RuntimeException.class,
+                () -> service.authenticateToken(session.token())
+        );
+        Assertions.assertTrue(service.listActiveSessions(10).isEmpty());
+    }
+
+    @SuppressWarnings("unchecked")
+    private void disableLocalUser(AuthServiceImpl service, String username) throws Exception {
+        Field localUsersField = AuthServiceImpl.class.getDeclaredField("localUsers");
+        localUsersField.setAccessible(true);
+        ConcurrentMap<String, Object> localUsers = (ConcurrentMap<String, Object>) localUsersField.get(service);
+        Object localUser = localUsers.get(username);
+        Method passwordHash = localUser.getClass().getDeclaredMethod("passwordHash");
+        Method roleCode = localUser.getClass().getDeclaredMethod("roleCode");
+        passwordHash.setAccessible(true);
+        roleCode.setAccessible(true);
+        String hash = (String) passwordHash.invoke(localUser);
+        String role = (String) roleCode.invoke(localUser);
+
+        Class<?> localUserClass = localUser.getClass();
+        var constructor = localUserClass.getDeclaredConstructor(String.class, String.class, String.class);
+        constructor.setAccessible(true);
+        Object disabled = constructor.newInstance(hash, role, "DISABLED");
+        localUsers.put(username, disabled);
     }
 }

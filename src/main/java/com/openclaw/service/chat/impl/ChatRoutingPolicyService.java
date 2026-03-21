@@ -1,11 +1,12 @@
 package com.openclaw.service.chat.impl;
 
-import com.openclaw.service.skill.impl.BuiltinSkillCatalogService;
+import com.openclaw.service.skill.impl.SkillRegistryService;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * 聊天链路路由策略。
@@ -25,12 +26,18 @@ public class ChatRoutingPolicyService {
             "快速回答：", "快速回答:", "快速回答 ",
             "直接回答：", "直接回答:", "直接回答 "
     );
-    private final BuiltinSkillCatalogService builtinSkillCatalogService = new BuiltinSkillCatalogService();
+
+    private final SkillRegistryService skillRegistryService;
+
+    public ChatRoutingPolicyService(SkillRegistryService skillRegistryService) {
+        this.skillRegistryService = skillRegistryService;
+    }
 
     public RoutingDecision decide(String question,
                                   String roleCode,
                                   String defaultMode,
-                                  boolean autoUpgradeEnabled) {
+                                  boolean autoUpgradeEnabled,
+                                  Set<String> allowedToolPacks) {
         String normalizedQuestion = StringUtils.hasText(question) ? question.trim() : "";
         String normalizedRole = normalizeRole(roleCode);
         String normalizedDefaultMode = normalizeMode(defaultMode);
@@ -75,7 +82,7 @@ public class ChatRoutingPolicyService {
             );
         }
 
-        if ("simplified".equals(normalizedDefaultMode) && autoUpgradeEnabled && shouldAutoUpgrade(normalizedQuestion)) {
+        if ("simplified".equals(normalizedDefaultMode) && autoUpgradeEnabled && shouldAutoUpgrade(normalizedQuestion, allowedToolPacks)) {
             return new RoutingDecision(
                     normalizedQuestion,
                     "opar",
@@ -94,11 +101,11 @@ public class ChatRoutingPolicyService {
         );
     }
 
-    boolean shouldAutoUpgrade(String question) {
+    boolean shouldAutoUpgrade(String question, Set<String> allowedToolPacks) {
         if (!StringUtils.hasText(question)) {
             return false;
         }
-        if (builtinSkillCatalogService.matchDefinition(question)
+        if (skillRegistryService.matchBestAgentVisibleDefinition(question, allowedToolPacks)
                 .filter(definition -> definition.enabled()
                         && "opar".equalsIgnoreCase(definition.preferredMode()))
                 .isPresent()) {

@@ -12,6 +12,7 @@
 4. 飞书接入
 5. GitHub 持续记录
 6. 模型用量统计与后台视图
+7. runtime skill registry 与 Markdown `SKILL.md` 导入
 
 ## 当前已完成范围
 
@@ -88,6 +89,16 @@
 Skill 本质上是：
 - 工具包能力 + 可见性策略 + 执行权限
 
+当前已开始统一为 runtime skill：
+- `BUILTIN`
+- `SCRIPT`
+- `MARKDOWN`
+
+已支持：
+- 后台查看 runtime skill registry
+- 从远程 `SKILL.md` / ClawHub 页面导入 Markdown skill
+- 导入 skill 参与路由与 prompt 注入
+
 ## 当前真实可用功能
 
 1. 同步聊天
@@ -100,6 +111,7 @@ Skill 本质上是：
 8. 审计日志查询
 9. 飞书渠道接入
 10. 模型 token 用量汇总与最近调用记录查看
+11. runtime skill 列表与 Markdown skill 导入
 
 ## 当前主要边界
 
@@ -120,6 +132,8 @@ Skill 本质上是：
 4. 飞书群聊记忆边界修正：保留群共享，切断私聊污染
 5. 项目初始化 git，并同步到 GitHub
 6. 新增 `llm_usage_record` 与后台模型用量视图
+7. 新增 runtime skill registry，并完成首个 ClawHub Markdown skill 导入验证
+8. 修复“账号删除/禁用后旧 token 仍可能继续可用”的认证漏洞
 
 ## GitHub
 

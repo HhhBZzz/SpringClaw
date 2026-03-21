@@ -260,6 +260,9 @@ openclaw:
     exchange-trigger-keywords: 汇率,美元,人民币,欧元,exchange,usd,cny,eur
     news-trigger-keywords: 新闻,热点,头条,资讯,news
     script-trigger-keywords: 脚本,skill,执行技能,python,run skill
+    markdown:
+      enabled: ${OPENCLAW_MARKDOWN_SKILL_ENABLED:true}
+      root: ${OPENCLAW_MARKDOWN_SKILL_ROOT:${user.dir}/skills/markdown-imports}
   webhook:
     security:
       enabled: false

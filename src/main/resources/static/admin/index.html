@@ -686,6 +686,67 @@
     <section class="panel">
       <div class="panel-head">
         <div>
+          <h3>Runtime Skills</h3>
+          <p class="panel-note">这里看的是统一 skill registry。Builtin、Script、Markdown 导入都会汇总到这里，后续路由和 prompt 也基于这一层工作。</p>
+        </div>
+        <div class="actions">
+          <button class="btn-secondary" id="loadSkillRegistryBtn">刷新 skill registry</button>
+        </div>
+      </div>
+
+      <div class="metrics" id="skillMetrics">
+        <div class="metric"><label>Total</label><strong>-</strong><span>运行时 skill 总数</span></div>
+        <div class="metric"><label>Builtin</label><strong>-</strong><span>内置显式技能</span></div>
+        <div class="metric"><label>Script</label><strong>-</strong><span>脚本技能</span></div>
+        <div class="metric"><label>Markdown</label><strong>-</strong><span>导入的 SKILL.md</span></div>
+      </div>
+
+      <div class="fields-3" style="margin-top: 14px;">
+        <div class="field">
+          <label for="skillImportUrl">Markdown Skill URL</label>
+          <input id="skillImportUrl" placeholder="GitHub raw/blob/tree URL 或直链 SKILL.md" />
+        </div>
+        <div class="field">
+          <label for="skillImportSlug">Slug</label>
+          <input id="skillImportSlug" placeholder="可选，默认自动推断" />
+        </div>
+        <div class="field">
+          <label for="skillImportKeywords">Trigger Keywords</label>
+          <input id="skillImportKeywords" placeholder="逗号分隔，如 总结群聊,今日总结" />
+        </div>
+      </div>
+      <div class="fields-3" style="margin-top: 12px;">
+        <div class="field">
+          <label for="skillImportToolPacks">Tool Packs</label>
+          <input id="skillImportToolPacks" placeholder="逗号分隔，如 workspace,file" />
+        </div>
+        <div class="field">
+          <label for="skillImportMode">Preferred Mode</label>
+          <select id="skillImportMode">
+            <option value="simplified">普通回答（simplified）</option>
+            <option value="opar">深度分析（opar）</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="skillImportContext">Context Policy</label>
+          <select id="skillImportContext">
+            <option value="session-only">session-only</option>
+            <option value="group-shared">group-shared</option>
+            <option value="user-cross-session">user-cross-session</option>
+          </select>
+        </div>
+      </div>
+      <div class="button-row" style="margin-top: 12px;">
+        <button class="btn-primary" id="importMarkdownSkillBtn">导入 Markdown skill</button>
+      </div>
+
+      <div class="output" id="skillImportOut" style="margin-top: 14px;">等待导入</div>
+      <div class="table-shell" id="runtimeSkillsTableWrap" style="margin-top: 14px;"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
           <h3>模型用量</h3>
           <p class="panel-note">按用户、provider、model 和调用阶段统计模型用量。这里看的是真实模型调用 usage，不是登录 token。</p>
         </div>
@@ -863,6 +924,7 @@
       cache: null,
       rabbit: null,
       chatRouting: null,
+      runtimeSkills: null,
     };
 
     const nodes = {
@@ -881,6 +943,9 @@
       chatRoutingOut: document.getElementById("chatRoutingOut"),
       providerGrid: document.getElementById("providerGrid"),
       modelActionOut: document.getElementById("modelActionOut"),
+      skillMetrics: document.getElementById("skillMetrics"),
+      skillImportOut: document.getElementById("skillImportOut"),
+      runtimeSkillsTableWrap: document.getElementById("runtimeSkillsTableWrap"),
       usageMetrics: document.getElementById("usageMetrics"),
       usageSummaryOut: document.getElementById("usageSummaryOut"),
       usageTableWrap: document.getElementById("usageTableWrap"),
@@ -1069,7 +1134,7 @@
       const stats = [
         { label: "Users", value: data.userCount ?? "-", note: "账号数量" },
         { label: "Tools", value: data.toolPermissionCount ?? "-", note: "工具权限规则" },
-        { label: "Skills", value: data.skillDescriptorCount ?? "-", note: "技能条目" },
+        { label: "Skills", value: data.runtimeSkillCount ?? "-", note: "运行时 skill" },
         { label: "Policies", value: data.skillPolicyCount ?? "-", note: "技能策略" },
       ];
       nodes.overviewMetrics.innerHTML = stats.map((item) => `
@@ -1143,16 +1208,79 @@
       `;
     }
 
+    function renderRuntimeSkills(payload) {
+      state.runtimeSkills = payload || null;
+      const sourceCounts = payload?.sourceCounts || {};
+      nodes.skillMetrics.innerHTML = `
+        <div class="metric">
+          <label>Total</label>
+          <strong>${escapeHtml(payload?.count ?? "-")}</strong>
+          <span>运行时 skill 总数</span>
+        </div>
+        <div class="metric">
+          <label>Builtin</label>
+          <strong>${escapeHtml(sourceCounts.BUILTIN ?? 0)}</strong>
+          <span>内置显式技能</span>
+        </div>
+        <div class="metric">
+          <label>Script</label>
+          <strong>${escapeHtml(sourceCounts.SCRIPT ?? 0)}</strong>
+          <span>脚本技能</span>
+        </div>
+        <div class="metric">
+          <label>Markdown</label>
+          <strong>${escapeHtml(sourceCounts.MARKDOWN ?? 0)}</strong>
+          <span>导入目录 ${escapeHtml(payload?.markdownRootPath || "-")}</span>
+        </div>
+      `;
+
+      const rows = Array.isArray(payload?.definitions) ? payload.definitions : [];
+      if (!rows.length) {
+        nodes.runtimeSkillsTableWrap.innerHTML = '<div class="quick-card"><h4>暂无 runtime skill</h4><div class="muted">当前 registry 还没有可展示的 skill。</div></div>';
+        return;
+      }
+      nodes.runtimeSkillsTableWrap.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>SkillId</th>
+              <th>Source</th>
+              <th>Mode</th>
+              <th>Tools</th>
+              <th>Keywords</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row) => `
+              <tr>
+                <td><strong>${escapeHtml(row.name || "-")}</strong></td>
+                <td><code>${escapeHtml(row.skillId || "-")}</code></td>
+                <td>${escapeHtml(row.sourceType || "-")}</td>
+                <td>${escapeHtml(row.preferredMode || "-")}</td>
+                <td>${escapeHtml(Array.isArray(row.toolPacks) ? row.toolPacks.join(", ") : "-")}</td>
+                <td>${escapeHtml(Array.isArray(row.triggerKeywords) ? row.triggerKeywords.join(", ") : "-")}</td>
+                <td>${escapeHtml(row.description || "-")}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      `;
+    }
+
     async function loadOverview() {
       state.overview = await api("/api/admin/manage/dashboard");
       state.usageSummary = state.overview.llmUsage || state.usageSummary;
       state.recentUsage = Array.isArray(state.overview.recentLlmUsage) ? state.overview.recentLlmUsage : state.recentUsage;
       state.chatRouting = state.overview.chatRouting || state.chatRouting;
+      state.runtimeSkills = state.overview.runtimeSkills || state.runtimeSkills;
       renderOverviewMetrics(state.overview);
       renderTokenStats(state.overview.tokenStats || {});
       renderSessionsTable(state.overview.activeSessions || []);
       renderUsageSummary(state.usageSummary || {});
       renderUsageTable(state.recentUsage || []);
+      renderRuntimeSkills(state.runtimeSkills || {});
       if (state.overview.providers) {
         state.providers = state.overview.providers;
         renderProviders(state.providers);
@@ -1232,6 +1360,33 @@
       renderUsageSummary(state.usageSummary || {});
       renderUsageTable(state.recentUsage || []);
       renderQuickCards();
+    }
+
+    async function loadSkillRegistry() {
+      state.runtimeSkills = await api("/api/admin/manage/skills/registry");
+      renderRuntimeSkills(state.runtimeSkills || {});
+    }
+
+    async function importMarkdownSkill() {
+      try {
+        const data = await api("/api/admin/manage/skills/import-markdown", {
+          method: "POST",
+          body: {
+            url: document.getElementById("skillImportUrl").value.trim(),
+            slug: document.getElementById("skillImportSlug").value.trim(),
+            triggerKeywords: document.getElementById("skillImportKeywords").value.trim(),
+            toolPacks: document.getElementById("skillImportToolPacks").value.trim(),
+            preferredMode: document.getElementById("skillImportMode").value,
+            contextPolicy: document.getElementById("skillImportContext").value,
+          },
+        });
+        renderOutput(nodes.skillImportOut, data.imported || data);
+        state.runtimeSkills = data;
+        renderRuntimeSkills(data);
+        await loadOverview();
+      } catch (error) {
+        renderOutput(nodes.skillImportOut, { error: error.message });
+      }
     }
 
     function renderProviders(data) {
@@ -1601,6 +1756,7 @@
         loadUsage(),
         loadCacheStats(),
         loadRabbitStats(),
+        loadSkillRegistry(),
         listUsers(),
         listPermissions(),
         listPolicies(),
@@ -1628,6 +1784,8 @@
       document.getElementById("listUsersBtn").addEventListener("click", listUsers);
       document.getElementById("createUserBtn").addEventListener("click", createUser);
       document.getElementById("loadModelsBtn").addEventListener("click", loadModels);
+      document.getElementById("loadSkillRegistryBtn").addEventListener("click", loadSkillRegistry);
+      document.getElementById("importMarkdownSkillBtn").addEventListener("click", importMarkdownSkill);
       document.getElementById("saveChatRoutingBtn").addEventListener("click", saveChatRouting);
       document.getElementById("loadChatRoutingBtn").addEventListener("click", loadChatRouting);
       document.getElementById("loadUsageBtn").addEventListener("click", loadUsage);
@@ -1669,6 +1827,7 @@
       renderOverviewMetrics({});
       renderUsageSummary({});
       renderUsageTable([]);
+      renderRuntimeSkills({});
       renderQuickCards();
       renderOpsCards();
       await loadBootstrapStatus();

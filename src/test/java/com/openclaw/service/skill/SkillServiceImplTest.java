@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openclaw.service.skill.impl.BuiltinSkillCatalogService;
 import com.openclaw.service.skill.impl.SkillRegistryService;
 import com.openclaw.service.skill.impl.SkillServiceImpl;
+import com.openclaw.service.skill.markdown.MarkdownSkillCatalogService;
 import com.openclaw.service.skill.script.ScriptSkillCatalogService;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -98,7 +99,8 @@ class SkillServiceImplTest {
     private SkillRegistryService registryService() {
         return new SkillRegistryService(
                 new BuiltinSkillCatalogService(),
-                new ScriptSkillCatalogService(false, ".", "*", new ObjectMapper())
+                new ScriptSkillCatalogService(false, ".", "*", new ObjectMapper()),
+                new MarkdownSkillCatalogService(true, "./target/test-markdown-skills", new ObjectMapper())
         );
     }
 }

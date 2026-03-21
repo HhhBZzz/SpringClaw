@@ -2,6 +2,7 @@ package com.openclaw.service.skill.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openclaw.service.skill.SkillDefinition;
+import com.openclaw.service.skill.markdown.MarkdownSkillCatalogService;
 import com.openclaw.service.skill.script.ScriptSkillCatalogService;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -36,7 +37,8 @@ class SkillRegistryServiceTest {
 
         SkillRegistryService registryService = new SkillRegistryService(
                 new BuiltinSkillCatalogService(),
-                new ScriptSkillCatalogService(true, tempDir.toString(), "*", new ObjectMapper())
+                new ScriptSkillCatalogService(true, tempDir.toString(), "*", new ObjectMapper()),
+                new MarkdownSkillCatalogService(true, tempDir.resolve("markdown").toString(), new ObjectMapper())
         );
 
         List<SkillDefinition> definitions = registryService.listAllDefinitions();

@@ -11,11 +11,14 @@ import com.openclaw.service.guard.ChatGuardService;
 import com.openclaw.service.memory.MemoryService;
 import com.openclaw.service.prompt.SoulPromptService;
 import com.openclaw.service.session.AgentSessionService;
+import com.openclaw.service.skill.SkillService;
+import com.openclaw.service.skill.impl.SkillRegistryService;
 import com.openclaw.service.usage.LlmUsageRecordService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -43,6 +46,8 @@ class ChatServiceImplPersistenceTest {
         ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
         ConversationAdvisorSupport conversationAdvisorSupport = mock(ConversationAdvisorSupport.class);
         LlmUsageRecordService llmUsageRecordService = mock(LlmUsageRecordService.class);
+        SkillService skillService = mock(SkillService.class);
+        SkillRegistryService skillRegistryService = mock(SkillRegistryService.class);
 
         AgentSession session = new AgentSession();
         session.setId(1L);
@@ -73,9 +78,11 @@ class ChatServiceImplPersistenceTest {
         when(authService.resolveRoleByUserId("u1")).thenReturn("USER");
         when(chatRoutingStateService.resolveDefaultMode("opar")).thenReturn("opar");
         when(chatRoutingStateService.resolveAutoUpgrade(false)).thenReturn(false);
-        when(chatRoutingPolicyService.decide("在么", "USER", "opar", false))
+        when(skillService.resolveAllowedToolPacks("feishu", "u1")).thenReturn(java.util.Set.of("system", "workspace", "file", "script"));
+        when(skillRegistryService.matchAgentVisibleDefinitions(anyString(), anySet(), eq(2))).thenReturn(java.util.List.of());
+        when(chatRoutingPolicyService.decide("在么", "USER", "opar", false, java.util.Set.of("system", "workspace", "file", "script")))
                 .thenReturn(new ChatRoutingPolicyService.RoutingDecision("在么", "opar", false, false, "默认"));
-        when(soulPromptService.buildSystemPrompt("feishu", "u1")).thenReturn("system");
+        when(soulPromptService.buildSystemPrompt(eq("feishu"), eq("u1"), any())).thenReturn("system");
         when(soulPromptService.soulVersion()).thenReturn("v1");
         when(contextAssembler.assemble("s1", "feishu", "u1", "在么")).thenReturn(assembled);
         when(aiProviderService.activeClient()).thenReturn(activeClient);
@@ -106,6 +113,8 @@ class ChatServiceImplPersistenceTest {
                 modelCallExecutor,
                 conversationAdvisorSupport,
                 llmUsageRecordService,
+                skillService,
+                skillRegistryService,
                 false,
                 0,
                 "opar",

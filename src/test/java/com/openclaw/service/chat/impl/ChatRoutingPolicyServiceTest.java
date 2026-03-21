@@ -1,15 +1,28 @@
 package com.openclaw.service.chat.impl;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.openclaw.service.skill.impl.BuiltinSkillCatalogService;
+import com.openclaw.service.skill.impl.SkillRegistryService;
+import com.openclaw.service.skill.markdown.MarkdownSkillCatalogService;
+import com.openclaw.service.skill.script.ScriptSkillCatalogService;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.Set;
+
 class ChatRoutingPolicyServiceTest {
 
-    private final ChatRoutingPolicyService service = new ChatRoutingPolicyService();
+    private final ChatRoutingPolicyService service = new ChatRoutingPolicyService(
+            new SkillRegistryService(
+                    new BuiltinSkillCatalogService(),
+                    new ScriptSkillCatalogService(false, ".", "*", new ObjectMapper()),
+                    new MarkdownSkillCatalogService(true, "./target/test-markdown-skills", new ObjectMapper())
+            )
+    );
 
     @Test
     void shouldKeepDefaultModeForNormalQuestion() {
-        ChatRoutingPolicyService.RoutingDecision decision = service.decide("你好", "USER", "simplified", true);
+        ChatRoutingPolicyService.RoutingDecision decision = service.decide("你好", "USER", "simplified", true, Set.of("system", "workspace", "file", "script"));
 
         Assertions.assertEquals("simplified", decision.executionMode());
         Assertions.assertEquals("你好", decision.effectiveQuestion());
@@ -23,7 +36,8 @@ class ChatRoutingPolicyServiceTest {
                 "先查启动日志，再定位报错原因，并给出修复方案",
                 "USER",
                 "simplified",
-                true
+                true,
+                Set.of("workspace", "file", "script")
         );
 
         Assertions.assertEquals("opar", decision.executionMode());
@@ -36,7 +50,8 @@ class ChatRoutingPolicyServiceTest {
                 "用代码分析分析 ChatServiceImpl",
                 "USER",
                 "simplified",
-                true
+                true,
+                Set.of("workspace", "file", "script")
         );
 
         Assertions.assertEquals("opar", decision.executionMode());
@@ -49,7 +64,8 @@ class ChatRoutingPolicyServiceTest {
                 "深度分析：帮我看这段启动报错",
                 "ADMIN",
                 "simplified",
-                true
+                true,
+                Set.of("workspace", "file", "script")
         );
 
         Assertions.assertEquals("opar", decision.executionMode());
@@ -63,7 +79,8 @@ class ChatRoutingPolicyServiceTest {
                 "深度分析：当前模型是什么",
                 "USER",
                 "simplified",
-                false
+                false,
+                Set.of("system")
         );
 
         Assertions.assertEquals("simplified", decision.executionMode());

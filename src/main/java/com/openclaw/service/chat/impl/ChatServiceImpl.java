@@ -14,6 +14,9 @@ import com.openclaw.service.guard.ChatGuardService;
 import com.openclaw.service.memory.MemoryService;
 import com.openclaw.service.prompt.SoulPromptService;
 import com.openclaw.service.session.AgentSessionService;
+import com.openclaw.service.skill.SkillDefinition;
+import com.openclaw.service.skill.SkillService;
+import com.openclaw.service.skill.impl.SkillRegistryService;
 import com.openclaw.service.usage.LlmUsageRecordService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,6 +27,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -53,6 +57,8 @@ public class ChatServiceImpl implements ChatService {
     private final ModelCallExecutor modelCallExecutor;
     private final ConversationAdvisorSupport conversationAdvisorSupport;
     private final LlmUsageRecordService llmUsageRecordService;
+    private final SkillService skillService;
+    private final SkillRegistryService skillRegistryService;
     private final boolean metaGuardEnabled;
     private final int metaGuardRetryTimes;
     private final String configuredAgentMode;
@@ -75,6 +81,8 @@ public class ChatServiceImpl implements ChatService {
                            ModelCallExecutor modelCallExecutor,
                            ConversationAdvisorSupport conversationAdvisorSupport,
                            LlmUsageRecordService llmUsageRecordService,
+                           SkillService skillService,
+                           SkillRegistryService skillRegistryService,
                            @Value("${openclaw.chat.meta-guard.enabled:true}") boolean metaGuardEnabled,
                            @Value("${openclaw.chat.meta-guard.retry-times:1}") int metaGuardRetryTimes,
                            @Value("${openclaw.chat.agent-mode:simplified}") String agentMode,
@@ -96,6 +104,8 @@ public class ChatServiceImpl implements ChatService {
         this.modelCallExecutor = modelCallExecutor;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
         this.llmUsageRecordService = llmUsageRecordService;
+        this.skillService = skillService;
+        this.skillRegistryService = skillRegistryService;
         this.metaGuardEnabled = metaGuardEnabled;
         this.metaGuardRetryTimes = Math.max(0, metaGuardRetryTimes);
         this.configuredAgentMode = normalizeAgentMode(agentMode);
@@ -230,24 +240,31 @@ public class ChatServiceImpl implements ChatService {
         AgentSession session = agentSessionService.getOrCreate(request.sessionKey(), channel, request.userId());
         String requestId = generateRequestId();
         String roleCode = authService.resolveRoleByUserId(request.userId());
+        var allowedToolPacks = skillService.resolveAllowedToolPacks(channel, request.userId());
         String effectiveDefaultMode = chatRoutingStateService.resolveDefaultMode(configuredAgentMode);
         boolean effectiveAutoUpgrade = chatRoutingStateService.resolveAutoUpgrade(routingAutoUpgradeEnabled);
         ChatRoutingPolicyService.RoutingDecision routingDecision = chatRoutingPolicyService.decide(
                 request.message(),
                 roleCode,
                 effectiveDefaultMode,
-                effectiveAutoUpgrade
+                effectiveAutoUpgrade,
+                allowedToolPacks
         );
         if (routingDecision == null) {
             routingDecision = new ChatRoutingPolicyService.RoutingDecision(
                     request.message(),
                     effectiveDefaultMode,
-                    false,
-                    false,
-                    "路由策略未返回结果，回退到当前默认链路。"
+                false,
+                false,
+                "路由策略未返回结果，回退到当前默认链路。"
             );
         }
-        String systemPrompt = soulPromptService.buildSystemPrompt(channel, request.userId());
+        List<SkillDefinition> matchedSkills = skillRegistryService.matchAgentVisibleDefinitions(
+                routingDecision.effectiveQuestion(),
+                allowedToolPacks,
+                2
+        );
+        String systemPrompt = soulPromptService.buildSystemPrompt(channel, request.userId(), matchedSkills);
         AssembledContext assembled = contextAssembler.assemble(
                 session.getSessionKey(),
                 channel,

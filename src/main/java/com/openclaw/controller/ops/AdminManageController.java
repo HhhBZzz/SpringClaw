@@ -14,6 +14,7 @@ import com.openclaw.service.ai.AiProviderService;
 import com.openclaw.service.auth.AuthService;
 import com.openclaw.service.chat.impl.ChatRoutingStateService;
 import com.openclaw.service.event.MessageEventService;
+import com.openclaw.service.skill.markdown.MarkdownSkillCatalogService;
 import com.openclaw.service.skill.impl.SkillRegistryService;
 import com.openclaw.service.skill.script.ScriptSkillCatalogService;
 import com.openclaw.service.skill.script.ScriptSkillDefinition;
@@ -48,6 +49,7 @@ public class AdminManageController {
     private final MessageEventService messageEventService;
     private final AuthService authService;
     private final SkillRegistryService skillRegistryService;
+    private final MarkdownSkillCatalogService markdownSkillCatalogService;
     private final ScriptSkillCatalogService scriptSkillCatalogService;
     private final AiProviderService aiProviderService;
     private final LlmUsageRecordService llmUsageRecordService;
@@ -63,6 +65,7 @@ public class AdminManageController {
                                  MessageEventService messageEventService,
                                  AuthService authService,
                                  SkillRegistryService skillRegistryService,
+                                 MarkdownSkillCatalogService markdownSkillCatalogService,
                                  ScriptSkillCatalogService scriptSkillCatalogService,
                                  AiProviderService aiProviderService,
                                  LlmUsageRecordService llmUsageRecordService,
@@ -77,6 +80,7 @@ public class AdminManageController {
         this.messageEventService = messageEventService;
         this.authService = authService;
         this.skillRegistryService = skillRegistryService;
+        this.markdownSkillCatalogService = markdownSkillCatalogService;
         this.scriptSkillCatalogService = scriptSkillCatalogService;
         this.aiProviderService = aiProviderService;
         this.llmUsageRecordService = llmUsageRecordService;
@@ -279,6 +283,30 @@ public class AdminManageController {
     @GetMapping("/skills/registry")
     public ApiResponse<Map<String, Object>> skillRegistry() {
         return ApiResponse.success(buildRuntimeSkillPayload());
+    }
+
+    @PostMapping("/skills/import-markdown")
+    public ApiResponse<Map<String, Object>> importMarkdownSkill(@RequestBody ImportMarkdownSkillRequest request) {
+        var result = markdownSkillCatalogService.importFromUrl(new MarkdownSkillCatalogService.ImportMarkdownSkillRequest(
+                request.url(),
+                request.slug(),
+                request.name(),
+                request.description(),
+                request.triggerKeywords(),
+                request.toolPacks(),
+                request.preferredMode(),
+                request.contextPolicy(),
+                request.agentVisible(),
+                request.priority()
+        ));
+        Map<String, Object> payload = buildRuntimeSkillPayload();
+        payload.put("imported", Map.of(
+                "slug", result.slug(),
+                "sourceUrl", result.sourceUrl(),
+                "skillPath", result.skillPath(),
+                "definition", result.definition()
+        ));
+        return ApiResponse.success(payload);
     }
 
     @GetMapping("/script-skills")
@@ -491,7 +519,14 @@ public class AdminManageController {
 
     private Map<String, Object> buildRuntimeSkillPayload() {
         Map<String, Object> payload = new LinkedHashMap<>();
+        Map<String, Long> sourceCounts = skillRegistryService.listAllDefinitions().stream()
+                .collect(Collectors.groupingBy(definition -> definition.sourceType() == null ? "UNKNOWN" : definition.sourceType(),
+                        LinkedHashMap::new,
+                        Collectors.counting()));
         payload.put("count", skillRegistryService.listAllDefinitions().size());
+        payload.put("enabled", markdownSkillCatalogService.enabled());
+        payload.put("markdownRootPath", markdownSkillCatalogService.rootPath().toString());
+        payload.put("sourceCounts", sourceCounts);
         payload.put("definitions", skillRegistryService.listAllDefinitions());
         return payload;
     }
@@ -528,6 +563,18 @@ public class AdminManageController {
     }
 
     public record UpdateChatRoutingRequest(String defaultMode, Boolean autoUpgrade) {
+    }
+
+    public record ImportMarkdownSkillRequest(String url,
+                                             String slug,
+                                             String name,
+                                             String description,
+                                             String triggerKeywords,
+                                             String toolPacks,
+                                             String preferredMode,
+                                             String contextPolicy,
+                                             Boolean agentVisible,
+                                             Integer priority) {
     }
 
     public record UserView(String username,

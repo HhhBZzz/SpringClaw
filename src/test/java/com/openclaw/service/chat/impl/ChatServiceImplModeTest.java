@@ -11,12 +11,15 @@ import com.openclaw.service.guard.ChatGuardService;
 import com.openclaw.service.memory.MemoryService;
 import com.openclaw.service.prompt.SoulPromptService;
 import com.openclaw.service.session.AgentSessionService;
+import com.openclaw.service.skill.SkillService;
+import com.openclaw.service.skill.impl.SkillRegistryService;
 import com.openclaw.service.usage.LlmUsageRecordService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anySet;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -31,7 +34,7 @@ class ChatServiceImplModeTest {
         Fixture fixture = new Fixture();
         when(fixture.chatRoutingStateService.resolveDefaultMode("simplified")).thenReturn("simplified");
         when(fixture.chatRoutingStateService.resolveAutoUpgrade(false)).thenReturn(false);
-        when(fixture.chatRoutingPolicyService.decide(anyString(), any(), eq("simplified"), anyBoolean()))
+        when(fixture.chatRoutingPolicyService.decide(anyString(), any(), eq("simplified"), anyBoolean(), anySet()))
                 .thenReturn(new ChatRoutingPolicyService.RoutingDecision("你好", "simplified", false, false, "默认"));
         when(fixture.simplifiedOparEngine.run(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any()))
                 .thenReturn(new ChatExecutionResult("observe", "SIMPLIFIED", "ACTION", "answer", true));
@@ -48,7 +51,7 @@ class ChatServiceImplModeTest {
         Fixture fixture = new Fixture();
         when(fixture.chatRoutingStateService.resolveDefaultMode("opar")).thenReturn("opar");
         when(fixture.chatRoutingStateService.resolveAutoUpgrade(false)).thenReturn(false);
-        when(fixture.chatRoutingPolicyService.decide(anyString(), any(), eq("opar"), anyBoolean()))
+        when(fixture.chatRoutingPolicyService.decide(anyString(), any(), eq("opar"), anyBoolean(), anySet()))
                 .thenReturn(new ChatRoutingPolicyService.RoutingDecision("你好", "opar", false, false, "默认"));
         when(fixture.oparLoopEngine.runLoop(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any()))
                 .thenReturn(new ChatExecutionResult("observe", "PLAN", "ACTION", "answer", true));
@@ -65,7 +68,7 @@ class ChatServiceImplModeTest {
         Fixture fixture = new Fixture();
         when(fixture.chatRoutingStateService.resolveDefaultMode("simplified")).thenReturn("simplified");
         when(fixture.chatRoutingStateService.resolveAutoUpgrade(true)).thenReturn(true);
-        when(fixture.chatRoutingPolicyService.decide(anyString(), any(), eq("simplified"), anyBoolean()))
+        when(fixture.chatRoutingPolicyService.decide(anyString(), any(), eq("simplified"), anyBoolean(), anySet()))
                 .thenReturn(new ChatRoutingPolicyService.RoutingDecision(
                         "分析这个启动报错并给修复方案",
                         "opar",
@@ -102,6 +105,8 @@ class ChatServiceImplModeTest {
         private final ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
         private final ConversationAdvisorSupport conversationAdvisorSupport = mock(ConversationAdvisorSupport.class);
         private final LlmUsageRecordService llmUsageRecordService = mock(LlmUsageRecordService.class);
+        private final SkillService skillService = mock(SkillService.class);
+        private final SkillRegistryService skillRegistryService = mock(SkillRegistryService.class);
         private final AgentSession session = new AgentSession();
         private final AssembledContext assembled = new AssembledContext(
                 "s1",
@@ -127,7 +132,9 @@ class ChatServiceImplModeTest {
             when(chatGuardService.acquireSessionLock("s1")).thenReturn("lock");
             when(agentSessionService.getOrCreate("s1", "api", "u1")).thenReturn(session);
             when(authService.resolveRoleByUserId("u1")).thenReturn("USER");
-            when(soulPromptService.buildSystemPrompt("api", "u1")).thenReturn("system");
+            when(skillService.resolveAllowedToolPacks("api", "u1")).thenReturn(java.util.Set.of("system", "workspace", "file", "script"));
+            when(skillRegistryService.matchAgentVisibleDefinitions(anyString(), anySet(), eq(2))).thenReturn(java.util.List.of());
+            when(soulPromptService.buildSystemPrompt(eq("api"), eq("u1"), any())).thenReturn("system");
             when(soulPromptService.soulVersion()).thenReturn("v1");
             when(contextAssembler.assemble("s1", "api", "u1", "你好")).thenReturn(assembled);
             when(contextAssembler.assemble("s1", "api", "u1", "分析这个启动报错并给修复方案")).thenReturn(
@@ -167,6 +174,8 @@ class ChatServiceImplModeTest {
                     modelCallExecutor,
                     conversationAdvisorSupport,
                     llmUsageRecordService,
+                    skillService,
+                    skillRegistryService,
                     false,
                     0,
                     agentMode,

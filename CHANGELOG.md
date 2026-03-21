@@ -243,6 +243,73 @@
 3. Prompt、路由、本地执行开始共享同一套 skill 定义
 4. 后续接 ClawHub `SKILL.md` 时，不需要再新造第四套 skill 结构
 
+### 今日继续重构：Markdown Skill 导入与认证补强
+
+#### 今日完成
+
+1. 新增 `MarkdownSkillCatalogService`
+   - 支持导入远程 `SKILL.md`
+   - 支持 GitHub raw/blob/tree URL 归一化
+   - 支持 ClawHub 页面里的 `readme:"..."` 提取
+2. 统一 runtime skill registry
+   - builtin / script / markdown 三类 skill 都进入 `SkillRegistryService`
+   - `ChatRoutingPolicyService` 和 `SoulPromptService` 开始直接使用 runtime skill 定义
+3. 后台增加 runtime skill 管理区
+   - 新增 Markdown skill 导入入口
+   - 后台直接展示 runtime skill 列表和来源统计
+4. 完成一次真实 ClawHub skill 导入验证
+   - 导入 `https://clawhub.ai/steipete/summarize`
+   - 已成功落地为本地 `SKILL.md`
+   - 问答链路已完成一次带 `summarize` 关键词的实际调用验证
+5. 修复认证链路对账号状态校验不足的问题
+   - `authenticateToken()` 现在会回查账号是否仍存在且为 `ACTIVE`
+   - 活跃 token 会话列表也不再把已删除/禁用账号算进去
+
+#### 今日问题与处理
+
+##### 问题 1：ClawHub 页面不是原始 Markdown，第一次导入会把整页 HTML 当成 skill
+
+- 现象：
+  - 导入接口能成功
+  - 但写入本地的 `SKILL.md` 是整页 HTML
+  - runtime skill 的 `name/description/instructions` 都退化了
+- 根因：
+  - ClawHub 页面把真实 skill 内容嵌在页面脚本里的 `readme:"..."` 字段
+  - 初版导入逻辑虽然尝试提取，但对页面内容的实际解析不稳定
+- 处理：
+  - 收紧 `tryExtractClawhubReadme(...)`
+  - 优先提取脚本里的 `readme:"..."` 内容，再做转义还原
+  - 用真实页面做回归测试
+- 结果：
+  - 现在导入 `steipete/summarize` 会生成真实 `SKILL.md`
+  - runtime registry 中的 Markdown skill 已能显示正确 `name/description/instructions`
+
+##### 问题 2：导入成功后，skill 只是“挂在后台里”，还没进入实际路由
+
+- 现象：
+  - 如果 runtime skill 只展示不参与 prompt 和路由，那它对 agent 没有真正价值
+- 处理：
+  - `ChatServiceImpl` 初始化上下文时会按问题匹配 runtime skill
+  - 命中的 skill 会参与：
+    - 路由模式选择
+    - 系统 prompt 注入
+- 结果：
+  - 导入的 Markdown skill 已不再是静态配置，而是进入实际对话链路
+
+##### 问题 3：删除或禁用账号后，旧 token 仍可能继续通过认证
+
+- 现象：
+  - token 认证之前只信 Redis/local token 缓存
+  - 不回查账号状态
+- 风险：
+  - 已删除/禁用账号的旧 token 仍可能继续访问后台或聊天接口
+- 处理：
+  - `authenticateToken()` 增加账号存在性和 `ACTIVE` 状态校验
+  - `listActiveSessions()` / `tokenRuntimeStats()` 也同步过滤失效账号
+- 结果：
+  - token 缓存不再天然高于账号状态
+  - 后台看到的活跃会话更接近真实可用会话
+
 ## 2026-03-20
 
 ### 今日完成

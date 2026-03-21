@@ -2,6 +2,7 @@ package com.openclaw.service.chat;
 
 import com.openclaw.common.exception.BusinessException;
 import com.openclaw.service.ai.AiProviderService;
+import com.openclaw.service.skill.impl.BuiltinSkillCatalogService;
 import com.openclaw.service.skill.script.ScriptSkillCatalogService;
 import com.openclaw.service.skill.script.ScriptSkillDefinition;
 import com.openclaw.tool.pack.ExchangeRateToolPack;
@@ -12,6 +13,7 @@ import com.openclaw.tool.pack.WebSearchToolPack;
 import com.openclaw.tool.pack.WeatherToolPack;
 import com.openclaw.tool.pack.WorkspaceSearchToolPack;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -35,9 +37,39 @@ public class LocalSkillFallbackService {
     private final ExchangeRateToolPack exchangeRateToolPack;
     private final NewsToolPack newsToolPack;
     private final ScriptSkillToolPack scriptSkillToolPack;
+    private final BuiltinSkillExecutionService builtinSkillExecutionService;
     private final LocalSkillModelControlSupport modelControlSupport;
     private final LocalSkillQuerySupport querySupport;
 
+    LocalSkillFallbackService(boolean enabled,
+                              SystemToolPack systemToolPack,
+                              WorkspaceSearchToolPack workspaceSearchToolPack,
+                              WebSearchToolPack webSearchToolPack,
+                              WeatherToolPack weatherToolPack,
+                              ExchangeRateToolPack exchangeRateToolPack,
+                              NewsToolPack newsToolPack,
+                              ScriptSkillToolPack scriptSkillToolPack,
+                              ScriptSkillCatalogService scriptSkillCatalogService,
+                              AiProviderService aiProviderService) {
+        this(enabled,
+                systemToolPack,
+                workspaceSearchToolPack,
+                webSearchToolPack,
+                weatherToolPack,
+                exchangeRateToolPack,
+                newsToolPack,
+                scriptSkillToolPack,
+                new BuiltinSkillExecutionService(
+                        new BuiltinSkillCatalogService(),
+                        workspaceSearchToolPack,
+                        scriptSkillToolPack,
+                        scriptSkillCatalogService
+                ),
+                scriptSkillCatalogService,
+                aiProviderService);
+    }
+
+    @Autowired
     public LocalSkillFallbackService(@Value("${openclaw.chat.local-fallback-enabled:true}") boolean enabled,
                                      SystemToolPack systemToolPack,
                                      WorkspaceSearchToolPack workspaceSearchToolPack,
@@ -46,6 +78,7 @@ public class LocalSkillFallbackService {
                                      ExchangeRateToolPack exchangeRateToolPack,
                                      NewsToolPack newsToolPack,
                                      ScriptSkillToolPack scriptSkillToolPack,
+                                     BuiltinSkillExecutionService builtinSkillExecutionService,
                                      ScriptSkillCatalogService scriptSkillCatalogService,
                                      AiProviderService aiProviderService) {
         this.enabled = enabled;
@@ -55,6 +88,7 @@ public class LocalSkillFallbackService {
         this.exchangeRateToolPack = exchangeRateToolPack;
         this.newsToolPack = newsToolPack;
         this.scriptSkillToolPack = scriptSkillToolPack;
+        this.builtinSkillExecutionService = builtinSkillExecutionService;
         this.modelControlSupport = new LocalSkillModelControlSupport(systemToolPack, aiProviderService);
         this.querySupport = new LocalSkillQuerySupport(scriptSkillToolPack, scriptSkillCatalogService);
     }
@@ -81,6 +115,11 @@ public class LocalSkillFallbackService {
         Optional<LocalSkillResult> controlPlane = tryHandleControlPlane(q);
         if (controlPlane.isPresent()) {
             return controlPlane;
+        }
+
+        Optional<LocalSkillResult> builtinSkill = builtinSkillExecutionService.tryExecute(q);
+        if (builtinSkill.isPresent()) {
+            return builtinSkill;
         }
 
         if (modelControlSupport.looksLikeDateQuestion(lower)) {

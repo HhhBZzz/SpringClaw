@@ -14,6 +14,7 @@ import com.openclaw.service.ai.AiProviderService;
 import com.openclaw.service.auth.AuthService;
 import com.openclaw.service.chat.impl.ChatRoutingStateService;
 import com.openclaw.service.event.MessageEventService;
+import com.openclaw.service.skill.impl.SkillRegistryService;
 import com.openclaw.service.skill.script.ScriptSkillCatalogService;
 import com.openclaw.service.skill.script.ScriptSkillDefinition;
 import com.openclaw.service.usage.LlmUsageRecordService;
@@ -46,6 +47,7 @@ public class AdminManageController {
     private final SkillPolicyMapper skillPolicyMapper;
     private final MessageEventService messageEventService;
     private final AuthService authService;
+    private final SkillRegistryService skillRegistryService;
     private final ScriptSkillCatalogService scriptSkillCatalogService;
     private final AiProviderService aiProviderService;
     private final LlmUsageRecordService llmUsageRecordService;
@@ -60,6 +62,7 @@ public class AdminManageController {
                                  SkillPolicyMapper skillPolicyMapper,
                                  MessageEventService messageEventService,
                                  AuthService authService,
+                                 SkillRegistryService skillRegistryService,
                                  ScriptSkillCatalogService scriptSkillCatalogService,
                                  AiProviderService aiProviderService,
                                  LlmUsageRecordService llmUsageRecordService,
@@ -73,6 +76,7 @@ public class AdminManageController {
         this.skillPolicyMapper = skillPolicyMapper;
         this.messageEventService = messageEventService;
         this.authService = authService;
+        this.skillRegistryService = skillRegistryService;
         this.scriptSkillCatalogService = scriptSkillCatalogService;
         this.aiProviderService = aiProviderService;
         this.llmUsageRecordService = llmUsageRecordService;
@@ -92,6 +96,7 @@ public class AdminManageController {
         Map<String, Object> result = buildOverviewPayload();
         result.put("activeSessions", authService.listActiveSessions(20));
         result.put("recentUsers", buildRecentUserActivity());
+        result.put("runtimeSkills", buildRuntimeSkillPayload());
         result.put("providers", aiProviderService.summary());
         result.put("llmUsage", llmUsageRecordService.summary(300));
         result.put("recentLlmUsage", llmUsageRecordService.listRecent(20));
@@ -167,6 +172,7 @@ public class AdminManageController {
         result.put("toolPermissionCount", safeCountToolPermissions());
         result.put("skillDescriptorCount", safeCountSkillDescriptors());
         result.put("skillPolicyCount", safeCountSkillPolicies());
+        result.put("runtimeSkillCount", skillRegistryService.listAllDefinitions().size());
         result.put("roleCounts", safeRoleCounts());
         result.put("tokenStats", authService.tokenRuntimeStats());
         result.put("llmUsage", llmUsageRecordService.summary(200));
@@ -268,6 +274,11 @@ public class AdminManageController {
                 new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<SkillDescriptor>()
                         .orderByAsc("priority")
         ));
+    }
+
+    @GetMapping("/skills/registry")
+    public ApiResponse<Map<String, Object>> skillRegistry() {
+        return ApiResponse.success(buildRuntimeSkillPayload());
     }
 
     @GetMapping("/script-skills")
@@ -475,6 +486,13 @@ public class AdminManageController {
         payload.put("rootPath", scriptSkillCatalogService.rootPath().toString());
         payload.put("count", definitions.size());
         payload.put("definitions", definitions.stream().map(this::toScriptSkillView).toList());
+        return payload;
+    }
+
+    private Map<String, Object> buildRuntimeSkillPayload() {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("count", skillRegistryService.listAllDefinitions().size());
+        payload.put("definitions", skillRegistryService.listAllDefinitions());
         return payload;
     }
 

@@ -2,7 +2,6 @@ package com.openclaw.service.prompt;
 
 import com.openclaw.common.exception.BusinessException;
 import com.openclaw.service.skill.SkillService;
-import com.openclaw.service.skill.script.ScriptSkillCatalogService;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
@@ -29,14 +28,12 @@ public class SoulPromptService implements ApplicationRunner {
 
     private final AtomicReference<String> soulCache = new AtomicReference<>(DEFAULT_SOUL);
     private final SkillService skillService;
-    private final ScriptSkillCatalogService scriptSkillCatalogService;
 
     @Value("${openclaw.soul.path:${user.dir}/SOUL.md}")
     private String soulPath;
 
-    public SoulPromptService(SkillService skillService, ScriptSkillCatalogService scriptSkillCatalogService) {
+    public SoulPromptService(SkillService skillService) {
         this.skillService = skillService;
-        this.scriptSkillCatalogService = scriptSkillCatalogService;
     }
 
     @Override
@@ -55,8 +52,6 @@ public class SoulPromptService implements ApplicationRunner {
     public String buildSystemPrompt(String channel, String userId) {
         String coreSkillSummary = skillService.describeCoreSkills(channel, userId);
         String skillSummary = skillService.describeAvailableSkills(channel, userId);
-        String coreScriptSkillSummary = scriptSkillCatalogService.describeCoreForPrompt();
-        String scriptSkillSummary = scriptSkillCatalogService.describeForPrompt();
         PromptTemplate template = new PromptTemplate("""
                 # 角色设定
                 {soul}
@@ -68,14 +63,8 @@ public class SoulPromptService implements ApplicationRunner {
                 # 当前核心 Agent 技能
                 {coreSkills}
 
-                # 当前核心脚本技能
-                {coreScriptSkills}
-
                 # 当前可用技能
                 {skills}
-
-                # 当前可用脚本技能
-                {scriptSkills}
 
                 # 行为约束
                 - 输出中文
@@ -89,9 +78,7 @@ public class SoulPromptService implements ApplicationRunner {
                 "channel", channel == null ? "unknown" : channel,
                 "userId", userId == null ? "anonymous" : userId,
                 "coreSkills", coreSkillSummary,
-                "coreScriptSkills", coreScriptSkillSummary,
-                "skills", skillSummary,
-                "scriptSkills", scriptSkillSummary
+                "skills", skillSummary
         ));
     }
 

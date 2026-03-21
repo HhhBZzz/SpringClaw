@@ -6,6 +6,7 @@ import com.openclaw.domain.entity.SkillDescriptor;
 import com.openclaw.domain.entity.SkillPolicy;
 import com.openclaw.mapper.SkillDescriptorMapper;
 import com.openclaw.mapper.SkillPolicyMapper;
+import com.openclaw.service.skill.SkillDefinition;
 import com.openclaw.service.skill.SkillService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +37,7 @@ public class SkillServiceImpl extends ServiceImpl<SkillDescriptorMapper, SkillDe
     private static final long DB_RETRY_INTERVAL_MS = 30_000L;
 
     private final SkillPolicyMapper skillPolicyMapper;
+    private final SkillRegistryService skillRegistryService;
     private final boolean skillEnabled;
     private final boolean dbEnabled;
     private final boolean defaultSystemEnabled;
@@ -44,12 +46,14 @@ public class SkillServiceImpl extends ServiceImpl<SkillDescriptorMapper, SkillDe
     private volatile long dbRetryAt = 0L;
 
     public SkillServiceImpl(SkillPolicyMapper skillPolicyMapper,
+                            SkillRegistryService skillRegistryService,
                             @Value("${openclaw.skill.enabled:true}") boolean skillEnabled,
                             @Value("${openclaw.persistence.db-enabled:false}") boolean dbEnabled,
                             @Value("${openclaw.skill.default-system-enabled:true}") boolean defaultSystemEnabled,
                             @Value("${openclaw.skill.default-file-enabled:true}") boolean defaultFileEnabled,
                             @Value("${openclaw.skill.default-business-enabled:true}") boolean defaultBusinessEnabled) {
         this.skillPolicyMapper = skillPolicyMapper;
+        this.skillRegistryService = skillRegistryService;
         this.skillEnabled = skillEnabled;
         this.dbEnabled = dbEnabled;
         this.defaultSystemEnabled = defaultSystemEnabled;
@@ -100,36 +104,21 @@ public class SkillServiceImpl extends ServiceImpl<SkillDescriptorMapper, SkillDe
             return "（Skill 功能未开启）";
         }
 
-        String channelKey = normalize(channel);
-        String userKey = normalize(userId);
-        List<SkillDescriptor> descriptors = loadDescriptors();
-        if (descriptors.isEmpty()) {
+        Set<String> allowedToolPacks = resolveAllowedToolPacks(channel, userId);
+        List<String> explicitSkillLines = skillRegistryService.listAgentVisibleDefinitions(allowedToolPacks).stream()
+                .map(this::toRuntimeSkillLine)
+                .toList();
+        List<String> genericSkillLines = buildGenericSkillLines(allowedToolPacks, collectCoveredToolPacks(allowedToolPacks));
+
+        if (explicitSkillLines.isEmpty() && genericSkillLines.isEmpty()) {
             return "（暂无可用技能）";
         }
-
-        Set<String> skillIds = descriptors.stream()
-                .map(SkillDescriptor::getSkillId)
-                .filter(StringUtils::hasText)
-                .collect(LinkedHashSet::new, LinkedHashSet::add, LinkedHashSet::addAll);
-        Map<String, Boolean> policyMap = loadPolicyMap(channelKey, userKey, skillIds);
-
-        List<String> lines = new ArrayList<>();
-        for (SkillDescriptor descriptor : descriptors) {
-            String skillId = safe(descriptor.getSkillId());
-            boolean enabled = descriptor.getEnabled() == null || descriptor.getEnabled() == 1;
-            boolean allowed = policyMap.getOrDefault(skillId, true);
-            if (!enabled || !allowed || !StringUtils.hasText(skillId)) {
-                continue;
-            }
-            String name = safe(descriptor.getName());
-            String desc = safe(descriptor.getDescription());
-            String toolPack = safe(descriptor.getToolPack());
-            lines.add("- " + name + " (" + skillId + ", tool=" + toolPack + "): " + desc);
-        }
-        if (lines.isEmpty()) {
-            return "（暂无可用技能）";
-        }
-        return String.join("\n", lines);
+        return joinSections(
+                explicitSkillLines.isEmpty() ? null : "显式技能",
+                explicitSkillLines,
+                genericSkillLines.isEmpty() ? null : "基础能力",
+                genericSkillLines
+        );
     }
 
     @Override
@@ -138,26 +127,111 @@ public class SkillServiceImpl extends ServiceImpl<SkillDescriptorMapper, SkillDe
             return "（核心技能未开启）";
         }
         Set<String> allowed = resolveAllowedToolPacks(channel, userId);
-        List<String> lines = new ArrayList<>();
-        if (allowed.contains("workspace")) {
-            lines.add("- Workspace Explorer：不知道路径时检索项目文件、实现位置和配置证据");
-        }
-        if (allowed.contains("file")) {
-            lines.add("- File Operator：在明确路径下读取、写入和列举文件");
-        }
-        if (allowed.contains("web")) {
-            lines.add("- Web Research：联网检索官网、公开网页和资料摘要");
-        }
-        if (allowed.contains("system")) {
-            lines.add("- Runtime & System：查看当前时间、JVM 信息、运行环境和受控命令结果");
-        }
-        if (allowed.contains("script")) {
-            lines.add("- External Skills：调用受控脚本技能做项目分析和运行诊断");
-        }
-        if (lines.isEmpty()) {
+        List<SkillDefinition> coreDefinitions = skillRegistryService.listCoreDefinitions(allowed);
+        Set<String> coveredToolPacks = collectCoveredToolPacks(coreDefinitions);
+        List<String> explicitLines = coreDefinitions.stream()
+                .map(this::toRuntimeSkillLine)
+                .toList();
+        List<String> genericLines = buildGenericCoreLines(allowed, coveredToolPacks);
+        if (explicitLines.isEmpty() && genericLines.isEmpty()) {
             return "（暂无核心技能）";
         }
-        return String.join("\n", lines);
+        return joinSections(
+                explicitLines.isEmpty() ? null : "核心显式技能",
+                explicitLines,
+                genericLines.isEmpty() ? null : "核心基础能力",
+                genericLines
+        );
+    }
+
+    private String toRuntimeSkillLine(SkillDefinition definition) {
+        String mode = StringUtils.hasText(definition.preferredMode()) ? definition.preferredMode() : "simplified";
+        String tools = (definition.toolPacks() == null || definition.toolPacks().isEmpty())
+                ? "-"
+                : String.join("/", definition.toolPacks());
+        return "- %s (%s, source=%s, mode=%s, tools=%s): %s".formatted(
+                definition.name(),
+                definition.skillId(),
+                definition.sourceType(),
+                mode,
+                tools,
+                definition.description()
+        );
+    }
+
+    private List<String> buildGenericSkillLines(Set<String> allowedToolPacks, Set<String> coveredToolPacks) {
+        List<String> lines = new ArrayList<>();
+        if (allowedToolPacks.contains("system") && !coveredToolPacks.contains("system")) {
+            lines.add("- 系统基础能力 (system): 获取时间、JVM 信息、运行环境与受控命令结果");
+        }
+        if (allowedToolPacks.contains("web") && !coveredToolPacks.contains("web")) {
+            lines.add("- 联网检索能力 (web): 搜索官网、公开网页与外部资料摘要");
+        }
+        if (allowedToolPacks.contains("weather") && !coveredToolPacks.contains("weather")) {
+            lines.add("- 天气能力 (weather): 查询城市天气");
+        }
+        if (allowedToolPacks.contains("exchange") && !coveredToolPacks.contains("exchange")) {
+            lines.add("- 汇率能力 (exchange): 查询币种汇率");
+        }
+        if (allowedToolPacks.contains("news") && !coveredToolPacks.contains("news")) {
+            lines.add("- 新闻能力 (news): 按关键词检索新闻摘要");
+        }
+        if (allowedToolPacks.contains("file") && !coveredToolPacks.contains("file")) {
+            lines.add("- 文件能力 (file): 在明确路径下读取、写入和列举文件");
+        }
+        if (allowedToolPacks.contains("workspace") && !coveredToolPacks.contains("workspace")) {
+            lines.add("- 项目检索能力 (workspace): 不知道路径时按文件名或关键词检索项目内容");
+        }
+        if (allowedToolPacks.contains("script") && !coveredToolPacks.contains("script")) {
+            lines.add("- 脚本能力 (script): 调用受控脚本能力完成项目分析和运行诊断");
+        }
+        return lines;
+    }
+
+    private List<String> buildGenericCoreLines(Set<String> allowedToolPacks, Set<String> coveredToolPacks) {
+        List<String> lines = new ArrayList<>();
+        if (allowedToolPacks.contains("system") && !coveredToolPacks.contains("system")) {
+            lines.add("- Runtime & System：查看当前时间、JVM 信息、运行环境和受控命令结果");
+        }
+        if (allowedToolPacks.contains("web") && !coveredToolPacks.contains("web")) {
+            lines.add("- Web Research：联网检索官网、公开网页和资料摘要");
+        }
+        if (allowedToolPacks.contains("workspace") && !coveredToolPacks.contains("workspace")) {
+            lines.add("- Workspace Explorer：不知道路径时检索项目文件、实现位置和配置证据");
+        }
+        if (allowedToolPacks.contains("file") && !coveredToolPacks.contains("file")) {
+            lines.add("- File Operator：在明确路径下读取、写入和列举文件");
+        }
+        if (allowedToolPacks.contains("script") && !coveredToolPacks.contains("script")) {
+            lines.add("- External Skills：调用受控脚本技能做项目分析和运行诊断");
+        }
+        return lines;
+    }
+
+    private Set<String> collectCoveredToolPacks(List<SkillDefinition> definitions) {
+        return definitions.stream()
+                .flatMap(definition -> definition.toolPacks() == null ? java.util.stream.Stream.empty() : definition.toolPacks().stream())
+                .filter(StringUtils::hasText)
+                .map(toolPack -> toolPack.trim().toLowerCase())
+                .collect(LinkedHashSet::new, LinkedHashSet::add, LinkedHashSet::addAll);
+    }
+
+    private Set<String> collectCoveredToolPacks(Set<String> allowedToolPacks) {
+        return collectCoveredToolPacks(skillRegistryService.listAgentVisibleDefinitions(allowedToolPacks));
+    }
+
+    private String joinSections(String firstTitle,
+                                List<String> firstLines,
+                                String secondTitle,
+                                List<String> secondLines) {
+        List<String> sections = new ArrayList<>();
+        if (firstTitle != null && firstLines != null && !firstLines.isEmpty()) {
+            sections.add(firstTitle + ":\n" + String.join("\n", firstLines));
+        }
+        if (secondTitle != null && secondLines != null && !secondLines.isEmpty()) {
+            sections.add(secondTitle + ":\n" + String.join("\n", secondLines));
+        }
+        return sections.isEmpty() ? "（暂无可用技能）" : String.join("\n", sections);
     }
 
     private List<SkillDescriptor> loadDescriptors() {

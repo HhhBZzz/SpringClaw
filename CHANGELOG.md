@@ -155,6 +155,94 @@
 - 结果：
   - 以后即使远程模型最后一步超时，只要工具已经成功，用户仍能拿到部分有效结果
 
+### 今日继续重构：统一 Skill 结构
+
+#### 今日完成
+
+1. 引入统一 `SkillDefinition`
+   - 新增统一运行时 skill 模型
+   - 先把 builtin skill 和 script skill 收到同一个注册中心
+2. 新增第一批显式 builtin skill
+   - `code-analysis`
+   - `log-diagnostics`
+3. 新增 `SkillRegistryService`
+   - 统一聚合 builtin skill 与脚本 skill
+   - 后续接 ClawHub `SKILL.md` 时有统一落点
+4. 本地兜底开始优先执行显式 builtin skill
+   - “代码分析”
+   - “日志诊断”
+   不再只是散落在关键词规则里
+5. Prompt 层去掉脚本技能重复拼接
+   - `SoulPromptService` 不再单独拼 “core script skills / script skills”
+   - 统一由 `SkillService` 输出显式 skill + 基础能力
+6. 路由层开始识别 skill 的 `preferredMode`
+   - 命中 `code-analysis/log-diagnostics` 时，即使问题不长，也可自动升级到 `opar`
+7. 后台新增统一 skill registry 接口
+   - `/api/admin/manage/skills/registry`
+
+#### 这轮主要问题
+
+##### 问题 1：项目里同时有多套“像 skill 的东西”
+
+- 现象：
+  - `tool pack`
+  - `skill_descriptor / skill_policy`
+  - `skills/*.py + *.skill.json`
+  - 本地 fallback 里的隐式能力
+- 风险：
+  - 同一类能力会在多个入口重复实现
+  - Prompt、后台、路由各自维护一份能力描述
+  - 后续接 ClawHub `SKILL.md` 会更乱
+- 处理：
+  - 先不推翻现有工具层
+  - 新增统一 `SkillDefinition`
+  - 先把 builtin 和 script 两类 skill 收编到 `SkillRegistryService`
+
+##### 问题 2：Prompt 层重复描述脚本能力和技能能力
+
+- 现象：
+  - `SkillService` 描述一份
+  - `ScriptSkillCatalogService` 又描述一份
+  - `SoulPromptService` 同时注入两段
+- 风险：
+  - 提示词冗余
+  - 同一个脚本能力在 prompt 里重复出现
+- 处理：
+  - `SoulPromptService` 改成只依赖 `SkillService`
+  - `SkillServiceImpl` 统一输出：
+    - 显式技能
+    - 基础能力
+
+##### 问题 3：builtin skill 只有定义，没有进入执行语义
+
+- 现象：
+  - 即使定义了 `code-analysis`
+  - 实际仍主要靠散落关键词和旧路由逻辑工作
+- 风险：
+  - skill 只是“新名字”，不是新结构
+- 处理：
+  - 新增 `BuiltinSkillExecutionService`
+  - `LocalSkillFallbackService` 先尝试显式 builtin skill
+  - `ChatRoutingPolicyService` 识别 builtin skill 的 `preferredMode`
+
+##### 问题 4：后台看不到统一后的运行时 skill 视图
+
+- 现象：
+  - 后台只能看 DB skill 和 script skill
+  - 看不到“当前真正可路由的统一 skill 集合”
+- 风险：
+  - 重构效果无法被管理端验证
+- 处理：
+  - `AdminManageController` 新增 runtime skill registry 视图
+  - dashboard 增加 `runtimeSkills`
+
+#### 这轮结果
+
+1. 现在 skill 不再只是 `toolPack` 的别名
+2. `code-analysis` 和 `log-diagnostics` 已经成为第一批显式 skill
+3. Prompt、路由、本地执行开始共享同一套 skill 定义
+4. 后续接 ClawHub `SKILL.md` 时，不需要再新造第四套 skill 结构
+
 ## 2026-03-20
 
 ### 今日完成

@@ -1,6 +1,10 @@
 package com.openclaw.service.skill;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.openclaw.service.skill.impl.BuiltinSkillCatalogService;
+import com.openclaw.service.skill.impl.SkillRegistryService;
 import com.openclaw.service.skill.impl.SkillServiceImpl;
+import com.openclaw.service.skill.script.ScriptSkillCatalogService;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -12,6 +16,7 @@ class SkillServiceImplTest {
     void shouldReturnDefaultToolPacksWhenDbDisabled() {
         SkillServiceImpl service = new SkillServiceImpl(
                 null,
+                registryService(),
                 true,
                 false,
                 true,
@@ -34,6 +39,7 @@ class SkillServiceImplTest {
     void shouldReturnEmptyWhenSkillDisabled() {
         SkillServiceImpl service = new SkillServiceImpl(
                 null,
+                registryService(),
                 false,
                 false,
                 true,
@@ -49,6 +55,7 @@ class SkillServiceImplTest {
     void shouldDescribeDefaultsWhenDbDisabled() {
         SkillServiceImpl service = new SkillServiceImpl(
                 null,
+                registryService(),
                 true,
                 false,
                 true,
@@ -57,20 +64,19 @@ class SkillServiceImplTest {
         );
 
         String description = service.describeAvailableSkills("api", "u1");
-        Assertions.assertTrue(description.contains("system-basic"));
-        Assertions.assertTrue(description.contains("file-basic"));
-        Assertions.assertTrue(description.contains("workspace-search"));
-        Assertions.assertTrue(description.contains("web-basic"));
-        Assertions.assertTrue(description.contains("weather-basic"));
-        Assertions.assertTrue(description.contains("exchange-basic"));
-        Assertions.assertTrue(description.contains("news-basic"));
-        Assertions.assertTrue(description.contains("script-basic"));
+        Assertions.assertTrue(description.contains("code-analysis"));
+        Assertions.assertTrue(description.contains("log-diagnostics"));
+        Assertions.assertTrue(description.contains("系统基础能力"));
+        Assertions.assertTrue(description.contains("天气能力"));
+        Assertions.assertTrue(description.contains("汇率能力"));
+        Assertions.assertTrue(description.contains("新闻能力"));
     }
 
     @Test
     void shouldDescribeCoreSkillsWhenDbDisabled() {
         SkillServiceImpl service = new SkillServiceImpl(
                 null,
+                registryService(),
                 true,
                 false,
                 true,
@@ -80,13 +86,19 @@ class SkillServiceImplTest {
 
         String description = service.describeCoreSkills("api", "u1");
 
-        Assertions.assertTrue(description.contains("Workspace Explorer"));
-        Assertions.assertTrue(description.contains("File Operator"));
+        Assertions.assertTrue(description.contains("code-analysis"));
+        Assertions.assertTrue(description.contains("log-diagnostics"));
         Assertions.assertTrue(description.contains("Web Research"));
         Assertions.assertTrue(description.contains("Runtime & System"));
-        Assertions.assertTrue(description.contains("External Skills"));
         Assertions.assertFalse(description.contains("天气"));
         Assertions.assertFalse(description.contains("汇率"));
         Assertions.assertFalse(description.contains("新闻"));
+    }
+
+    private SkillRegistryService registryService() {
+        return new SkillRegistryService(
+                new BuiltinSkillCatalogService(),
+                new ScriptSkillCatalogService(false, ".", "*", new ObjectMapper())
+        );
     }
 }

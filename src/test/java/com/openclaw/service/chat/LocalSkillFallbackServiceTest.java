@@ -88,8 +88,9 @@ class LocalSkillFallbackServiceTest {
         LocalSkillFallbackService.LocalSkillResult result = service.tryHandleStructured("项目中是否存在 Spring AI 相关文件")
                 .orElseThrow();
 
-        Assertions.assertEquals("WORKSPACE_ANALYSIS", result.route());
-        Assertions.assertTrue(result.executionDetails().contains("SpringAiConfig.java"));
+        Assertions.assertEquals("BUILTIN_SKILL:CODE_ANALYSIS", result.route());
+        Assertions.assertTrue(result.executionDetails().contains("skill=code-analysis"));
+        Assertions.assertTrue(result.fallbackAnswer().contains("SpringAiConfig.java"));
     }
 
     @Test

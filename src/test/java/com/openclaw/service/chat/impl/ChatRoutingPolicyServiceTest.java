@@ -31,6 +31,19 @@ class ChatRoutingPolicyServiceTest {
     }
 
     @Test
+    void shouldAutoUpgradeForBuiltinCodeAnalysisSkill() {
+        ChatRoutingPolicyService.RoutingDecision decision = service.decide(
+                "用代码分析分析 ChatServiceImpl",
+                "USER",
+                "simplified",
+                true
+        );
+
+        Assertions.assertEquals("opar", decision.executionMode());
+        Assertions.assertTrue(decision.autoUpgraded());
+    }
+
+    @Test
     void shouldAllowAdminManualDeepAnalysis() {
         ChatRoutingPolicyService.RoutingDecision decision = service.decide(
                 "深度分析：帮我看这段启动报错",

@@ -1,5 +1,6 @@
 package com.openclaw.service.chat.impl;
 
+import com.openclaw.service.skill.impl.BuiltinSkillCatalogService;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -24,6 +25,7 @@ public class ChatRoutingPolicyService {
             "快速回答：", "快速回答:", "快速回答 ",
             "直接回答：", "直接回答:", "直接回答 "
     );
+    private final BuiltinSkillCatalogService builtinSkillCatalogService = new BuiltinSkillCatalogService();
 
     public RoutingDecision decide(String question,
                                   String roleCode,
@@ -95,6 +97,12 @@ public class ChatRoutingPolicyService {
     boolean shouldAutoUpgrade(String question) {
         if (!StringUtils.hasText(question)) {
             return false;
+        }
+        if (builtinSkillCatalogService.matchDefinition(question)
+                .filter(definition -> definition.enabled()
+                        && "opar".equalsIgnoreCase(definition.preferredMode()))
+                .isPresent()) {
+            return true;
         }
         String normalized = question.trim().toLowerCase(Locale.ROOT);
         int score = 0;

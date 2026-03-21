@@ -3,6 +3,7 @@ package com.openclaw.service.chat.impl;
 import com.openclaw.service.ai.AiProviderService;
 import com.openclaw.service.chat.LocalSkillFallbackService;
 import com.openclaw.service.context.AssembledContext;
+import com.openclaw.service.event.MessageEventService;
 import com.openclaw.tool.runtime.ToolOrchestrator;
 import com.openclaw.tool.runtime.ToolExecutionContext;
 import com.openclaw.tool.runtime.ToolExecutionContextHolder;
@@ -10,6 +11,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+
+import java.util.Comparator;
+import java.util.List;
 
 /**
  * 简化版 Agent 执行器：简单问题直答，需要时再让模型自行调用工具。
@@ -28,6 +32,7 @@ public class SimplifiedOparEngine {
     private final ModelCallExecutor modelCallExecutor;
     private final OparContextAwareSupport contextAwareSupport;
     private final ConversationAdvisorSupport conversationAdvisorSupport;
+    private final MessageEventService messageEventService;
 
     public SimplifiedOparEngine(AiProviderService aiProviderService,
                                 ToolOrchestrator toolOrchestrator,
@@ -37,7 +42,8 @@ public class SimplifiedOparEngine {
                                 ModelTransportGuardService modelTransportGuardService,
                                 ModelCallExecutor modelCallExecutor,
                                 OparContextAwareSupport contextAwareSupport,
-                                ConversationAdvisorSupport conversationAdvisorSupport) {
+                                ConversationAdvisorSupport conversationAdvisorSupport,
+                                MessageEventService messageEventService) {
         this.aiProviderService = aiProviderService;
         this.toolOrchestrator = toolOrchestrator;
         this.localSkillFallbackService = localSkillFallbackService;
@@ -47,6 +53,7 @@ public class SimplifiedOparEngine {
         this.modelCallExecutor = modelCallExecutor;
         this.contextAwareSupport = contextAwareSupport;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
+        this.messageEventService = messageEventService;
     }
 
     public ChatExecutionResult run(AiProviderService.ActiveChatClient activeClient,
@@ -114,6 +121,16 @@ public class SimplifiedOparEngine {
                 if (localResult != null) {
                     return buildLocalResult(systemPrompt, assembled, localResult, "SIMPLIFIED:LOCAL_FALLBACK");
                 }
+                String auditFallback = buildToolAuditFallback(assembled, requestId, "模型未返回可用内容");
+                if (StringUtils.hasText(auditFallback)) {
+                    return new ChatExecutionResult(
+                            assembled.observePrompt(),
+                            "SIMPLIFIED: 工具已执行，但模型未返回可用内容，已改用工具结果兜底。",
+                            "行动已完成部分工具调用，使用工具审计结果直接组织答复。",
+                            auditFallback,
+                            false
+                    );
+                }
                 return buildDisabledResult(systemPrompt, result.client(), assembled, fallbackResponder);
             }
             return new ChatExecutionResult(
@@ -128,6 +145,16 @@ public class SimplifiedOparEngine {
             LocalSkillFallbackService.LocalSkillResult localResult = tryLocalFallbackResult(assembled.question());
             if (localResult != null) {
                 return buildLocalResult(systemPrompt, assembled, localResult, "SIMPLIFIED:DEGRADED_LOCAL");
+            }
+            String auditFallback = buildToolAuditFallback(assembled, requestId, ex.getMessage());
+            if (StringUtils.hasText(auditFallback)) {
+                return new ChatExecutionResult(
+                        assembled.observePrompt(),
+                        "SIMPLIFIED: 工具已执行，但模型总结超时，已改用工具结果兜底。",
+                        "行动已完成部分工具调用，远程模型在整理答案时失败。reason=" + safe(ex.getMessage()),
+                        auditFallback,
+                        false
+                );
             }
             return new ChatExecutionResult(
                     assembled.observePrompt(),
@@ -264,7 +291,98 @@ public class SimplifiedOparEngine {
         return builder.toString();
     }
 
+    private String buildToolAuditFallback(AssembledContext assembled, String requestId, String reason) {
+        if (!StringUtils.hasText(requestId)) {
+            return "";
+        }
+        List<ToolAuditEntry> entries = messageEventService.listSessionEvents(
+                        assembled.sessionKey(),
+                        "SYSTEM",
+                        "TOOL",
+                        24,
+                        false
+                ).stream()
+                .filter(event -> requestId.equals(event.getRequestId()))
+                .map(event -> parseToolAuditEntry(event.getContent()))
+                .filter(entry -> entry != null)
+                .sorted(Comparator.comparing(ToolAuditEntry::toolName))
+                .toList();
+
+        List<ToolAuditEntry> successEntries = entries.stream()
+                .filter(entry -> "SUCCESS".equals(entry.status()))
+                .filter(entry -> StringUtils.hasText(entry.detail()))
+                .filter(entry -> !"invoke".equalsIgnoreCase(entry.detail()))
+                .toList();
+        if (successEntries.isEmpty()) {
+            return "";
+        }
+
+        StringBuilder builder = new StringBuilder();
+        builder.append("这次远程模型在整理最终回答时失败了");
+        if (StringUtils.hasText(reason)) {
+            builder.append("（").append(safe(reason)).append("）");
+        }
+        builder.append("，但本地工具已经拿到这些结果：");
+        for (ToolAuditEntry entry : successEntries.stream().limit(3).toList()) {
+            builder.append("\n- ")
+                    .append(entry.toolName())
+                    .append("：")
+                    .append(truncateToolDetail(entry.detail(), 260));
+        }
+        if (successEntries.size() > 3) {
+            builder.append("\n- 其余 ").append(successEntries.size() - 3).append(" 条工具结果已省略。");
+        }
+        builder.append("\n你可以继续指定让我基于这些结果做哪一类分析，我会优先走本地路径。");
+        return builder.toString();
+    }
+
+    private ToolAuditEntry parseToolAuditEntry(String content) {
+        String text = safe(content);
+        if (!StringUtils.hasText(text) || !text.contains("tool=") || !text.contains("status=")) {
+            return null;
+        }
+        String tool = extractField(text, "tool=");
+        String status = extractField(text, "status=");
+        String detail = extractTrailingField(text, "detail=");
+        if (!StringUtils.hasText(tool) || !StringUtils.hasText(status)) {
+            return null;
+        }
+        return new ToolAuditEntry(tool, status.toUpperCase(), detail);
+    }
+
+    private String extractField(String text, String marker) {
+        int start = text.indexOf(marker);
+        if (start < 0) {
+            return "";
+        }
+        int valueStart = start + marker.length();
+        int end = text.indexOf(", ", valueStart);
+        if (end < 0) {
+            end = text.length();
+        }
+        return text.substring(valueStart, end).trim();
+    }
+
+    private String extractTrailingField(String text, String marker) {
+        int start = text.indexOf(marker);
+        if (start < 0) {
+            return "";
+        }
+        return text.substring(start + marker.length()).replaceAll("\\s+", " ").trim();
+    }
+
+    private String truncateToolDetail(String detail, int maxLen) {
+        String text = safe(detail).replace('\n', ' ').replace('\r', ' ').trim();
+        if (text.length() <= maxLen) {
+            return text;
+        }
+        return text.substring(0, maxLen) + "...";
+    }
+
     private static String safe(String text) {
         return text == null ? "" : text;
+    }
+
+    private record ToolAuditEntry(String toolName, String status, String detail) {
     }
 }

@@ -14,14 +14,88 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class SimplifiedOparEngineTest {
+
+    @Test
+    void shouldShortCircuitExplicitWebFetchToPriorityStructuredLocalSkill() {
+        AiProviderService aiProviderService = mock(AiProviderService.class);
+        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
+        LocalSkillFallbackService localSkillFallbackService = mock(LocalSkillFallbackService.class);
+        ModelControlIntentService modelControlIntentService = mock(ModelControlIntentService.class);
+        LocalExecutionNarrator localExecutionNarrator = mock(LocalExecutionNarrator.class);
+        ModelTransportGuardService modelTransportGuardService = mock(ModelTransportGuardService.class);
+        ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
+        OparContextAwareSupport contextAwareSupport = mock(OparContextAwareSupport.class);
+        ConversationAdvisorSupport conversationAdvisorSupport = mock(ConversationAdvisorSupport.class);
+        MessageEventService messageEventService = mock(MessageEventService.class);
+
+        SimplifiedOparEngine engine = new SimplifiedOparEngine(
+                aiProviderService,
+                toolOrchestrator,
+                localSkillFallbackService,
+                modelControlIntentService,
+                localExecutionNarrator,
+                modelTransportGuardService,
+                modelCallExecutor,
+                contextAwareSupport,
+                conversationAdvisorSupport,
+                messageEventService
+        );
+
+        AiProviderService.ActiveChatClient activeClient = new AiProviderService.ActiveChatClient(
+                "coding-plan",
+                "qwen3.5-plus",
+                "https://coding.dashscope.aliyuncs.com/v1",
+                mock(ChatClient.class),
+                true,
+                ""
+        );
+        AssembledContext assembled = new AssembledContext(
+                "feishu:p2p:s1",
+                "feishu",
+                "ou_xxx",
+                "读取这个网页 https://example.com",
+                "",
+                "",
+                "# 当前问题\n读取这个网页 https://example.com"
+        );
+        LocalSkillFallbackService.LocalSkillResult localResult =
+                new LocalSkillFallbackService.LocalSkillResult(
+                        "BUILTIN_SKILL:WEB_CRAWL",
+                        "skill=web-crawl\nurl=https://example.com\ntitle=Example Domain",
+                        "Example Domain",
+                        true
+                );
+
+        when(contextAwareSupport.tryContextAwareLocalResult(assembled)).thenReturn(null);
+        when(localSkillFallbackService.tryHandleControlPlane(anyString())).thenReturn(Optional.empty());
+        when(localSkillFallbackService.tryHandlePriorityStructured(anyString())).thenReturn(Optional.of(localResult));
+        when(aiProviderService.activeClient()).thenReturn(activeClient);
+        when(modelTransportGuardService.isModelCallEnabled(activeClient)).thenReturn(true);
+        when(localExecutionNarrator.narrate(eq("system"), eq(assembled), eq(localResult), eq(activeClient), eq(true)))
+                .thenReturn("已读取 Example Domain");
+
+        ChatExecutionResult result = engine.run(
+                activeClient,
+                "system",
+                assembled,
+                "req-1",
+                (reason, context) -> "fallback:" + reason
+        );
+
+        assertThat(result.plan()).contains("SIMPLIFIED:PRIORITY_STRUCTURED");
+        assertThat(result.action()).contains("skill=web-crawl");
+        assertThat(result.reflect()).isEqualTo("已读取 Example Domain");
+        assertThat(result.modelEnabled()).isFalse();
+        verifyNoInteractions(modelCallExecutor, toolOrchestrator, modelControlIntentService, conversationAdvisorSupport, messageEventService);
+    }
 
     @Test
     void shouldReturnToolAuditFallbackWhenModelTimesOutAfterToolSuccess() throws Exception {

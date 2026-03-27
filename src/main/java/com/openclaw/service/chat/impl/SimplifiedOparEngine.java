@@ -71,6 +71,11 @@ public class SimplifiedOparEngine {
             return buildLocalResult(systemPrompt, assembled, controlPlane, "SIMPLIFIED:CONTROL_PLANE");
         }
 
+        LocalSkillFallbackService.LocalSkillResult priorityStructured = tryPriorityStructuredLocalResult(assembled.question());
+        if (priorityStructured != null) {
+            return buildLocalResult(systemPrompt, assembled, priorityStructured, "SIMPLIFIED:PRIORITY_STRUCTURED");
+        }
+
         LocalSkillFallbackService.LocalSkillResult aiControl = tryAiAssistedModelControl(activeClient, assembled, requestId);
         if (aiControl != null) {
             return buildLocalResult(systemPrompt, assembled, aiControl, "SIMPLIFIED:AI_CONTROL");
@@ -218,6 +223,15 @@ public class SimplifiedOparEngine {
             return localSkillFallbackService.tryHandleStructured(question).orElse(null);
         } catch (Exception ex) {
             log.warn("简化模式本地兜底失败，reason={}", ex.getMessage());
+            return null;
+        }
+    }
+
+    private LocalSkillFallbackService.LocalSkillResult tryPriorityStructuredLocalResult(String question) {
+        try {
+            return localSkillFallbackService.tryHandlePriorityStructured(question).orElse(null);
+        } catch (Exception ex) {
+            log.warn("简化模式优先结构化技能执行失败，reason={}", ex.getMessage());
             return null;
         }
     }

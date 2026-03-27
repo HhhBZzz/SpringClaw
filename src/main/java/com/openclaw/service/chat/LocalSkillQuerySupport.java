@@ -1,8 +1,8 @@
 package com.openclaw.service.chat;
 
 import com.openclaw.service.skill.script.ScriptSkillCatalogService;
+import com.openclaw.service.skill.script.ScriptSkillExecutorService;
 import com.openclaw.service.skill.script.ScriptSkillDefinition;
-import com.openclaw.tool.pack.ScriptSkillToolPack;
 import org.springframework.util.StringUtils;
 
 import java.util.LinkedHashMap;
@@ -15,14 +15,16 @@ final class LocalSkillQuerySupport {
 
     private static final Pattern WEATHER_CITY_PATTERN =
             Pattern.compile("([\\p{IsHan}A-Za-z]{2,20}?)(天气|气温|温度|下雨|weather)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern URL_PATTERN =
+            Pattern.compile("((?:https?://|www\\.)[^\\s]+)", Pattern.CASE_INSENSITIVE);
 
-    private final ScriptSkillToolPack scriptSkillToolPack;
+    private final ScriptSkillExecutorService scriptSkillExecutorService;
     private final ScriptSkillCatalogService scriptSkillCatalogService;
     private final Map<String, String> currencyAliasMap = new LinkedHashMap<>();
 
-    LocalSkillQuerySupport(ScriptSkillToolPack scriptSkillToolPack,
+    LocalSkillQuerySupport(ScriptSkillExecutorService scriptSkillExecutorService,
                            ScriptSkillCatalogService scriptSkillCatalogService) {
-        this.scriptSkillToolPack = scriptSkillToolPack;
+        this.scriptSkillExecutorService = scriptSkillExecutorService;
         this.scriptSkillCatalogService = scriptSkillCatalogService;
 
         currencyAliasMap.put("美元", "USD");
@@ -53,6 +55,15 @@ final class LocalSkillQuerySupport {
     boolean looksLikeExplicitWebSearchQuestion(String text) {
         return containsAny(text,
                 "联网", "上网查", "官网", "网页搜索", "搜索网页", "web search", "google", "bing", "duckduckgo");
+    }
+
+    boolean looksLikeExplicitWebFetchQuestion(String text) {
+        boolean hasUrl = URL_PATTERN.matcher(text).find();
+        boolean fetchIntent = containsAny(text,
+                "抓取网页", "抓网页", "爬取网页", "爬网页", "读取网页", "读取链接", "打开链接",
+                "打开这个网址", "读这个网址", "网页正文", "页面正文", "提取正文", "总结这个网页",
+                "看看这个网页", "看这个链接", "fetch url", "crawl", "read webpage", "read page");
+        return hasUrl && fetchIntent;
     }
 
     boolean looksLikeExplicitScriptSkillQuestion(String text) {
@@ -173,6 +184,24 @@ final class LocalSkillQuerySupport {
                 || text.contains("命中结果（关键词=");
     }
 
+    String extractFirstUrl(String question) {
+        if (!StringUtils.hasText(question)) {
+            return "";
+        }
+        Matcher matcher = URL_PATTERN.matcher(question);
+        if (!matcher.find()) {
+            return "";
+        }
+        String url = matcher.group(1).trim();
+        while (!url.isEmpty() && ".,);]}>\"'".indexOf(url.charAt(url.length() - 1)) >= 0) {
+            url = url.substring(0, url.length() - 1);
+        }
+        if (url.startsWith("www.")) {
+            return "https://" + url;
+        }
+        return url;
+    }
+
     private boolean containsAny(String text, String... keys) {
         for (String key : keys) {
             if (text.contains(key)) {
@@ -221,7 +250,7 @@ final class LocalSkillQuerySupport {
 
     private String tryScriptSkill(String skillName, String goal) {
         try {
-            return scriptSkillToolPack.runScriptSkillByGoal(skillName, goal);
+            return scriptSkillExecutorService.runScriptSkillByGoal(skillName, goal);
         } catch (Exception ignore) {
             return "";
         }

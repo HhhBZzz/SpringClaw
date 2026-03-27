@@ -165,7 +165,7 @@ public class SkillServiceImpl extends ServiceImpl<SkillDescriptorMapper, SkillDe
             lines.add("- 系统基础能力 (system): 获取时间、JVM 信息、运行环境与受控命令结果");
         }
         if (allowedToolPacks.contains("web") && !coveredToolPacks.contains("web")) {
-            lines.add("- 联网检索能力 (web): 搜索官网、公开网页与外部资料摘要");
+            lines.add("- 联网检索能力 (web): 搜索官网、公开网页与外部资料摘要；深度网页抓取改走 Python web skill");
         }
         if (allowedToolPacks.contains("weather") && !coveredToolPacks.contains("weather")) {
             lines.add("- 天气能力 (weather): 查询城市天气");
@@ -183,7 +183,7 @@ public class SkillServiceImpl extends ServiceImpl<SkillDescriptorMapper, SkillDe
             lines.add("- 项目检索能力 (workspace): 不知道路径时按文件名或关键词检索项目内容");
         }
         if (allowedToolPacks.contains("script") && !coveredToolPacks.contains("script")) {
-            lines.add("- 脚本能力 (script): 调用受控脚本能力完成项目分析和运行诊断");
+            lines.add("- 脚本能力 (script): 调用受控 Python 技能完成项目分析、运行诊断和网页抓取");
         }
         return lines;
     }
@@ -194,7 +194,7 @@ public class SkillServiceImpl extends ServiceImpl<SkillDescriptorMapper, SkillDe
             lines.add("- Runtime & System：查看当前时间、JVM 信息、运行环境和受控命令结果");
         }
         if (allowedToolPacks.contains("web") && !coveredToolPacks.contains("web")) {
-            lines.add("- Web Research：联网检索官网、公开网页和资料摘要");
+            lines.add("- Web Research：联网搜索官网、公开网页和资料摘要；网页正文抓取交给 Python web skill");
         }
         if (allowedToolPacks.contains("workspace") && !coveredToolPacks.contains("workspace")) {
             lines.add("- Workspace Explorer：不知道路径时检索项目文件、实现位置和配置证据");
@@ -203,7 +203,7 @@ public class SkillServiceImpl extends ServiceImpl<SkillDescriptorMapper, SkillDe
             lines.add("- File Operator：在明确路径下读取、写入和列举文件");
         }
         if (allowedToolPacks.contains("script") && !coveredToolPacks.contains("script")) {
-            lines.add("- External Skills：调用受控脚本技能做项目分析和运行诊断");
+            lines.add("- External Skills：调用受控 Python 技能做项目分析、运行诊断和网页抓取");
         }
         return lines;
     }
@@ -304,7 +304,7 @@ public class SkillServiceImpl extends ServiceImpl<SkillDescriptorMapper, SkillDe
             list.add(buildDefault("file-basic", "文件技能", "在受控目录内读取/写入/列举文件", "file", 20));
             list.add(buildDefault("workspace-search", "项目检索技能", "不知道路径时可按文件名或关键词检索项目内容", "workspace", 25));
         }
-        list.add(buildDefault("web-basic", "联网检索技能", "检索公开网页并抓取文本摘要", "web", 30));
+        list.add(buildDefault("web-basic", "联网检索技能", "检索公开网页摘要；网页正文抓取交给 Python web skill", "web", 30));
         if (defaultBusinessEnabled) {
             list.add(buildDefault("weather-basic", "天气技能", "查询城市天气", "weather", 40));
             list.add(buildDefault("exchange-basic", "汇率技能", "查询币种汇率", "exchange", 41));

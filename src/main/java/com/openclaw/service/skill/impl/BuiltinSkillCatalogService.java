@@ -35,6 +35,24 @@ public class BuiltinSkillCatalogService {
                     true
             ),
             new SkillDefinition(
+                    "web-crawl",
+                    "网页抓取",
+                    "读取指定 URL 的网页正文、标题和主要内容，适合让 agent 真正打开链接而不是只做关键词搜索。",
+                    "BUILTIN",
+                    "openclaw:builtin:web-crawl",
+                    "遇到带明确 URL 的网页读取、抓取、正文提取请求时，优先使用受控 Python web_crawler skill；不要退回 Java 抓取正文。",
+                    List.of("抓取网页", "爬取网页", "读取网页", "读取链接", "网页正文", "页面正文", "提取正文", "打开这个链接", "总结这个网页"),
+                    List.of("读取这个网页 https://example.com", "帮我抓取这个链接的正文"),
+                    List.of("script"),
+                    "simplified",
+                    "session-only",
+                    "builtin",
+                    "web-crawl",
+                    true,
+                    25,
+                    true
+            ),
+            new SkillDefinition(
                     "log-diagnostics",
                     "日志诊断",
                     "分析日志、报错、堆栈和启动失败现象，适合排查运行时问题。",
@@ -56,6 +74,17 @@ public class BuiltinSkillCatalogService {
 
     public List<SkillDefinition> listDefinitions() {
         return definitions;
+    }
+
+    public Optional<SkillDefinition> matchHighConfidenceDefinition(String question) {
+        if (!StringUtils.hasText(question)) {
+            return Optional.empty();
+        }
+        String normalized = question.trim().toLowerCase(Locale.ROOT);
+        return definitions.stream()
+                .filter(definition -> definition.enabled() && definition.agentVisible())
+                .filter(definition -> isHighConfidenceMatch(definition, normalized))
+                .findFirst();
     }
 
     public Optional<SkillDefinition> matchDefinition(String question) {
@@ -94,7 +123,27 @@ public class BuiltinSkillCatalogService {
                 score += 1;
             }
         }
+        if ("web-crawl".equals(definition.skillId())) {
+            if (containsAny(normalizedQuestion, "网页", "页面", "链接", "网址", "url", "正文")) {
+                score += 2;
+            }
+            if (containsAny(normalizedQuestion, "抓取", "爬取", "读取", "打开", "提取", "总结")) {
+                score += 1;
+            }
+            if (normalizedQuestion.contains("http://") || normalizedQuestion.contains("https://") || normalizedQuestion.contains("www.")) {
+                score += 3;
+            }
+        }
         return score;
+    }
+
+    private boolean isHighConfidenceMatch(SkillDefinition definition, String normalizedQuestion) {
+        if ("web-crawl".equals(definition.skillId())) {
+            return containsAny(normalizedQuestion, "http://", "https://", "www.")
+                    && containsAny(normalizedQuestion,
+                    "抓取", "爬取", "读取", "打开", "提取", "总结", "网页", "页面", "链接", "网址", "url", "正文");
+        }
+        return false;
     }
 
     private boolean containsAny(String text, String... keywords) {

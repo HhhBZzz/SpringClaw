@@ -96,6 +96,16 @@ public class OparLoopEngine {
                         "本地执行完成，已整理真实结果。"
                 );
             }
+            LocalSkillFallbackService.LocalSkillResult priorityStructuredResult = tryPriorityStructuredLocalResult(assembled.question());
+            if (priorityStructuredResult != null) {
+                return buildLocalExecutionResult(
+                        systemPrompt,
+                        assembled,
+                        priorityStructuredResult,
+                        "命中高置信度结构化技能，跳过模型计划阶段。",
+                        "已由受控本地技能完成执行。"
+                );
+            }
             LocalSkillFallbackService.LocalSkillResult aiControlResult = tryAiAssistedModelControl(activeClient, assembled, requestId);
             if (aiControlResult != null) {
                 return buildLocalExecutionResult(
@@ -214,6 +224,18 @@ public class OparLoopEngine {
             return localSkillFallbackService.tryHandleControlPlane(question).orElse(null);
         } catch (Exception ex) {
             log.warn("控制面本地执行失败，reason={}", ex.getMessage());
+            return null;
+        }
+    }
+
+    private LocalSkillFallbackService.LocalSkillResult tryPriorityStructuredLocalResult(String question) {
+        if (!localFallbackEnabled) {
+            return null;
+        }
+        try {
+            return localSkillFallbackService.tryHandlePriorityStructured(question).orElse(null);
+        } catch (Exception ex) {
+            log.warn("高置信度结构化技能执行失败，reason={}", ex.getMessage());
             return null;
         }
     }

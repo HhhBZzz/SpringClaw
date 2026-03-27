@@ -19,11 +19,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * 天气查询工具包（免 API Key 版本）。
@@ -38,15 +36,22 @@ public class WeatherToolPack {
     private final int requestTimeoutSeconds;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
-    private final WebSearchToolPack webSearchToolPack;
     private final Cache<String, String> weatherCache;
 
     public WeatherToolPack(boolean enabled,
                            String urlTemplate,
                            int timeoutSeconds,
+                           String cnUrlTemplate) {
+        this(enabled, urlTemplate, timeoutSeconds, cnUrlTemplate, defaultCache());
+    }
+
+    // 保留兼容构造器，避免测试夹具和旧调用点因为移除 web 抓取兜底而全部重写。
+    public WeatherToolPack(boolean enabled,
+                           String urlTemplate,
+                           int timeoutSeconds,
                            String cnUrlTemplate,
-                           WebSearchToolPack webSearchToolPack) {
-        this(enabled, urlTemplate, timeoutSeconds, cnUrlTemplate, webSearchToolPack, defaultCache());
+                           WebSearchToolPack ignoredWebSearchToolPack) {
+        this(enabled, urlTemplate, timeoutSeconds, cnUrlTemplate);
     }
 
     @Autowired
@@ -54,7 +59,6 @@ public class WeatherToolPack {
                            @Value("${openclaw.tools.weather.url-template:https://wttr.in/{city}?format=j1}") String urlTemplate,
                            @Value("${openclaw.tools.weather.timeout-seconds:8}") int timeoutSeconds,
                            @Value("${openclaw.tools.weather.cn-url-template:https://www.weather.com.cn/data/sk/{cityCode}.html}") String cnUrlTemplate,
-                           @Autowired(required = false) WebSearchToolPack webSearchToolPack,
                            @Qualifier("weatherCache") Cache<String, String> weatherCache) {
         this.enabled = enabled;
         this.urlTemplate = StringUtils.hasText(urlTemplate)
@@ -66,7 +70,6 @@ public class WeatherToolPack {
         this.requestTimeoutSeconds = Math.max(1, timeoutSeconds);
         this.httpClient = buildHttpClient(timeoutSeconds);
         this.objectMapper = new ObjectMapper();
-        this.webSearchToolPack = webSearchToolPack;
         this.weatherCache = weatherCache;
     }
 
@@ -294,150 +297,6 @@ public class WeatherToolPack {
         }
         return objectMapper.readValue(body, new TypeReference<>() {
         });
-    }
-
-    private Optional<String> tryWebSearch(String city) {
-        if (webSearchToolPack == null) {
-            return Optional.empty();
-        }
-        try {
-            Optional<String> fromWeatherPage = tryWeatherComPage(city);
-            if (fromWeatherPage.isPresent()) {
-                return fromWeatherPage;
-            }
-
-            String result = webSearchToolPack.webSearch(city + " 实时天气 温度");
-            Optional<String> summary = extractWeatherSummary(result, city);
-            if (summary.isEmpty()) {
-                return Optional.empty();
-            }
-            return Optional.of("城市: " + city + "\n来源: web-search\n" + summary.get());
-        } catch (Exception ignore) {
-            return Optional.empty();
-        }
-    }
-
-    private Optional<String> tryWeatherComPage(String city) {
-        String url = weatherComUrl(city);
-        if (!StringUtils.hasText(url)) {
-            return Optional.empty();
-        }
-        try {
-            String result = webSearchToolPack.fetchUrlText(url);
-            Optional<String> summary = extractWeatherSummary(result, city);
-            if (summary.isEmpty()) {
-                return Optional.empty();
-            }
-            return Optional.of("城市: " + city + "\n来源: weather.com.cn\n" + summary.get() + "\n链接: " + url);
-        } catch (Exception ignore) {
-            return Optional.empty();
-        }
-    }
-
-    private String weatherComUrl(String city) {
-        return switch (city) {
-            case "北京" -> "https://www.weather.com.cn/weather/101010100.shtml";
-            case "上海" -> "https://www.weather.com.cn/weather/101020100.shtml";
-            case "广州" -> "https://www.weather.com.cn/weather/101280101.shtml";
-            case "深圳" -> "https://www.weather.com.cn/weather/101280601.shtml";
-            case "杭州" -> "https://www.weather.com.cn/weather/101210101.shtml";
-            case "成都" -> "https://www.weather.com.cn/weather/101270101.shtml";
-            case "武汉" -> "https://www.weather.com.cn/weather/101200101.shtml";
-            case "西安" -> "https://www.weather.com.cn/weather/101110101.shtml";
-            default -> "";
-        };
-    }
-
-    private Optional<String> extractWeatherSummary(String raw, String city) {
-        if (!StringUtils.hasText(raw)) {
-            return Optional.empty();
-        }
-        String[] lines = raw.replace("\r", "").split("\n");
-        Set<String> picked = new LinkedHashSet<>();
-        int strongSignals = 0;
-        for (String line : lines) {
-            String normalized = line == null ? "" : line.trim();
-            if (!StringUtils.hasText(normalized)) {
-                continue;
-            }
-            normalized = normalized.replaceFirst("^[*-]\\s*", "");
-            if (!StringUtils.hasText(normalized) || isNoiseLine(normalized)) {
-                continue;
-            }
-            if (containsWeatherSignal(normalized, city)) {
-                picked.add(normalized);
-                if (isStrongWeatherSignal(normalized)) {
-                    strongSignals++;
-                }
-            }
-            if (picked.size() >= 6) {
-                break;
-            }
-        }
-        if (picked.isEmpty() || strongSignals == 0) {
-            return Optional.empty();
-        }
-        StringBuilder sb = new StringBuilder("摘要:\n");
-        for (String line : picked) {
-            sb.append("- ").append(line).append("\n");
-        }
-        return Optional.of(sb.toString().trim());
-    }
-
-    private boolean containsWeatherSignal(String line, String city) {
-        String lower = line.toLowerCase();
-        boolean hasTemperature = line.contains("℃")
-                || lower.contains("°c")
-                || line.matches(".*-?\\d{1,2}\\s*[~\\-]\\s*-?\\d{1,2}.*");
-        boolean hasWeatherKeyword = lower.contains("weather")
-                || lower.contains("temperature")
-                || line.contains("天气")
-                || line.contains("温度")
-                || line.contains("体感")
-                || line.contains("湿度")
-                || line.contains("风力")
-                || line.contains("风向")
-                || line.contains("降雨")
-                || line.contains("晴")
-                || line.contains("阴")
-                || line.contains("雨")
-                || line.contains("雪")
-                || line.contains("多云")
-                || line.contains("雷暴")
-                || line.contains("雾");
-        boolean hasNumber = line.matches(".*\\d+.*");
-        return hasTemperature
-                || (hasWeatherKeyword && hasNumber)
-                || (line.contains(city) && hasTemperature);
-    }
-
-    private boolean isStrongWeatherSignal(String line) {
-        String lower = line.toLowerCase();
-        return line.contains("℃")
-                || lower.contains("°c")
-                || line.matches(".*\\d+\\s*~\\s*\\d+.*")
-                || line.contains("湿度")
-                || line.contains("体感")
-                || line.matches(".*\\d+%.*");
-    }
-
-    private boolean isNoiseLine(String line) {
-        String lower = line.toLowerCase();
-        return lower.equals("all")
-                || lower.equals("images")
-                || lower.equals("videos")
-                || lower.equals("news")
-                || lower.equals("more")
-                || lower.contains("all regions")
-                || lower.contains("duck.ai")
-                || lower.contains("protected")
-                || lower.startsWith("url source:")
-                || lower.startsWith("markdown content:")
-                || lower.startsWith("title:")
-                || lower.startsWith("web_search query=")
-                || lower.startsWith("!image")
-                || lower.startsWith("http://duckduckgo.com")
-                || lower.startsWith("https://duckduckgo.com");
     }
 
     private String resolveCnCityCode(String city) {

@@ -4,6 +4,7 @@ import com.openclaw.common.exception.BusinessException;
 import com.openclaw.service.ai.AiProviderService;
 import com.openclaw.service.skill.impl.BuiltinSkillCatalogService;
 import com.openclaw.service.skill.script.ScriptSkillCatalogService;
+import com.openclaw.service.skill.script.ScriptSkillExecutorService;
 import com.openclaw.service.skill.script.ScriptSkillDefinition;
 import com.openclaw.tool.pack.ExchangeRateToolPack;
 import com.openclaw.tool.pack.NewsToolPack;
@@ -59,12 +60,8 @@ public class LocalSkillFallbackService {
                 exchangeRateToolPack,
                 newsToolPack,
                 scriptSkillToolPack,
-                new BuiltinSkillExecutionService(
-                        new BuiltinSkillCatalogService(),
-                        workspaceSearchToolPack,
-                        scriptSkillToolPack,
-                        scriptSkillCatalogService
-                ),
+                createBuiltinSkillExecutionService(enabled, workspaceSearchToolPack, scriptSkillCatalogService),
+                createScriptSkillExecutorService(enabled, scriptSkillCatalogService),
                 scriptSkillCatalogService,
                 aiProviderService);
     }
@@ -79,6 +76,7 @@ public class LocalSkillFallbackService {
                                      NewsToolPack newsToolPack,
                                      ScriptSkillToolPack scriptSkillToolPack,
                                      BuiltinSkillExecutionService builtinSkillExecutionService,
+                                     ScriptSkillExecutorService scriptSkillExecutorService,
                                      ScriptSkillCatalogService scriptSkillCatalogService,
                                      AiProviderService aiProviderService) {
         this.enabled = enabled;
@@ -90,7 +88,30 @@ public class LocalSkillFallbackService {
         this.scriptSkillToolPack = scriptSkillToolPack;
         this.builtinSkillExecutionService = builtinSkillExecutionService;
         this.modelControlSupport = new LocalSkillModelControlSupport(systemToolPack, aiProviderService);
-        this.querySupport = new LocalSkillQuerySupport(scriptSkillToolPack, scriptSkillCatalogService);
+        this.querySupport = new LocalSkillQuerySupport(scriptSkillExecutorService, scriptSkillCatalogService);
+    }
+
+    private static ScriptSkillExecutorService createScriptSkillExecutorService(boolean enabled,
+                                                                               ScriptSkillCatalogService scriptSkillCatalogService) {
+        return new ScriptSkillExecutorService(
+                enabled,
+                scriptSkillCatalogService,
+                "python3",
+                8,
+                3000,
+                new com.fasterxml.jackson.databind.ObjectMapper()
+        );
+    }
+
+    private static BuiltinSkillExecutionService createBuiltinSkillExecutionService(boolean enabled,
+                                                                                   WorkspaceSearchToolPack workspaceSearchToolPack,
+                                                                                   ScriptSkillCatalogService scriptSkillCatalogService) {
+        return new BuiltinSkillExecutionService(
+                new BuiltinSkillCatalogService(),
+                workspaceSearchToolPack,
+                createScriptSkillExecutorService(enabled, scriptSkillCatalogService),
+                scriptSkillCatalogService
+        );
     }
 
     public Optional<String> tryHandle(String question) {
@@ -102,6 +123,13 @@ public class LocalSkillFallbackService {
             return Optional.empty();
         }
         return modelControlSupport.tryHandleControlPlane(question);
+    }
+
+    public Optional<LocalSkillResult> tryHandlePriorityStructured(String question) {
+        if (!enabled || !StringUtils.hasText(question)) {
+            return Optional.empty();
+        }
+        return builtinSkillExecutionService.tryExecuteHighConfidence(question.trim());
     }
 
     public Optional<LocalSkillResult> tryHandleStructured(String question) {
@@ -163,6 +191,18 @@ public class LocalSkillFallbackService {
             String keyword = querySupport.extractNewsKeyword(q);
             String answer = newsToolPack.searchNews(keyword);
             return localResult("NEWS_SEARCH", answer, answer, true);
+        }
+
+        if (querySupport.looksLikeExplicitWebFetchQuestion(q)) {
+            String answer = querySupport.runScriptSkillByCategory("web", q);
+            if (StringUtils.hasText(answer)) {
+                return localResult("WEB_CRAWL", answer, answer, true);
+            }
+            String target = querySupport.extractFirstUrl(q);
+            String fallback = StringUtils.hasText(target)
+                    ? "未找到可用的网页抓取 Python skill，目标链接: " + target
+                    : "未找到可用的网页抓取 Python skill。";
+            return localResult("WEB_CRAWL", fallback, fallback, false);
         }
 
         if (querySupport.looksLikeWorkspaceQuestion(lower)) {

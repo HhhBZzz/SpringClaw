@@ -2,7 +2,7 @@ package com.openclaw.service.chat;
 
 import com.openclaw.service.skill.SkillDefinition;
 import com.openclaw.service.skill.impl.BuiltinSkillCatalogService;
-import com.openclaw.tool.pack.ScriptSkillToolPack;
+import com.openclaw.service.skill.script.ScriptSkillExecutorService;
 import com.openclaw.tool.pack.WorkspaceSearchToolPack;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -22,11 +22,11 @@ public class BuiltinSkillExecutionService {
 
     public BuiltinSkillExecutionService(BuiltinSkillCatalogService builtinSkillCatalogService,
                                         WorkspaceSearchToolPack workspaceSearchToolPack,
-                                        ScriptSkillToolPack scriptSkillToolPack,
+                                        ScriptSkillExecutorService scriptSkillExecutorService,
                                         com.openclaw.service.skill.script.ScriptSkillCatalogService scriptSkillCatalogService) {
         this.builtinSkillCatalogService = builtinSkillCatalogService;
         this.workspaceSearchToolPack = workspaceSearchToolPack;
-        this.querySupport = new LocalSkillQuerySupport(scriptSkillToolPack, scriptSkillCatalogService);
+        this.querySupport = new LocalSkillQuerySupport(scriptSkillExecutorService, scriptSkillCatalogService);
     }
 
     public Optional<LocalSkillFallbackService.LocalSkillResult> tryExecute(String question) {
@@ -34,9 +34,15 @@ public class BuiltinSkillExecutionService {
                 .flatMap(definition -> execute(definition, question));
     }
 
+    public Optional<LocalSkillFallbackService.LocalSkillResult> tryExecuteHighConfidence(String question) {
+        return builtinSkillCatalogService.matchHighConfidenceDefinition(question)
+                .flatMap(definition -> execute(definition, question));
+    }
+
     private Optional<LocalSkillFallbackService.LocalSkillResult> execute(SkillDefinition definition, String question) {
         return switch (definition.skillId()) {
             case "code-analysis" -> Optional.of(runCodeAnalysis(definition, question));
+            case "web-crawl" -> Optional.of(runWebCrawl(definition, question));
             case "log-diagnostics" -> Optional.of(runLogDiagnostics(definition, question));
             default -> Optional.empty();
         };
@@ -67,6 +73,23 @@ public class BuiltinSkillExecutionService {
         String detail = "skill=%s\n%s".formatted(definition.skillId(), answer);
         return new LocalSkillFallbackService.LocalSkillResult(
                 "BUILTIN_SKILL:LOG_DIAGNOSTICS",
+                detail,
+                answer,
+                true
+        );
+    }
+
+    private LocalSkillFallbackService.LocalSkillResult runWebCrawl(SkillDefinition definition, String question) {
+        String answer = querySupport.runScriptSkillByCategory("web", question);
+        if (!StringUtils.hasText(answer)) {
+            String target = querySupport.extractFirstUrl(question);
+            answer = StringUtils.hasText(target)
+                    ? "未找到可用的网页抓取 Python skill，目标链接: " + target
+                    : "未找到可用的网页抓取 Python skill，请在 skills 目录中提供 web 类 skill。";
+        }
+        String detail = "skill=%s\n%s".formatted(definition.skillId(), answer);
+        return new LocalSkillFallbackService.LocalSkillResult(
+                "BUILTIN_SKILL:WEB_CRAWL",
                 detail,
                 answer,
                 true

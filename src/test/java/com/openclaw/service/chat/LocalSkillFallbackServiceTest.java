@@ -596,6 +596,67 @@ class LocalSkillFallbackServiceTest {
         Assertions.assertTrue(service.tryHandle("Python 和 Java 的区别是什么").isEmpty());
     }
 
+    @Test
+    void shouldUsePythonWebSkillForExplicitWebFetchQuestion() throws Exception {
+        Files.writeString(tempDir.resolve("web_crawler.py"), """
+                import json
+                import sys
+                payload = json.loads(sys.argv[1])
+                print("title=demo")
+                print("url=" + payload.get("goal", ""))
+                """);
+        Files.writeString(tempDir.resolve("web_crawler.skill.json"), """
+                {
+                  "displayName": "网页抓取",
+                  "category": "web",
+                  "tier": "core",
+                  "description": "抓取网页正文",
+                  "inputHint": "goal",
+                  "visibleToAgent": true,
+                  "keywords": ["抓取网页", "读取网页"]
+                }
+                """);
+
+        ScriptSkillCatalogService scriptSkillCatalogService =
+                new ScriptSkillCatalogService(true, tempDir.toString(), "web_crawler", new ObjectMapper());
+        ScriptSkillToolPack scriptSkillToolPack = new ScriptSkillToolPack(
+                true,
+                scriptSkillCatalogService,
+                "python3",
+                5,
+                2000,
+                new ObjectMapper()
+        );
+        LocalSkillFallbackService service = new LocalSkillFallbackService(
+                true,
+                new SystemToolPack(false, "pwd,ls", 5, 2000),
+                new WorkspaceSearchToolPack(
+                        new WorkspaceTaskService(tempDir.toString(), 8, 4, 6, 1200, 512),
+                        tempDir.toString(),
+                        8,
+                        4000,
+                        30,
+                        5000,
+                        512
+                ),
+                new WebSearchToolPack(false, "https://example.com?q={query}", true, 3, 2000),
+                new StubWeatherToolPack(),
+                new ExchangeRateToolPack(false, "https://example.com/{base}", 3),
+                new NewsToolPack(false, "https://example.com/{query}", 5, 3),
+                scriptSkillToolPack,
+                scriptSkillCatalogService,
+                newAiProviderService()
+        );
+
+        LocalSkillFallbackService.LocalSkillResult result =
+                service.tryHandlePriorityStructured("读取这个网页 https://example.com/docs").orElseThrow();
+
+        Assertions.assertEquals("BUILTIN_SKILL:WEB_CRAWL", result.route());
+        Assertions.assertTrue(result.executionDetails().contains("skill=web-crawl"));
+        Assertions.assertTrue(result.fallbackAnswer().contains("title=demo"));
+        Assertions.assertTrue(result.fallbackAnswer().contains("https://example.com/docs"));
+    }
+
     private AiProviderService mockAiProviderService() {
         return newAiProviderService();
     }
@@ -644,7 +705,7 @@ class LocalSkillFallbackServiceTest {
     private static final class StubWeatherToolPack extends WeatherToolPack {
 
         private StubWeatherToolPack() {
-            super(true, "https://example.com/{city}", 3, "https://example.com/{cityCode}", null);
+            super(true, "https://example.com/{city}", 3, "https://example.com/{cityCode}");
         }
 
         @Override

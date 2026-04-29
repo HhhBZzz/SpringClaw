@@ -1,0 +1,320 @@
+package com.springclaw.service.task.executor;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.springclaw.common.exception.BusinessException;
+import com.springclaw.domain.entity.AgentSession;
+import com.springclaw.domain.entity.ScheduledTask;
+import com.springclaw.domain.entity.ScheduledTaskExecution;
+import com.springclaw.dto.chat.ChatRequest;
+import com.springclaw.service.chat.BuiltinSkillExecutionService;
+import com.springclaw.service.chat.LocalSkillFallbackService;
+import com.springclaw.service.chat.impl.ChatServiceImpl;
+import com.springclaw.service.event.MessageEventService;
+import com.springclaw.service.memory.MemoryService;
+import com.springclaw.service.prompt.SoulPromptService;
+import com.springclaw.service.session.AgentSessionService;
+import com.springclaw.service.skill.SkillDefinition;
+import com.springclaw.service.skill.SkillService;
+import com.springclaw.service.skill.impl.SkillRegistryService;
+import com.springclaw.service.skill.script.ScriptSkillExecutorService;
+import com.springclaw.service.task.ScheduledTaskExecutionService;
+import com.springclaw.service.task.ScheduledTaskService;
+import com.springclaw.service.task.TaskExecutionOutcome;
+import com.springclaw.service.task.TaskScheduleSupport;
+import com.springclaw.strategy.channel.model.UnifiedInboundMessage;
+import com.springclaw.strategy.channel.outbound.ChannelOutboundDispatcher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
+@Service
+public class TaskExecutionService {
+
+    private static final Logger log = LoggerFactory.getLogger(TaskExecutionService.class);
+
+    private final ScheduledTaskService scheduledTaskService;
+    private final ScheduledTaskExecutionService scheduledTaskExecutionService;
+    private final TaskScheduleSupport taskScheduleSupport;
+    private final ScriptSkillExecutorService scriptSkillExecutorService;
+    private final BuiltinSkillExecutionService builtinSkillExecutionService;
+    private final SkillRegistryService skillRegistryService;
+    private final SkillService skillService;
+    private final ChatServiceImpl chatService;
+    private final AgentSessionService agentSessionService;
+    private final MemoryService memoryService;
+    private final MessageEventService messageEventService;
+    private final SoulPromptService soulPromptService;
+    private final ChannelOutboundDispatcher channelOutboundDispatcher;
+    private final ObjectMapper objectMapper;
+    private final boolean feishuDeliveryEnabled;
+
+    public TaskExecutionService(ScheduledTaskService scheduledTaskService,
+                                ScheduledTaskExecutionService scheduledTaskExecutionService,
+                                TaskScheduleSupport taskScheduleSupport,
+                                ScriptSkillExecutorService scriptSkillExecutorService,
+                                BuiltinSkillExecutionService builtinSkillExecutionService,
+                                SkillRegistryService skillRegistryService,
+                                SkillService skillService,
+                                ChatServiceImpl chatService,
+                                AgentSessionService agentSessionService,
+                                MemoryService memoryService,
+                                MessageEventService messageEventService,
+                                SoulPromptService soulPromptService,
+                                ChannelOutboundDispatcher channelOutboundDispatcher,
+                                ObjectMapper objectMapper,
+                                @Value("${springclaw.task.delivery.feishu-enabled:true}") boolean feishuDeliveryEnabled) {
+        this.scheduledTaskService = scheduledTaskService;
+        this.scheduledTaskExecutionService = scheduledTaskExecutionService;
+        this.taskScheduleSupport = taskScheduleSupport;
+        this.scriptSkillExecutorService = scriptSkillExecutorService;
+        this.builtinSkillExecutionService = builtinSkillExecutionService;
+        this.skillRegistryService = skillRegistryService;
+        this.skillService = skillService;
+        this.chatService = chatService;
+        this.agentSessionService = agentSessionService;
+        this.memoryService = memoryService;
+        this.messageEventService = messageEventService;
+        this.soulPromptService = soulPromptService;
+        this.channelOutboundDispatcher = channelOutboundDispatcher;
+        this.objectMapper = objectMapper;
+        this.feishuDeliveryEnabled = feishuDeliveryEnabled;
+    }
+
+    public TaskExecutionOutcome runTask(ScheduledTask task, String triggerSource) {
+        LocalDateTime startedAt = LocalDateTime.now();
+        if (!"CRON".equalsIgnoreCase(safe(triggerSource))) {
+            scheduledTaskService.markRunning(task, startedAt, task.getNextRunAt());
+        }
+        String requestId = UUID.randomUUID().toString().replace("-", "");
+        ScheduledTaskExecution execution = scheduledTaskExecutionService.start(task.getTaskId(), triggerSource, requestId);
+        try {
+            TaskExecutionOutcome outcome = switch (normalize(task.getTargetType())) {
+                case "skill" -> executeSkillTask(task, requestId);
+                case "agent" -> executeAgentTask(task);
+                default -> throw new BusinessException(40079, "不支持的任务目标类型: " + task.getTargetType());
+            };
+            if (shouldPersistToSession(task) && !"agent".equalsIgnoreCase(task.getTargetType())) {
+                persistTaskTurn(task, outcome.requestId(), outcome.sessionKey(), renderTaskPrompt(task), outcome.resultPayload());
+            }
+            deliverIfNeeded(task, outcome.resultPayload());
+            scheduledTaskExecutionService.complete(
+                    execution.getExecutionId(),
+                    "SUCCESS",
+                    truncate(outcome.summary(), 300),
+                    truncate(outcome.resultPayload(), 5000),
+                    "",
+                    outcome.requestId(),
+                    outcome.sessionKey(),
+                    LocalDateTime.now()
+            );
+            scheduledTaskService.markFinished(task, "SUCCESS", LocalDateTime.now());
+            return outcome;
+        } catch (Exception ex) {
+            String error = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
+            scheduledTaskExecutionService.complete(
+                    execution.getExecutionId(),
+                    "FAILED",
+                    truncate(error, 300),
+                    "",
+                    truncate(error, 1000),
+                    requestId,
+                    resolveTaskSessionKey(task),
+                    LocalDateTime.now()
+            );
+            scheduledTaskService.markFinished(task, "FAILED", LocalDateTime.now());
+            throw ex;
+        }
+    }
+
+    public int dispatchDueTasks(int limit) {
+        LocalDateTime now = LocalDateTime.now();
+        List<ScheduledTask> dueTasks = scheduledTaskService.listDueTasks(now, limit);
+        int executed = 0;
+        for (ScheduledTask task : dueTasks) {
+            LocalDateTime nextRunAt = taskScheduleSupport.nextRunAt(task.getScheduleType(), task.getScheduleExpression(), now);
+            scheduledTaskService.markRunning(task, now, nextRunAt);
+            try {
+                runTask(task, "CRON");
+            } catch (Exception ex) {
+                log.warn("定时任务执行失败，taskId={}, reason={}", task.getTaskId(), ex.getMessage());
+            }
+            executed++;
+        }
+        return executed;
+    }
+
+    private TaskExecutionOutcome executeSkillTask(ScheduledTask task, String requestId) {
+        String skillId = safe(task.getTargetRef());
+        Set<String> allowedToolPacks = skillService.resolveAllowedToolPacks(task.getChannel(), task.getOwnerUserId());
+        SkillDefinition definition = skillRegistryService.listAgentVisibleDefinitions(allowedToolPacks).stream()
+                .filter(candidate -> skillId.equalsIgnoreCase(candidate.skillId()))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(40362, "当前账号无权执行 skill: " + skillId));
+        String payload = safe(task.getInputPayload());
+        String answer = switch (normalize(definition.executorType())) {
+            case "script" -> runScriptSkill(skillId, payload);
+            case "builtin" -> builtinSkillExecutionService.executeBySkillId(skillId, payload)
+                    .map(LocalSkillFallbackService.LocalSkillResult::fallbackAnswer)
+                    .orElseThrow(() -> new BusinessException(50096, "builtin skill 未返回结果: " + skillId));
+            default -> throw new BusinessException(40080, "该 skill 当前不可直接执行: " + skillId);
+        };
+        return new TaskExecutionOutcome(buildSummary(task, answer), answer, requestId, resolveTaskSessionKey(task));
+    }
+
+    private TaskExecutionOutcome executeAgentTask(ScheduledTask task) {
+        String prompt = resolveAgentPrompt(task.getInputPayload());
+        ChatServiceImpl.TaskChatExecutionResult result = chatService.executeTaskMessage(
+                new ChatRequest(resolveTaskSessionKey(task), task.getOwnerUserId(), prompt, task.getChannel()),
+                shouldPersistToSession(task)
+        );
+        return new TaskExecutionOutcome(buildSummary(task, result.answer()), result.answer(), result.requestId(), result.sessionKey());
+    }
+
+    private void persistTaskTurn(ScheduledTask task, String requestId, String sessionKey, String userMessage, String assistantMessage) {
+        AgentSession session = agentSessionService.getOrCreate(sessionKey, task.getChannel(), task.getOwnerUserId());
+        agentSessionService.persistConversation(session, userMessage, assistantMessage, soulPromptService.soulVersion());
+        memoryService.storeConversationTurn(sessionKey, task.getChannel(), task.getOwnerUserId(), userMessage, assistantMessage);
+        messageEventService.recordTurn(sessionKey, task.getChannel(), task.getOwnerUserId(), userMessage, assistantMessage, "TASK", requestId);
+        messageEventService.recordSingle(
+                sessionKey,
+                task.getChannel(),
+                task.getOwnerUserId(),
+                "SYSTEM",
+                "TASK",
+                "taskId=%s, trigger=%s, target=%s/%s".formatted(task.getTaskId(), "SYSTEM", task.getTargetType(), task.getTargetRef()),
+                requestId
+        );
+    }
+
+    private void deliverIfNeeded(ScheduledTask task, String answer) {
+        if (!feishuDeliveryEnabled) {
+            return;
+        }
+        if (!"FEISHU".equalsIgnoreCase(safe(task.getDeliveryMode()))) {
+            return;
+        }
+        String targetSessionKey = resolveDeliveryTarget(task);
+        if (!StringUtils.hasText(targetSessionKey)) {
+            return;
+        }
+        UnifiedInboundMessage inboundMessage = new UnifiedInboundMessage(
+                safe(task.getChannel(), "feishu"),
+                targetSessionKey,
+                task.getOwnerUserId(),
+                ""
+        );
+        channelOutboundDispatcher.dispatch(safe(task.getChannel(), "feishu"), inboundMessage, Map.of(), truncate(answer, 1800));
+    }
+
+    private String resolveDeliveryTarget(ScheduledTask task) {
+        if (!StringUtils.hasText(task.getDeliveryTarget())) {
+            return "feishu".equalsIgnoreCase(task.getChannel()) && shouldPersistToSession(task)
+                    ? resolveTaskSessionKey(task)
+                    : "";
+        }
+        if ("CURRENT_SESSION".equalsIgnoreCase(task.getDeliveryTarget())) {
+            return resolveTaskSessionKey(task);
+        }
+        return task.getDeliveryTarget().trim();
+    }
+
+    private String runScriptSkill(String skillId, String payload) {
+        String trimmed = payload == null ? "" : payload.trim();
+        if (!StringUtils.hasText(trimmed)) {
+            return scriptSkillExecutorService.runScriptSkillByGoal(skillId, "请执行默认任务");
+        }
+        if (looksLikeJson(trimmed)) {
+            return scriptSkillExecutorService.runScriptSkill(skillId, trimmed);
+        }
+        return scriptSkillExecutorService.runScriptSkillByGoal(skillId, trimmed);
+    }
+
+    private String resolveAgentPrompt(String rawInputPayload) {
+        String payload = safe(rawInputPayload);
+        if (!looksLikeJson(payload)) {
+            return payload;
+        }
+        try {
+            Map<String, Object> parsed = objectMapper.readValue(payload, new TypeReference<>() {
+            });
+            Object message = parsed.get("message");
+            if (message == null) {
+                message = parsed.get("prompt");
+            }
+            if (message == null) {
+                message = parsed.get("goal");
+            }
+            if (message != null && StringUtils.hasText(String.valueOf(message))) {
+                return String.valueOf(message).trim();
+            }
+        } catch (Exception ex) {
+            throw new BusinessException(40081, "Agent 任务 inputPayload JSON 非法: " + ex.getMessage());
+        }
+        throw new BusinessException(40082, "Agent 任务需要 message/prompt/goal 字段");
+    }
+
+    private boolean shouldPersistToSession(ScheduledTask task) {
+        return task.getPersistToSession() != null && task.getPersistToSession() == 1;
+    }
+
+    private String renderTaskPrompt(ScheduledTask task) {
+        return switch (normalize(task.getTargetType())) {
+            case "agent" -> resolveAgentPrompt(task.getInputPayload());
+            case "skill" -> safe(task.getInputPayload(), "执行 skill: " + task.getTargetRef());
+            default -> safe(task.getInputPayload());
+        };
+    }
+
+    private String resolveTaskSessionKey(ScheduledTask task) {
+        String template = safe(task.getSessionKeyTemplate());
+        if (!StringUtils.hasText(template)) {
+            return shouldPersistToSession(task)
+                    ? "task:" + task.getTaskId()
+                    : "task:shadow:" + task.getTaskId();
+        }
+        return template
+                .replace("{taskId}", task.getTaskId())
+                .replace("{ownerUserId}", task.getOwnerUserId())
+                .replace("{date}", LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE))
+                .replace("{channel}", safe(task.getChannel(), "api"));
+    }
+
+    private String buildSummary(ScheduledTask task, String answer) {
+        return "%s 执行完成：%s".formatted(task.getName(), truncate(answer, 120));
+    }
+
+    private boolean looksLikeJson(String text) {
+        return StringUtils.hasText(text) && text.trim().startsWith("{") && text.trim().endsWith("}");
+    }
+
+    private String truncate(String text, int maxLen) {
+        if (!StringUtils.hasText(text)) {
+            return "";
+        }
+        return text.length() <= maxLen ? text : text.substring(0, maxLen) + "...";
+    }
+
+    private String normalize(String value) {
+        return StringUtils.hasText(value) ? value.trim().toLowerCase(Locale.ROOT) : "";
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private String safe(String value, String fallback) {
+        return StringUtils.hasText(value) ? value.trim() : fallback;
+    }
+}

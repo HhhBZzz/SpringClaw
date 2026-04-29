@@ -2,210 +2,223 @@
 
 ## 结论
 
-当前项目新增/删除 `script skill` 已经比较轻：
+当前项目的可执行 skill 已统一到 package 结构：
 
-1. 新增一个技能，通常只要两份文件
-2. 删除一个技能，删掉这两份文件再 reload
-3. 不需要改 `application.yml`
-4. 不需要改 Java 主流程
+1. 一个 skill = 一个目录
+2. 目录里至少有一个 `SKILL.md`
+3. Python 脚本放在 `scripts/run.py`
+4. Java 主链路不再以 `skills/*.py + *.skill.json` 为 canonical 结构
 
-前提是你新增的是“外挂脚本技能”，不是“核心 Java ToolPack”
+现在的标准位置：
 
-## 当前项目里的技能结构
+- `skills/packages/<skillId>/SKILL.md`
+- `skills/packages/<skillId>/scripts/run.py`
 
-项目现在有两层技能：
+## 当前项目里的 skill 层次
 
-1. Java ToolPack
-作用：高频、强确定性、需要稳定控制的能力
-例子：天气、新闻、汇率、系统命令、工作区检索
+项目现在统一按 package skill 管理，主要差别在执行器类型：
 
-2. Script Skill
-作用：外挂、实验性、诊断型、项目分析型能力
-位置：`skills/*.py + skills/*.skill.json`
+1. package builtin skill
+作用：高频、强确定性、平台内建能力
+例子：`code-analysis`、`log-diagnostics`、`web-crawl`
+说明：定义也在 `skills/packages/<skillId>/SKILL.md`，只是执行仍由 Java 内建执行器负责。
 
-Script Skill 由下面两部分组成：
+2. package script skill
+作用：外挂、实验性、诊断型、采集型能力
+位置：`skills/packages/<skillId>/`
+说明：定义在 `SKILL.md`，执行器通常是 Python `scripts/run.py`
 
-1. 目录扫描
-文件：[ScriptSkillCatalogService.java](/Users/hanbingzheng/springclaw/src/main/java/com/openclaw/service/skill/script/ScriptSkillCatalogService.java)
+package script skill 的发现和执行分别由：
 
-2. 受控执行
-文件：[ScriptSkillToolPack.java](/Users/hanbingzheng/springclaw/src/main/java/com/openclaw/tool/pack/ScriptSkillToolPack.java)
+- [ScriptSkillCatalogService.java](/Users/hanbingzheng/springclaw/src/main/java/com/openclaw/service/skill/script/ScriptSkillCatalogService.java)
+- [ScriptSkillExecutorService.java](/Users/hanbingzheng/springclaw/src/main/java/com/openclaw/service/skill/script/ScriptSkillExecutorService.java)
+- [ScriptSkillToolPack.java](/Users/hanbingzheng/springclaw/src/main/java/com/openclaw/tool/pack/ScriptSkillToolPack.java)
 
-## 什么时候用 Script Skill
+Markdown / ClawHub 导入 skill 也统一落到：
 
-优先用 Script Skill 的情况：
+- `skills/packages/<slug>/SKILL.md`
 
-1. 本地诊断
-2. 项目分析
-3. 小型自动化
-4. 试验性能力
-5. 未来可能删掉或替换的功能
+对应服务：
 
-不要先用 Script Skill 的情况：
+- [MarkdownSkillCatalogService.java](/Users/hanbingzheng/springclaw/src/main/java/com/openclaw/service/skill/markdown/MarkdownSkillCatalogService.java)
 
-1. 高频核心功能
-2. 必须稳定命中的控制面
-3. 需要很强权限治理的能力
-4. 需要复杂 Tool 编排的核心链路
+统一 skill 定义聚合在：
 
-这类能力更适合直接写成 Java ToolPack。
+- [BuiltinSkillCatalogService.java](/Users/hanbingzheng/springclaw/src/main/java/com/openclaw/service/skill/impl/BuiltinSkillCatalogService.java)
+- [ScriptSkillCatalogService.java](/Users/hanbingzheng/springclaw/src/main/java/com/openclaw/service/skill/script/ScriptSkillCatalogService.java)
+- [SkillRegistryService.java](/Users/hanbingzheng/springclaw/src/main/java/com/openclaw/service/skill/impl/SkillRegistryService.java)
 
-## 新增一个 Skill
+## package skill 目录结构
 
-### 第一步：复制模板
+最小结构：
+
+```text
+skills/packages/my_skill/
+├── SKILL.md
+└── scripts/
+    └── run.py
+```
+
+可选结构：
+
+```text
+skills/packages/my_skill/
+├── SKILL.md
+├── scripts/
+│   └── run.py
+├── templates/
+├── references/
+└── assets/
+```
 
 模板目录：
 
-- [example_skill.py](/Users/hanbingzheng/springclaw/skills/templates/example_skill.py)
-- [example_skill.skill.json](/Users/hanbingzheng/springclaw/skills/templates/example_skill.skill.json)
+- [SKILL.md](/Users/hanbingzheng/springclaw/skills/templates/package_skill/SKILL.md)
+- [run.py](/Users/hanbingzheng/springclaw/skills/templates/package_skill/scripts/run.py)
 
-复制到 `skills/` 根目录，并改成你的技能名：
+## SKILL.md 里最重要的字段
 
-1. `skills/my_skill.py`
-2. `skills/my_skill.skill.json`
+当前 SpringClaw 认这些字段：
 
-注意：
-
-1. 文件名必须一致
-2. `my_skill.py` 对应 `my_skill.skill.json`
-3. 技能名默认取 `.py` 文件名
-
-### 第二步：填写元数据
-
-`my_skill.skill.json` 里最重要的字段：
-
-1. `displayName`
-用户可读名称
-
-2. `category`
-建议用现有类别之一：
-- `workspace`
-- `runtime`
-- `weather`
-- `debug`
-- `general`
-
-3. `description`
-一句话说清做什么
-
-4. `inputHint`
-告诉模型应该传什么
-
-5. `keywords`
-命中关键词
-
-6. `exampleQuestions`
-示例问法
-
-## Python Skill 的输入输出约定
-
-运行时，Java 会这样调用：
-
-```bash
-python3 skills/my_skill.py '{"goal":"...","workspaceRoot":"...","skillName":"..."}'
+```md
+---
+name: 示例技能
+description: 说明这个 skill 是干什么的
+version: 1.0.0
+metadata:
+  openclaw:
+    springclaw:
+      skillId: example_skill
+      executor:
+        type: python
+        entrypoint: scripts/run.py
+      category: general
+      tier: utility
+      inputHint: 传入 goal
+      priority: 100
+      agentVisible: true
+      toolPacks:
+        - script
+      preferredMode: simplified
+      contextPolicy: session-only
+      triggerKeywords:
+        - 示例技能
+      triggerExamples:
+        - 用 example_skill 做个演示
+---
 ```
 
-你在脚本里应该做的事情：
+最关键的是：
 
-1. 读取 `sys.argv[1]`
-2. 解析 JSON
-3. 从 `goal` 里拿自然语言任务
-4. 输出纯文本结果到 stdout
+1. `skillId`
+2. `executor.type`
+3. `executor.entrypoint`
+4. `category`
+5. `triggerKeywords`
+6. `triggerExamples`
+
+当前支持的执行器类型：
+
+1. `builtin`
+2. `python`
+3. `node`（结构已预留，执行链待补齐）
+4. `prompt`
+
+## Python skill 输入输出约定
+
+运行时会调用：
+
+```bash
+python3 skills/packages/my_skill/scripts/run.py '{"goal":"...","workspaceRoot":"...","skillName":"..."}'
+```
 
 环境变量会提供：
 
 1. `OPENCLAW_WORKSPACE_ROOT`
 2. `OPENCLAW_SCRIPT_ROOT`
-3. `OPENCLAW_SKILL_NAME`
+3. `OPENCLAW_SKILL_ROOT`
+4. `OPENCLAW_SKILL_NAME`
 
 建议输出规则：
 
 1. 先给结论
 2. 再给证据或列表
-3. 纯文本
+3. 输出纯文本
 4. 控制长度
-5. 不要输出交互式提示
+5. 不输出交互式提示
 
-## 让系统识别到新 Skill
+## 新增一个 skill
 
-当前配置已经允许扫描全部脚本技能：
+### 第一步：复制模板
 
-- [application.yml](/Users/hanbingzheng/springclaw/src/main/resources/application.yml#L168)
+复制：
 
-关键配置：
+- [SKILL.md](/Users/hanbingzheng/springclaw/skills/templates/package_skill/SKILL.md)
+- [run.py](/Users/hanbingzheng/springclaw/skills/templates/package_skill/scripts/run.py)
 
-```yaml
-openclaw:
-  tools:
-    script:
-      enabled: true
-      allowed-skills: ${OPENCLAW_SCRIPT_ALLOWED_SKILLS:*}
-```
+到：
 
-也就是说现在默认白名单是 `*`。
+1. `skills/packages/my_skill/SKILL.md`
+2. `skills/packages/my_skill/scripts/run.py`
 
-新增文件后，调用重载接口：
+### 第二步：填写元数据
+
+重点填：
+
+1. `skillId`
+2. `name`
+3. `description`
+4. `category`
+5. `inputHint`
+6. `triggerKeywords`
+7. `triggerExamples`
+
+### 第三步：重载并查看
 
 ```http
 POST /api/admin/manage/script-skills/reload
-```
-
-查看结果：
-
-```http
 GET /api/admin/manage/script-skills
+GET /api/admin/manage/skills/registry
 ```
 
-对应接口：
+## 删除一个 skill
 
-- [AdminManageController.java](/Users/hanbingzheng/springclaw/src/main/java/com/openclaw/controller/ops/AdminManageController.java#L183)
-- [AdminManageController.java](/Users/hanbingzheng/springclaw/src/main/java/com/openclaw/controller/ops/AdminManageController.java#L206)
+删除目录即可：
 
-## 删除一个 Skill
+1. 删除 `skills/packages/my_skill/`
+2. 调一次 reload 接口
 
-删除很直接：
+## 当前配置
 
-1. 删除 `skills/my_skill.py`
-2. 删除 `skills/my_skill.skill.json`
-3. 调一次 reload 接口
+新配置统一到：
 
-如果只是暂时不想让它运行，也可以用白名单控制：
-
-```bash
-OPENCLAW_SCRIPT_ALLOWED_SKILLS=repo_inspector,runtime_probe
+```yaml
+openclaw:
+  skills:
+    enabled: true
+    root: ${user.dir}/skills/packages
+    allowed-skills: "*"
+    runners:
+      python-command: python3
+    execution:
+      timeout-seconds: 8
+      max-output-chars: 3000
 ```
 
-## 当前这套设计的优点
+## 适合放 package skill 的能力
 
-1. 新增快
-2. 风险隔离
-3. 不动主链路
-4. 有元数据，模型和本地规则都能感知
-5. 可热重载
+优先放 package skill 的情况：
 
-## 当前这套设计的边界
+1. 本地诊断
+2. 项目分析
+3. 网页抓取
+4. 数据采集与清洗
+5. 试验性能力
 
-1. 不是完全插件化
-2. 不是所有 skill 都能自动高质量命中
-3. 高频核心能力仍然更适合 Java ToolPack
-4. 复杂控制逻辑不能只靠脚本 skill
+不要先放 package skill 的情况：
 
-## 建议的项目约束
+1. 高频核心控制面
+2. 必须强确定命中的平台能力
+3. 需要复杂权限治理的底座逻辑
 
-以后新增 skill，按这条标准选：
-
-1. 如果是实验性、小工具、诊断、项目分析
-放 `skills/`
-
-2. 如果是核心能力、强确定性、高频控制面
-写成 Java ToolPack
-
-## 最小检查清单
-
-新增 skill 后，至少检查：
-
-1. 文件名是否一致
-2. `.skill.json` 是否合法 JSON
-3. `reload` 后是否出现在 `/api/admin/manage/script-skills`
-4. `goal` 输入是否能正常解析
-5. 输出是否是短而稳定的纯文本
+这些更适合做成 `executor.type=builtin` 的 package skill，或者继续留在底层 ToolPack。

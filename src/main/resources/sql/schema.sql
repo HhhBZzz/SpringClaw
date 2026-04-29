@@ -147,3 +147,57 @@ CREATE TABLE IF NOT EXISTS `llm_usage_record` (
   KEY `idx_llm_usage_user` (`user_id`, `create_time`),
   KEY `idx_llm_usage_provider_model` (`provider_id`, `model`, `create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `scheduled_task` (
+  `id` BIGINT NOT NULL,
+  `task_id` VARCHAR(64) NOT NULL,
+  `owner_user_id` VARCHAR(64) NOT NULL,
+  `name` VARCHAR(128) NOT NULL,
+  `enabled` TINYINT NOT NULL DEFAULT 1,
+  `schedule_type` VARCHAR(16) NOT NULL,
+  `schedule_expression` VARCHAR(128) NOT NULL,
+  `target_type` VARCHAR(16) NOT NULL,
+  `target_ref` VARCHAR(128) NOT NULL,
+  `input_payload` TEXT NULL,
+  `channel` VARCHAR(32) NOT NULL DEFAULT 'api',
+  `delivery_mode` VARCHAR(32) NOT NULL DEFAULT 'NONE',
+  `delivery_target` VARCHAR(255) NULL,
+  `persist_to_session` TINYINT NOT NULL DEFAULT 0,
+  `session_key_template` VARCHAR(255) NULL,
+  `last_run_at` DATETIME NULL,
+  `next_run_at` DATETIME NULL,
+  `last_status` VARCHAR(32) NOT NULL DEFAULT 'READY',
+  `create_time` DATETIME NOT NULL,
+  `update_time` DATETIME NOT NULL,
+  `create_by` VARCHAR(64) NULL,
+  `update_by` VARCHAR(64) NULL,
+  `deleted` TINYINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_scheduled_task_task_id` (`task_id`),
+  KEY `idx_scheduled_task_owner` (`owner_user_id`, `enabled`, `update_time`),
+  KEY `idx_scheduled_task_due` (`enabled`, `next_run_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `scheduled_task_execution` (
+  `id` BIGINT NOT NULL,
+  `execution_id` VARCHAR(64) NOT NULL,
+  `task_id` VARCHAR(64) NOT NULL,
+  `trigger_source` VARCHAR(16) NOT NULL,
+  `started_at` DATETIME NOT NULL,
+  `finished_at` DATETIME NULL,
+  `status` VARCHAR(32) NOT NULL,
+  `summary` VARCHAR(512) NULL,
+  `result_payload` TEXT NULL,
+  `error_message` VARCHAR(1024) NULL,
+  `request_id` VARCHAR(64) NULL,
+  `session_key` VARCHAR(128) NULL,
+  `create_time` DATETIME NOT NULL,
+  `update_time` DATETIME NOT NULL,
+  `create_by` VARCHAR(64) NULL,
+  `update_by` VARCHAR(64) NULL,
+  `deleted` TINYINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_scheduled_task_execution_execution_id` (`execution_id`),
+  KEY `idx_scheduled_task_execution_task` (`task_id`, `started_at`),
+  KEY `idx_scheduled_task_execution_request` (`request_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

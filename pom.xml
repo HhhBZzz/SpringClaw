@@ -11,11 +11,11 @@
         <relativePath/>
     </parent>
 
-    <groupId>com.openclaw</groupId>
-    <artifactId>openclaw-java</artifactId>
+    <groupId>com.springclaw</groupId>
+    <artifactId>springclaw</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>openclaw-java</name>
-    <description>OpenClaw Java Rewrite - Stage 1</description>
+    <name>springclaw</name>
+    <description>SpringClaw - Enterprise AI Agent Backend</description>
 
     <properties>
         <java.version>17</java.version>
@@ -152,7 +152,7 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>com.openclaw.OpenClawJavaApplication</mainClass>
+                    <mainClass>com.springclaw.SpringClawApplication</mainClass>
                 </configuration>
             </plugin>
         </plugins>

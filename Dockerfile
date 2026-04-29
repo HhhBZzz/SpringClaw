@@ -15,7 +15,7 @@ WORKDIR /app
 ENV TZ=Asia/Shanghai
 ENV SERVER_PORT=18080
 
-COPY --from=builder /app/target/openclaw-java-0.0.1-SNAPSHOT.jar ./app.jar
+COPY --from=builder /app/target/springclaw-java-0.0.1-SNAPSHOT.jar ./app.jar
 COPY --from=builder /app/skills ./skills
 COPY --from=builder /app/SOUL.md ./SOUL.md
 

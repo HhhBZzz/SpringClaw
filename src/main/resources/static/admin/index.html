@@ -747,6 +747,158 @@
     <section class="panel">
       <div class="panel-head">
         <div>
+          <h3>定时任务</h3>
+          <p class="panel-note">这里管理任务底座。任务可以定时执行某个 skill，也可以定时发一条完整 Agent prompt；执行记录默认独立归档，可选写回会话或投递到飞书。</p>
+        </div>
+        <div class="actions">
+          <button class="btn-secondary" id="loadTaskSummaryBtn">刷新汇总</button>
+          <button class="btn-primary" id="listTasksBtn">刷新任务</button>
+        </div>
+      </div>
+
+      <div class="metrics" id="taskMetrics">
+        <div class="metric"><label>Total</label><strong>-</strong><span>任务总数</span></div>
+        <div class="metric"><label>Enabled</label><strong>-</strong><span>已启用任务</span></div>
+        <div class="metric"><label>Disabled</label><strong>-</strong><span>已停用任务</span></div>
+        <div class="metric"><label>Latest</label><strong>-</strong><span>最近一次状态</span></div>
+      </div>
+
+      <div class="grid" style="margin-top: 14px;">
+        <div class="stack">
+          <div class="panel-head" style="padding-bottom: 0;">
+            <div>
+              <h3 style="font-size: 18px;">手动创建</h3>
+              <p class="panel-note">适合直接按字段配置。`targetType=skill` 时填 skillId；`targetType=agent` 时 `targetRef` 固定填 `prompt`，正文写在 `inputPayload`。</p>
+            </div>
+          </div>
+          <div class="fields-3">
+            <div class="field">
+              <label for="taskName">任务名</label>
+              <input id="taskName" placeholder="如 每日官网抓取" />
+            </div>
+            <div class="field">
+              <label for="taskScheduleType">调度类型</label>
+              <select id="taskScheduleType">
+                <option value="preset">preset</option>
+                <option value="cron">cron</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="taskScheduleExpression">调度表达式</label>
+              <input id="taskScheduleExpression" placeholder="如 DAILY@09:00 或 0 0 9 * * ?" />
+            </div>
+          </div>
+          <div class="fields-3" style="margin-top: 12px;">
+            <div class="field">
+              <label for="taskTargetType">执行目标</label>
+              <select id="taskTargetType">
+                <option value="skill">skill</option>
+                <option value="agent">agent</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="taskTargetRef">targetRef</label>
+              <input id="taskTargetRef" placeholder="如 web_crawler / prompt" />
+            </div>
+            <div class="field">
+              <label for="taskChannel">channel</label>
+              <select id="taskChannel">
+                <option value="feishu">feishu</option>
+                <option value="api">api</option>
+              </select>
+            </div>
+          </div>
+          <div class="fields-3" style="margin-top: 12px;">
+            <div class="field">
+              <label for="taskDeliveryMode">投递方式</label>
+              <select id="taskDeliveryMode">
+                <option value="NONE">NONE</option>
+                <option value="FEISHU">FEISHU</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="taskDeliveryTarget">deliveryTarget</label>
+              <input id="taskDeliveryTarget" placeholder="可空；飞书时可填 sessionKey" />
+            </div>
+            <div class="field">
+              <label for="taskPersistToSession">写回会话</label>
+              <select id="taskPersistToSession">
+                <option value="false">false</option>
+                <option value="true">true</option>
+              </select>
+            </div>
+          </div>
+          <div class="fields-3" style="margin-top: 12px;">
+            <div class="field">
+              <label for="taskEnabled">启用状态</label>
+              <select id="taskEnabled">
+                <option value="true">true</option>
+                <option value="false">false</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="taskSessionKeyTemplate">sessionKeyTemplate</label>
+              <input id="taskSessionKeyTemplate" placeholder="可空，如 task:{taskId}" />
+            </div>
+            <div class="field">
+              <label>说明</label>
+              <div class="helper">如果你只是想跑一个普通 Agent 问句，推荐 `targetType=agent` + `targetRef=prompt`。</div>
+            </div>
+          </div>
+          <div class="field" style="margin-top: 12px;">
+            <label for="taskInputPayload">inputPayload</label>
+            <textarea id="taskInputPayload" rows="4" placeholder="skill 的输入文本，或 agent 的完整任务 prompt"></textarea>
+          </div>
+          <div class="button-row" style="margin-top: 12px;">
+            <button class="btn-primary" id="createTaskBtn">创建任务</button>
+            <button class="btn-secondary" id="resetTaskFormBtn">清空表单</button>
+          </div>
+          <div class="output" id="taskActionOut" style="margin-top: 14px;">等待创建或操作</div>
+        </div>
+
+        <div class="stack">
+          <div class="panel-head" style="padding-bottom: 0;">
+            <div>
+              <h3 style="font-size: 18px;">聊天草稿</h3>
+              <p class="panel-note">先让后端把自然语言解析成任务草稿；确认后才真正落库。适合模拟飞书里的“每天 9 点帮我抓网页”这类交互。</p>
+            </div>
+          </div>
+          <div class="fields-3">
+            <div class="field">
+              <label for="taskDraftChannel">channel</label>
+              <select id="taskDraftChannel">
+                <option value="feishu">feishu</option>
+                <option value="api">api</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="taskDraftSessionKey">currentSessionKey</label>
+              <input id="taskDraftSessionKey" placeholder="可空；投递到当前会话时有用" />
+            </div>
+            <div class="field">
+              <label>示例</label>
+              <div class="helper">比如：每天 9 点帮我抓取这个网页 https://example.com 并发到飞书</div>
+            </div>
+          </div>
+          <div class="field" style="margin-top: 12px;">
+            <label for="taskDraftMessage">自然语言</label>
+            <textarea id="taskDraftMessage" rows="4" placeholder="如 每天 9 点帮我抓取这个网页 https://example.com 并发到飞书"></textarea>
+          </div>
+          <div class="button-row" style="margin-top: 12px;">
+            <button class="btn-primary" id="parseTaskDraftBtn">解析草稿</button>
+            <button class="btn-secondary" id="confirmTaskDraftBtn">确认创建</button>
+          </div>
+          <div class="output" id="taskDraftOut" style="margin-top: 14px;">等待解析</div>
+        </div>
+      </div>
+
+      <div class="table-shell" id="tasksTableWrap" style="margin-top: 14px;"></div>
+      <div class="table-shell" id="taskExecutionsTableWrap" style="margin-top: 14px;"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
           <h3>模型用量</h3>
           <p class="panel-note">按用户、provider、model 和调用阶段统计模型用量。这里看的是真实模型调用 usage，不是登录 token。</p>
         </div>
@@ -912,7 +1064,7 @@
 
   <script>
     const state = {
-      token: localStorage.getItem("openclaw.admin.token") || "",
+      token: localStorage.getItem("springclaw.admin.token") || "",
       me: null,
       bootstrap: null,
       overview: null,
@@ -925,6 +1077,12 @@
       rabbit: null,
       chatRouting: null,
       runtimeSkills: null,
+      taskSummary: null,
+      tasks: [],
+      selectedTaskId: "",
+      taskExecutions: [],
+      taskDraft: null,
+      editingTaskId: "",
     };
 
     const nodes = {
@@ -946,6 +1104,11 @@
       skillMetrics: document.getElementById("skillMetrics"),
       skillImportOut: document.getElementById("skillImportOut"),
       runtimeSkillsTableWrap: document.getElementById("runtimeSkillsTableWrap"),
+      taskMetrics: document.getElementById("taskMetrics"),
+      taskActionOut: document.getElementById("taskActionOut"),
+      taskDraftOut: document.getElementById("taskDraftOut"),
+      tasksTableWrap: document.getElementById("tasksTableWrap"),
+      taskExecutionsTableWrap: document.getElementById("taskExecutionsTableWrap"),
       usageMetrics: document.getElementById("usageMetrics"),
       usageSummaryOut: document.getElementById("usageSummaryOut"),
       usageTableWrap: document.getElementById("usageTableWrap"),
@@ -991,9 +1154,9 @@
     function setToken(token) {
       state.token = token || "";
       if (state.token) {
-        localStorage.setItem("openclaw.admin.token", state.token);
+        localStorage.setItem("springclaw.admin.token", state.token);
       } else {
-        localStorage.removeItem("openclaw.admin.token");
+        localStorage.removeItem("springclaw.admin.token");
       }
       nodes.tokenValue.textContent = state.token || "未保存";
     }
@@ -1009,7 +1172,7 @@
 
     function setAdminUiEnabled(enabled) {
       document.querySelectorAll(
-        "#refreshAllBtn, #listUsersBtn, #createUserBtn, #loadModelsBtn, #loadUsageBtn, #loadHealthBtn, #loadCacheBtn, #loadRabbitBtn, #loadMemoryStatusBtn, #searchMemoryBtn, #listPermissionsBtn, #savePermissionBtn, #listPoliciesBtn, #savePolicyBtn, #auditStatsBtn, #auditLogsBtn, #saveChatRoutingBtn, #loadChatRoutingBtn, #usersTableWrap button, #providerGrid button"
+        "#refreshAllBtn, #listUsersBtn, #createUserBtn, #loadModelsBtn, #loadUsageBtn, #loadHealthBtn, #loadCacheBtn, #loadRabbitBtn, #loadMemoryStatusBtn, #searchMemoryBtn, #listPermissionsBtn, #savePermissionBtn, #listPoliciesBtn, #savePolicyBtn, #auditStatsBtn, #auditLogsBtn, #saveChatRoutingBtn, #loadChatRoutingBtn, #loadTaskSummaryBtn, #listTasksBtn, #createTaskBtn, #resetTaskFormBtn, #parseTaskDraftBtn, #confirmTaskDraftBtn, #usersTableWrap button, #providerGrid button, #tasksTableWrap button"
       ).forEach((node) => {
         node.disabled = !enabled;
       });
@@ -1269,6 +1432,208 @@
       `;
     }
 
+    function formatDateTime(value) {
+      if (!value) return "-";
+      const normalized = typeof value === "string" ? value.replace(" ", "T") : value;
+      const date = new Date(normalized);
+      if (Number.isNaN(date.getTime())) {
+        return String(value);
+      }
+      return date.toLocaleString("zh-CN", { hour12: false });
+    }
+
+    function renderTaskSummary(payload) {
+      state.taskSummary = payload || null;
+      const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
+      const latest = tasks.length ? (tasks[0].lastStatus || "未执行") : "暂无任务";
+      nodes.taskMetrics.innerHTML = `
+        <div class="metric">
+          <label>Total</label>
+          <strong>${escapeHtml(payload?.total ?? 0)}</strong>
+          <span>任务总数</span>
+        </div>
+        <div class="metric">
+          <label>Enabled</label>
+          <strong>${escapeHtml(payload?.enabled ?? 0)}</strong>
+          <span>已启用任务</span>
+        </div>
+        <div class="metric">
+          <label>Disabled</label>
+          <strong>${escapeHtml(payload?.disabled ?? 0)}</strong>
+          <span>已停用任务</span>
+        </div>
+        <div class="metric">
+          <label>Latest</label>
+          <strong>${escapeHtml(latest)}</strong>
+          <span>最近一条任务状态</span>
+        </div>
+      `;
+    }
+
+    function getTaskSaveButton() {
+      return document.getElementById("createTaskBtn");
+    }
+
+    function readTaskRowEnabled(task) {
+      return task?.enabled === null || task?.enabled === undefined || Number(task.enabled) === 1;
+    }
+
+    function clearTaskForm(message) {
+      state.editingTaskId = "";
+      document.getElementById("taskName").value = "";
+      document.getElementById("taskScheduleType").value = "preset";
+      document.getElementById("taskScheduleExpression").value = "";
+      document.getElementById("taskTargetType").value = "skill";
+      document.getElementById("taskTargetRef").value = "";
+      document.getElementById("taskChannel").value = "feishu";
+      document.getElementById("taskDeliveryMode").value = "NONE";
+      document.getElementById("taskDeliveryTarget").value = "";
+      document.getElementById("taskPersistToSession").value = "false";
+      document.getElementById("taskEnabled").value = "true";
+      document.getElementById("taskSessionKeyTemplate").value = "";
+      document.getElementById("taskInputPayload").value = "";
+      getTaskSaveButton().textContent = "创建任务";
+      if (message) {
+        renderOutput(nodes.taskActionOut, { message });
+      }
+    }
+
+    function populateTaskForm(task) {
+      if (!task?.taskId) return;
+      state.editingTaskId = task.taskId;
+      document.getElementById("taskName").value = task.name || "";
+      document.getElementById("taskScheduleType").value = task.scheduleType || "preset";
+      document.getElementById("taskScheduleExpression").value = task.scheduleExpression || "";
+      document.getElementById("taskTargetType").value = task.targetType || "skill";
+      document.getElementById("taskTargetRef").value = task.targetRef || "";
+      document.getElementById("taskChannel").value = task.channel || "api";
+      document.getElementById("taskDeliveryMode").value = task.deliveryMode || "NONE";
+      document.getElementById("taskDeliveryTarget").value = task.deliveryTarget || "";
+      document.getElementById("taskPersistToSession").value = Number(task.persistToSession || 0) === 1 ? "true" : "false";
+      document.getElementById("taskEnabled").value = readTaskRowEnabled(task) ? "true" : "false";
+      document.getElementById("taskSessionKeyTemplate").value = task.sessionKeyTemplate || "";
+      document.getElementById("taskInputPayload").value = task.inputPayload || "";
+      getTaskSaveButton().textContent = "保存修改";
+      renderOutput(nodes.taskActionOut, {
+        message: "已加载任务到表单，保存后会调用更新接口。",
+        taskId: task.taskId,
+      });
+    }
+
+    function renderTasksTable(rows) {
+      state.tasks = Array.isArray(rows) ? rows : [];
+      if (!state.tasks.length) {
+        nodes.tasksTableWrap.innerHTML = '<div class="quick-card"><h4>暂无定时任务</h4><div class="muted">先在上面创建任务，或者用聊天草稿解析一条自然语言任务。</div></div>';
+        return;
+      }
+      nodes.tasksTableWrap.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>TaskId</th>
+              <th>Schedule</th>
+              <th>Target</th>
+              <th>Delivery</th>
+              <th>Status</th>
+              <th>Next Run</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${state.tasks.map((row) => `
+              <tr>
+                <td>
+                  <strong>${escapeHtml(row.name || "-")}</strong>
+                  <div class="row-sub">owner ${escapeHtml(row.ownerUserId || "-")}</div>
+                </td>
+                <td><code>${escapeHtml(row.taskId || "-")}</code></td>
+                <td>
+                  <div>${escapeHtml(row.scheduleType || "-")}</div>
+                  <div class="row-sub">${escapeHtml(row.scheduleExpression || "-")}</div>
+                </td>
+                <td>
+                  <div>${escapeHtml(row.targetType || "-")}</div>
+                  <div class="row-sub">${escapeHtml(row.targetRef || "-")}</div>
+                </td>
+                <td>
+                  <div>${escapeHtml(row.deliveryMode || "NONE")}</div>
+                  <div class="row-sub">${escapeHtml(row.deliveryTarget || "-")}</div>
+                </td>
+                <td>
+                  <span class="status-pill ${(row.enabled === 1 || row.enabled === null) ? "" : "warn"}">${(row.enabled === 1 || row.enabled === null) ? "ENABLED" : "DISABLED"}</span>
+                  <div class="row-sub">${escapeHtml(row.lastStatus || "未执行")}</div>
+                </td>
+                <td>${escapeHtml(formatDateTime(row.nextRunAt))}</td>
+                <td>
+                  <div class="role-actions">
+                    <button class="btn-primary btn-tiny js-task-run" data-task-id="${escapeHtml(row.taskId || "")}">执行</button>
+                    <button class="btn-secondary btn-tiny js-task-edit" data-task-id="${escapeHtml(row.taskId || "")}">编辑</button>
+                    <button class="btn-secondary btn-tiny js-task-toggle" data-task-id="${escapeHtml(row.taskId || "")}" data-enabled="${(row.enabled === 1 || row.enabled === null) ? "true" : "false"}">${(row.enabled === 1 || row.enabled === null) ? "停用" : "启用"}</button>
+                    <button class="btn-secondary btn-tiny js-task-executions" data-task-id="${escapeHtml(row.taskId || "")}">日志</button>
+                    <button class="btn-danger btn-tiny js-task-delete" data-task-id="${escapeHtml(row.taskId || "")}" data-task-name="${escapeHtml(row.name || "")}">删除</button>
+                  </div>
+                </td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      `;
+    }
+
+    function renderTaskExecutions(rows, taskId) {
+      state.taskExecutions = Array.isArray(rows) ? rows : [];
+      state.selectedTaskId = taskId || "";
+      if (!state.taskExecutions.length) {
+        nodes.taskExecutionsTableWrap.innerHTML = '<div class="quick-card"><h4>暂无执行记录</h4><div class="muted">先手动执行一次，或者等调度器触发。</div></div>';
+        return;
+      }
+      nodes.taskExecutionsTableWrap.innerHTML = `
+        <div class="panel-head" style="padding: 0 0 12px 0;">
+          <div>
+            <h3 style="font-size: 18px;">执行记录：${escapeHtml(taskId || "-")}</h3>
+            <p class="panel-note">这里展示最近的任务执行结果，包括 skill/agent 的摘要、requestId 和可选 sessionKey。</p>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>ExecutionId</th>
+              <th>Trigger</th>
+              <th>Status</th>
+              <th>Started</th>
+              <th>Finished</th>
+              <th>Summary</th>
+              <th>Error</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${state.taskExecutions.map((row) => `
+              <tr>
+                <td>
+                  <code>${escapeHtml(row.executionId || "-")}</code>
+                  <div class="row-sub">request ${escapeHtml(row.requestId || "-")}</div>
+                  <div class="row-sub">session ${escapeHtml(row.sessionKey || "-")}</div>
+                </td>
+                <td>${escapeHtml(row.triggerSource || "-")}</td>
+                <td><span class="status-pill ${String(row.status || "").toUpperCase() === "SUCCESS" ? "" : "warn"}">${escapeHtml(row.status || "-")}</span></td>
+                <td>${escapeHtml(formatDateTime(row.startedAt))}</td>
+                <td>${escapeHtml(formatDateTime(row.finishedAt))}</td>
+                <td>
+                  <div>${escapeHtml(row.summary || "-")}</div>
+                  <details style="margin-top: 6px;">
+                    <summary>resultPayload</summary>
+                    <pre>${escapeHtml(row.resultPayload || "-")}</pre>
+                  </details>
+                </td>
+                <td>${escapeHtml(row.errorMessage || "-")}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      `;
+    }
+
     async function loadOverview() {
       state.overview = await api("/api/admin/manage/dashboard");
       state.usageSummary = state.overview.llmUsage || state.usageSummary;
@@ -1365,6 +1730,151 @@
     async function loadSkillRegistry() {
       state.runtimeSkills = await api("/api/admin/manage/skills/registry");
       renderRuntimeSkills(state.runtimeSkills || {});
+    }
+
+    async function loadTaskSummary() {
+      const data = await api("/api/tasks/summary?limit=20");
+      renderTaskSummary(data || {});
+    }
+
+    async function loadTasks() {
+      const rows = await api("/api/tasks?limit=50");
+      renderTasksTable(rows || []);
+      if (state.taskSummary) {
+        renderTaskSummary({ ...state.taskSummary, tasks: rows || [], total: rows?.length ?? state.taskSummary.total });
+      }
+    }
+
+    function collectTaskForm() {
+      return {
+        name: document.getElementById("taskName").value.trim(),
+        enabled: document.getElementById("taskEnabled").value === "true",
+        scheduleType: document.getElementById("taskScheduleType").value,
+        scheduleExpression: document.getElementById("taskScheduleExpression").value.trim(),
+        targetType: document.getElementById("taskTargetType").value,
+        targetRef: document.getElementById("taskTargetRef").value.trim(),
+        inputPayload: document.getElementById("taskInputPayload").value.trim(),
+        channel: document.getElementById("taskChannel").value,
+        deliveryMode: document.getElementById("taskDeliveryMode").value,
+        deliveryTarget: document.getElementById("taskDeliveryTarget").value.trim(),
+        persistToSession: document.getElementById("taskPersistToSession").value === "true",
+        sessionKeyTemplate: document.getElementById("taskSessionKeyTemplate").value.trim(),
+      };
+    }
+
+    async function createTask() {
+      try {
+        const method = state.editingTaskId ? "PUT" : "POST";
+        const url = state.editingTaskId
+          ? `/api/tasks/${encodeURIComponent(state.editingTaskId)}`
+          : "/api/tasks";
+        const data = await api(url, {
+          method,
+          body: collectTaskForm(),
+        });
+        renderOutput(nodes.taskActionOut, data);
+        clearTaskForm(state.editingTaskId ? "任务已更新。" : "任务已创建。");
+        await Promise.allSettled([loadTaskSummary(), loadTasks()]);
+      } catch (error) {
+        renderOutput(nodes.taskActionOut, { error: error.message });
+      }
+    }
+
+    async function runTask(taskId) {
+      try {
+        const data = await api(`/api/tasks/${encodeURIComponent(taskId)}/run`, {
+          method: "POST",
+        });
+        renderOutput(nodes.taskActionOut, data);
+        await Promise.allSettled([loadTaskSummary(), loadTasks(), loadTaskExecutions(taskId)]);
+      } catch (error) {
+        renderOutput(nodes.taskActionOut, { error: error.message, taskId });
+      }
+    }
+
+    async function toggleTask(taskId, enabled) {
+      const path = enabled ? "disable" : "enable";
+      try {
+        const data = await api(`/api/tasks/${encodeURIComponent(taskId)}/${path}`, {
+          method: "POST",
+        });
+        renderOutput(nodes.taskActionOut, data);
+        await Promise.allSettled([loadTaskSummary(), loadTasks(), state.selectedTaskId === taskId ? loadTaskExecutions(taskId) : Promise.resolve()]);
+      } catch (error) {
+        renderOutput(nodes.taskActionOut, { error: error.message, taskId, action: path });
+      }
+    }
+
+    async function deleteTask(taskId, taskName) {
+      const label = taskName || taskId || "该任务";
+      if (!window.confirm(`确认删除任务「${label}」吗？这会同时删除它的执行记录。`)) {
+        return;
+      }
+      try {
+        const data = await api(`/api/tasks/${encodeURIComponent(taskId)}`, {
+          method: "DELETE",
+        });
+        renderOutput(nodes.taskActionOut, data ?? { message: `任务「${label}」已删除。`, taskId });
+        if (state.editingTaskId === taskId) {
+          clearTaskForm("已删除当前编辑中的任务，表单已重置。");
+        }
+        if (state.selectedTaskId === taskId) {
+          state.selectedTaskId = "";
+          state.taskExecutions = [];
+          nodes.taskExecutionsTableWrap.innerHTML = '<div class="quick-card"><h4>暂无执行记录</h4><div class="muted">任务已删除，执行记录视图已清空。</div></div>';
+        }
+        await Promise.allSettled([loadTaskSummary(), loadTasks()]);
+      } catch (error) {
+        renderOutput(nodes.taskActionOut, { error: error.message, taskId, action: "delete" });
+      }
+    }
+
+    async function loadTaskExecutions(taskId) {
+      try {
+        const rows = await api(`/api/tasks/${encodeURIComponent(taskId)}/executions?limit=20`);
+        renderTaskExecutions(rows || [], taskId);
+      } catch (error) {
+        renderOutput(nodes.taskExecutionsTableWrap, { error: error.message, taskId });
+      }
+    }
+
+    async function parseTaskDraft() {
+      try {
+        const data = await api("/api/tasks/drafts/parse", {
+          method: "POST",
+          body: {
+            message: document.getElementById("taskDraftMessage").value.trim(),
+            channel: document.getElementById("taskDraftChannel").value,
+            currentSessionKey: document.getElementById("taskDraftSessionKey").value.trim(),
+          },
+        });
+        state.taskDraft = data;
+        renderOutput(nodes.taskDraftOut, data);
+      } catch (error) {
+        state.taskDraft = null;
+        renderOutput(nodes.taskDraftOut, { error: error.message });
+      }
+    }
+
+    async function confirmTaskDraft() {
+      if (!state.taskDraft) {
+        renderOutput(nodes.taskDraftOut, { error: "请先解析草稿。" });
+        return;
+      }
+      try {
+        const data = await api("/api/tasks/drafts/confirm", {
+          method: "POST",
+          body: {
+            draft: state.taskDraft,
+            currentSessionKey: document.getElementById("taskDraftSessionKey").value.trim(),
+          },
+        });
+        renderOutput(nodes.taskDraftOut, data);
+        state.taskDraft = null;
+        await Promise.allSettled([loadTaskSummary(), loadTasks()]);
+      } catch (error) {
+        renderOutput(nodes.taskDraftOut, { error: error.message });
+      }
     }
 
     async function importMarkdownSkill() {
@@ -1757,6 +2267,8 @@
         loadCacheStats(),
         loadRabbitStats(),
         loadSkillRegistry(),
+        loadTaskSummary(),
+        loadTasks(),
         listUsers(),
         listPermissions(),
         listPolicies(),
@@ -1786,6 +2298,12 @@
       document.getElementById("loadModelsBtn").addEventListener("click", loadModels);
       document.getElementById("loadSkillRegistryBtn").addEventListener("click", loadSkillRegistry);
       document.getElementById("importMarkdownSkillBtn").addEventListener("click", importMarkdownSkill);
+      document.getElementById("loadTaskSummaryBtn").addEventListener("click", loadTaskSummary);
+      document.getElementById("listTasksBtn").addEventListener("click", loadTasks);
+      document.getElementById("createTaskBtn").addEventListener("click", createTask);
+      document.getElementById("resetTaskFormBtn").addEventListener("click", () => clearTaskForm("已清空任务表单。"));
+      document.getElementById("parseTaskDraftBtn").addEventListener("click", parseTaskDraft);
+      document.getElementById("confirmTaskDraftBtn").addEventListener("click", confirmTaskDraft);
       document.getElementById("saveChatRoutingBtn").addEventListener("click", saveChatRouting);
       document.getElementById("loadChatRoutingBtn").addEventListener("click", loadChatRouting);
       document.getElementById("loadUsageBtn").addEventListener("click", loadUsage);
@@ -1818,6 +2336,34 @@
           switchProvider(modelButton.dataset.provider || "", modelButton.dataset.model || "");
         }
       });
+
+      nodes.tasksTableWrap.addEventListener("click", (event) => {
+        const runButton = event.target.closest(".js-task-run");
+        if (runButton) {
+          runTask(runButton.dataset.taskId || "");
+          return;
+        }
+        const editButton = event.target.closest(".js-task-edit");
+        if (editButton) {
+          const task = state.tasks.find((item) => item.taskId === (editButton.dataset.taskId || ""));
+          populateTaskForm(task);
+          return;
+        }
+        const toggleButton = event.target.closest(".js-task-toggle");
+        if (toggleButton) {
+          toggleTask(toggleButton.dataset.taskId || "", toggleButton.dataset.enabled === "true");
+          return;
+        }
+        const executionButton = event.target.closest(".js-task-executions");
+        if (executionButton) {
+          loadTaskExecutions(executionButton.dataset.taskId || "");
+          return;
+        }
+        const deleteButton = event.target.closest(".js-task-delete");
+        if (deleteButton) {
+          deleteTask(deleteButton.dataset.taskId || "", deleteButton.dataset.taskName || "");
+        }
+      });
     }
 
     async function bootstrap() {
@@ -1828,6 +2374,7 @@
       renderUsageSummary({});
       renderUsageTable([]);
       renderRuntimeSkills({});
+      clearTaskForm();
       renderQuickCards();
       renderOpsCards();
       await loadBootstrapStatus();

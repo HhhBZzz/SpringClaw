@@ -20,5 +20,5 @@ docs/PROJECT_MEMORY.md
 # Logs
 *.log
 
-# Runtime-imported markdown skills
-skills/markdown-imports/
+# Browser automation artifacts
+.playwright-cli/

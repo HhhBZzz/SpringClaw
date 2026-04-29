@@ -1,0 +1,140 @@
+package com.springclaw.service.chat.impl;
+
+import com.springclaw.domain.entity.AgentSession;
+import com.springclaw.dto.chat.ChatRequest;
+import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.context.AssembledContext;
+import com.springclaw.service.guard.ChatGuardService;
+import com.springclaw.service.usage.LlmUsageRecordService;
+import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.client.ChatClient;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+class ChatServiceImplModeTest {
+
+    @Test
+    void shouldDefaultToSimplifiedWhenModeIsUnknown() {
+        Fixture fixture = new Fixture();
+        ChatContext context = fixture.buildChatContext("你好", "simplified", "默认");
+        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(fixture.simplifiedOparEngine.run(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any()))
+                .thenReturn(new ChatExecutionResult("observe", "SIMPLIFIED", "ACTION", "answer", true));
+
+        ChatServiceImpl service = fixture.build();
+        service.chat(new ChatRequest("s1", "u1", "你好", "api"));
+
+        verify(fixture.simplifiedOparEngine).run(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any());
+        verify(fixture.oparLoopEngine, never()).runLoop(any(), anyString(), any(), anyString(), any());
+    }
+
+    @Test
+    void shouldUseOparWhenModeExplicitlyConfigured() {
+        Fixture fixture = new Fixture();
+        ChatContext context = fixture.buildChatContext("你好", "opar", "默认");
+        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(fixture.oparLoopEngine.runLoop(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any()))
+                .thenReturn(new ChatExecutionResult("observe", "PLAN", "ACTION", "answer", true));
+
+        ChatServiceImpl service = fixture.build();
+        service.chat(new ChatRequest("s1", "u1", "你好", "api"));
+
+        verify(fixture.oparLoopEngine).runLoop(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any());
+        verify(fixture.simplifiedOparEngine, never()).run(any(), anyString(), any(), anyString(), any());
+    }
+
+    @Test
+    void shouldUseOparWhenRoutingPolicyAutoUpgrades() {
+        Fixture fixture = new Fixture();
+        ChatContext context = fixture.buildChatContext("分析这个启动报错并给修复方案", "opar", "自动升级");
+        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(fixture.oparLoopEngine.runLoop(eq(fixture.activeClient), eq("system"), any(AssembledContext.class), anyString(), any()))
+                .thenReturn(new ChatExecutionResult("observe", "PLAN", "ACTION", "answer", true));
+
+        ChatServiceImpl service = fixture.build();
+        service.chat(new ChatRequest("s1", "u1", "分析这个启动报错并给修复方案", "api"));
+
+        verify(fixture.oparLoopEngine).runLoop(eq(fixture.activeClient), eq("system"), any(AssembledContext.class), anyString(), any());
+        verify(fixture.simplifiedOparEngine, never()).run(any(), anyString(), any(), anyString(), any());
+    }
+
+    private static final class Fixture {
+
+        private final AiProviderService aiProviderService = mock(AiProviderService.class);
+        private final ChatGuardService chatGuardService = mock(ChatGuardService.class);
+        private final OparLoopEngine oparLoopEngine = mock(OparLoopEngine.class);
+        private final SimplifiedOparEngine simplifiedOparEngine = mock(SimplifiedOparEngine.class);
+        private final ChatResponsePolicyService chatResponsePolicyService = mock(ChatResponsePolicyService.class);
+        private final ModelTransportGuardService modelTransportGuardService = mock(ModelTransportGuardService.class);
+        private final LlmUsageRecordService llmUsageRecordService = mock(LlmUsageRecordService.class);
+        private final ConversationAdvisorSupport conversationAdvisorSupport = mock(ConversationAdvisorSupport.class);
+        private final ChatContextFactory chatContextFactory = mock(ChatContextFactory.class);
+        private final ChatResultPersister chatResultPersister = mock(ChatResultPersister.class);
+        private final MetaGuardExecutor metaGuardExecutor = mock(MetaGuardExecutor.class);
+        private final AgentSession session = new AgentSession();
+        private final AssembledContext assembled = new AssembledContext(
+                "s1",
+                "api",
+                "u1",
+                "你好",
+                "- USER: 你好",
+                "（暂无长期语义记忆）",
+                "# 当前问题\n你好"
+        );
+        private final AiProviderService.ActiveChatClient activeClient = new AiProviderService.ActiveChatClient(
+                "deepseek",
+                "deepseek-chat",
+                "https://api.deepseek.com",
+                mock(ChatClient.class),
+                true,
+                ""
+        );
+
+        private Fixture() {
+            session.setId(1L);
+            session.setSessionKey("s1");
+            when(chatGuardService.acquireSessionLock("s1")).thenReturn("lock");
+            when(aiProviderService.activeClient()).thenReturn(activeClient);
+        }
+
+        private ChatContext buildChatContext(String message, String executionMode, String routingReason) {
+            return new ChatContext(
+                    session,
+                    "api",
+                    "u1",
+                    "USER",
+                    message,
+                    message,
+                    "req-1",
+                    "system",
+                    assembled,
+                    activeClient,
+                    executionMode,
+                    routingReason
+            );
+        }
+
+        private ChatServiceImpl build() {
+            return new ChatServiceImpl(
+                    aiProviderService,
+                    chatGuardService,
+                    oparLoopEngine,
+                    simplifiedOparEngine,
+                    chatResponsePolicyService,
+                    modelTransportGuardService,
+                    llmUsageRecordService,
+                    conversationAdvisorSupport,
+                    chatContextFactory,
+                    chatResultPersister,
+                    metaGuardExecutor
+            );
+        }
+    }
+}

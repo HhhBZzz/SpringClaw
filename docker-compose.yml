@@ -1,7 +1,7 @@
 services:
   mysql:
     image: mysql:8.0
-    container_name: openclaw-mysql
+    container_name: springclaw-mysql
     restart: unless-stopped
     command:
       - --default-authentication-plugin=mysql_native_password
@@ -9,12 +9,12 @@ services:
       - --collation-server=utf8mb4_0900_ai_ci
     environment:
       MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: openclaw
+      MYSQL_DATABASE: springclaw
       TZ: Asia/Shanghai
     ports:
       - "3306:3306"
     volumes:
-      - openclaw-mysql-data:/var/lib/mysql
+      - springclaw-mysql-data:/var/lib/mysql
       - ./src/main/resources/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"]
@@ -24,7 +24,7 @@ services:
 
   redis:
     image: redis/redis-stack-server:latest
-    container_name: openclaw-redis
+    container_name: springclaw-redis
     restart: unless-stopped
     environment:
       # Do not override the image entrypoint/command with plain redis-server,
@@ -34,7 +34,7 @@ services:
       - "6379:6379"
       - "8001:8001"
     volumes:
-      - openclaw-redis-data:/data
+      - springclaw-redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -43,7 +43,7 @@ services:
 
   rabbitmq:
     image: rabbitmq:3-management
-    container_name: openclaw-rabbitmq
+    container_name: springclaw-rabbitmq
     restart: unless-stopped
     ports:
       - "5672:5672"
@@ -58,7 +58,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: openclaw-app
+    container_name: springclaw-app
     restart: unless-stopped
     depends_on:
       mysql:
@@ -71,7 +71,7 @@ services:
       SERVER_PORT: 18080
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
-      MYSQL_DB: openclaw
+      MYSQL_DB: springclaw
       MYSQL_USER: root
       MYSQL_PASSWORD: root
       REDIS_HOST: redis
@@ -80,25 +80,25 @@ services:
       RABBITMQ_PORT: 5672
       RABBITMQ_USERNAME: guest
       RABBITMQ_PASSWORD: guest
-      OPENCLAW_PERSISTENCE_DB_ENABLED: "true"
-      OPENCLAW_AUTH_REDIS_ENABLED: "true"
-      OPENCLAW_GUARD_REDIS_ENABLED: "true"
-      OPENCLAW_TOOLS_GUARD_REDIS_ENABLED: "true"
-      OPENCLAW_FEISHU_LONG_CONNECTION_ENABLED: "false"
-      OPENCLAW_FEISHU_OUTBOUND_ENABLED: "false"
-      OPENCLAW_AI_ACTIVE_PROVIDER: ${OPENCLAW_AI_ACTIVE_PROVIDER:-primary}
-      OPENCLAW_PRIMARY_ENABLED: ${OPENCLAW_PRIMARY_ENABLED:-true}
-      OPENCLAW_PRIMARY_API_KEY: ${OPENCLAW_PRIMARY_API_KEY:-}
-      OPENCLAW_PRIMARY_BASE_URL: ${OPENCLAW_PRIMARY_BASE_URL:-https://api.zhongzhuan.win}
-      OPENCLAW_PRIMARY_MODEL: ${OPENCLAW_PRIMARY_MODEL:-claude-opus-4-6}
-      OPENCLAW_QWEN_ENABLED: ${OPENCLAW_QWEN_ENABLED:-true}
-      OPENCLAW_QWEN_API_KEY: ${OPENCLAW_QWEN_API_KEY:-}
-      OPENCLAW_QWEN_BASE_URL: ${OPENCLAW_QWEN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
-      OPENCLAW_QWEN_MODEL: ${OPENCLAW_QWEN_MODEL:-qwen3.5-plus}
-      OPENCLAW_CODING_PLAN_ENABLED: ${OPENCLAW_CODING_PLAN_ENABLED:-true}
-      OPENCLAW_CODING_PLAN_API_KEY: ${OPENCLAW_CODING_PLAN_API_KEY:-}
-      OPENCLAW_CODING_PLAN_BASE_URL: ${OPENCLAW_CODING_PLAN_BASE_URL:-https://coding.dashscope.aliyuncs.com/v1}
-      OPENCLAW_CODING_PLAN_MODEL: ${OPENCLAW_CODING_PLAN_MODEL:-qwen3.5-plus}
+      SPRINGCLAW_PERSISTENCE_DB_ENABLED: "true"
+      SPRINGCLAW_AUTH_REDIS_ENABLED: "true"
+      SPRINGCLAW_GUARD_REDIS_ENABLED: "true"
+      SPRINGCLAW_TOOLS_GUARD_REDIS_ENABLED: "true"
+      SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED: "false"
+      SPRINGCLAW_FEISHU_OUTBOUND_ENABLED: "false"
+      SPRINGCLAW_AI_ACTIVE_PROVIDER: ${SPRINGCLAW_AI_ACTIVE_PROVIDER:-primary}
+      SPRINGCLAW_PRIMARY_ENABLED: ${SPRINGCLAW_PRIMARY_ENABLED:-true}
+      SPRINGCLAW_PRIMARY_API_KEY: ${SPRINGCLAW_PRIMARY_API_KEY:-}
+      SPRINGCLAW_PRIMARY_BASE_URL: ${SPRINGCLAW_PRIMARY_BASE_URL:-https://api.zhongzhuan.win}
+      SPRINGCLAW_PRIMARY_MODEL: ${SPRINGCLAW_PRIMARY_MODEL:-claude-opus-4-6}
+      SPRINGCLAW_QWEN_ENABLED: ${SPRINGCLAW_QWEN_ENABLED:-true}
+      SPRINGCLAW_QWEN_API_KEY: ${SPRINGCLAW_QWEN_API_KEY:-}
+      SPRINGCLAW_QWEN_BASE_URL: ${SPRINGCLAW_QWEN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      SPRINGCLAW_QWEN_MODEL: ${SPRINGCLAW_QWEN_MODEL:-qwen3.5-plus}
+      SPRINGCLAW_CODING_PLAN_ENABLED: ${SPRINGCLAW_CODING_PLAN_ENABLED:-true}
+      SPRINGCLAW_CODING_PLAN_API_KEY: ${SPRINGCLAW_CODING_PLAN_API_KEY:-}
+      SPRINGCLAW_CODING_PLAN_BASE_URL: ${SPRINGCLAW_CODING_PLAN_BASE_URL:-https://coding.dashscope.aliyuncs.com/v1}
+      SPRINGCLAW_CODING_PLAN_MODEL: ${SPRINGCLAW_CODING_PLAN_MODEL:-qwen3.5-plus}
     ports:
       - "18080:18080"
     volumes:
@@ -106,5 +106,5 @@ services:
       - ./SOUL.md:/app/SOUL.md:ro
 
 volumes:
-  openclaw-mysql-data:
-  openclaw-redis-data:
+  springclaw-mysql-data:
+  springclaw-redis-data:

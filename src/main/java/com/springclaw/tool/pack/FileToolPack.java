@@ -1,21 +1,17 @@
 package com.springclaw.tool.pack;
 
 import com.springclaw.common.exception.BusinessException;
+import com.springclaw.service.files.LocalFilesystemService;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
-import java.nio.file.FileSystems;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.PathMatcher;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
-import java.util.stream.Collectors;
 
 /**
  * 文件工具包。
@@ -27,55 +23,38 @@ import java.util.stream.Collectors;
 @Component
 public class FileToolPack {
 
-    private static final int MAX_FILE_SEARCH_RESULTS = 100;
-    private static final int MAX_CONTENT_SEARCH_RESULTS = 50;
-
+    private final LocalFilesystemService localFilesystemService;
     private final Path rootPath;
-    private final int maxReadChars;
+
+    @Autowired
+    public FileToolPack(LocalFilesystemService localFilesystemService,
+                        @Value("${springclaw.tools.file.root:${user.dir}}") String root) {
+        this.localFilesystemService = localFilesystemService;
+        this.rootPath = Path.of(root).toAbsolutePath().normalize();
+    }
 
     public FileToolPack(@Value("${springclaw.tools.file.root:${user.dir}}") String root,
                         @Value("${springclaw.tools.file.max-read-chars:12000}") int maxReadChars) {
+        this.localFilesystemService = new LocalFilesystemService(
+                root,
+                ".git,node_modules,target,dist,build,.ssh,.gnupg,.aws,.kube,Library/Keychains,.env",
+                maxReadChars,
+                8,
+                100,
+                50,
+                512
+        );
         this.rootPath = Path.of(root).toAbsolutePath().normalize();
-        this.maxReadChars = Math.max(2048, maxReadChars);
     }
 
     @Tool(description = "列出指定目录下的文件和目录")
     public String listFiles(String relativeDir) {
-        Path dir = resolveSafePath(relativeDir, true);
-        try {
-            if (!Files.exists(dir) || !Files.isDirectory(dir)) {
-                return "目录不存在: " + relativeDir;
-            }
-            try (var stream = Files.list(dir)) {
-                List<String> lines = stream
-                        .limit(200)
-                        .map(path -> (Files.isDirectory(path) ? "[D] " : "[F] ") + rootPath.relativize(path))
-                        .collect(Collectors.toList());
-                if (lines.isEmpty()) {
-                    return "目录为空: " + relativeDir;
-                }
-                return String.join("\n", lines);
-            }
-        } catch (IOException ex) {
-            throw new BusinessException(50021, "文件工具 listFiles 失败: " + ex.getMessage());
-        }
+        return stripDefaultRootPrefix(localFilesystemService.listFiles("", relativeDir));
     }
 
     @Tool(description = "读取指定文本文件内容")
     public String readTextFile(String relativeFilePath) {
-        Path file = resolveSafePath(relativeFilePath, false);
-        try {
-            if (!Files.exists(file) || Files.isDirectory(file)) {
-                return "文件不存在: " + relativeFilePath;
-            }
-            String content = Files.readString(file, StandardCharsets.UTF_8);
-            if (content.length() > maxReadChars) {
-                return content.substring(0, maxReadChars) + "\n...<TRUNCATED>";
-            }
-            return content;
-        } catch (IOException ex) {
-            throw new BusinessException(50022, "文件工具 readTextFile 失败: " + ex.getMessage());
-        }
+        return localFilesystemService.readTextFile("", relativeFilePath);
     }
 
     @Tool(description = "写入文本到指定文件。默认覆盖原文件")
@@ -100,19 +79,7 @@ public class FileToolPack {
 
     @Tool(description = "按文件名递归搜索文件，支持通配符，例如 *.java、*Service*.java、application*.yml")
     public String searchFiles(String pattern) {
-        String normalizedPattern = normalizePattern(pattern, "*");
-        PathMatcher matcher = buildMatcher(normalizedPattern);
-        List<String> results = new ArrayList<>();
-        try (var stream = Files.walk(rootPath)) {
-            stream.filter(Files::isRegularFile)
-                    .forEach(path -> collectMatchedFile(results, path, matcher));
-        } catch (IOException ex) {
-            throw new BusinessException(50024, "文件工具 searchFiles 失败: " + ex.getMessage());
-        }
-        if (results.isEmpty()) {
-            return "未找到匹配文件: " + normalizedPattern;
-        }
-        return String.join("\n", results);
+        return stripDefaultRootPrefix(localFilesystemService.searchFilesByGlob("", pattern));
     }
 
     @Tool(description = "按内容递归搜索文件，支持 filePattern 过滤，类似 grep。示例：keyword=ChatService, filePattern=*.java")
@@ -120,21 +87,7 @@ public class FileToolPack {
         if (!StringUtils.hasText(keyword)) {
             throw new BusinessException(40053, "keyword 不能为空");
         }
-        String normalizedPattern = normalizePattern(filePattern, "*");
-        PathMatcher matcher = buildMatcher(normalizedPattern);
-        List<String> results = new ArrayList<>();
-        String keywordLower = keyword.trim().toLowerCase(Locale.ROOT);
-        try (var stream = Files.walk(rootPath)) {
-            stream.filter(Files::isRegularFile)
-                    .filter(path -> matchesPattern(path, matcher))
-                    .forEach(path -> grepFile(results, path, keywordLower));
-        } catch (IOException ex) {
-            throw new BusinessException(50025, "文件工具 searchInFiles 失败: " + ex.getMessage());
-        }
-        if (results.isEmpty()) {
-            return "未找到关键词命中: " + keyword.trim() + "（filePattern=" + normalizedPattern + "）";
-        }
-        return String.join("\n", results);
+        return stripDefaultRootPrefix(localFilesystemService.grepText(keyword, filePattern));
     }
 
     private Path resolveSafePath(String raw, boolean allowBlankAsRoot) {
@@ -153,54 +106,10 @@ public class FileToolPack {
         return target;
     }
 
-    private String normalizePattern(String pattern, String fallback) {
-        if (!StringUtils.hasText(pattern)) {
-            return fallback;
+    private String stripDefaultRootPrefix(String text) {
+        if (!StringUtils.hasText(text)) {
+            return text;
         }
-        return pattern.trim();
-    }
-
-    private PathMatcher buildMatcher(String pattern) {
-        return FileSystems.getDefault().getPathMatcher("glob:" + pattern);
-    }
-
-    private void collectMatchedFile(List<String> results, Path path, PathMatcher matcher) {
-        if (results.size() >= MAX_FILE_SEARCH_RESULTS || !matchesPattern(path, matcher)) {
-            return;
-        }
-        results.add("[F] " + rootPath.relativize(path));
-    }
-
-    private boolean matchesPattern(Path path, PathMatcher matcher) {
-        Path relative = rootPath.relativize(path);
-        return matcher.matches(relative) || matcher.matches(relative.getFileName());
-    }
-
-    private void grepFile(List<String> results, Path path, String keywordLower) {
-        if (results.size() >= MAX_CONTENT_SEARCH_RESULTS) {
-            return;
-        }
-        try {
-            List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
-            for (int i = 0; i < lines.size() && results.size() < MAX_CONTENT_SEARCH_RESULTS; i++) {
-                String line = lines.get(i);
-                if (line.toLowerCase(Locale.ROOT).contains(keywordLower)) {
-                    results.add(rootPath.relativize(path) + ":" + (i + 1) + ": " + truncateLine(line));
-                }
-            }
-        } catch (IOException ex) {
-            // 忽略单文件读取失败，继续搜索其他文件。
-        }
-    }
-
-    private String truncateLine(String line) {
-        if (line == null) {
-            return "";
-        }
-        String normalized = line.replaceAll("\\s+", " ").trim();
-        if (normalized.length() <= 240) {
-            return normalized;
-        }
-        return normalized.substring(0, 240) + "...";
+        return text.replace("root1:", "");
     }
 }

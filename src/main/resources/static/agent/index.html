@@ -1,0 +1,1113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SpringClaw Agent</title>
+  <style>
+    :root {
+      --bg: #11140f;
+      --bg-soft: #171b14;
+      --surface: rgba(250, 246, 236, 0.08);
+      --surface-strong: rgba(250, 246, 236, 0.13);
+      --card: rgba(255, 250, 239, 0.92);
+      --card-soft: rgba(255, 250, 239, 0.78);
+      --text: #f8f1e3;
+      --text-dark: #17211d;
+      --muted: #aeb9ac;
+      --muted-dark: #657267;
+      --line: rgba(248, 241, 227, 0.12);
+      --line-dark: rgba(23, 33, 29, 0.11);
+      --accent: #18a999;
+      --accent-strong: #09665d;
+      --gold: #c88a3d;
+      --gold-soft: rgba(200, 138, 61, 0.16);
+      --danger: #ef4444;
+      --warn: #f59e0b;
+      --ok: #34d399;
+      --shadow: 0 28px 80px rgba(0, 0, 0, 0.28);
+      --radius: 28px;
+      --radius-sm: 18px;
+      --mono: "SFMono-Regular", "JetBrains Mono", "Menlo", monospace;
+      --sans: "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      color: var(--text);
+      font-family: var(--sans);
+      background:
+        radial-gradient(circle at 20% 0%, rgba(24, 169, 153, 0.26), transparent 30%),
+        radial-gradient(circle at 86% 8%, rgba(200, 138, 61, 0.18), transparent 26%),
+        linear-gradient(135deg, #0d100c 0%, #171b14 48%, #0f1513 100%);
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(248, 241, 227, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(248, 241, 227, 0.035) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: linear-gradient(180deg, rgba(0,0,0,0.78), transparent 88%);
+    }
+
+    :focus-visible {
+      outline: 3px solid rgba(24, 169, 153, 0.5);
+      outline-offset: 3px;
+    }
+
+    .app-shell {
+      position: relative;
+      z-index: 1;
+      width: min(1680px, calc(100% - 28px));
+      min-height: calc(100dvh - 28px);
+      margin: 14px auto;
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr) 340px;
+      gap: 14px;
+    }
+
+    .rail,
+    .stage,
+    .inspector,
+    .composer,
+    .floating-auth {
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    .rail,
+    .inspector {
+      min-height: calc(100dvh - 28px);
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, rgba(255,255,255,0.1), rgba(255,255,255,0.045));
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .mark {
+      width: 44px;
+      height: 44px;
+      border-radius: 16px;
+      display: grid;
+      place-items: center;
+      color: #062f2c;
+      background: linear-gradient(135deg, #b9fff4, var(--accent));
+      font-weight: 900;
+      box-shadow: 0 16px 44px rgba(24, 169, 153, 0.28);
+    }
+
+    .brand h1,
+    .panel-title h2,
+    .inspector h2 {
+      margin: 0;
+      letter-spacing: -0.04em;
+    }
+
+    .brand h1 { font-size: 20px; }
+
+    .eyebrow,
+    .label,
+    .message-meta,
+    .chip {
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .rail-card,
+    .tool-card,
+    .session-card,
+    .login-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      background: rgba(255,255,255,0.06);
+      padding: 14px;
+    }
+
+    .session-card {
+      display: grid;
+      gap: 8px;
+      color: var(--text);
+      text-decoration: none;
+    }
+
+    .session-card strong {
+      font-size: 14px;
+      letter-spacing: -0.02em;
+    }
+
+    .session-card.active {
+      background: linear-gradient(135deg, rgba(24, 169, 153, 0.22), rgba(200, 138, 61, 0.08));
+      border-color: rgba(24, 169, 153, 0.36);
+    }
+
+    .stage {
+      position: relative;
+      min-height: calc(100dvh - 28px);
+      border-radius: var(--radius);
+      background: rgba(250, 246, 236, 0.92);
+      color: var(--text-dark);
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+    }
+
+    .stage::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(circle at 20% 8%, rgba(24, 169, 153, 0.14), transparent 26%),
+        radial-gradient(circle at 80% 16%, rgba(200, 138, 61, 0.16), transparent 22%);
+    }
+
+    .topbar,
+    .chat-log,
+    .composer-wrap {
+      position: relative;
+      z-index: 1;
+    }
+
+    .topbar {
+      padding: 20px 22px 12px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border-bottom: 1px solid rgba(23, 33, 29, 0.08);
+    }
+
+    .panel-title h2 {
+      font-size: clamp(28px, 4vw, 46px);
+      line-height: 0.96;
+      max-width: 12ch;
+    }
+
+    .top-actions,
+    .button-row,
+    .quick-prompts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    button,
+    input,
+    textarea,
+    select {
+      font: inherit;
+    }
+
+    button {
+      min-height: 44px;
+      border: none;
+      border-radius: 14px;
+      cursor: pointer;
+      font-weight: 800;
+      transition: transform 150ms ease, box-shadow 150ms ease, opacity 150ms ease;
+      touch-action: manipulation;
+    }
+
+    button:hover { transform: translateY(-1px); box-shadow: 0 14px 34px rgba(23, 33, 29, 0.12); }
+    button:active { transform: translateY(0) scale(0.99); }
+    button:disabled { opacity: 0.48; cursor: wait; transform: none; box-shadow: none; }
+
+    .btn-primary {
+      padding: 11px 15px;
+      color: #f7fffd;
+      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+    }
+
+    .btn-ghost {
+      padding: 11px 14px;
+      color: var(--text);
+      background: rgba(255,255,255,0.08);
+      border: 1px solid var(--line);
+    }
+
+    .stage .btn-ghost {
+      color: var(--text-dark);
+      background: rgba(255,255,255,0.74);
+      border-color: var(--line-dark);
+    }
+
+    .chat-log {
+      overflow: auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      scrollbar-color: rgba(24, 169, 153, 0.42) transparent;
+    }
+
+    .welcome {
+      width: min(820px, 100%);
+      margin: auto;
+      display: grid;
+      gap: 18px;
+      text-align: center;
+    }
+
+    .welcome h3 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 52px);
+      line-height: 0.98;
+      letter-spacing: -0.055em;
+    }
+
+    .welcome p {
+      margin: 0 auto;
+      max-width: 66ch;
+      color: var(--muted-dark);
+      line-height: 1.75;
+    }
+
+    .quick-prompts { justify-content: center; }
+
+    .prompt-chip,
+    .chip {
+      min-height: 38px;
+      border-radius: 999px;
+      border: 1px solid rgba(23, 33, 29, 0.1);
+      background: rgba(255,255,255,0.72);
+      color: var(--text-dark);
+      padding: 9px 12px;
+    }
+
+    .message {
+      display: grid;
+      gap: 8px;
+      max-width: min(860px, 96%);
+      animation: messageIn 260ms ease both;
+    }
+
+    .message.user { align-self: flex-end; }
+    .message.agent { align-self: flex-start; }
+
+    .bubble {
+      border-radius: 24px;
+      padding: 16px 18px;
+      line-height: 1.74;
+      white-space: pre-wrap;
+      word-break: break-word;
+      border: 1px solid rgba(23, 33, 29, 0.09);
+    }
+
+    .message.user .bubble {
+      color: #f7fffd;
+      background: linear-gradient(135deg, #0f766e, #0a4f4a);
+      border-color: rgba(255,255,255,0.18);
+      border-bottom-right-radius: 8px;
+    }
+
+    .message.agent .bubble {
+      background: rgba(255,255,255,0.82);
+      border-bottom-left-radius: 8px;
+    }
+
+    .rich-message {
+      display: grid;
+      gap: 11px;
+      white-space: normal;
+      font-size: 16px;
+    }
+
+    .rich-message h2 {
+      margin: 4px 0 0;
+      font-size: 22px;
+      line-height: 1.25;
+      letter-spacing: -0.035em;
+    }
+
+    .rich-message p {
+      margin: 0;
+      color: #2f3b36;
+      white-space: pre-line;
+    }
+
+    .rich-message ul,
+    .rich-message ol {
+      display: grid;
+      gap: 7px;
+      margin: 0;
+      padding-left: 22px;
+      color: #2f3b36;
+    }
+
+    .rich-message pre {
+      overflow: auto;
+      margin: 0;
+      border-radius: 16px;
+      padding: 13px;
+      background: #f3efe5;
+      font-family: var(--mono);
+      font-size: 13px;
+      white-space: pre;
+    }
+
+    .message-meta {
+      color: var(--muted-dark);
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .thinking {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .thinking span {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 900ms ease-in-out infinite;
+    }
+
+    .thinking span:nth-child(2) { animation-delay: 120ms; }
+    .thinking span:nth-child(3) { animation-delay: 240ms; }
+
+    .composer-wrap {
+      padding: 16px;
+      border-top: 1px solid rgba(23, 33, 29, 0.08);
+    }
+
+    .composer {
+      border-radius: 26px;
+      background: rgba(255,255,255,0.84);
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    textarea,
+    input,
+    select {
+      width: 100%;
+      border: 1px solid transparent;
+      outline: none;
+      border-radius: 14px;
+      color: inherit;
+      background: rgba(255,255,255,0.08);
+    }
+
+    .stage textarea,
+    .stage input,
+    .stage select {
+      background: rgba(23, 33, 29, 0.055);
+    }
+
+    textarea:focus,
+    input:focus,
+    select:focus {
+      border-color: rgba(24, 169, 153, 0.42);
+      box-shadow: 0 0 0 4px rgba(24, 169, 153, 0.12);
+    }
+
+    textarea {
+      min-height: 84px;
+      max-height: 220px;
+      resize: vertical;
+      padding: 14px;
+      line-height: 1.65;
+    }
+
+    input,
+    select {
+      min-height: 44px;
+      padding: 0 12px;
+    }
+
+    .composer-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      background: rgba(24, 169, 153, 0.13);
+      color: #b9fff4;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .stage .status-pill { color: var(--accent-strong); }
+    .status-pill.warn { color: #fff1c2; background: rgba(245, 158, 11, 0.18); }
+    .stage .status-pill.warn { color: #92400e; }
+    .status-pill.danger { color: #ffe2e2; background: rgba(239, 68, 68, 0.16); }
+    .stage .status-pill.danger { color: #b91c1c; }
+
+    .tool-card {
+      display: grid;
+      gap: 10px;
+    }
+
+    .tool-card h3,
+    .login-card h3 {
+      margin: 0;
+      font-size: 16px;
+      letter-spacing: -0.02em;
+    }
+
+    .tool-list {
+      display: grid;
+      gap: 9px;
+    }
+
+    .tool-item {
+      border-radius: 16px;
+      padding: 12px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--line);
+    }
+
+    .tool-item strong { display: block; margin-bottom: 5px; }
+    .tool-item span { display: block; color: var(--muted); font-size: 12px; line-height: 1.55; }
+
+    .login-card {
+      display: grid;
+      gap: 10px;
+    }
+
+    .login-card input {
+      color: var(--text);
+      border-color: var(--line);
+    }
+
+    .login-card .button-row button { flex: 1; }
+
+    .meta-grid {
+      display: grid;
+      gap: 10px;
+    }
+
+    .meta-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .meta-row:last-child { border-bottom: none; }
+    .meta-row code { color: var(--text); font-family: var(--mono); word-break: break-all; }
+
+    .hidden { display: none !important; }
+
+    @keyframes pulse {
+      0%, 100% { transform: translateY(0); opacity: 0.38; }
+      50% { transform: translateY(-4px); opacity: 1; }
+    }
+
+    @keyframes messageIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 1220px) {
+      .app-shell { grid-template-columns: 240px minmax(0, 1fr); }
+      .inspector { display: none; }
+    }
+
+    @media (max-width: 860px) {
+      .app-shell {
+        width: min(100% - 16px, 1680px);
+        grid-template-columns: 1fr;
+      }
+      .rail {
+        min-height: auto;
+        flex-direction: row;
+        overflow: auto;
+      }
+      .rail-card,
+      .session-card,
+      .login-card { min-width: 240px; }
+      .stage { min-height: calc(100dvh - 220px); }
+      .topbar { flex-direction: column; }
+      .message { max-width: 100%; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.001ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="rail" aria-label="Agent navigation">
+      <div class="brand">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div class="mark">SC</div>
+          <div>
+            <div class="eyebrow">SpringClaw</div>
+            <h1>Agent</h1>
+          </div>
+        </div>
+        <a class="btn-ghost" href="/admin" style="display:inline-grid; place-items:center; min-width:44px; text-decoration:none;">Admin</a>
+      </div>
+
+      <section class="login-card" aria-label="登录">
+        <div>
+          <div class="eyebrow">Identity</div>
+          <h3>登录后开始对话</h3>
+        </div>
+        <input id="username" autocomplete="username" placeholder="用户名 / 飞书 userId" />
+        <input id="password" autocomplete="current-password" type="password" placeholder="密码" />
+        <div class="button-row">
+          <button class="btn-primary" id="loginBtn">登录</button>
+          <button class="btn-ghost" id="registerBtn">注册</button>
+        </div>
+        <span id="authStatus" class="status-pill warn">未登录</span>
+      </section>
+
+      <a class="session-card active" href="#">
+        <span class="eyebrow">Current Session</span>
+        <strong id="sessionLabel">新的 Agent 会话</strong>
+        <span id="sessionPreview" class="message-meta">等待第一条消息</span>
+      </a>
+
+      <section class="rail-card">
+        <div class="eyebrow">Shortcuts</div>
+        <div class="tool-list" style="margin-top:10px;">
+          <button class="btn-ghost prompt-mini" data-prompt="请审查当前项目源码，看看架构是否合理，有没有冗余垃圾代码和风险点。">项目审查</button>
+          <button class="btn-ghost prompt-mini" data-prompt="帮我在本地电脑授权文件里找一下简历相关文件。">授权文件</button>
+          <button class="btn-ghost prompt-mini" data-prompt="分析一下当前项目的 agent 主流程，并告诉我哪里还可以优化。">分析项目</button>
+          <button class="btn-ghost prompt-mini" data-prompt="列出目前可用的 skills，并说明每个 skill 适合什么场景。">查看 skills</button>
+          <button class="btn-ghost prompt-mini" data-prompt="帮我创建一个每天 9 点运行 web_crawler 的定时任务草稿。">定时任务</button>
+        </div>
+      </section>
+
+      <section class="rail-card">
+        <div class="eyebrow">Model Switch</div>
+        <p style="margin:8px 0 12px;color:var(--muted);font-size:13px;line-height:1.55;">这些按钮会发送真实控制指令，不是静态装饰。</p>
+        <div class="tool-list">
+          <button class="btn-ghost prompt-mini" data-prompt="切换到 deepseek-v4-pro">DeepSeek V4 Pro</button>
+          <button class="btn-ghost prompt-mini" data-prompt="切换到 qwen3.5-plus">Qwen 3.5 Plus</button>
+          <button class="btn-ghost prompt-mini" data-prompt="切换到 qwen3-coder-plus">Qwen Coder Plus</button>
+        </div>
+      </section>
+    </aside>
+
+    <main class="stage" aria-label="Agent chat workspace">
+      <header class="topbar">
+        <div class="panel-title">
+          <div class="eyebrow">Agent Workspace</div>
+          <h2>和 SpringClaw 一起工作。</h2>
+        </div>
+        <div class="top-actions">
+          <span id="modelBadge" class="status-pill warn">模型待连接</span>
+          <button class="btn-ghost" id="newSessionBtn">新会话</button>
+          <button class="btn-ghost" id="logoutBtn">退出</button>
+        </div>
+      </header>
+
+      <section class="chat-log" id="chatLog" aria-live="polite">
+        <div class="welcome" id="welcomePanel">
+          <div class="eyebrow">Codex-like Agent Console</div>
+          <h3>不只是聊天，是一个能调用 skill、记忆和任务底座的工作台。</h3>
+          <p>登录后直接提问。比如让它审查本地源码、搜索授权电脑文件、调用网页抓取 skill、解释模型路由，或者把自然语言任务变成定时任务草稿。</p>
+          <div class="quick-prompts">
+            <button class="prompt-chip" data-prompt="我现在这个项目的 agent 流程是怎样的？用大白话说。">解释 Agent 流程</button>
+            <button class="prompt-chip" data-prompt="请审查当前项目源码，看看架构是否合理，有没有冗余垃圾代码和风险点。">本地项目审查</button>
+            <button class="prompt-chip" data-prompt="帮我列出当前授权本地目录，并搜索简历相关文件。">授权文件搜索</button>
+            <button class="prompt-chip" data-prompt="用 web_crawler skill 读取 https://example.com 并总结。">测试网页 skill</button>
+            <button class="prompt-chip" data-prompt="帮我看看当前项目还缺什么才能像真正的 agent 产品。">产品化建议</button>
+          </div>
+        </div>
+      </section>
+
+      <footer class="composer-wrap">
+        <div class="composer">
+          <textarea id="messageInput" placeholder="输入任务，比如：帮我分析 skills 是怎么被注册和调用的。按 Enter 发送，Shift+Enter 换行。"></textarea>
+          <div class="composer-meta">
+            <div class="top-actions">
+              <span id="sendStatus" class="status-pill warn">等待输入</span>
+              <span class="chip">channel: api</span>
+            </div>
+            <div class="top-actions">
+              <input id="sessionKey" aria-label="Session key" style="width: min(320px, 70vw);" />
+              <button class="btn-primary" id="sendBtn">发送</button>
+            </div>
+          </div>
+        </div>
+      </footer>
+    </main>
+
+    <aside class="inspector" aria-label="Agent context inspector">
+      <div>
+        <div class="eyebrow">Context</div>
+        <h2>运行上下文</h2>
+      </div>
+
+      <section class="tool-card">
+        <h3>当前身份</h3>
+        <div class="meta-grid">
+          <div class="meta-row"><span>User</span><code id="meUser">-</code></div>
+          <div class="meta-row"><span>Role</span><code id="meRole">-</code></div>
+          <div class="meta-row"><span>Session</span><code id="sideSessionKey">-</code></div>
+        </div>
+      </section>
+
+      <section class="tool-card">
+        <h3>Agent 能力</h3>
+        <div class="tool-list">
+          <div class="tool-item"><strong>Skills</strong><span>可触发 repo_inspector、web_crawler、runtime_probe、boss 数据集等包式技能。</span></div>
+          <div class="tool-item"><strong>Local Files</strong><span>可读取授权目录内的本地文件，受敏感路径黑名单和审计保护。</span></div>
+          <div class="tool-item"><strong>Memory</strong><span>会话历史和可选向量记忆由后端主链路管理。</span></div>
+          <div class="tool-item"><strong>Tasks</strong><span>自然语言可以解析成定时任务草稿，再由后台确认落库。</span></div>
+        </div>
+      </section>
+
+      <section class="tool-card">
+        <h3>使用建议</h3>
+        <div class="tool-list">
+          <div class="tool-item"><strong>说清目标</strong><span>例如“分析当前项目的 skill 注册层”，比“看看项目”更容易触发正确路径。</span></div>
+          <div class="tool-item"><strong>要求证据</strong><span>让 Agent 给出类名、路径和流程，会更像工程工具而不是闲聊机器人。</span></div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <script>
+    const state = {
+      token: localStorage.getItem("springclaw.agent.token") || localStorage.getItem("springclaw.admin.token") || "",
+      me: null,
+      messages: [],
+      sessionKey: localStorage.getItem("springclaw.agent.session") || makeSessionKey(),
+      busy: false,
+    };
+
+    const nodes = {
+      username: document.getElementById("username"),
+      password: document.getElementById("password"),
+      loginBtn: document.getElementById("loginBtn"),
+      registerBtn: document.getElementById("registerBtn"),
+      logoutBtn: document.getElementById("logoutBtn"),
+      newSessionBtn: document.getElementById("newSessionBtn"),
+      authStatus: document.getElementById("authStatus"),
+      modelBadge: document.getElementById("modelBadge"),
+      sendStatus: document.getElementById("sendStatus"),
+      chatLog: document.getElementById("chatLog"),
+      welcomePanel: document.getElementById("welcomePanel"),
+      messageInput: document.getElementById("messageInput"),
+      sessionKey: document.getElementById("sessionKey"),
+      sendBtn: document.getElementById("sendBtn"),
+      meUser: document.getElementById("meUser"),
+      meRole: document.getElementById("meRole"),
+      sideSessionKey: document.getElementById("sideSessionKey"),
+      sessionLabel: document.getElementById("sessionLabel"),
+      sessionPreview: document.getElementById("sessionPreview"),
+    };
+
+    function makeSessionKey() {
+      return `agent:api:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`;
+    }
+
+    function escapeHtml(text) {
+      return String(text ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function cleanInline(text) {
+      return String(text ?? "")
+        .replace(/\*\*(.*?)\*\*/g, "$1")
+        .replace(/__(.*?)__/g, "$1")
+        .replace(/`([^`]+)`/g, "$1")
+        .replace(/\*/g, "")
+        .trim();
+    }
+
+    function renderMessageHtml(content) {
+      const text = String(content || "");
+      if (!text.trim()) {
+        return '<p>正在生成回答...</p>';
+      }
+      const lines = text.replace(/\r\n/g, "\n").split("\n");
+      const html = [];
+      let i = 0;
+      while (i < lines.length) {
+        const trimmed = lines[i].trim();
+        if (!trimmed || /^-{3,}$/.test(trimmed)) {
+          i += 1;
+          continue;
+        }
+        if (trimmed.startsWith("```")) {
+          const code = [];
+          i += 1;
+          while (i < lines.length && !lines[i].trim().startsWith("```")) {
+            code.push(lines[i]);
+            i += 1;
+          }
+          html.push(`<pre><code>${escapeHtml(code.join("\n"))}</code></pre>`);
+          i += 1;
+          continue;
+        }
+        const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+        if (heading) {
+          html.push(`<h2>${escapeHtml(cleanInline(heading[2]))}</h2>`);
+          i += 1;
+          continue;
+        }
+        const unordered = trimmed.match(/^[-*]\s+(.+)$/);
+        if (unordered) {
+          const items = [];
+          while (i < lines.length) {
+            const item = lines[i].trim().match(/^[-*]\s+(.+)$/);
+            if (!item) break;
+            items.push(`<li>${escapeHtml(cleanInline(item[1]))}</li>`);
+            i += 1;
+          }
+          html.push(`<ul>${items.join("")}</ul>`);
+          continue;
+        }
+        const ordered = trimmed.match(/^\d+[.)]\s+(.+)$/);
+        if (ordered) {
+          const items = [];
+          while (i < lines.length) {
+            const item = lines[i].trim().match(/^\d+[.)]\s+(.+)$/);
+            if (!item) break;
+            items.push(`<li>${escapeHtml(cleanInline(item[1]))}</li>`);
+            i += 1;
+          }
+          html.push(`<ol>${items.join("")}</ol>`);
+          continue;
+        }
+        const paragraph = [];
+        while (i < lines.length) {
+          const next = lines[i].trim();
+          if (!next || next.startsWith("```") || /^(#{1,4})\s+/.test(next) || /^[-*]\s+/.test(next) || /^\d+[.)]\s+/.test(next)) {
+            break;
+          }
+          paragraph.push(cleanInline(next));
+          i += 1;
+        }
+        html.push(`<p>${escapeHtml(paragraph.join("\n"))}</p>`);
+      }
+      return html.join("");
+    }
+
+    function setToken(token) {
+      state.token = token || "";
+      if (state.token) {
+        localStorage.setItem("springclaw.agent.token", state.token);
+      } else {
+        localStorage.removeItem("springclaw.agent.token");
+      }
+    }
+
+    function setStatus(node, text, kind = "warn") {
+      node.textContent = text;
+      node.className = kind === "danger" ? "status-pill danger" : kind === "ok" ? "status-pill" : "status-pill warn";
+    }
+
+    async function api(url, { method = "GET", body, auth = true } = {}) {
+      const headers = { "Content-Type": "application/json" };
+      if (auth && state.token) headers.Authorization = `Bearer ${state.token}`;
+      const response = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const payload = await response.json().catch(() => ({ code: response.status, message: "响应不是合法 JSON" }));
+      if (!response.ok || payload.code !== 0) {
+        throw new Error(payload.message || `请求失败 (${response.status})`);
+      }
+      return payload.data;
+    }
+
+    async function streamApi(body, handlers = {}) {
+      const headers = { "Content-Type": "application/json", Accept: "text/event-stream" };
+      if (state.token) headers.Authorization = `Bearer ${state.token}`;
+      const response = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const raw = await response.text();
+        throw new Error(raw || `请求失败 (${response.status})`);
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        buffer = consumeStreamBuffer(buffer, handlers);
+      }
+      consumeStreamBuffer(buffer + "\n\n", handlers);
+    }
+
+    function consumeStreamBuffer(buffer, handlers) {
+      const parts = buffer.split(/\r?\n\r?\n/);
+      const rest = parts.pop() || "";
+      for (const part of parts) {
+        let event = "message";
+        const data = [];
+        for (const line of part.split(/\r?\n/)) {
+          if (line.startsWith("event:")) event = line.slice(6).trim();
+          if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+        }
+        const payload = data.join("\n");
+        if (event === "token" || event === "message") handlers.onToken?.(payload);
+        if (event === "status") handlers.onStatus?.(payload);
+        if (event === "error") handlers.onError?.(payload);
+      }
+      return rest;
+    }
+
+    function syncContext() {
+      nodes.sessionKey.value = state.sessionKey;
+      nodes.sideSessionKey.textContent = state.sessionKey;
+      nodes.sessionLabel.textContent = state.messages.length ? "正在协作" : "新的 Agent 会话";
+      const last = state.messages[state.messages.length - 1];
+      nodes.sessionPreview.textContent = last ? last.content.slice(0, 42) : "等待第一条消息";
+      nodes.meUser.textContent = state.me?.username || "-";
+      nodes.meRole.textContent = state.me?.roleCode || "-";
+      if (state.me) {
+        setStatus(nodes.authStatus, `${state.me.username} / ${state.me.roleCode}`, "ok");
+      } else {
+        setStatus(nodes.authStatus, state.token ? "登录待校验" : "未登录", "warn");
+      }
+    }
+
+    function renderMessages() {
+      nodes.welcomePanel.classList.toggle("hidden", state.messages.length > 0);
+      nodes.chatLog.querySelectorAll(".message").forEach((node) => node.remove());
+      for (const message of state.messages) {
+        const item = document.createElement("article");
+        item.className = `message ${message.role}`;
+        const meta = message.role === "user" ? "你" : `SpringClaw Agent${message.model ? ` / ${message.model}` : ""}`;
+        item.innerHTML = `
+          <div class="message-meta">${escapeHtml(meta)} · ${escapeHtml(message.time)}</div>
+          <div class="bubble rich-message">${renderMessageHtml(message.content)}</div>
+        `;
+        nodes.chatLog.appendChild(item);
+      }
+      nodes.chatLog.scrollTop = nodes.chatLog.scrollHeight;
+      syncContext();
+    }
+
+    function addMessage(role, content, model = "") {
+      state.messages.push({
+        role,
+        content,
+        model,
+        time: new Date().toLocaleTimeString("zh-CN", { hour12: false }),
+      });
+      renderMessages();
+      return state.messages[state.messages.length - 1];
+    }
+
+    function renderThinking() {
+      const item = document.createElement("article");
+      item.className = "message agent";
+      item.id = "thinkingMessage";
+      item.innerHTML = `
+        <div class="message-meta">SpringClaw Agent · 正在执行</div>
+        <div class="bubble"><span class="thinking"><span></span><span></span><span></span></span> 正在规划、调用工具或生成回答...</div>
+      `;
+      nodes.chatLog.appendChild(item);
+      nodes.chatLog.scrollTop = nodes.chatLog.scrollHeight;
+    }
+
+    function removeThinking() {
+      document.getElementById("thinkingMessage")?.remove();
+    }
+
+    async function loadMe() {
+      if (!state.token) {
+        state.me = null;
+        syncContext();
+        return;
+      }
+      try {
+        state.me = await api("/api/auth/me");
+        nodes.username.value = state.me.username || "";
+        setStatus(nodes.authStatus, `${state.me.username} / ${state.me.roleCode}`, "ok");
+      } catch (error) {
+        state.me = null;
+        setToken("");
+        setStatus(nodes.authStatus, error.message, "danger");
+      } finally {
+        syncContext();
+      }
+    }
+
+    async function doAuth(mode) {
+      const username = nodes.username.value.trim();
+      const password = nodes.password.value;
+      if (!username || !password) {
+        setStatus(nodes.authStatus, "请填写用户名和密码", "warn");
+        return;
+      }
+      setStatus(nodes.authStatus, mode === "login" ? "正在登录" : "正在注册", "warn");
+      try {
+        const data = await api(`/api/auth/${mode}`, {
+          method: "POST",
+          auth: false,
+          body: { username, password },
+        });
+        setToken(data.token);
+        state.me = { username: data.username, roleCode: data.roleCode, expireAt: data.expireAt };
+        setStatus(nodes.authStatus, `${data.username} / ${data.roleCode}`, "ok");
+        syncContext();
+      } catch (error) {
+        setStatus(nodes.authStatus, error.message, "danger");
+      }
+    }
+
+    async function sendMessage() {
+      if (state.busy) return;
+      const text = nodes.messageInput.value.trim();
+      if (!text) {
+        setStatus(nodes.sendStatus, "请输入消息", "warn");
+        nodes.messageInput.focus();
+        return;
+      }
+      if (!state.token) {
+        setStatus(nodes.sendStatus, "请先登录", "danger");
+        return;
+      }
+      state.sessionKey = nodes.sessionKey.value.trim() || makeSessionKey();
+      localStorage.setItem("springclaw.agent.session", state.sessionKey);
+      nodes.messageInput.value = "";
+      state.busy = true;
+      nodes.sendBtn.disabled = true;
+      addMessage("user", text);
+      setStatus(nodes.sendStatus, "Agent 正在处理", "warn");
+      const agentMessage = addMessage("agent", "");
+      try {
+        await streamApi(
+          {
+            sessionKey: state.sessionKey,
+            userId: state.me?.username || nodes.username.value.trim(),
+            message: text,
+            channel: "api",
+          },
+          {
+            onStatus(status) {
+              setStatus(nodes.sendStatus, status || "Agent 正在处理", "warn");
+            },
+            onToken(token) {
+              agentMessage.content += token;
+              renderMessages();
+            },
+            onError(message) {
+              agentMessage.content += agentMessage.content ? `\n${message}` : message;
+              renderMessages();
+            },
+          }
+        );
+        if (!agentMessage.content.trim()) {
+          agentMessage.content = "没有返回内容。";
+          renderMessages();
+        }
+        setStatus(nodes.sendStatus, "已完成", "ok");
+        nodes.modelBadge.textContent = "流式输出已完成";
+        nodes.modelBadge.className = "status-pill";
+      } catch (error) {
+        agentMessage.content = `请求失败：${error.message}`;
+        renderMessages();
+        setStatus(nodes.sendStatus, "请求失败", "danger");
+      } finally {
+        state.busy = false;
+        nodes.sendBtn.disabled = false;
+        nodes.messageInput.focus();
+      }
+    }
+
+    function newSession() {
+      state.messages = [];
+      state.sessionKey = makeSessionKey();
+      localStorage.setItem("springclaw.agent.session", state.sessionKey);
+      setStatus(nodes.sendStatus, "新会话已创建", "ok");
+      renderMessages();
+    }
+
+    function bindEvents() {
+      nodes.loginBtn.addEventListener("click", () => doAuth("login"));
+      nodes.registerBtn.addEventListener("click", () => doAuth("register"));
+      nodes.logoutBtn.addEventListener("click", () => {
+        setToken("");
+        state.me = null;
+        syncContext();
+        setStatus(nodes.authStatus, "已退出", "warn");
+      });
+      nodes.newSessionBtn.addEventListener("click", newSession);
+      nodes.sendBtn.addEventListener("click", sendMessage);
+      nodes.sessionKey.addEventListener("change", () => {
+        state.sessionKey = nodes.sessionKey.value.trim() || makeSessionKey();
+        localStorage.setItem("springclaw.agent.session", state.sessionKey);
+        syncContext();
+      });
+      nodes.messageInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          sendMessage();
+        }
+      });
+      document.querySelectorAll("[data-prompt]").forEach((button) => {
+        button.addEventListener("click", () => {
+          nodes.messageInput.value = button.dataset.prompt || "";
+          nodes.messageInput.focus();
+        });
+      });
+    }
+
+    async function bootstrap() {
+      bindEvents();
+      syncContext();
+      renderMessages();
+      await loadMe();
+      setStatus(nodes.sendStatus, state.token ? "可以开始提问" : "请先登录", state.token ? "ok" : "warn");
+    }
+
+    bootstrap();
+  </script>
+</body>
+</html>

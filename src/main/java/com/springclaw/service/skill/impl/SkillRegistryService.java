@@ -133,6 +133,12 @@ public class SkillRegistryService {
                 if (containsAny(normalizedQuestion, "分析", "定位", "看看", "找", "梳理")) s += 1;
                 yield s;
             }
+            case "workspace-review" -> {
+                int s = 0;
+                if (containsAny(normalizedQuestion, "项目", "源码", "代码", "架构", "模块", "文件")) s += 2;
+                if (containsAny(normalizedQuestion, "审查", "review", "检查", "评估", "优化", "冗余", "垃圾代码", "技术债", "风险")) s += 3;
+                yield s;
+            }
             case "log-diagnostics" -> {
                 int s = 0;
                 if (containsAny(normalizedQuestion, "日志", "报错", "错误", "异常", "堆栈", "超时", "启动失败", "端口")) s += 2;
@@ -152,6 +158,16 @@ public class SkillRegistryService {
 
     /** 高置信度条件：需要同时满足 URL + 抓取意图 */
     private boolean isHighConfidenceMatch(SkillDefinition definition, String normalizedQuestion) {
+        if ("code-analysis".equals(definition.skillId())) {
+            return containsAny(normalizedQuestion, "项目结构", "工程结构", "目录结构", "代码结构", "项目架构")
+                    || (containsAny(normalizedQuestion, "项目", "工程", "代码", "类", "方法", "接口", "实现", "文件", "模块", "目录")
+                    && containsAny(normalizedQuestion, "分析", "定位", "看看", "找", "梳理", "结构", "在哪", "怎样"));
+        }
+        if ("workspace-review".equals(definition.skillId())) {
+            return containsAny(normalizedQuestion, "审查项目", "项目审查", "审查源码", "源码审查", "架构审查", "代码审查")
+                    || (containsAny(normalizedQuestion, "项目", "工程", "源码", "代码", "架构", "模块")
+                    && containsAny(normalizedQuestion, "审查", "review", "检查", "评估", "优化", "冗余", "垃圾代码", "技术债", "风险"));
+        }
         if ("web-crawl".equals(definition.skillId())) {
             return containsAny(normalizedQuestion, "http://", "https://", "www.")
                     && containsAny(normalizedQuestion,

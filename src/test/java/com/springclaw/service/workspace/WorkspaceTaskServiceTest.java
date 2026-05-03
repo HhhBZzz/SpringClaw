@@ -52,4 +52,40 @@ class WorkspaceTaskServiceTest {
         Assertions.assertTrue(result.contains("OrderService.java"));
         Assertions.assertTrue(result.contains("createOrder"));
     }
+
+    @Test
+    void shouldReturnReadableProjectStructureForStructureQuestion() throws Exception {
+        Files.createDirectories(tempDir.resolve("src/main/java/com/demo/controller"));
+        Files.createDirectories(tempDir.resolve("src/main/java/com/demo/service"));
+        Files.createDirectories(tempDir.resolve("src/main/resources"));
+        Files.createDirectories(tempDir.resolve("frontend/src"));
+        Files.createDirectories(tempDir.resolve("skills/packages/repo_inspector"));
+
+        Files.writeString(tempDir.resolve("pom.xml"), "<project><artifactId>demo</artifactId></project>");
+        Files.writeString(tempDir.resolve("src/main/java/com/demo/DemoApplication.java"), "class DemoApplication {}");
+        Files.writeString(tempDir.resolve("src/main/java/com/demo/controller/UserController.java"), "class UserController {}");
+        Files.writeString(tempDir.resolve("src/main/java/com/demo/service/UserService.java"), "class UserService {}");
+        Files.writeString(tempDir.resolve("src/main/resources/application.yml"), "server:\\n  port: 18080\\n");
+        Files.writeString(tempDir.resolve("frontend/package.json"), "{\"scripts\":{\"dev\":\"vite\"}}");
+        Files.writeString(tempDir.resolve("frontend/src/App.vue"), "<template>demo</template>");
+        Files.writeString(tempDir.resolve("skills/packages/repo_inspector/SKILL.md"), "---\\nname: repo inspector\\n---\\n");
+
+        WorkspaceTaskService service = new WorkspaceTaskService(
+                tempDir.toString(),
+                8,
+                4,
+                6,
+                3000,
+                512
+        );
+
+        String result = service.analyzeTask("帮我看看这个项目里结构是怎样的");
+
+        Assertions.assertFalse(result.contains("WORKSPACE_TASK"));
+        Assertions.assertTrue(result.contains("项目结构概览"));
+        Assertions.assertTrue(result.contains("Spring Boot 后端"));
+        Assertions.assertTrue(result.contains("src/main/java"));
+        Assertions.assertTrue(result.contains("frontend"));
+        Assertions.assertTrue(result.contains("skills/packages"));
+    }
 }

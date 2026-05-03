@@ -164,8 +164,10 @@ class SimplifiedOparEngineTest {
                 (reason, context) -> "fallback:" + reason
         );
 
-        assertThat(result.reflect()).contains("远程模型在整理最终回答时失败了");
-        assertThat(result.reflect()).contains("FileToolPack.listFiles");
+        assertThat(result.reflect()).contains("我已经拿到本地工具结果");
+        assertThat(result.reflect()).doesNotContain("远程模型");
+        assertThat(result.reflect()).doesNotContain("Error while extracting response");
+        assertThat(result.reflect()).contains("文件检索");
         assertThat(result.reflect()).contains("skills/packages/runtime_probe/scripts/run.py");
         assertThat(result.plan()).contains("工具已执行，但模型总结超时");
         assertThat(result.modelEnabled()).isFalse();

@@ -1,6 +1,7 @@
 package com.springclaw.service.prompt;
 
 import com.springclaw.common.exception.BusinessException;
+import com.springclaw.service.files.LocalFilesystemService;
 import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.SkillService;
 import org.springframework.ai.chat.prompt.PromptTemplate;
@@ -14,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -30,12 +32,14 @@ public class SoulPromptService implements ApplicationRunner {
 
     private final AtomicReference<String> soulCache = new AtomicReference<>(DEFAULT_SOUL);
     private final SkillService skillService;
+    private final LocalFilesystemService localFilesystemService;
 
     @Value("${springclaw.soul.path:${user.dir}/SOUL.md}")
     private String soulPath;
 
-    public SoulPromptService(SkillService skillService) {
+    public SoulPromptService(SkillService skillService, LocalFilesystemService localFilesystemService) {
         this.skillService = skillService;
+        this.localFilesystemService = localFilesystemService;
     }
 
     @Override
@@ -56,9 +60,11 @@ public class SoulPromptService implements ApplicationRunner {
     }
 
     public String buildSystemPrompt(String channel, String userId, List<SkillDefinition> matchedSkills) {
+        Set<String> allowedToolPacks = skillService.resolveAllowedToolPacks(channel, userId);
         String coreSkillSummary = skillService.describeCoreSkills(channel, userId);
         String skillSummary = skillService.describeAvailableSkills(channel, userId);
         String matchedSkillSummary = describeMatchedSkills(matchedSkills);
+        String localFileBoundary = describeLocalFileBoundary(allowedToolPacks);
         PromptTemplate template = new PromptTemplate("""
                 # 角色设定
                 {soul}
@@ -76,11 +82,15 @@ public class SoulPromptService implements ApplicationRunner {
                 # 当前可用技能
                 {skills}
 
+                # 本地文件访问边界
+                {localFileBoundary}
+
                 # 行为约束
                 - 输出中文
                 - 输出结构清晰
                 - 优先给出可执行建议
                 - 优先使用核心 Agent 技能完成工作区检索、文件分析、联网研究、运行诊断
+                - 如果用户询问“能否读取本机文件/其他项目/授权目录”，不要回答只能读取当前项目；应说明可通过 Local Files 读取已授权根目录内的非敏感文本文件，并优先调用 listAuthorizedRoots 确认边界
                 - 如果本次命中了显式技能，优先遵守该技能的 instructions，再使用通用能力
                 - 只有在用户明确需要详细状态时，才展开内部能力清单
                 """);
@@ -90,7 +100,8 @@ public class SoulPromptService implements ApplicationRunner {
                 "userId", userId == null ? "anonymous" : userId,
                 "coreSkills", coreSkillSummary,
                 "matchedSkills", matchedSkillSummary,
-                "skills", skillSummary
+                "skills", skillSummary,
+                "localFileBoundary", localFileBoundary
         ));
     }
 
@@ -130,6 +141,24 @@ public class SoulPromptService implements ApplicationRunner {
                 ))
                 .reduce((left, right) -> left + "\n" + right)
                 .orElse("（未命中显式技能，按默认路由处理）");
+    }
+
+    private String describeLocalFileBoundary(Set<String> allowedToolPacks) {
+        if (allowedToolPacks == null || !allowedToolPacks.contains("file")) {
+            return "当前请求未开放本地文件工具；不能声称可读取用户电脑文件。";
+        }
+        try {
+            String roots = localFilesystemService.listAuthorizedRoots();
+            return """
+                    当前不是只能读取项目目录。
+                    - 项目工作区能力：用于审查当前项目源码。
+                    - Local Files 能力：可读取用户显式授权根目录内的非敏感文本文件；禁止越权读取授权目录外路径和敏感目录。
+                    - 当前授权根目录：
+                    %s
+                    """.formatted(roots);
+        } catch (Exception ex) {
+            return "Local Files 已启用，但授权根目录读取失败；回答时应说明需要先检查本地文件配置。";
+        }
     }
 
     private String truncate(String text, int maxLen) {

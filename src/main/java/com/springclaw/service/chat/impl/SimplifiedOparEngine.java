@@ -76,11 +76,6 @@ public class SimplifiedOparEngine {
             return buildLocalResult(systemPrompt, assembled, priorityStructured, "SIMPLIFIED:PRIORITY_STRUCTURED");
         }
 
-        LocalSkillFallbackService.LocalSkillResult aiControl = tryAiAssistedModelControl(activeClient, assembled, requestId);
-        if (aiControl != null) {
-            return buildLocalResult(systemPrompt, assembled, aiControl, "SIMPLIFIED:AI_CONTROL");
-        }
-
         if (!modelTransportGuardService.isModelCallEnabled(activeClient)) {
             return buildDisabledResult(systemPrompt, activeClient, assembled, fallbackResponder);
         }
@@ -239,16 +234,7 @@ public class SimplifiedOparEngine {
     private LocalSkillFallbackService.LocalSkillResult tryAiAssistedModelControl(AiProviderService.ActiveChatClient activeClient,
                                                                                  AssembledContext assembled,
                                                                                  String requestId) {
-        if (!modelTransportGuardService.isModelCallEnabled(activeClient)) {
-            return null;
-        }
-        try {
-            String response = modelControlIntentService.classify(activeClient, assembled, requestId);
-            return dispatchAiModelControlCommand(response);
-        } catch (Exception ex) {
-            log.warn("简化模式下模型辅助 provider 意图识别失败，已跳过辅助分类，不影响主回答。reason={}", ex.getMessage());
-            return null;
-        }
+        return null;
     }
 
     private LocalSkillFallbackService.LocalSkillResult dispatchAiModelControlCommand(String rawCommand) {
@@ -332,22 +318,53 @@ public class SimplifiedOparEngine {
         }
 
         StringBuilder builder = new StringBuilder();
-        builder.append("这次远程模型在整理最终回答时失败了");
-        if (StringUtils.hasText(reason)) {
-            builder.append("（").append(safe(reason)).append("）");
-        }
-        builder.append("，但本地工具已经拿到这些结果：");
-        for (ToolAuditEntry entry : successEntries.stream().limit(3).toList()) {
+        builder.append("我已经拿到本地工具结果，先把确定信息整理如下：");
+        for (ToolAuditEntry entry : successEntries.stream().limit(6).toList()) {
             builder.append("\n- ")
-                    .append(entry.toolName())
+                    .append(friendlyToolName(entry.toolName()))
                     .append("：")
-                    .append(truncateToolDetail(entry.detail(), 260));
+                    .append(renderFriendlyToolDetail(entry.detail()));
         }
-        if (successEntries.size() > 3) {
-            builder.append("\n- 其余 ").append(successEntries.size() - 3).append(" 条工具结果已省略。");
+        if (successEntries.size() > 6) {
+            builder.append("\n- 还有 ").append(successEntries.size() - 6).append(" 条工具结果已收起。");
         }
-        builder.append("\n你可以继续指定让我基于这些结果做哪一类分析，我会优先走本地路径。");
+        builder.append("\n如果你要继续深入，可以直接说“按后端模块展开”或“继续分析这些文件”。");
         return builder.toString();
+    }
+
+    private String friendlyToolName(String toolName) {
+        String text = safe(toolName);
+        if (text.contains("FileToolPack.listFiles")) {
+            return "文件检索";
+        }
+        if (text.contains("FileToolPack.readFile")) {
+            return "文件读取";
+        }
+        if (text.contains("LocalFilesystemToolPack")) {
+            return "本地授权文件";
+        }
+        if (text.contains("WorkspaceSearchToolPack")) {
+            return "工作区检索";
+        }
+        if (text.contains("ScriptSkillToolPack")) {
+            return "脚本技能";
+        }
+        if (text.contains("WebSearchToolPack")) {
+            return "网页检索";
+        }
+        if (text.contains("WeatherToolPack")) {
+            return "天气查询";
+        }
+        return text.replace("ToolPack.", " ");
+    }
+
+    private String renderFriendlyToolDetail(String detail) {
+        String text = safe(detail)
+                .replace("[F]", "文件")
+                .replace("[D]", "目录")
+                .replaceAll("\\s+", " ")
+                .trim();
+        return truncateToolDetail(text, 320);
     }
 
     private ToolAuditEntry parseToolAuditEntry(String content) {

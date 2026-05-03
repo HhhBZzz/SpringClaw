@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class AiProviderServiceTest {
@@ -83,30 +84,108 @@ class AiProviderServiceTest {
     }
 
     @Test
-    void shouldSwitchDeepSeekProviderAndSpecificModel() {
+    void shouldRejectDeepSeekThinkingModelsOnSpringAiChatPath() {
         SpringClawAiProperties properties = new SpringClawAiProperties();
         properties.getProviders().getPrimary().setApiKey("primary-test-key");
         properties.getProviders().getPrimary().setBaseUrl("https://api.example.com");
         properties.getProviders().getPrimary().setModel("claude-opus-4-6");
         properties.getProviders().getDeepSeek().setApiKey("deepseek-test-key");
         properties.getProviders().getDeepSeek().setBaseUrl("https://api.deepseek.com");
-        properties.getProviders().getDeepSeek().setModel("deepseek-chat");
-        properties.getProviders().getDeepSeek().setModels(List.of("deepseek-chat", "deepseek-reasoner"));
+        properties.getProviders().getDeepSeek().setModel("deepseek-v4-pro");
+        properties.getProviders().getDeepSeek().setModels(List.of("deepseek-v4-pro"));
         properties.setActiveProvider("primary");
 
         AiProviderService service = newService(properties);
 
-        service.switchActiveModel("deepseek", "reasoner");
+        assertThatThrownBy(() -> service.switchActiveModel("deepseek", "reasoner"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("暂不支持");
+
+        service.switchActiveModel("deepseek", "deepseek-v4-pro");
 
         assertThat(service.activeClient().providerId()).isEqualTo("deepseek");
-        assertThat(service.activeClient().model()).isEqualTo("deepseek-reasoner");
+        assertThat(service.activeClient().model()).isEqualTo("deepseek-v4-pro");
         @SuppressWarnings("unchecked")
         List<AiProviderService.ProviderView> providers = (List<AiProviderService.ProviderView>) service.summary().get("providers");
         assertThat(providers).anySatisfy(view -> {
             assertThat(view.providerId()).isEqualTo("deepseek");
-            assertThat(view.availableModels()).containsExactly("deepseek-chat", "deepseek-reasoner");
-            assertThat(view.model()).isEqualTo("deepseek-reasoner");
+            assertThat(view.availableModels()).containsExactly("deepseek-v4-pro");
+            assertThat(view.model()).isEqualTo("deepseek-v4-pro");
         });
+    }
+
+    @Test
+    void shouldIgnorePersistedDeepSeekThinkingModelOnStartup() {
+        SpringClawAiProperties properties = new SpringClawAiProperties();
+        properties.getProviders().getDeepSeek().setApiKey("deepseek-test-key");
+        properties.getProviders().getDeepSeek().setBaseUrl("https://api.deepseek.com");
+        properties.getProviders().getDeepSeek().setModel("deepseek-v4-pro");
+        properties.getProviders().getDeepSeek().setModels(List.of("deepseek-v4-pro"));
+        properties.setActiveProvider("deepseek");
+
+        StaticListableBeanFactory beanFactory = new StaticListableBeanFactory();
+        beanFactory.addBean("restClientBuilder", RestClient.builder());
+        beanFactory.addBean("webClientBuilder", WebClient.builder());
+        ObjectProvider<RestClient.Builder> restProvider = beanFactory.getBeanProvider(RestClient.Builder.class);
+        ObjectProvider<WebClient.Builder> webProvider = beanFactory.getBeanProvider(WebClient.Builder.class);
+        AiProviderStateService stateService = mock(AiProviderStateService.class);
+        when(stateService.resolvePreferredProvider("deepseek")).thenReturn("deepseek");
+        when(stateService.resolvePreferredModel("deepseek", "deepseek-v4-pro")).thenReturn("deepseek-reasoner");
+        when(stateService.resolvePreferredModel("primary", "qwen3.5-plus")).thenAnswer(invocation -> invocation.getArgument(1));
+        when(stateService.resolvePreferredModel("qwen", "qwen3.5-plus")).thenAnswer(invocation -> invocation.getArgument(1));
+        when(stateService.resolvePreferredModel("coding-plan", "qwen3.5-plus")).thenAnswer(invocation -> invocation.getArgument(1));
+
+        AiProviderService service = new AiProviderService(
+                properties,
+                stateService,
+                mock(ToolCallingManager.class),
+                RetryTemplate.builder().maxAttempts(1).build(),
+                ObservationRegistry.NOOP,
+                restProvider,
+                webProvider,
+                key -> ""
+        );
+
+        assertThat(service.activeClient().providerId()).isEqualTo("deepseek");
+        assertThat(service.activeClient().model()).isEqualTo("deepseek-v4-pro");
+        verify(stateService).persistActiveState("deepseek", "deepseek-v4-pro", "startup-sanitize");
+    }
+
+    @Test
+    void shouldRepairPersistedDeprecatedDeepSeekAliasOnStartup() {
+        SpringClawAiProperties properties = new SpringClawAiProperties();
+        properties.getProviders().getDeepSeek().setApiKey("deepseek-test-key");
+        properties.getProviders().getDeepSeek().setBaseUrl("https://api.deepseek.com");
+        properties.getProviders().getDeepSeek().setModel("deepseek-v4-pro");
+        properties.getProviders().getDeepSeek().setModels(List.of("deepseek-v4-pro"));
+        properties.setActiveProvider("deepseek");
+
+        StaticListableBeanFactory beanFactory = new StaticListableBeanFactory();
+        beanFactory.addBean("restClientBuilder", RestClient.builder());
+        beanFactory.addBean("webClientBuilder", WebClient.builder());
+        ObjectProvider<RestClient.Builder> restProvider = beanFactory.getBeanProvider(RestClient.Builder.class);
+        ObjectProvider<WebClient.Builder> webProvider = beanFactory.getBeanProvider(WebClient.Builder.class);
+        AiProviderStateService stateService = mock(AiProviderStateService.class);
+        when(stateService.resolvePreferredProvider("deepseek")).thenReturn("deepseek");
+        when(stateService.resolvePreferredModel("deepseek", "deepseek-v4-pro")).thenReturn("deepseek-chat");
+        when(stateService.resolvePreferredModel("primary", "qwen3.5-plus")).thenAnswer(invocation -> invocation.getArgument(1));
+        when(stateService.resolvePreferredModel("qwen", "qwen3.5-plus")).thenAnswer(invocation -> invocation.getArgument(1));
+        when(stateService.resolvePreferredModel("coding-plan", "qwen3.5-plus")).thenAnswer(invocation -> invocation.getArgument(1));
+
+        AiProviderService service = new AiProviderService(
+                properties,
+                stateService,
+                mock(ToolCallingManager.class),
+                RetryTemplate.builder().maxAttempts(1).build(),
+                ObservationRegistry.NOOP,
+                restProvider,
+                webProvider,
+                key -> ""
+        );
+
+        assertThat(service.activeClient().providerId()).isEqualTo("deepseek");
+        assertThat(service.activeClient().model()).isEqualTo("deepseek-v4-pro");
+        verify(stateService).persistActiveState("deepseek", "deepseek-v4-pro", "startup-sanitize");
     }
 
     @Test
@@ -121,8 +200,8 @@ class AiProviderServiceTest {
         properties.getProviders().getCodingPlan().setModels(List.of("qwen3.5-plus", "qwen3-coder-plus", "qwen3-coder-next"));
         properties.getProviders().getDeepSeek().setApiKey("deepseek-test-key");
         properties.getProviders().getDeepSeek().setBaseUrl("https://api.deepseek.com");
-        properties.getProviders().getDeepSeek().setModel("deepseek-chat");
-        properties.getProviders().getDeepSeek().setModels(List.of("deepseek-chat", "deepseek-reasoner"));
+        properties.getProviders().getDeepSeek().setModel("deepseek-v4-pro");
+        properties.getProviders().getDeepSeek().setModels(List.of("deepseek-v4-pro"));
         properties.setActiveProvider("primary");
 
         StaticListableBeanFactory beanFactory = new StaticListableBeanFactory();

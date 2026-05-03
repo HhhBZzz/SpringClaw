@@ -15,6 +15,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.reactive.function.client.WebClient;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -81,14 +82,20 @@ public class AiProviderService {
         registerProvider("coding-plan", aiProperties.getProviders().getCodingPlan());
         registerProvider("deepseek", aiProperties.getProviders().getDeepSeek());
 
+        Map<String, Boolean> repairedStartupModels = new LinkedHashMap<>();
         for (AiProviderRuntime runtime : providers.values()) {
-            runtime.restoreActiveModel(resolveStartupModel(runtime));
+            StartupModelChoice startupModel = resolveStartupModel(runtime);
+            runtime.restoreActiveModel(startupModel.model());
+            repairedStartupModels.put(runtime.providerId(), startupModel.repaired());
         }
 
         this.activeProviderId = new AtomicReference<>(resolveInitialProviderId(
                 resolveStartupProvider(aiProperties.getActiveProvider())
         ));
         AiProviderRuntime active = this.providers.get(this.activeProviderId.get());
+        if (active != null && Boolean.TRUE.equals(repairedStartupModels.get(active.providerId()))) {
+            aiProviderStateService.persistActiveState(active.providerId(), active.currentModel(), "startup-sanitize");
+        }
         log.info("当前活动模型提供方: provider={}, model={}, available={}",
                 active.providerId(), active.currentModel(), active.available());
     }
@@ -146,6 +153,7 @@ public class AiProviderService {
     public synchronized ProviderView switchActiveProvider(String providerId, String source) {
         String normalized = normalizeProviderId(providerId);
         AiProviderRuntime runtime = requireAvailableProvider(normalized);
+        sanitizeRuntimeModel(runtime);
         activeProviderId.set(normalized);
         aiProviderStateService.persistActiveState(normalized, runtime.currentModel(), source);
         return toView(runtime, true);
@@ -160,8 +168,12 @@ public class AiProviderService {
         AiProviderRuntime runtime = requireAvailableProvider(normalizedProvider);
         String resolvedModel = runtime.resolveModel(modelHint);
         if (!StringUtils.hasText(resolvedModel)) {
+            if (isChatUnsupportedModelHint(normalizedProvider, modelHint)) {
+                throw new BusinessException(40043, unsupportedChatModelMessage(normalizedProvider, modelHint));
+            }
             throw new BusinessException(40042, "未识别模型或模型未启用: " + safe(modelHint));
         }
+        ensureChatCompatibleModel(normalizedProvider, resolvedModel);
         runtime.setActiveModel(resolvedModel);
         activeProviderId.set(normalizedProvider);
         aiProviderStateService.persistActiveState(normalizedProvider, resolvedModel, source);
@@ -174,6 +186,9 @@ public class AiProviderService {
             return "";
         }
         String resolved = runtime.resolveModel(modelHint);
+        if (isUnsupportedChatModel(runtime.providerId(), resolved)) {
+            return "";
+        }
         return StringUtils.hasText(resolved) ? resolved : "";
     }
 
@@ -182,8 +197,12 @@ public class AiProviderService {
         AiProviderRuntime runtime = requireAvailableProvider(normalizedProvider);
         String resolvedModel = runtime.resolveModel(modelHint);
         if (!StringUtils.hasText(resolvedModel)) {
+            if (isChatUnsupportedModelHint(normalizedProvider, modelHint)) {
+                throw new BusinessException(40043, unsupportedChatModelMessage(normalizedProvider, modelHint));
+            }
             throw new BusinessException(40042, "未识别模型或模型未启用: " + safe(modelHint));
         }
+        ensureChatCompatibleModel(normalizedProvider, resolvedModel);
         runtime.setActiveModel(resolvedModel);
         activeProviderId.set(normalizedProvider);
         aiProviderStateService.persistActiveState(normalizedProvider, resolvedModel, source);
@@ -195,7 +214,9 @@ public class AiProviderService {
         if (runtime == null || !runtime.available()) {
             return List.of();
         }
-        return runtime.failoverModels(failedModel);
+        return runtime.failoverModels(failedModel).stream()
+                .filter(model -> !isUnsupportedChatModel(runtime.providerId(), model))
+                .toList();
     }
 
     public String findProviderByModelHint(String modelHint, String preferredProviderId) {
@@ -205,6 +226,7 @@ public class AiProviderService {
         List<AiProviderRuntime> exactMatches = providers.values().stream()
                 .filter(AiProviderRuntime::available)
                 .filter(runtime -> runtime.matchesModelExactly(modelHint))
+                .filter(runtime -> isSupportedResolvedModel(runtime, modelHint))
                 .toList();
         String exact = chooseProvider(exactMatches, preferred, current);
         if (StringUtils.hasText(exact)) {
@@ -214,12 +236,29 @@ public class AiProviderService {
         List<AiProviderRuntime> fuzzyMatches = providers.values().stream()
                 .filter(AiProviderRuntime::available)
                 .filter(runtime -> runtime.matchesModelFuzzy(modelHint))
+                .filter(runtime -> isSupportedResolvedModel(runtime, modelHint))
                 .toList();
         return chooseProvider(fuzzyMatches, preferred, current);
     }
 
     public boolean hasKnownModelHint(String modelHint) {
         return StringUtils.hasText(findProviderByModelHint(modelHint, null));
+    }
+
+    public boolean isChatUnsupportedModelHint(String providerId, String modelHint) {
+        String normalizedProvider = normalizeProviderId(providerId);
+        String candidate = resolveModelCandidate(normalizedProvider, modelHint);
+        return isUnsupportedChatModel(normalizedProvider, candidate);
+    }
+
+    public String unsupportedChatModelMessage(String providerId, String modelHint) {
+        String normalizedProvider = normalizeProviderId(providerId);
+        String candidate = resolveModelCandidate(normalizedProvider, modelHint);
+        if (!StringUtils.hasText(candidate)) {
+            candidate = safe(modelHint);
+        }
+        return "当前主聊天链路暂不支持该 DeepSeek thinking 模型: " + candidate
+                + "。请使用 deepseek-v4-pro 的普通聊天模式；显式 thinking/reasoner 需要单独 reasoning 适配器。";
     }
 
     public Map<String, Object> summary() {
@@ -256,13 +295,16 @@ public class AiProviderService {
         return aiProviderStateService.resolvePreferredProvider(configured);
     }
 
-    private String resolveStartupModel(AiProviderRuntime runtime) {
+    private StartupModelChoice resolveStartupModel(AiProviderRuntime runtime) {
         String configuredDefault = runtime.defaultModel();
         String explicit = safe(envLookup.apply(modelEnvName(runtime.providerId()))).trim();
         if (StringUtils.hasText(explicit)) {
-            return explicit;
+            return toStartupCompatibleModel(runtime, explicit);
         }
-        return aiProviderStateService.resolvePreferredModel(runtime.providerId(), configuredDefault);
+        return toStartupCompatibleModel(
+                runtime,
+                aiProviderStateService.resolvePreferredModel(runtime.providerId(), configuredDefault)
+        );
     }
 
     private String modelEnvName(String providerId) {
@@ -289,6 +331,7 @@ public class AiProviderService {
     }
 
     private ProviderView toView(AiProviderRuntime runtime, boolean active) {
+        sanitizeRuntimeModel(runtime);
         return new ProviderView(
                 runtime.providerId(),
                 runtime.currentModel(),
@@ -298,7 +341,7 @@ public class AiProviderService {
                 runtime.available(),
                 active,
                 runtime.availableReason(),
-                runtime.availableModels()
+                chatCompatibleModels(runtime)
         );
     }
 
@@ -342,6 +385,92 @@ public class AiProviderService {
         return providerId.trim().toLowerCase(Locale.ROOT);
     }
 
+    private void sanitizeRuntimeModel(AiProviderRuntime runtime) {
+        if (runtime == null || !isUnsupportedChatModel(runtime.providerId(), runtime.currentModel())) {
+            return;
+        }
+        String compatible = firstCompatibleModel(runtime);
+        if (StringUtils.hasText(compatible)) {
+            runtime.setActiveModel(compatible);
+        }
+    }
+
+    private StartupModelChoice toStartupCompatibleModel(AiProviderRuntime runtime, String preferredModel) {
+        String resolved = runtime.resolveModel(preferredModel);
+        String candidate = StringUtils.hasText(resolved) ? resolved : preferredModel;
+        if (isUnsupportedChatModel(runtime.providerId(), candidate)) {
+            String compatible = firstCompatibleModel(runtime);
+            log.warn("模型 {}:{} 当前不适合 Spring AI 主聊天链路，启动时回退到 {}。",
+                    runtime.providerId(), candidate, compatible);
+            return new StartupModelChoice(StringUtils.hasText(compatible) ? compatible : runtime.defaultModel(), true);
+        }
+        if (StringUtils.hasText(resolved)) {
+            return new StartupModelChoice(resolved, false);
+        }
+        String compatible = firstCompatibleModel(runtime);
+        if (StringUtils.hasText(preferredModel) && StringUtils.hasText(compatible)) {
+            log.warn("模型 {}:{} 未在当前可用模型列表中，启动时回退到 {}。",
+                    runtime.providerId(), preferredModel, compatible);
+            return new StartupModelChoice(compatible, true);
+        }
+        return new StartupModelChoice(runtime.defaultModel(), false);
+    }
+
+    private void ensureChatCompatibleModel(String providerId, String model) {
+        if (!isUnsupportedChatModel(providerId, model)) {
+            return;
+        }
+        throw new BusinessException(40043, unsupportedChatModelMessage(providerId, model));
+    }
+
+    private boolean isSupportedResolvedModel(AiProviderRuntime runtime, String modelHint) {
+        String resolved = runtime.resolveModel(modelHint);
+        return StringUtils.hasText(resolved) && !isUnsupportedChatModel(runtime.providerId(), resolved);
+    }
+
+    private List<String> chatCompatibleModels(AiProviderRuntime runtime) {
+        List<String> models = new ArrayList<>();
+        for (String model : runtime.availableModels()) {
+            if (StringUtils.hasText(model) && !isUnsupportedChatModel(runtime.providerId(), model)) {
+                models.add(model);
+            }
+        }
+        return List.copyOf(models);
+    }
+
+    private String firstCompatibleModel(AiProviderRuntime runtime) {
+        if (runtime == null) {
+            return "";
+        }
+        for (String model : runtime.availableModels()) {
+            if (StringUtils.hasText(model) && !isUnsupportedChatModel(runtime.providerId(), model)) {
+                return model;
+            }
+        }
+        return "";
+    }
+
+    private String resolveModelCandidate(String providerId, String modelHint) {
+        AiProviderRuntime runtime = providers.get(normalizeProviderId(providerId));
+        if (runtime == null) {
+            return safe(modelHint);
+        }
+        String resolved = runtime.resolveModel(modelHint);
+        return StringUtils.hasText(resolved) ? resolved : safe(modelHint);
+    }
+
+    private boolean isUnsupportedChatModel(String providerId, String model) {
+        if (!"deepseek".equals(normalizeProviderId(providerId)) || !StringUtils.hasText(model)) {
+            return false;
+        }
+        String normalized = model.toLowerCase(Locale.ROOT)
+                .replace("-", "")
+                .replace("_", "")
+                .replace(".", "")
+                .replace(" ", "");
+        return normalized.contains("reasoner");
+    }
+
     private String safe(String text) {
         return text == null ? "" : text;
     }
@@ -370,5 +499,8 @@ public class AiProviderService {
     }
 
     record RequestPaths(String completionsPath, String embeddingsPath) {
+    }
+
+    private record StartupModelChoice(String model, boolean repaired) {
     }
 }

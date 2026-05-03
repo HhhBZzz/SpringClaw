@@ -8,6 +8,90 @@
 
 当前日志先补到 `2026-03-21`。
 
+## 2026-05-03
+
+### 今日完成
+
+1. 修复本地文件访问边界误判
+   - 系统提示词增加“本地文件访问边界”
+   - 明确当前不是只能读取项目目录
+   - 注入 Local Files 授权根目录说明
+   - 普通用户默认允许读取/搜索授权目录，仍禁止系统命令、文件写入和脚本执行
+2. 增加确定性本地文件边界兜底
+   - 新增 `LOCAL_FILES_BOUNDARY` 本地路线
+   - 用户询问“授权目录/本地文件/是不是只能看当前项目”时，不再完全依赖模型判断
+   - 回答会直接列出授权根目录和敏感路径限制
+3. 优化聊天前端体验
+   - Vue Agent 页面改为调用 `/api/chat/stream`
+   - 静态 `/agent` 页面同步改为流式接口
+   - 回复气泡增加轻量 Markdown 清洗与结构化渲染
+   - 不再把 `**标题**`、分隔线等 Markdown 符号原样露给用户
+4. 优化响应速度
+   - 移除主链路前置的“AI 二次模型切换意图分类”调用
+   - 模型切换/查询继续由本地规则控制面处理
+   - 普通问答减少一次额外模型调用
+5. 流式接口修正
+   - `/api/chat/stream` 改为先返回 `SseEmitter`
+   - 后台异步执行 Agent
+   - 支持 `status/token/error/done` 事件
+
+### 今日问题与处理
+
+#### 问题 1：前端仍显示“只能读取当前项目目录”
+
+- 现象：
+  - 用户刷新后仍看到旧式回答
+- 排查：
+  - 直接用全新登录会话调用后端 `/api/chat/send`
+  - 后端已能回答“能读取授权本地目录 `/Users/hanbingzheng`”
+  - 数据库 `tool_permission / skill_descriptor / skill_policy` 均为空，不是 DB 残留策略导致
+- 判断：
+  - 主要原因是旧会话上下文污染和前端仍走 `/api/chat/send`
+- 处理：
+  - 增加确定性 `LOCAL_FILES_BOUNDARY`
+  - 前端切到 `/api/chat/stream`
+  - 建议用户对这类边界问题新开会话确认
+
+#### 问题 2：回复像 Markdown 原文，不像成熟 Agent 产品
+
+- 现象：
+  - 页面直接展示 `**结论**`、`---` 等符号
+- 处理：
+  - 前端增加轻量 Markdown block parser
+  - 标题、段落、列表、代码块分别渲染
+  - 行内 `**`、反引号等符号清洗掉
+
+#### 问题 3：流式接口名义存在，但前端没有使用
+
+- 现象：
+  - 后端已有 `/api/chat/stream`
+  - Vue 和静态页面都仍调用 `/api/chat/send`
+- 处理：
+  - Vue `streamChat` 使用 fetch body reader 解析 SSE
+  - 静态页面也改为解析 SSE
+  - 后端 stream 方法改成异步执行，避免连接建立前被 Agent 执行阻塞
+
+#### 问题 4：本地兜底过多会拖慢主链路
+
+- 保留：
+  - 模型查询/切换规则兜底
+  - 本地文件边界
+  - 天气、汇率、新闻
+  - 网页抓取 skill
+  - 项目代码分析和项目审查
+  - 会话记忆查询
+- 调整：
+  - 删除主链路前置 AI 二次模型切换意图分类
+  - 理由是它会额外消耗一次模型请求，且本地规则已经能覆盖主要控制意图
+
+### 今日验证
+
+1. `npm run build` 通过
+2. `mvn -q -DskipTests compile` 通过
+3. `mvn -q -Dtest=LocalSkillFallbackServiceTest#shouldAnswerAuthorizedLocalFileBoundaryDeterministically,SoulPromptServiceTest,ApplicationYamlPolicyTest test` 通过
+4. 完整 `mvn -q test` 需要非沙箱运行，当前审批超时，未能完成 fresh verification
+5. 重启当前 18080 后端需要停止旧进程，当前审批超时，未能自动重启
+
 ## 2026-03-21
 
 ### 今日完成

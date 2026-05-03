@@ -33,7 +33,7 @@ public class LocalExecutionNarrator {
                           LocalSkillFallbackService.LocalSkillResult localResult,
                           AiProviderService.ActiveChatClient narrationClient,
                           boolean modelCallEnabled) {
-        if (!modelCallEnabled) {
+        if (!modelCallEnabled || shouldUseDeterministicAnswer(localResult)) {
             return localResult.fallbackAnswer();
         }
         try {
@@ -108,5 +108,16 @@ public class LocalExecutionNarrator {
 
     private static String safe(String text) {
         return text == null ? "" : text;
+    }
+
+    private boolean shouldUseDeterministicAnswer(LocalSkillFallbackService.LocalSkillResult localResult) {
+        if (localResult == null || !StringUtils.hasText(localResult.route())) {
+            return false;
+        }
+        String route = localResult.route();
+        return route.contains("WORKSPACE_ANALYSIS")
+                || route.contains("BUILTIN_SKILL:CODE_ANALYSIS")
+                || route.startsWith("MODEL_")
+                || route.startsWith("SYSTEM_");
     }
 }

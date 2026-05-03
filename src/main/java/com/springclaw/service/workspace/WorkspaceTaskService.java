@@ -62,9 +62,14 @@ public class WorkspaceTaskService {
             throw new BusinessException(40074, "工作区任务不能为空");
         }
 
+        String normalizedGoal = goal.trim();
+        if (looksLikeProjectStructureQuestion(normalizedGoal)) {
+            return analyzeProjectStructure(normalizedGoal);
+        }
+
         List<String> keywords = extractKeywords(goal);
         if (keywords.isEmpty()) {
-            keywords = List.of(goal.trim());
+            keywords = List.of(normalizedGoal);
         }
 
         List<CandidateFile> ranked = rankCandidateFiles(keywords);
@@ -74,7 +79,7 @@ public class WorkspaceTaskService {
 
         StringBuilder builder = new StringBuilder();
         builder.append("WORKSPACE_TASK\n")
-                .append("任务: ").append(goal.trim()).append("\n\n")
+                .append("任务: ").append(normalizedGoal).append("\n\n")
                 .append("推测最相关文件:\n");
 
         int index = 1;
@@ -98,6 +103,106 @@ public class WorkspaceTaskService {
         }
 
         return trim(builder.toString().trim());
+    }
+
+    private String analyzeProjectStructure(String goal) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("项目结构概览\n")
+                .append("任务: ").append(goal).append("\n\n")
+                .append("整体判断:\n");
+
+        List<String> stack = detectProjectStack();
+        if (stack.isEmpty()) {
+            builder.append("- 这是一个普通代码工作区，暂未识别到 Maven、前端或 skill 包等典型入口。\n");
+        } else {
+            stack.forEach(item -> builder.append("- ").append(item).append('\n'));
+        }
+
+        builder.append("\n核心目录:\n");
+        List<String> directories = describeKnownDirectories();
+        if (directories.isEmpty()) {
+            builder.append("- 当前工作区没有命中预设的核心目录，建议先查看根目录文件。\n");
+        } else {
+            directories.forEach(item -> builder.append("- ").append(item).append('\n'));
+        }
+
+        builder.append("\n关键入口文件:\n");
+        List<String> entryFiles = describeEntryFiles();
+        if (entryFiles.isEmpty()) {
+            builder.append("- 暂未识别到典型入口文件。\n");
+        } else {
+            entryFiles.forEach(item -> builder.append("- ").append(item).append('\n'));
+        }
+
+        builder.append("\n建议阅读顺序:\n")
+                .append("1. 先看根目录构建文件和 application.yml，确认技术栈与运行配置。\n")
+                .append("2. 再看 controller/service/tool/skill 相关目录，理解请求如何进入业务和工具执行。\n")
+                .append("3. 最后看 frontend 与 static 页面，确认前端如何调用后端接口。");
+
+        return trim(builder.toString().trim());
+    }
+
+    private List<String> detectProjectStack() {
+        List<String> stack = new ArrayList<>();
+        if (exists("pom.xml") && isDirectory("src/main/java")) {
+            stack.add("Spring Boot 后端: Maven 项目，核心代码在 src/main/java。");
+        } else if (exists("build.gradle") || exists("build.gradle.kts")) {
+            stack.add("Java/Gradle 后端: 使用 Gradle 构建。");
+        }
+        if (exists("frontend/package.json")) {
+            String frontendPackage = readSafe(rootPath.resolve("frontend/package.json"));
+            String stackName = frontendPackage.contains("\"vue\"") || frontendPackage.contains("@vitejs/plugin-vue")
+                    ? "Vue/Vite 前端"
+                    : "Node 前端";
+            stack.add(stackName + ": 前端工程在 frontend。");
+        }
+        if (isDirectory("skills/packages")) {
+            stack.add("Skill 包体系: skills/packages 存放可被 Agent 调用的能力包。");
+        }
+        if (exists("docker-compose.yml")) {
+            stack.add("Docker 编排: docker-compose.yml 管理 MySQL、Redis、RabbitMQ 等本地依赖。");
+        }
+        return stack;
+    }
+
+    private List<String> describeKnownDirectories() {
+        List<String> directories = new ArrayList<>();
+        addDirectoryDescription(directories, "src/main/java", "Java 后端源码，通常包含 controller、service、domain、tool、strategy 等模块。");
+        addDirectoryDescription(directories, "src/main/resources", "后端配置、SQL、静态资源目录。");
+        addDirectoryDescription(directories, "src/main/resources/static", "Spring Boot 直接托管的静态页面。");
+        addDirectoryDescription(directories, "frontend", "独立前端工程，开发态通常由 Vite 启动。");
+        addDirectoryDescription(directories, "skills/packages", "项目内 skill 单源目录，每个子目录通常有 SKILL.md 和执行脚本。");
+        addDirectoryDescription(directories, "docs", "项目文档和设计说明。");
+        addDirectoryDescription(directories, "http", "接口调试样例。");
+        return directories;
+    }
+
+    private List<String> describeEntryFiles() {
+        List<String> files = new ArrayList<>();
+        addFileDescription(files, "pom.xml", "Maven 依赖和构建入口。");
+        addFileDescription(files, "src/main/resources/application.yml", "后端核心配置入口。");
+        addFileDescription(files, "docker-compose.yml", "本地依赖编排入口。");
+        addFileDescription(files, "frontend/package.json", "前端依赖和启动脚本入口。");
+        addFileDescription(files, "SOUL.md", "Agent 系统人格/系统提示词来源。");
+        findFirstApplicationFile().ifPresent(path ->
+                files.add(path + ": Spring Boot 启动类。"));
+        return files;
+    }
+
+    private java.util.Optional<String> findFirstApplicationFile() {
+        Path javaRoot = rootPath.resolve("src/main/java");
+        if (!Files.isDirectory(javaRoot)) {
+            return java.util.Optional.empty();
+        }
+        try (Stream<Path> stream = Files.walk(javaRoot, Math.min(maxDepth, 8))) {
+            return stream.filter(Files::isRegularFile)
+                    .map(this::toRelative)
+                    .filter(path -> path.endsWith("Application.java"))
+                    .sorted()
+                    .findFirst();
+        } catch (IOException ex) {
+            return java.util.Optional.empty();
+        }
     }
 
     private List<CandidateFile> rankCandidateFiles(List<String> keywords) {
@@ -227,6 +332,44 @@ public class WorkspaceTaskService {
         }
         String ext = name.substring(idx + 1).toLowerCase(Locale.ROOT);
         return TEXT_EXTENSIONS.contains(ext);
+    }
+
+    private boolean looksLikeProjectStructureQuestion(String goal) {
+        String lower = goal.toLowerCase(Locale.ROOT);
+        boolean explicitStructure = containsAny(lower, "项目结构", "工程结构", "目录结构", "整体结构", "项目架构", "代码结构");
+        boolean structureIntent = containsAny(lower, "结构", "架构", "目录", "模块", "组成", "怎么组织", "怎样", "概览", "梳理");
+        boolean projectScope = containsAny(lower, "项目", "工程", "代码库", "仓库", "整体", "当前");
+        boolean preciseLocation = containsAny(lower, "在哪个文件", "实现在哪", "源码位置", "代码位置", "哪个类", "哪个方法");
+        return explicitStructure || (projectScope && structureIntent && !preciseLocation);
+    }
+
+    private void addDirectoryDescription(List<String> target, String relativePath, String description) {
+        if (isDirectory(relativePath)) {
+            target.add(relativePath + ": " + description);
+        }
+    }
+
+    private void addFileDescription(List<String> target, String relativePath, String description) {
+        if (exists(relativePath)) {
+            target.add(relativePath + ": " + description);
+        }
+    }
+
+    private boolean exists(String relativePath) {
+        return Files.exists(rootPath.resolve(relativePath));
+    }
+
+    private boolean isDirectory(String relativePath) {
+        return Files.isDirectory(rootPath.resolve(relativePath));
+    }
+
+    private boolean containsAny(String text, String... keys) {
+        for (String key : keys) {
+            if (text.contains(key)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isIgnored(Path path) {

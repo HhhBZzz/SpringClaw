@@ -3,7 +3,9 @@ package com.springclaw.service.chat;
 import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import com.springclaw.service.skill.script.ScriptSkillExecutorService;
+import com.springclaw.service.workspace.WorkspaceReviewService;
 import com.springclaw.tool.pack.WorkspaceSearchToolPack;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -18,15 +20,32 @@ public class BuiltinSkillExecutionService {
 
     private final SkillRegistryService skillRegistryService;
     private final WorkspaceSearchToolPack workspaceSearchToolPack;
+    private final WorkspaceReviewService workspaceReviewService;
     private final LocalSkillQuerySupport querySupport;
 
+    @Autowired
     public BuiltinSkillExecutionService(SkillRegistryService skillRegistryService,
                                         WorkspaceSearchToolPack workspaceSearchToolPack,
+                                        WorkspaceReviewService workspaceReviewService,
                                         ScriptSkillExecutorService scriptSkillExecutorService,
                                         com.springclaw.service.skill.script.ScriptSkillCatalogService scriptSkillCatalogService) {
         this.skillRegistryService = skillRegistryService;
         this.workspaceSearchToolPack = workspaceSearchToolPack;
+        this.workspaceReviewService = workspaceReviewService;
         this.querySupport = new LocalSkillQuerySupport(scriptSkillExecutorService, scriptSkillCatalogService);
+    }
+
+    BuiltinSkillExecutionService(SkillRegistryService skillRegistryService,
+                                 WorkspaceSearchToolPack workspaceSearchToolPack,
+                                 ScriptSkillExecutorService scriptSkillExecutorService,
+                                 com.springclaw.service.skill.script.ScriptSkillCatalogService scriptSkillCatalogService) {
+        this(
+                skillRegistryService,
+                workspaceSearchToolPack,
+                new WorkspaceReviewService(System.getProperty("user.dir"), 8, 3000, 40, 512),
+                scriptSkillExecutorService,
+                scriptSkillCatalogService
+        );
     }
 
     public Optional<LocalSkillFallbackService.LocalSkillResult> tryExecute(String question) {
@@ -52,10 +71,22 @@ public class BuiltinSkillExecutionService {
     private Optional<LocalSkillFallbackService.LocalSkillResult> execute(SkillDefinition definition, String question) {
         return switch (definition.skillId()) {
             case "code-analysis" -> Optional.of(runCodeAnalysis(definition, question));
+            case "workspace-review" -> Optional.of(runWorkspaceReview(definition, question));
             case "web-crawl" -> Optional.of(runWebCrawl(definition, question));
             case "log-diagnostics" -> Optional.of(runLogDiagnostics(definition, question));
             default -> Optional.empty();
         };
+    }
+
+    private LocalSkillFallbackService.LocalSkillResult runWorkspaceReview(SkillDefinition definition, String question) {
+        String answer = workspaceReviewService.reviewWorkspace(question);
+        String detail = "skill=%s\n%s".formatted(definition.skillId(), answer);
+        return new LocalSkillFallbackService.LocalSkillResult(
+                "BUILTIN_SKILL:WORKSPACE_REVIEW",
+                detail,
+                answer,
+                true
+        );
     }
 
     private LocalSkillFallbackService.LocalSkillResult runCodeAnalysis(SkillDefinition definition, String question) {
@@ -66,11 +97,12 @@ public class BuiltinSkillExecutionService {
                 answer = scriptAnswer;
             }
         }
+        String fallback = querySupport.renderWorkspaceAnswer(answer);
         String detail = "skill=%s\n%s".formatted(definition.skillId(), answer);
         return new LocalSkillFallbackService.LocalSkillResult(
                 "BUILTIN_SKILL:CODE_ANALYSIS",
                 detail,
-                answer,
+                fallback,
                 true
         );
     }

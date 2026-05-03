@@ -177,7 +177,7 @@ public class SkillServiceImpl extends ServiceImpl<SkillDescriptorMapper, SkillDe
             lines.add("- 新闻能力 (news): 按关键词检索新闻摘要");
         }
         if (allowedToolPacks.contains("file") && !coveredToolPacks.contains("file")) {
-            lines.add("- 文件能力 (file): 在明确路径下读取、写入和列举文件");
+            lines.add("- 文件能力 (file): 在授权目录内读取、搜索和列举本地文件；写入仍限制在项目受控目录");
         }
         if (allowedToolPacks.contains("workspace") && !coveredToolPacks.contains("workspace")) {
             lines.add("- 项目检索能力 (workspace): 不知道路径时按文件名或关键词检索项目内容");
@@ -200,7 +200,7 @@ public class SkillServiceImpl extends ServiceImpl<SkillDescriptorMapper, SkillDe
             lines.add("- Workspace Explorer：不知道路径时检索项目文件、实现位置和配置证据");
         }
         if (allowedToolPacks.contains("file") && !coveredToolPacks.contains("file")) {
-            lines.add("- File Operator：在明确路径下读取、写入和列举文件");
+            lines.add("- File Operator：在授权目录内读取、搜索和列举本地文件；写入仍限制在项目受控目录");
         }
         if (allowedToolPacks.contains("script") && !coveredToolPacks.contains("script")) {
             lines.add("- External Skills：调用受控 Python 技能做项目分析、运行诊断和网页抓取");
@@ -301,7 +301,7 @@ public class SkillServiceImpl extends ServiceImpl<SkillDescriptorMapper, SkillDe
             list.add(buildDefault("system-basic", "系统基础技能", "获取系统时间、UUID、JVM 信息", "system", 10));
         }
         if (defaultFileEnabled) {
-            list.add(buildDefault("file-basic", "文件技能", "在受控目录内读取/写入/列举文件", "file", 20));
+            list.add(buildDefault("file-basic", "文件技能", "在授权目录内读取/搜索/列举文件，写入仍限制在项目受控目录", "file", 20));
             list.add(buildDefault("workspace-search", "项目检索技能", "不知道路径时可按文件名或关键词检索项目内容", "workspace", 25));
         }
         list.add(buildDefault("web-basic", "联网检索技能", "检索公开网页摘要；网页正文抓取交给 Python web skill", "web", 30));

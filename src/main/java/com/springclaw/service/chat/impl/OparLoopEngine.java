@@ -4,6 +4,7 @@ import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.tool.pack.FileToolPack;
+import com.springclaw.tool.pack.LocalFilesystemToolPack;
 import com.springclaw.tool.pack.ScriptSkillToolPack;
 import com.springclaw.tool.runtime.ToolExecutionContext;
 import com.springclaw.tool.runtime.ToolExecutionContextHolder;
@@ -104,16 +105,6 @@ public class OparLoopEngine {
                         priorityStructuredResult,
                         "命中高置信度结构化技能，跳过模型计划阶段。",
                         "已由受控本地技能完成执行。"
-                );
-            }
-            LocalSkillFallbackService.LocalSkillResult aiControlResult = tryAiAssistedModelControl(activeClient, assembled, requestId);
-            if (aiControlResult != null) {
-                return buildLocalExecutionResult(
-                        systemPrompt,
-                        assembled,
-                        aiControlResult,
-                        "模型识别到模型控制意图，跳过完整计划阶段。",
-                        "已由本地执行器完成控制/查询。"
                 );
             }
         }
@@ -447,16 +438,7 @@ public class OparLoopEngine {
     private LocalSkillFallbackService.LocalSkillResult tryAiAssistedModelControl(AiProviderService.ActiveChatClient activeClient,
                                                                                  AssembledContext assembled,
                                                                                  String requestId) {
-        if (!modelTransportGuardService.isModelCallEnabled(activeClient)) {
-            return null;
-        }
-        try {
-            String response = modelControlIntentService.classify(activeClient, assembled, requestId);
-            return dispatchAiModelControlCommand(response);
-        } catch (Exception ex) {
-            log.warn("模型辅助 provider 意图识别失败，已跳过辅助分类，不影响后续规划。reason={}", ex.getMessage());
-            return null;
-        }
+        return null;
     }
 
     private LocalSkillFallbackService.LocalSkillResult dispatchAiModelControlCommand(String rawCommand) {
@@ -497,7 +479,7 @@ public class OparLoopEngine {
             return true;
         }
         for (Object tool : tools) {
-            if (tool instanceof FileToolPack || tool instanceof ScriptSkillToolPack) {
+            if (tool instanceof FileToolPack || tool instanceof LocalFilesystemToolPack || tool instanceof ScriptSkillToolPack) {
                 return false;
             }
         }

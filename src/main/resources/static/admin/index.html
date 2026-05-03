@@ -16,10 +16,14 @@
       --accent: #0f766e;
       --accent-strong: #0a4f4a;
       --accent-soft: rgba(15, 118, 110, 0.12);
+      --accent-ink: #062f2c;
+      --sand: #c0843d;
+      --sand-soft: rgba(192, 132, 61, 0.14);
       --warn: #b45309;
       --danger: #b42318;
       --ok: #0f766e;
       --shadow: 0 18px 50px rgba(40, 30, 20, 0.09);
+      --shadow-hover: 0 26px 70px rgba(40, 30, 20, 0.14);
       --radius: 22px;
       --radius-sm: 16px;
       --mono: "SFMono-Regular", "JetBrains Mono", "Menlo", monospace;
@@ -27,6 +31,11 @@
     }
 
     * { box-sizing: border-box; }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
     body {
       margin: 0;
       min-height: 100vh;
@@ -36,6 +45,16 @@
         radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 28%),
         radial-gradient(circle at 82% 10%, rgba(180, 83, 9, 0.12), transparent 24%),
         linear-gradient(180deg, #f8f4ee 0%, #efe8de 52%, #e8dfd3 100%);
+    }
+
+    ::selection {
+      background: rgba(15, 118, 110, 0.22);
+      color: var(--accent-ink);
+    }
+
+    :focus-visible {
+      outline: 3px solid rgba(15, 118, 110, 0.38);
+      outline-offset: 3px;
     }
 
     body::before {
@@ -48,6 +67,25 @@
         linear-gradient(90deg, rgba(23, 33, 29, 0.022) 1px, transparent 1px);
       background-size: 22px 22px;
       mask-image: linear-gradient(180deg, rgba(0,0,0,0.32), transparent 85%);
+    }
+
+    .skip-link {
+      position: fixed;
+      left: 18px;
+      top: 18px;
+      z-index: 100;
+      transform: translateY(-130%);
+      border-radius: 999px;
+      padding: 10px 14px;
+      background: var(--accent-ink);
+      color: #f7fffd;
+      text-decoration: none;
+      box-shadow: var(--shadow);
+      transition: transform 160ms ease;
+    }
+
+    .skip-link:focus {
+      transform: translateY(0);
     }
 
     .shell {
@@ -66,6 +104,7 @@
       box-shadow: var(--shadow);
       background: linear-gradient(180deg, rgba(255,255,255,0.74), rgba(255,250,244,0.92));
       backdrop-filter: blur(10px);
+      transition: box-shadow 180ms ease, border-color 180ms ease, transform 180ms ease;
     }
 
     .hero {
@@ -88,6 +127,18 @@
       background: radial-gradient(circle, rgba(15, 118, 110, 0.14), transparent 70%);
     }
 
+    .hero::before {
+      content: "";
+      position: absolute;
+      width: 420px;
+      height: 120px;
+      left: 34%;
+      bottom: -86px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, transparent, rgba(192, 132, 61, 0.2), transparent);
+      transform: rotate(-4deg);
+    }
+
     .eyebrow {
       display: inline-flex;
       align-items: center;
@@ -102,12 +153,28 @@
       text-transform: uppercase;
     }
 
+    .eyebrow::before,
+    .nav-chip::before,
+    .section-kicker::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 5px rgba(15, 118, 110, 0.1);
+    }
+
     h1 {
       margin: 18px 0 10px;
       font-size: clamp(34px, 4.2vw, 58px);
       line-height: 0.95;
       letter-spacing: -0.05em;
       max-width: 9ch;
+    }
+
+    h1 span {
+      display: block;
+      color: var(--accent-strong);
     }
 
     .subhead {
@@ -118,11 +185,88 @@
       font-size: 15px;
     }
 
+    .hero-actions {
+      margin-top: 20px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
     .hero-grid {
       margin-top: 18px;
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 12px;
+    }
+
+    .content-stack {
+      display: grid;
+      gap: 20px;
+    }
+
+    .command-bar {
+      position: sticky;
+      top: 12px;
+      z-index: 20;
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: center;
+      padding: 12px;
+      border-radius: 24px;
+      border: 1px solid rgba(23, 33, 29, 0.1);
+      background: rgba(255, 253, 248, 0.82);
+      box-shadow: 0 14px 40px rgba(40, 30, 20, 0.1);
+      backdrop-filter: blur(14px);
+    }
+
+    .section-nav {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .nav-chip {
+      min-height: 38px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      border-radius: 999px;
+      color: var(--muted);
+      text-decoration: none;
+      border: 1px solid rgba(23, 33, 29, 0.08);
+      background: rgba(255,255,255,0.62);
+      font-size: 13px;
+      font-weight: 700;
+      transition: color 160ms ease, background 160ms ease, transform 160ms ease, border-color 160ms ease;
+    }
+
+    .nav-chip:hover,
+    .nav-chip.active {
+      color: var(--accent-ink);
+      background: rgba(15, 118, 110, 0.12);
+      border-color: rgba(15, 118, 110, 0.18);
+      transform: translateY(-1px);
+    }
+
+    .command-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .state-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--warn);
+      box-shadow: 0 0 0 6px rgba(180, 83, 9, 0.12);
     }
 
     .hero-card,
@@ -143,6 +287,18 @@
 
     .hero-card {
       padding: 14px 16px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-card::after {
+      content: "";
+      position: absolute;
+      inset: auto -30px -54px auto;
+      width: 90px;
+      height: 90px;
+      border-radius: 50%;
+      background: rgba(15, 118, 110, 0.08);
     }
 
     .hero-card label,
@@ -173,6 +329,12 @@
 
     .panel {
       padding: 20px;
+      scroll-margin-top: 92px;
+    }
+
+    .panel:hover {
+      box-shadow: var(--shadow-hover);
+      border-color: rgba(15, 118, 110, 0.12);
     }
 
     .grid {
@@ -187,6 +349,18 @@
       gap: 14px;
       align-items: center;
       margin-bottom: 14px;
+    }
+
+    .section-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      color: var(--accent-strong);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
     }
 
     .panel-head h2,
@@ -207,6 +381,10 @@
     .helper,
     .status-strip {
       padding: 14px 16px;
+    }
+
+    .toolbar {
+      background: linear-gradient(135deg, rgba(255,255,255,0.86), rgba(255, 250, 244, 0.68));
     }
 
     .toolbar,
@@ -241,10 +419,21 @@
       display: flex;
       flex-direction: column;
       justify-content: space-between;
+      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+    }
+
+    .metric:hover,
+    .quick-card:hover,
+    .mini-card:hover,
+    .provider-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(15, 118, 110, 0.18);
+      background: rgba(255,255,255,0.86);
     }
 
     .metric strong {
       font-size: 30px;
+      font-variant-numeric: tabular-nums;
     }
 
     .metric span,
@@ -273,6 +462,13 @@
 
     .field {
       padding: 12px 14px;
+      transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+    }
+
+    .field:focus-within {
+      border-color: rgba(15, 118, 110, 0.35);
+      background: rgba(255,255,255,0.9);
+      box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.08);
     }
 
     input,
@@ -291,6 +487,7 @@
       background: transparent;
       color: var(--text);
       padding: 0;
+      min-height: 28px;
     }
 
     textarea {
@@ -304,12 +501,19 @@
       cursor: pointer;
       border-radius: 14px;
       padding: 11px 15px;
+      min-height: 44px;
       font-weight: 700;
       letter-spacing: 0.01em;
-      transition: transform 140ms ease, opacity 140ms ease;
+      touch-action: manipulation;
+      transition: transform 140ms ease, opacity 140ms ease, box-shadow 140ms ease;
     }
 
-    button:hover { transform: translateY(-1px); }
+    button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 24px rgba(23, 33, 29, 0.09);
+    }
+
+    button:active { transform: translateY(0) scale(0.99); }
     button:disabled { opacity: 0.45; cursor: wait; transform: none; }
 
     .btn-primary {
@@ -329,6 +533,7 @@
     }
 
     .btn-tiny {
+      min-height: 36px;
       padding: 7px 10px;
       border-radius: 10px;
       font-size: 12px;
@@ -404,6 +609,7 @@
     .quick-card,
     .mini-card {
       padding: 16px;
+      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
     }
 
     .provider-card {
@@ -413,6 +619,7 @@
       background: rgba(255,255,255,0.78);
       display: grid;
       gap: 12px;
+      transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
     }
 
     .provider-head {
@@ -439,6 +646,7 @@
 
     .table-shell {
       overflow: auto;
+      scrollbar-color: rgba(15, 118, 110, 0.42) transparent;
     }
 
     table {
@@ -472,6 +680,7 @@
       font-size: 12px;
       line-height: 1.7;
       white-space: pre-wrap;
+      scrollbar-color: rgba(15, 118, 110, 0.42) transparent;
     }
 
     .hidden { display: none !important; }
@@ -494,6 +703,17 @@
       .metrics {
         grid-template-columns: 1fr;
       }
+
+      .command-bar {
+        align-items: stretch;
+        flex-direction: column;
+        position: static;
+      }
+
+      .command-meta {
+        justify-content: space-between;
+        white-space: normal;
+      }
     }
 
     @media (max-width: 760px) {
@@ -501,19 +721,40 @@
       .hero, .panel { padding: 16px; border-radius: 24px; }
       .fields-2, .fields-3 { grid-template-columns: 1fr; }
       h1 { max-width: none; }
+      .section-nav { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; }
+      .nav-chip { flex: 0 0 auto; }
+      .panel-head { align-items: flex-start; flex-direction: column; }
+      .hero-actions .nav-chip { width: 100%; justify-content: center; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.001ms !important;
+      }
     }
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#mainContent">跳到主要内容</a>
   <div class="shell fade-in">
     <section class="hero">
       <div>
         <div class="eyebrow">SpringClaw / Admin Console</div>
-        <h1>管理员工作台。</h1>
+        <h1>Agent Ops <span>控制台。</span></h1>
         <p class="subhead">
-          默认只保留最常用的后台动作：登录、看系统状态、管理用户角色、切换模型、检查记忆与队列、查审计日志。
-          复杂原始数据仍然能看，但不再让你先手填一堆表单。
+          把模型、skill、任务调度、记忆和审计压进同一张操作台。默认展示关键状态，复杂原始数据仍然能看，
+          但先让管理员知道系统现在是否健康、谁能用、下一个动作是什么。
         </p>
+        <div class="hero-actions">
+          <a class="nav-chip active" href="#skills">查看 Skill Registry</a>
+          <a class="nav-chip" href="#tasks">创建定时任务</a>
+          <a class="nav-chip" href="#models">切换模型</a>
+        </div>
         <div class="hero-grid">
           <div class="hero-card">
             <label>访问权限</label>
@@ -572,9 +813,29 @@
       </aside>
     </section>
 
-    <section class="panel">
+    <main id="mainContent" class="content-stack">
+    <nav class="command-bar" aria-label="后台模块导航">
+      <div class="section-nav">
+        <a class="nav-chip active" href="#system" data-nav-target="system">系统</a>
+        <a class="nav-chip" href="#users" data-nav-target="users">用户</a>
+        <a class="nav-chip" href="#models" data-nav-target="models">模型</a>
+        <a class="nav-chip" href="#skills" data-nav-target="skills">Skills</a>
+        <a class="nav-chip" href="#tasks" data-nav-target="tasks">任务</a>
+        <a class="nav-chip" href="#usage" data-nav-target="usage">用量</a>
+        <a class="nav-chip" href="#ops" data-nav-target="ops">运行态</a>
+        <a class="nav-chip" href="#governance" data-nav-target="governance">策略</a>
+        <a class="nav-chip" href="#audit" data-nav-target="audit">审计</a>
+      </div>
+      <div class="command-meta" aria-live="polite">
+        <span class="state-dot" aria-hidden="true"></span>
+        <span>快捷导航已启用，键盘 Tab 可直接操作</span>
+      </div>
+    </nav>
+
+    <section class="panel" id="system" data-section="system">
       <div class="panel-head">
         <div>
+          <div class="section-kicker">01 / Overview</div>
           <h2>系统快照</h2>
           <p class="panel-note">管理员登录后，这里会自动刷新健康状态、当前模型、记忆模式、缓存和队列概况。</p>
         </div>
@@ -600,9 +861,10 @@
     </section>
 
     <div class="grid">
-      <section class="panel">
+      <section class="panel" id="users" data-section="users">
         <div class="panel-head">
           <div>
+            <div class="section-kicker">02 / Identity</div>
             <h3>用户与角色</h3>
             <p class="panel-note">创建账号后，直接在用户表里一键切角色。飞书用户直接用 `ou_xxx` 作为用户名。</p>
           </div>
@@ -641,9 +903,10 @@
         <div class="table-shell" id="sessionsTableWrap" style="margin-top: 14px;"></div>
       </section>
 
-      <section class="panel">
+      <section class="panel" id="models" data-section="models">
         <div class="panel-head">
           <div>
+            <div class="section-kicker">03 / Model Runtime</div>
             <h3>模型控制</h3>
             <p class="panel-note">管理员可以设置默认聊天链路，并查看所有 provider 和可切换模型。复杂任务默认仍建议自动升级到深度分析链路。</p>
           </div>
@@ -683,9 +946,10 @@
       </section>
     </div>
 
-    <section class="panel">
+    <section class="panel" id="skills" data-section="skills">
       <div class="panel-head">
         <div>
+          <div class="section-kicker">04 / Skill Registry</div>
           <h3>Runtime Skills</h3>
           <p class="panel-note">这里看的是统一 skill registry。Builtin、Script、Markdown 导入都会汇总到这里，后续路由和 prompt 也基于这一层工作。</p>
         </div>
@@ -744,9 +1008,10 @@
       <div class="table-shell" id="runtimeSkillsTableWrap" style="margin-top: 14px;"></div>
     </section>
 
-    <section class="panel">
+    <section class="panel" id="tasks" data-section="tasks">
       <div class="panel-head">
         <div>
+          <div class="section-kicker">05 / Scheduled Work</div>
           <h3>定时任务</h3>
           <p class="panel-note">这里管理任务底座。任务可以定时执行某个 skill，也可以定时发一条完整 Agent prompt；执行记录默认独立归档，可选写回会话或投递到飞书。</p>
         </div>
@@ -896,9 +1161,10 @@
       <div class="table-shell" id="taskExecutionsTableWrap" style="margin-top: 14px;"></div>
     </section>
 
-    <section class="panel">
+    <section class="panel" id="usage" data-section="usage">
       <div class="panel-head">
         <div>
+          <div class="section-kicker">06 / Cost & Usage</div>
           <h3>模型用量</h3>
           <p class="panel-note">按用户、provider、model 和调用阶段统计模型用量。这里看的是真实模型调用 usage，不是登录 token。</p>
         </div>
@@ -919,9 +1185,10 @@
     </section>
 
     <div class="grid">
-      <section class="panel">
+      <section class="panel" id="ops" data-section="ops">
         <div class="panel-head">
           <div>
+            <div class="section-kicker">07 / Runtime Ops</div>
             <h3>运维与记忆</h3>
             <p class="panel-note">这里聚合健康、缓存、RabbitMQ 和记忆运行态；需要原始结构时仍保留完整输出。</p>
           </div>
@@ -960,9 +1227,10 @@
         <div class="output" id="memorySearchOut" style="margin-top: 14px;">等待搜索</div>
       </section>
 
-      <section class="panel">
+      <section class="panel" id="governance" data-section="governance">
         <div class="panel-head">
           <div>
+            <div class="section-kicker">08 / Governance</div>
             <h3>权限与技能策略</h3>
             <p class="panel-note">保留高级配置，但尽量简化成最少字段。常用场景是放开某个角色的某个工具，或给某个飞书用户定向放行 skill。</p>
           </div>
@@ -985,7 +1253,7 @@
             </div>
             <div class="field">
               <label for="permTool">工具名</label>
-              <input id="permTool" placeholder="如 WorkspaceSearchToolPack.findFilesByName" />
+              <input id="permTool" placeholder="如 LocalFilesystemToolPack.searchAuthorizedFiles" />
             </div>
             <div class="field">
               <label for="permAllow">是否允许</label>
@@ -1030,9 +1298,10 @@
       </section>
     </div>
 
-    <section class="panel">
+    <section class="panel" id="audit" data-section="audit">
       <div class="panel-head">
         <div>
+          <div class="section-kicker">09 / Audit Trail</div>
           <h3>审计日志</h3>
           <p class="panel-note">只保留最常用的筛选条件。统计和最近 30 条日志可以直接一键刷新。</p>
         </div>
@@ -1060,6 +1329,7 @@
       <div class="output" id="auditStatsOut" style="margin-top: 14px;">等待统计</div>
       <div class="table-shell" id="auditTableWrap" style="margin-top: 14px;"></div>
     </section>
+    </main>
   </div>
 
   <script>
@@ -1121,6 +1391,7 @@
       policiesTableWrap: document.getElementById("policiesTableWrap"),
       auditStatsOut: document.getElementById("auditStatsOut"),
       auditTableWrap: document.getElementById("auditTableWrap"),
+      stateDot: document.querySelector(".state-dot"),
     };
 
     function escapeHtml(text) {
@@ -1168,6 +1439,12 @@
           ? "status-pill"
           : "status-pill warn";
       nodes.overviewStatus.textContent = text;
+      if (nodes.stateDot) {
+        const color = kind === "danger" ? "var(--danger)" : kind === "ok" ? "var(--ok)" : "var(--warn)";
+        const glow = kind === "danger" ? "rgba(180, 35, 24, 0.14)" : kind === "ok" ? "rgba(15, 118, 110, 0.14)" : "rgba(180, 83, 9, 0.12)";
+        nodes.stateDot.style.background = color;
+        nodes.stateDot.style.boxShadow = `0 0 0 6px ${glow}`;
+      }
     }
 
     function setAdminUiEnabled(enabled) {
@@ -1179,6 +1456,10 @@
       document.querySelectorAll(
         ".panel input, .panel select, .panel textarea"
       ).forEach((node) => {
+        if (node.closest(".auth-panel")) {
+          node.disabled = false;
+          return;
+        }
         node.disabled = !enabled;
       });
     }
@@ -2282,6 +2563,33 @@
       }
     }
 
+    function initSectionNavigation() {
+      const chips = Array.from(document.querySelectorAll(".nav-chip[data-nav-target]"));
+      const sections = Array.from(document.querySelectorAll("[data-section]"));
+      if (!chips.length || !sections.length) {
+        return;
+      }
+      const setActive = (id) => {
+        chips.forEach((chip) => chip.classList.toggle("active", chip.dataset.navTarget === id));
+      };
+      if (!("IntersectionObserver" in window)) {
+        setActive(sections[0].dataset.section);
+        return;
+      }
+      const observer = new IntersectionObserver((entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (visible) {
+          setActive(visible.target.dataset.section);
+        }
+      }, {
+        rootMargin: "-18% 0px -62% 0px",
+        threshold: [0.08, 0.2, 0.4],
+      });
+      sections.forEach((section) => observer.observe(section));
+    }
+
     function bindEvents() {
       document.getElementById("loginBtn").addEventListener("click", () => doLogin("login"));
       document.getElementById("registerBtn").addEventListener("click", () => doLogin("register"));
@@ -2370,6 +2678,7 @@
       setToken(state.token);
       renderAuth();
       bindEvents();
+      initSectionNavigation();
       renderOverviewMetrics({});
       renderUsageSummary({});
       renderUsageTable([]);

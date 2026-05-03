@@ -9,6 +9,7 @@ import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.util.StringUtils;
 
+import java.util.Map;
 import java.util.List;
 import java.util.Locale;
 import java.util.LinkedHashSet;
@@ -233,10 +234,15 @@ final class AiProviderRuntime {
     }
 
     private ChatClient buildChatClient(String model) {
-        OpenAiChatOptions chatOptions = OpenAiChatOptions.builder()
+        OpenAiChatOptions.Builder optionsBuilder = OpenAiChatOptions.builder()
                 .model(model)
-                .temperature(temperature)
-                .build();
+                .temperature(temperature);
+        if (isDeepSeekV4Model(model)) {
+            // DeepSeek V4 enables thinking by default. The current Spring AI tool path
+            // does not persist reasoning_content, so keep the normal chat path non-thinking.
+            optionsBuilder.extraBody(Map.of("thinking", Map.of("type", "disabled")));
+        }
+        OpenAiChatOptions chatOptions = optionsBuilder.build();
         return ChatClient.builder(
                 OpenAiChatModel.builder()
                         .openAiApi(openAiApi)
@@ -246,6 +252,12 @@ final class AiProviderRuntime {
                         .observationRegistry(observationRegistry)
                         .build()
         ).build();
+    }
+
+    private boolean isDeepSeekV4Model(String model) {
+        return "deepseek".equalsIgnoreCase(providerId)
+                && StringUtils.hasText(model)
+                && normalizeModelToken(model).contains("deepseekv4");
     }
 
     private boolean matchesModelToken(String normalizedHint, String model) {

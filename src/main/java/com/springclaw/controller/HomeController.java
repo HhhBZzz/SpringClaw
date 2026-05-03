@@ -26,6 +26,8 @@ public class HomeController {
                 "authLoginEndpoint", "/api/auth/login",
                 "auditLogsEndpoint", "/api/admin/audit/logs",
                 "adminPage", "/admin",
+                "staticAgentPage", "/agent/index.html",
+                "vueAgentPage", "http://localhost:5173/#/agent",
                 "healthEndpoint", "/actuator/health"
         ));
     }

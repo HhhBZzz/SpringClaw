@@ -1,4 +1,8 @@
 spring:
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:.env.local[.properties]
   application:
     name: springclaw-java
   datasource:
@@ -71,8 +75,12 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 springclaw:
+  web:
+    cors:
+      allowed-origins: ${SPRINGCLAW_WEB_CORS_ALLOWED_ORIGINS:}
+      allowed-origin-patterns: ${SPRINGCLAW_WEB_CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173,http://localhost:3000,http://127.0.0.1:3000,http://192.168.*:*}
   ai:
-    active-provider: ${SPRINGCLAW_AI_ACTIVE_PROVIDER:primary}
+    active-provider: ${SPRINGCLAW_AI_ACTIVE_PROVIDER:${OPENCLAW_AI_ACTIVE_PROVIDER:primary}}
     request-timeout-seconds: ${SPRINGCLAW_AI_REQUEST_TIMEOUT_SECONDS:12}
     max-failover-attempts: ${SPRINGCLAW_AI_MAX_FAILOVER_ATTEMPTS:1}
     state:
@@ -113,13 +121,12 @@ springclaw:
           - MiniMax-M2.5
         temperature: ${SPRINGCLAW_CODING_PLAN_TEMPERATURE:0.2}
       deepseek:
-        enabled: ${SPRINGCLAW_DEEPSEEK_ENABLED:true}
-        api-key: ${SPRINGCLAW_DEEPSEEK_API_KEY:}
-        base-url: ${SPRINGCLAW_DEEPSEEK_BASE_URL:https://api.deepseek.com}
-        model: ${SPRINGCLAW_DEEPSEEK_MODEL:deepseek-chat}
+        enabled: ${SPRINGCLAW_DEEPSEEK_ENABLED:${OPENCLAW_DEEPSEEK_ENABLED:true}}
+        api-key: ${SPRINGCLAW_DEEPSEEK_API_KEY:${OPENCLAW_DEEPSEEK_API_KEY:}}
+        base-url: ${SPRINGCLAW_DEEPSEEK_BASE_URL:${OPENCLAW_DEEPSEEK_BASE_URL:https://api.deepseek.com}}
+        model: ${SPRINGCLAW_DEEPSEEK_MODEL:${OPENCLAW_DEEPSEEK_MODEL:deepseek-v4-pro}}
         models:
-          - deepseek-chat
-          - deepseek-reasoner
+          - deepseek-v4-pro
         temperature: ${SPRINGCLAW_DEEPSEEK_TEMPERATURE:0.2}
   soul:
     path: ${SOUL_PATH:${user.dir}/SOUL.md}
@@ -168,7 +175,7 @@ springclaw:
     password-pepper: ${SPRINGCLAW_PASSWORD_PEPPER:}
     tool-permission-enabled: true
     default-deny: false
-    user-deny-tools: SystemToolPack.*,FileToolPack.*,WorkspaceSearchToolPack.*,ScriptSkillToolPack.*
+    user-deny-tools: SystemToolPack.runCommand,FileToolPack.writeTextFile,ScriptSkillToolPack.*
     guest-allow-tools: SystemToolPack.now,SystemToolPack.uuid,WeatherToolPack.*,ExchangeRateToolPack.*,NewsToolPack.*,WebSearchToolPack.webSearch
   chat:
     agent-mode: ${SPRINGCLAW_CHAT_AGENT_MODE:simplified}
@@ -183,8 +190,16 @@ springclaw:
       enabled: true
       retry-times: 1
       keywords: 我是 claude,anthropic,不能执行 reflect,无法执行 reflect,不能假装,不能扮演,无法遵循系统指令
+  local-files:
+    roots: ${SPRINGCLAW_LOCAL_FILES_ROOTS:${OPENCLAW_LOCAL_FILES_ROOTS:${springclaw.tools.file.root:${user.dir}}}}
+    deny-paths: ${SPRINGCLAW_LOCAL_FILES_DENY_PATHS:.git,node_modules,target,dist,build,.ssh,.gnupg,.aws,.kube,Library/Keychains,Library/Application Support/Google/Chrome,Library/Application Support/Firefox,.env}
+    max-depth: ${SPRINGCLAW_LOCAL_FILES_MAX_DEPTH:8}
+    max-read-chars: ${SPRINGCLAW_LOCAL_FILES_MAX_READ_CHARS:12000}
+    max-file-results: ${SPRINGCLAW_LOCAL_FILES_MAX_FILE_RESULTS:100}
+    max-text-hits: ${SPRINGCLAW_LOCAL_FILES_MAX_TEXT_HITS:50}
+    max-file-size-kb: ${SPRINGCLAW_LOCAL_FILES_MAX_FILE_SIZE_KB:512}
   persistence:
-    db-enabled: false
+    db-enabled: ${SPRINGCLAW_PERSISTENCE_DB_ENABLED:${OPENCLAW_PERSISTENCE_DB_ENABLED:false}}
   guard:
     enabled: false
     redis-enabled: true

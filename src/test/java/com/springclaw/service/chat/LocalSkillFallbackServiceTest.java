@@ -4,9 +4,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.config.ai.SpringClawAiProperties;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.ai.AiProviderStateService;
+import com.springclaw.service.files.LocalFilesystemService;
 import com.springclaw.service.skill.bundle.SkillPackageCatalogService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import com.springclaw.service.skill.script.ScriptSkillCatalogService;
+import com.springclaw.service.skill.script.ScriptSkillExecutorService;
+import com.springclaw.service.workspace.WorkspaceReviewService;
 import com.springclaw.service.workspace.WorkspaceTaskService;
 import io.micrometer.observation.ObservationRegistry;
 import com.springclaw.tool.pack.ExchangeRateToolPack;
@@ -38,6 +41,56 @@ class LocalSkillFallbackServiceTest {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void shouldAnswerAuthorizedLocalFileBoundaryDeterministically() throws Exception {
+        Path documents = tempDir.resolve("Documents");
+        Files.createDirectories(documents);
+        Files.writeString(documents.resolve("resume.txt"), "resume");
+
+        ScriptSkillCatalogService scriptSkillCatalogService = new ScriptSkillCatalogService(false, tempDir.toString(), "echo", new ObjectMapper());
+        ScriptSkillExecutorService scriptSkillExecutorService = new ScriptSkillExecutorService(false, scriptSkillCatalogService, "python3", 3, 1000, new ObjectMapper());
+        ScriptSkillToolPack scriptSkillToolPack = new ScriptSkillToolPack(false, scriptSkillCatalogService, "python3", 3, 1000, new ObjectMapper());
+        WorkspaceSearchToolPack workspaceSearchToolPack = new WorkspaceSearchToolPack(
+                new WorkspaceTaskService(tempDir.toString(), 8, 4, 6, 1200, 512),
+                tempDir.toString(),
+                8,
+                4000,
+                30,
+                5000,
+                512
+        );
+
+        LocalSkillFallbackService service = new LocalSkillFallbackService(
+                true,
+                new SystemToolPack(false, "pwd,ls", 5, 2000),
+                workspaceSearchToolPack,
+                new WebSearchToolPack(false, "https://example.com?q={query}", true, 3, 2000),
+                new StubWeatherToolPack(),
+                new ExchangeRateToolPack(false, "https://example.com/{base}", 3),
+                new NewsToolPack(false, "https://example.com/{query}", 5, 3),
+                scriptSkillToolPack,
+                new BuiltinSkillExecutionService(
+                        registryService(),
+                        workspaceSearchToolPack,
+                        new WorkspaceReviewService(tempDir.toString(), 8, 300, 20, 512),
+                        scriptSkillExecutorService,
+                        scriptSkillCatalogService
+                ),
+                scriptSkillExecutorService,
+                scriptSkillCatalogService,
+                null,
+                new LocalFilesystemService(documents.toString(), ".ssh,.env", 12000, 8, 100, 20, 512)
+        );
+
+        LocalSkillFallbackService.LocalSkillResult result = service.tryHandleStructured("帮我列出当前授权本地目录，并说明是不是只能读取当前项目")
+                .orElseThrow();
+
+        Assertions.assertEquals("LOCAL_FILES_BOUNDARY", result.route());
+        Assertions.assertTrue(result.fallbackAnswer().contains("不是只能读取当前项目目录"));
+        Assertions.assertTrue(result.fallbackAnswer().contains("root1"));
+        Assertions.assertTrue(result.fallbackAnswer().contains("Documents"));
+    }
 
     @Test
     void shouldRouteProjectFileQuestionToWorkspaceAnalysis() throws Exception {
@@ -97,7 +150,83 @@ class LocalSkillFallbackServiceTest {
 
         Assertions.assertEquals("BUILTIN_SKILL:CODE_ANALYSIS", result.route());
         Assertions.assertTrue(result.executionDetails().contains("skill=code-analysis"));
+        Assertions.assertFalse(result.fallbackAnswer().contains("WORKSPACE_TASK"));
         Assertions.assertTrue(result.fallbackAnswer().contains("SpringAiConfig.java"));
+    }
+
+    @Test
+    void shouldRouteProjectReviewQuestionToWorkspaceReviewSkill() throws Exception {
+        writeBuiltinSkill("workspace-review", "本地项目审查", "审查项目源码、架构和冗余代码",
+                "workspace,file,script", "opar",
+                "审查项目,项目审查,源码审查,架构审查,冗余代码,垃圾代码", "审查这个项目架构");
+
+        Path serviceFile = tempDir.resolve("src/main/java/com/demo/service/UserService.java");
+        Files.createDirectories(serviceFile.getParent());
+        Files.writeString(serviceFile, """
+                package com.demo.service;
+
+                public class UserService {
+                    // TODO split responsibilities
+                    public void save() {
+                    }
+                }
+                """);
+        Files.writeString(tempDir.resolve("pom.xml"), "<project><artifactId>demo</artifactId></project>");
+
+        SystemToolPack systemToolPack = new SystemToolPack(false, "pwd,ls", 5, 2000);
+        WorkspaceTaskService workspaceTaskService = new WorkspaceTaskService(tempDir.toString(), 8, 4, 6, 1200, 512);
+        WorkspaceSearchToolPack workspaceSearchToolPack = new WorkspaceSearchToolPack(
+                workspaceTaskService,
+                tempDir.toString(),
+                8,
+                4000,
+                30,
+                5000,
+                512
+        );
+        WebSearchToolPack webSearchToolPack = new WebSearchToolPack(false, "https://example.com?q={query}", true, 3, 2000);
+        WeatherToolPack weatherToolPack = new WeatherToolPack(
+                false,
+                "https://example.com/{city}",
+                3,
+                "https://www.weather.com.cn/data/sk/{cityCode}.html",
+                webSearchToolPack
+        );
+        ExchangeRateToolPack exchangeRateToolPack = new ExchangeRateToolPack(false, "https://example.com/{base}", 3);
+        NewsToolPack newsToolPack = new NewsToolPack(false, "https://example.com/{query}", 5, 3);
+        ScriptSkillCatalogService scriptSkillCatalogService = new ScriptSkillCatalogService(false, tempDir.toString(), "echo", new ObjectMapper());
+        ScriptSkillExecutorService scriptSkillExecutorService = new ScriptSkillExecutorService(false, scriptSkillCatalogService, "python3", 3, 1000, new ObjectMapper());
+        ScriptSkillToolPack scriptSkillToolPack = new ScriptSkillToolPack(false, scriptSkillCatalogService, "python3", 3, 1000, new ObjectMapper());
+        BuiltinSkillExecutionService builtinSkillExecutionService = new BuiltinSkillExecutionService(
+                registryService(),
+                workspaceSearchToolPack,
+                new WorkspaceReviewService(tempDir.toString(), 8, 300, 20, 512),
+                scriptSkillExecutorService,
+                scriptSkillCatalogService
+        );
+
+        LocalSkillFallbackService service = new LocalSkillFallbackService(
+                true,
+                systemToolPack,
+                workspaceSearchToolPack,
+                webSearchToolPack,
+                weatherToolPack,
+                exchangeRateToolPack,
+                newsToolPack,
+                scriptSkillToolPack,
+                builtinSkillExecutionService,
+                scriptSkillExecutorService,
+                scriptSkillCatalogService,
+                mockAiProviderService()
+        );
+
+        LocalSkillFallbackService.LocalSkillResult result = service.tryHandleStructured("请审查这个项目源码，看看架构是否合理")
+                .orElseThrow();
+
+        Assertions.assertEquals("BUILTIN_SKILL:WORKSPACE_REVIEW", result.route());
+        Assertions.assertTrue(result.executionDetails().contains("skill=workspace-review"));
+        Assertions.assertTrue(result.fallbackAnswer().contains("LOCAL_WORKSPACE_REVIEW"));
+        Assertions.assertTrue(result.fallbackAnswer().contains("UserService.java"));
     }
 
     @Test
@@ -297,13 +426,12 @@ class LocalSkillFallbackServiceTest {
         String detailAnswer = service.tryHandle("列出所有模型").orElse("");
 
         Assertions.assertEquals("MODEL_PROVIDER_SWITCH", switchResult.route());
-        Assertions.assertTrue(switchResult.executionDetails().contains("provider: deepseek"));
-        Assertions.assertTrue(switchResult.executionDetails().contains("model: deepseek-reasoner"));
-        Assertions.assertTrue(switchResult.fallbackAnswer().contains("已切换到 deepseek"));
-        Assertions.assertTrue(currentAnswer.contains("我当前使用的是 deepseek 的 deepseek-reasoner"));
+        Assertions.assertTrue(switchResult.executionDetails().contains("模型切换失败"));
+        Assertions.assertTrue(switchResult.executionDetails().contains("暂不支持"));
+        Assertions.assertFalse(currentAnswer.contains("deepseek-reasoner"));
         Assertions.assertTrue(detailAnswer.contains("deepseek"));
-        Assertions.assertTrue(detailAnswer.contains("deepseek-chat"));
-        Assertions.assertTrue(detailAnswer.contains("deepseek-reasoner"));
+        Assertions.assertTrue(detailAnswer.contains("deepseek-v4-pro"));
+        Assertions.assertFalse(detailAnswer.contains("deepseek-reasoner"));
     }
 
     @Test
@@ -762,8 +890,8 @@ class LocalSkillFallbackServiceTest {
         properties.getProviders().getCodingPlan().setModels(List.of("qwen3.5-plus", "qwen3-coder-plus", "qwen3-coder-next"));
         properties.getProviders().getDeepSeek().setApiKey("deepseek-test-key");
         properties.getProviders().getDeepSeek().setBaseUrl("https://api.deepseek.com");
-        properties.getProviders().getDeepSeek().setModel("deepseek-chat");
-        properties.getProviders().getDeepSeek().setModels(List.of("deepseek-chat", "deepseek-reasoner"));
+        properties.getProviders().getDeepSeek().setModel("deepseek-v4-pro");
+        properties.getProviders().getDeepSeek().setModels(List.of("deepseek-v4-pro"));
         properties.setActiveProvider("primary");
 
         StaticListableBeanFactory beanFactory = new StaticListableBeanFactory();

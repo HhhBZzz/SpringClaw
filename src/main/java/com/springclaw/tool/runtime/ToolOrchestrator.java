@@ -3,11 +3,13 @@ package com.springclaw.tool.runtime;
 import com.springclaw.service.skill.SkillService;
 import com.springclaw.tool.pack.ExchangeRateToolPack;
 import com.springclaw.tool.pack.FileToolPack;
+import com.springclaw.tool.pack.LocalFilesystemToolPack;
 import com.springclaw.tool.pack.NewsToolPack;
 import com.springclaw.tool.pack.ScriptSkillToolPack;
 import com.springclaw.tool.pack.SystemToolPack;
 import com.springclaw.tool.pack.WebSearchToolPack;
 import com.springclaw.tool.pack.WeatherToolPack;
+import com.springclaw.tool.pack.WorkspaceReviewToolPack;
 import com.springclaw.tool.pack.WorkspaceSearchToolPack;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -29,8 +31,10 @@ import java.util.Set;
 public class ToolOrchestrator {
 
     private final FileToolPack fileToolPack;
+    private final LocalFilesystemToolPack localFilesystemToolPack;
     private final SystemToolPack systemToolPack;
     private final WorkspaceSearchToolPack workspaceSearchToolPack;
+    private final WorkspaceReviewToolPack workspaceReviewToolPack;
     private final WebSearchToolPack webSearchToolPack;
     private final WeatherToolPack weatherToolPack;
     private final ExchangeRateToolPack exchangeRateToolPack;
@@ -38,6 +42,7 @@ public class ToolOrchestrator {
     private final ScriptSkillToolPack scriptSkillToolPack;
     private final SkillService skillService;
     private final List<String> fileTriggerKeywords;
+    private final List<String> localFileTriggerKeywords;
     private final List<String> workspaceTriggerKeywords;
     private final List<String> webTriggerKeywords;
     private final List<String> weatherTriggerKeywords;
@@ -46,8 +51,10 @@ public class ToolOrchestrator {
     private final List<String> scriptTriggerKeywords;
 
     public ToolOrchestrator(FileToolPack fileToolPack,
+                            LocalFilesystemToolPack localFilesystemToolPack,
                             SystemToolPack systemToolPack,
                             WorkspaceSearchToolPack workspaceSearchToolPack,
+                            WorkspaceReviewToolPack workspaceReviewToolPack,
                             WebSearchToolPack webSearchToolPack,
                             WeatherToolPack weatherToolPack,
                             ExchangeRateToolPack exchangeRateToolPack,
@@ -55,6 +62,7 @@ public class ToolOrchestrator {
                             ScriptSkillToolPack scriptSkillToolPack,
                             SkillService skillService,
                             @Value("${springclaw.skill.file-trigger-keywords:文件,目录,path,read,write,list,保存,读取}") String fileTriggerKeywords,
+                            @Value("${springclaw.skill.local-file-trigger-keywords:本地文件,电脑文件,授权文件,授权目录,本机文件,桌面,下载,文档,Desktop,Downloads,Documents,简历,论文}") String localFileTriggerKeywords,
                             @Value("${springclaw.skill.workspace-trigger-keywords:找文件,搜代码,在哪个文件,关键词检索,不知道路径,search file,find file,grep}") String workspaceTriggerKeywords,
                             @Value("${springclaw.skill.web-trigger-keywords:联网,搜索,查一下,网页,新闻,官网,web search,google,bing}") String webTriggerKeywords,
                             @Value("${springclaw.skill.weather-trigger-keywords:天气,气温,温度,下雨,weather}") String weatherTriggerKeywords,
@@ -62,8 +70,10 @@ public class ToolOrchestrator {
                             @Value("${springclaw.skill.news-trigger-keywords:新闻,热点,头条,资讯,news}") String newsTriggerKeywords,
                             @Value("${springclaw.skill.script-trigger-keywords:脚本,skill,执行技能,python,run skill}") String scriptTriggerKeywords) {
         this.fileToolPack = fileToolPack;
+        this.localFilesystemToolPack = localFilesystemToolPack;
         this.systemToolPack = systemToolPack;
         this.workspaceSearchToolPack = workspaceSearchToolPack;
+        this.workspaceReviewToolPack = workspaceReviewToolPack;
         this.webSearchToolPack = webSearchToolPack;
         this.weatherToolPack = weatherToolPack;
         this.exchangeRateToolPack = exchangeRateToolPack;
@@ -71,6 +81,11 @@ public class ToolOrchestrator {
         this.scriptSkillToolPack = scriptSkillToolPack;
         this.skillService = skillService;
         this.fileTriggerKeywords = Arrays.stream(fileTriggerKeywords.split(","))
+                .map(String::trim)
+                .map(String::toLowerCase)
+                .filter(StringUtils::hasText)
+                .toList();
+        this.localFileTriggerKeywords = Arrays.stream(localFileTriggerKeywords.split(","))
                 .map(String::trim)
                 .map(String::toLowerCase)
                 .filter(StringUtils::hasText)
@@ -121,8 +136,14 @@ public class ToolOrchestrator {
         if (allowedToolPacks.contains("file") && needFileTools(merged)) {
             tools.add(fileToolPack);
         }
+        if (allowedToolPacks.contains("file") && needLocalFilesystemTools(merged)) {
+            tools.add(localFilesystemToolPack);
+        }
         if (allowedToolPacks.contains("workspace") && needWorkspaceTools(merged)) {
             tools.add(workspaceSearchToolPack);
+        }
+        if (allowedToolPacks.contains("workspace") && needWorkspaceReview(merged)) {
+            tools.add(workspaceReviewToolPack);
         }
         if (allowedToolPacks.contains("web") && needWebTools(merged)) {
             tools.add(webSearchToolPack);
@@ -152,9 +173,11 @@ public class ToolOrchestrator {
         }
         if (allowedToolPacks.contains("file")) {
             tools.add(fileToolPack);
+            tools.add(localFilesystemToolPack);
         }
         if (allowedToolPacks.contains("workspace")) {
             tools.add(workspaceSearchToolPack);
+            tools.add(workspaceReviewToolPack);
         }
         if (allowedToolPacks.contains("web")) {
             tools.add(webSearchToolPack);
@@ -183,10 +206,24 @@ public class ToolOrchestrator {
                 "写入", "保存到", "覆盖", "读取", "read", "write", "list", "列出目录", "列出文件");
     }
 
+    private boolean needLocalFilesystemTools(String text) {
+        return containsAnyKeyword(text, localFileTriggerKeywords)
+                || containsAnyLiteral(text,
+                "本地电脑", "授权根目录", "授权目录", "授权文件", "电脑里", "电脑上",
+                "读取本地", "搜索本地", "找一下简历", "找简历", "找论文", "local filesystem");
+    }
+
     private boolean needWorkspaceTools(String text) {
         return containsAnyKeyword(text, workspaceTriggerKeywords)
                 || looksLikeWorkspaceQuestion(text)
                 || (containsAnyKeyword(text, fileTriggerKeywords) && !hasExplicitPath(text));
+    }
+
+    private boolean needWorkspaceReview(String text) {
+        return containsAnyLiteral(text,
+                "审查项目", "项目审查", "审查源码", "源码审查", "架构审查", "代码审查",
+                "review 项目", "review 代码", "冗余代码", "垃圾代码", "架构是否合理",
+                "哪里不合理", "哪里需要优化", "安全风险", "技术债", "code review");
     }
 
     private boolean needWebTools(String text) {

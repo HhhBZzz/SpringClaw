@@ -250,6 +250,12 @@ final class LocalSkillModelControlSupport {
             return "未识别要切换的模型。可选 provider：primary / qwen / coding-plan / deepseek。";
         }
         if (target.hasExplicitModelHint() && !StringUtils.hasText(target.modelId())) {
+            if (aiProviderService.isChatUnsupportedModelHint(target.providerId(), target.requestedModelHint())) {
+                return "模型切换失败：" + aiProviderService.unsupportedChatModelMessage(
+                        target.providerId(),
+                        target.requestedModelHint()
+                );
+            }
             return "未识别到目标模型：%s。请直接说具体模型名，例如 qwen3.5-plus、qwen3-coder-plus。"
                     .formatted(target.requestedModelHint());
         }

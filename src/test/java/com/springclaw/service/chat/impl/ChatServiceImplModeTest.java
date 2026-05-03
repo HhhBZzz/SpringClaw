@@ -6,8 +6,10 @@ import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
 import com.springclaw.service.usage.LlmUsageRecordService;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -63,6 +65,26 @@ class ChatServiceImplModeTest {
 
         verify(fixture.oparLoopEngine).runLoop(eq(fixture.activeClient), eq("system"), any(AssembledContext.class), anyString(), any());
         verify(fixture.simplifiedOparEngine, never()).run(any(), anyString(), any(), anyString(), any());
+    }
+
+    @Test
+    void streamShouldReturnEmitterBeforeAgentExecutionFinishes() throws Exception {
+        Fixture fixture = new Fixture();
+        ChatContext context = fixture.buildChatContext("你好", "simplified", "默认");
+        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(fixture.simplifiedOparEngine.run(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any()))
+                .thenAnswer(invocation -> {
+                    Thread.sleep(350);
+                    return new ChatExecutionResult("observe", "SIMPLIFIED", "ACTION", "answer", true);
+                });
+
+        ChatServiceImpl service = fixture.build();
+        long start = System.currentTimeMillis();
+        SseEmitter emitter = service.stream(new ChatRequest("s1", "u1", "你好", "api"));
+        long elapsed = System.currentTimeMillis() - start;
+
+        emitter.complete();
+        Assertions.assertTrue(elapsed < 180, "stream endpoint should return immediately, elapsed=" + elapsed);
     }
 
     private static final class Fixture {

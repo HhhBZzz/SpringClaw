@@ -66,6 +66,26 @@ class BuiltinSkillCatalogServiceTest {
                 .contains("web-crawl");
     }
 
+    @Test
+    void shouldTreatProjectStructureQuestionAsHighConfidenceCodeAnalysis() throws Exception {
+        writeBuiltinSkill(
+                "code-analysis",
+                "代码分析",
+                "分析项目结构",
+                "workspace,file,script",
+                "opar",
+                "分析代码,定位代码,分析项目",
+                "帮我看看项目结构"
+        );
+
+        SkillRegistryService service = new SkillRegistryService(
+                new SkillPackageCatalogService(true, tempDir.toString()));
+
+        assertThat(service.matchHighConfidenceDefinition("帮我看看这个项目里结构是怎样的"))
+                .map(SkillDefinition::skillId)
+                .contains("code-analysis");
+    }
+
     private void writeBuiltinSkill(String skillId,
                                    String name,
                                    String description,

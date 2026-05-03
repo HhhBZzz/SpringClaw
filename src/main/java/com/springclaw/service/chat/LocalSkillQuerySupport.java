@@ -184,6 +184,55 @@ final class LocalSkillQuerySupport {
                 || text.contains("命中结果（关键词=");
     }
 
+    String renderWorkspaceAnswer(String answer) {
+        if (!StringUtils.hasText(answer) || !answer.startsWith("WORKSPACE_TASK")) {
+            return answer;
+        }
+
+        String task = "";
+        StringBuilder files = new StringBuilder();
+        StringBuilder snippets = new StringBuilder();
+        String section = "";
+        for (String line : answer.split("\\R")) {
+            String value = line.trim();
+            if (!StringUtils.hasText(value) || "WORKSPACE_TASK".equals(value)) {
+                continue;
+            }
+            if (value.startsWith("任务:")) {
+                task = value.substring("任务:".length()).trim();
+                continue;
+            }
+            if ("推测最相关文件:".equals(value)) {
+                section = "files";
+                continue;
+            }
+            if ("关键代码片段:".equals(value)) {
+                section = "snippets";
+                continue;
+            }
+            if ("files".equals(section)) {
+                files.append("- ")
+                        .append(value.replaceAll("\\s*\\(score=\\d+\\)", ""))
+                        .append('\n');
+            } else if ("snippets".equals(section)) {
+                snippets.append(value)
+                        .append('\n');
+            }
+        }
+
+        StringBuilder rendered = new StringBuilder("我在项目里做了代码定位，结论如下：\n");
+        if (StringUtils.hasText(task)) {
+            rendered.append("\n问题：").append(task).append('\n');
+        }
+        if (!files.isEmpty()) {
+            rendered.append("\n最相关文件：\n").append(files);
+        }
+        if (!snippets.isEmpty()) {
+            rendered.append("\n关键线索：\n").append(snippets);
+        }
+        return rendered.toString().trim();
+    }
+
     String extractFirstUrl(String question) {
         if (!StringUtils.hasText(question)) {
             return "";

@@ -22,3 +22,9 @@ docs/PROJECT_MEMORY.md
 
 # Browser automation artifacts
 .playwright-cli/
+
+# Frontend workspace
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.npm-cache/

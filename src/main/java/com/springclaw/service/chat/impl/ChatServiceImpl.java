@@ -17,7 +17,9 @@ import reactor.core.Disposable;
 
 import java.io.IOException;
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 对话服务编排层。
@@ -79,22 +81,70 @@ public class ChatServiceImpl implements ChatService {
         chatGuardService.checkRateLimit(request.sessionKey());
         String lockToken = chatGuardService.acquireSessionLock(request.sessionKey());
         AtomicBoolean lockReleased = new AtomicBoolean(false);
-
-        ChatContext context = chatContextFactory.build(request, true);
-        ChatExecutionResult executionResult = runAgentExecution(context);
         SseEmitter emitter = new SseEmitter(120_000L);
-        StringBuilder fullAnswer = new StringBuilder();
+        AtomicReference<Disposable> disposableRef = new AtomicReference<>();
 
-        if (shouldSendImmediateAnswer(context, executionResult)) {
-            String answer = resolveFinalAnswer(context, executionResult);
-            fullAnswer.append(answer);
-            sendToken(emitter, answer);
-            chatResultPersister.persist(context, answer, executionResult);
-            releaseSessionLockOnce(context.session().getSessionKey(), lockToken, lockReleased);
+        emitter.onCompletion(() -> {
+            Disposable disposable = disposableRef.get();
+            if (disposable != null) {
+                disposable.dispose();
+            }
+            releaseSessionLockOnce(request.sessionKey(), lockToken, lockReleased);
+        });
+        emitter.onTimeout(() -> {
+            Disposable disposable = disposableRef.get();
+            if (disposable != null) {
+                disposable.dispose();
+            }
+            releaseSessionLockOnce(request.sessionKey(), lockToken, lockReleased);
             emitter.complete();
-            return emitter;
-        }
+        });
+        CompletableFuture.runAsync(() -> executeStream(request, lockToken, lockReleased, emitter, disposableRef));
+        return emitter;
+    }
 
+    private void executeStream(ChatRequest request,
+                               String lockToken,
+                               AtomicBoolean lockReleased,
+                               SseEmitter emitter,
+                               AtomicReference<Disposable> disposableRef) {
+        try {
+            sendStatus(emitter, "正在组织上下文");
+            ChatContext context = chatContextFactory.build(request, true);
+            sendStatus(emitter, "正在执行 Agent");
+            ChatExecutionResult executionResult = runAgentExecution(context);
+
+            if (shouldSendImmediateAnswer(context, executionResult)) {
+                streamImmediateAnswer(context, executionResult, emitter);
+                releaseSessionLockOnce(context.session().getSessionKey(), lockToken, lockReleased);
+                completeEmitter(emitter);
+                return;
+            }
+
+            streamReflectAnswer(context, executionResult, lockToken, lockReleased, emitter, disposableRef);
+        } catch (Exception ex) {
+            log.warn("流式聊天启动失败，sessionKey={}, reason={}", request.sessionKey(), ex.getMessage());
+            sendError(emitter, ex.getMessage());
+            releaseSessionLockOnce(request.sessionKey(), lockToken, lockReleased);
+            completeEmitter(emitter);
+        }
+    }
+
+    private void streamImmediateAnswer(ChatContext context,
+                                       ChatExecutionResult executionResult,
+                                       SseEmitter emitter) {
+        String answer = resolveFinalAnswer(context, executionResult);
+        sendAnswerChunks(emitter, answer);
+        chatResultPersister.persist(context, answer, executionResult);
+    }
+
+    private void streamReflectAnswer(ChatContext context,
+                                     ChatExecutionResult executionResult,
+                                     String lockToken,
+                                     AtomicBoolean lockReleased,
+                                     SseEmitter emitter,
+                                     AtomicReference<Disposable> disposableRef) {
+        StringBuilder fullAnswer = new StringBuilder();
         AiProviderService.ActiveChatClient reflectClient = aiProviderService.activeClient();
         String reflectPrompt = oparLoopEngine.renderReflectPrompt(context.assembled(), executionResult.plan(), executionResult.action());
         final org.springframework.ai.chat.model.ChatResponse[] latestStreamResponse = new org.springframework.ai.chat.model.ChatResponse[1];
@@ -148,7 +198,7 @@ public class ChatServiceImpl implements ChatService {
                     }
                     chatResultPersister.persist(context, fullAnswer.toString(), executionResult);
                     releaseSessionLockOnce(context.session().getSessionKey(), lockToken, lockReleased);
-                    emitter.complete();
+                    completeEmitter(emitter);
                 })
                 .doOnError(ex -> {
                     modelTransportGuardService.markFailure(reflectClient.providerId(), ex);
@@ -158,23 +208,13 @@ public class ChatServiceImpl implements ChatService {
                     }
                     fullAnswer.setLength(0);
                     fullAnswer.append(fallback);
-                    sendToken(emitter, fallback);
+                    sendAnswerChunks(emitter, fallback);
                     chatResultPersister.persist(context, fullAnswer.toString(), executionResult);
                     releaseSessionLockOnce(context.session().getSessionKey(), lockToken, lockReleased);
-                    emitter.complete();
+                    completeEmitter(emitter);
                 })
                 .subscribe();
-
-        emitter.onCompletion(() -> {
-            disposable.dispose();
-            releaseSessionLockOnce(context.session().getSessionKey(), lockToken, lockReleased);
-        });
-        emitter.onTimeout(() -> {
-            disposable.dispose();
-            releaseSessionLockOnce(context.session().getSessionKey(), lockToken, lockReleased);
-            emitter.complete();
-        });
-        return emitter;
+        disposableRef.set(disposable);
     }
 
     public TaskChatExecutionResult executeTaskMessage(ChatRequest request, boolean persistResult) {
@@ -258,10 +298,41 @@ public class ChatServiceImpl implements ChatService {
     }
 
     private void sendToken(SseEmitter emitter, String token) {
+        sendEvent(emitter, "token", token);
+    }
+
+    private void sendStatus(SseEmitter emitter, String status) {
+        sendEvent(emitter, "status", status);
+    }
+
+    private void sendError(SseEmitter emitter, String error) {
+        sendEvent(emitter, "error", StringUtils.hasText(error) ? error : "流式回答失败");
+    }
+
+    private void completeEmitter(SseEmitter emitter) {
+        sendEvent(emitter, "done", "done");
+        emitter.complete();
+    }
+
+    private void sendAnswerChunks(SseEmitter emitter, String answer) {
+        String text = answer == null ? "" : answer;
+        if (!StringUtils.hasText(text)) {
+            return;
+        }
+        int chunkSize = 48;
+        for (int start = 0; start < text.length(); start += chunkSize) {
+            int end = Math.min(text.length(), start + chunkSize);
+            sendToken(emitter, text.substring(start, end));
+        }
+    }
+
+    private void sendEvent(SseEmitter emitter, String eventName, String data) {
         try {
-            emitter.send(SseEmitter.event().name("token").data(token));
+            emitter.send(SseEmitter.event().name(eventName).data(data == null ? "" : data));
         } catch (IOException e) {
             emitter.completeWithError(e);
+        } catch (IllegalStateException ignored) {
+            // Client disconnected or emitter was already completed.
         }
     }
 

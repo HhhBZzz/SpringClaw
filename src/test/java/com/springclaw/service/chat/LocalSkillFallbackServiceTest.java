@@ -5,7 +5,7 @@ import com.springclaw.config.ai.SpringClawAiProperties;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.ai.AiProviderStateService;
 import com.springclaw.service.files.LocalFilesystemService;
-import com.springclaw.service.skill.bundle.SkillPackageCatalogService;
+import com.springclaw.service.skill.bundle.SkillCatalogService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import com.springclaw.service.skill.script.ScriptSkillCatalogService;
 import com.springclaw.service.skill.script.ScriptSkillExecutorService;
@@ -747,6 +747,80 @@ class LocalSkillFallbackServiceTest {
     }
 
     @Test
+    void shouldAutoRouteHighConfidenceScriptSkillWithoutHardcodedJavaBranch() throws Exception {
+        Path statusDir = tempDir.resolve("system_status");
+        Files.createDirectories(statusDir.resolve("scripts"));
+        Files.writeString(statusDir.resolve("scripts/run.py"), """
+                import json
+                import sys
+                payload = json.loads(sys.argv[1])
+                print("skill=system_status")
+                print("goal=" + payload.get("goal", ""))
+                """);
+        Files.writeString(statusDir.resolve("SKILL.md"), """
+                ---
+                name: 系统状态
+                description: 查看系统状态
+                skillId: system_status
+                type: python
+                entrypoint: scripts/run.py
+                category: runtime
+                tier: core
+                inputHint: goal
+                priority: 30
+                enabled: true
+                agentVisible: true
+                triggerKeywords:
+                  - 系统状态
+                ---
+                # 系统状态
+                """);
+
+        ScriptSkillCatalogService scriptSkillCatalogService =
+                new ScriptSkillCatalogService(true, tempDir.toString(), "*", new ObjectMapper());
+        ScriptSkillExecutorService scriptSkillExecutorService =
+                new ScriptSkillExecutorService(true, scriptSkillCatalogService, "python3", 5, 2000, new ObjectMapper());
+        ScriptSkillToolPack scriptSkillToolPack =
+                new ScriptSkillToolPack(true, scriptSkillCatalogService, "python3", 5, 2000, new ObjectMapper());
+        WorkspaceSearchToolPack workspaceSearchToolPack = new WorkspaceSearchToolPack(
+                new WorkspaceTaskService(tempDir.toString(), 8, 4, 6, 1200, 512),
+                tempDir.toString(),
+                8,
+                4000,
+                30,
+                5000,
+                512
+        );
+        LocalSkillFallbackService service = new LocalSkillFallbackService(
+                true,
+                new SystemToolPack(false, "pwd,ls", 5, 2000),
+                workspaceSearchToolPack,
+                new WebSearchToolPack(false, "https://example.com?q={query}", true, 3, 2000),
+                new StubWeatherToolPack(),
+                new ExchangeRateToolPack(false, "https://example.com/{base}", 3),
+                new NewsToolPack(false, "https://example.com/{query}", 5, 3),
+                scriptSkillToolPack,
+                new BuiltinSkillExecutionService(
+                        registryService(),
+                        workspaceSearchToolPack,
+                        new WorkspaceReviewService(tempDir.toString(), 8, 300, 20, 512),
+                        scriptSkillExecutorService,
+                        scriptSkillCatalogService
+                ),
+                scriptSkillExecutorService,
+                scriptSkillCatalogService,
+                newAiProviderService()
+        );
+
+        LocalSkillFallbackService.LocalSkillResult result =
+                service.tryHandleStructured("查看系统状态").orElseThrow();
+
+        Assertions.assertEquals("SCRIPT_SKILL_AUTO", result.route());
+        Assertions.assertTrue(result.executionDetails().contains("skill=system_status"));
+        Assertions.assertTrue(result.fallbackAnswer().contains("查看系统状态"));
+    }
+
+    @Test
     void shouldUsePythonWebSkillForExplicitWebFetchQuestion() throws Exception {
         writeBuiltinSkill("web-crawl", "网页抓取", "抓取网页正文",
                 "script", "simplified",
@@ -824,7 +898,7 @@ class LocalSkillFallbackServiceTest {
     }
 
     private SkillRegistryService registryService() {
-        return new SkillRegistryService(new SkillPackageCatalogService(true, tempDir.toString()));
+        return new SkillRegistryService(new SkillCatalogService(true, tempDir.toString()));
     }
 
     private void writeBuiltinSkill(String skillId, String name, String description,

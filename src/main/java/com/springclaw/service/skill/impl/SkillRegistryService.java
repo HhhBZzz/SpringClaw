@@ -2,7 +2,7 @@ package com.springclaw.service.skill.impl;
 
 import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.bundle.SkillBundleDefinition;
-import com.springclaw.service.skill.bundle.SkillPackageCatalogService;
+import com.springclaw.service.skill.bundle.SkillCatalogService;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -14,21 +14,21 @@ import java.util.Set;
 
 /**
  * 统一 skill 注册中心。
- * 所有 skill 定义均来自 skills/packages/ 下的 SKILL.md 文件，
- * 通过 SkillPackageCatalogService 扫描和解析。
+ * 所有 skill 定义均来自 skills/ 下的 SKILL.md 文件，
+ * 通过 SkillCatalogService 扫描和解析。
  */
 @Service
 public class SkillRegistryService {
 
-    private final SkillPackageCatalogService packageCatalogService;
+    private final SkillCatalogService skillCatalogService;
 
-    public SkillRegistryService(SkillPackageCatalogService packageCatalogService) {
-        this.packageCatalogService = packageCatalogService;
+    public SkillRegistryService(SkillCatalogService skillCatalogService) {
+        this.skillCatalogService = skillCatalogService;
     }
 
     /** 列出所有 skill 定义，按 priority + skillId 排序 */
     public List<SkillDefinition> listAllDefinitions() {
-        return packageCatalogService.listBundles().stream()
+        return skillCatalogService.listBundles().stream()
                 .map(SkillBundleDefinition::toRuntimeDefinition)
                 .sorted(Comparator.comparingInt(SkillDefinition::priority)
                         .thenComparing(def -> def.skillId().toLowerCase(Locale.ROOT)))

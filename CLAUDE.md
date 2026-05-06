@@ -50,7 +50,7 @@ No linter (Checkstyle/SpotBugs/PMD) is configured.
 
 - **Memory**: Dual-track — short-term via MySQL `message_event` table (`service/event/`), long-term via Redis Vector Store with embeddings (`service/memory/`). `ContextAssembler` (`service/context/`) builds the full conversation context including semantic recall.
 - **Channel Adapters** (`strategy/channel/`): Strategy pattern — `ChannelAdapter` interface with `FeishuChannelAdapter`, `TelegramChannelAdapter`, `WechatChannelAdapter`, selected by `ChannelAdapterFactory`.
-- **Skills** (`service/skill/`): Package-based skills rooted at `skills/packages/`. `BuiltinSkillCatalogService`, `ScriptSkillCatalogService`, and `MarkdownSkillCatalogService` all read `SKILL.md`-driven package definitions, then route execution by executor type (`builtin` / `python` / prompt-style markdown). Governed by `skill_descriptor` and `skill_policy` entities.
+- **Skills** (`service/skill/`): Directory-based skills rooted at `skills/`. `SkillCatalogService` scans `SKILL.md` definitions. `SkillRuntimeService` executes `python` / historical `script` and `builtin` skills, while prompt-style markdown skills remain non-executable instructions. Governed by `skill_descriptor` and `skill_policy` entities.
 - **Auth** (`web/auth/`): Token-based auth with `@RequireRole` annotation. `TokenAuthenticationInterceptor` + `RoleAuthorizationInterceptor`. First registered user auto-promoted to ADMIN.
 - **Async Chat**: RabbitMQ-based — producer sends to queue, consumer processes, result stored in Redis with TTL. Poll via `GET /api/chat/async/{id}`.
 - **System Prompt**: Loaded from `SOUL.md` at project root by `SoulPromptService`.

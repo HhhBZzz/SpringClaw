@@ -97,10 +97,10 @@ public class ToolPermissionServiceImpl implements ToolPermissionService {
     private Boolean defaultDecision(String roleCode, String toolName) {
         String role = normalizeRole(roleCode);
         if ("GUEST".equals(role)) {
-            return guestAllowTools.contains(normalizeTool(toolName));
+            return matchesAny(guestAllowTools, toolName);
         }
         if ("USER".equals(role)) {
-            return !userDenyTools.contains(normalizeTool(toolName));
+            return !matchesAny(userDenyTools, toolName);
         }
         return !defaultDeny;
     }
@@ -134,6 +134,10 @@ public class ToolPermissionServiceImpl implements ToolPermissionService {
             return normalizedTool.startsWith(prefix);
         }
         return normalizedPattern.equals(normalizedTool);
+    }
+
+    private boolean matchesAny(Set<String> patterns, String toolName) {
+        return patterns.stream().anyMatch(pattern -> matches(pattern, toolName));
     }
 
     private Set<String> parseToolSet(String text) {

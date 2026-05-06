@@ -2,21 +2,18 @@ package com.springclaw.service.task;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.domain.entity.ScheduledTask;
-import com.springclaw.service.chat.BuiltinSkillExecutionService;
 import com.springclaw.service.chat.impl.ChatServiceImpl;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.memory.MemoryService;
 import com.springclaw.service.prompt.SoulPromptService;
 import com.springclaw.service.session.AgentSessionService;
 import com.springclaw.service.skill.SkillService;
-import com.springclaw.service.skill.impl.SkillRegistryService;
-import com.springclaw.service.skill.script.ScriptSkillExecutorService;
+import com.springclaw.service.skill.runtime.SkillRuntimeService;
 import com.springclaw.service.task.executor.TaskExecutionService;
 import com.springclaw.strategy.channel.outbound.ChannelOutboundDispatcher;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -35,9 +32,7 @@ class TaskExecutionServiceTest {
         ScheduledTaskService scheduledTaskService = mock(ScheduledTaskService.class);
         ScheduledTaskExecutionService executionService = mock(ScheduledTaskExecutionService.class);
         TaskScheduleSupport scheduleSupport = new TaskScheduleSupport();
-        ScriptSkillExecutorService scriptExecutor = mock(ScriptSkillExecutorService.class);
-        BuiltinSkillExecutionService builtinExecutor = mock(BuiltinSkillExecutionService.class);
-        SkillRegistryService registryService = mock(SkillRegistryService.class);
+        SkillRuntimeService skillRuntimeService = mock(SkillRuntimeService.class);
         SkillService skillService = mock(SkillService.class);
         ChatServiceImpl chatService = mock(ChatServiceImpl.class);
         AgentSessionService agentSessionService = mock(AgentSessionService.class);
@@ -50,9 +45,7 @@ class TaskExecutionServiceTest {
                 scheduledTaskService,
                 executionService,
                 scheduleSupport,
-                scriptExecutor,
-                builtinExecutor,
-                registryService,
+                skillRuntimeService,
                 skillService,
                 chatService,
                 agentSessionService,
@@ -76,33 +69,84 @@ class TaskExecutionServiceTest {
         task.setNextRunAt(LocalDateTime.now().plusMinutes(10));
 
         when(skillService.resolveAllowedToolPacks("api", "tester")).thenReturn(Set.of("script"));
-        when(registryService.listAgentVisibleDefinitions(Set.of("script"))).thenReturn(List.of(
-                new com.springclaw.service.skill.SkillDefinition(
-                        "web_crawler", "网页抓取", "desc", "SCRIPT", "scripts/run.py", "", List.of(), List.of(), List.of("script"),
-                        "simplified", "session-only", "script", "web_crawler", true, 10, true
-                )
-        ));
         when(executionService.start(anyString(), anyString(), anyString())).thenAnswer(invocation -> {
             var record = new com.springclaw.domain.entity.ScheduledTaskExecution();
             record.setExecutionId("exec_1");
             return record;
         });
-        when(scriptExecutor.runScriptSkillByGoal("web_crawler", "读取这个网页 https://example.com")).thenReturn("抓取成功");
+        when(skillRuntimeService.executeBySkillId("web_crawler", "读取这个网页 https://example.com", Set.of("script")))
+                .thenReturn("抓取成功");
 
         TaskExecutionOutcome outcome = service.runTask(task, "MANUAL");
 
         assertThat(outcome.resultPayload()).isEqualTo("抓取成功");
+        verify(skillRuntimeService).executeBySkillId("web_crawler", "读取这个网页 https://example.com", Set.of("script"));
         verify(chatService, never()).executeTaskMessage(any(), anyBoolean());
         verify(executionService).complete(anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void shouldExecutePythonSkillTask() {
+        ScheduledTaskService scheduledTaskService = mock(ScheduledTaskService.class);
+        ScheduledTaskExecutionService executionService = mock(ScheduledTaskExecutionService.class);
+        TaskScheduleSupport scheduleSupport = new TaskScheduleSupport();
+        SkillRuntimeService skillRuntimeService = mock(SkillRuntimeService.class);
+        SkillService skillService = mock(SkillService.class);
+        ChatServiceImpl chatService = mock(ChatServiceImpl.class);
+        AgentSessionService agentSessionService = mock(AgentSessionService.class);
+        MemoryService memoryService = mock(MemoryService.class);
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        SoulPromptService soulPromptService = mock(SoulPromptService.class);
+        ChannelOutboundDispatcher dispatcher = mock(ChannelOutboundDispatcher.class);
+
+        TaskExecutionService service = new TaskExecutionService(
+                scheduledTaskService,
+                executionService,
+                scheduleSupport,
+                skillRuntimeService,
+                skillService,
+                chatService,
+                agentSessionService,
+                memoryService,
+                messageEventService,
+                soulPromptService,
+                dispatcher,
+                new ObjectMapper(),
+                true
+        );
+
+        ScheduledTask task = new ScheduledTask();
+        task.setTaskId("task_python");
+        task.setOwnerUserId("tester");
+        task.setName("Python Skill 任务");
+        task.setChannel("api");
+        task.setTargetType("skill");
+        task.setTargetRef("repo_inspector");
+        task.setInputPayload("分析项目结构");
+        task.setPersistToSession(0);
+        task.setNextRunAt(LocalDateTime.now().plusMinutes(10));
+
+        when(skillService.resolveAllowedToolPacks("api", "tester")).thenReturn(Set.of("script"));
+        when(executionService.start(anyString(), anyString(), anyString())).thenAnswer(invocation -> {
+            var record = new com.springclaw.domain.entity.ScheduledTaskExecution();
+            record.setExecutionId("exec_python");
+            return record;
+        });
+        when(skillRuntimeService.executeBySkillId("repo_inspector", "分析项目结构", Set.of("script")))
+                .thenReturn("结构分析完成");
+
+        TaskExecutionOutcome outcome = service.runTask(task, "MANUAL");
+
+        assertThat(outcome.resultPayload()).isEqualTo("结构分析完成");
+        verify(skillRuntimeService).executeBySkillId("repo_inspector", "分析项目结构", Set.of("script"));
+        verify(chatService, never()).executeTaskMessage(any(), anyBoolean());
     }
 
     @Test
     void shouldExecuteAgentTaskThroughChatService() {
         ScheduledTaskService scheduledTaskService = mock(ScheduledTaskService.class);
         ScheduledTaskExecutionService executionService = mock(ScheduledTaskExecutionService.class);
-        ScriptSkillExecutorService scriptExecutor = mock(ScriptSkillExecutorService.class);
-        BuiltinSkillExecutionService builtinExecutor = mock(BuiltinSkillExecutionService.class);
-        SkillRegistryService registryService = mock(SkillRegistryService.class);
+        SkillRuntimeService skillRuntimeService = mock(SkillRuntimeService.class);
         SkillService skillService = mock(SkillService.class);
         ChatServiceImpl chatService = mock(ChatServiceImpl.class);
         AgentSessionService agentSessionService = mock(AgentSessionService.class);
@@ -115,9 +159,7 @@ class TaskExecutionServiceTest {
                 scheduledTaskService,
                 executionService,
                 new TaskScheduleSupport(),
-                scriptExecutor,
-                builtinExecutor,
-                registryService,
+                skillRuntimeService,
                 skillService,
                 chatService,
                 agentSessionService,

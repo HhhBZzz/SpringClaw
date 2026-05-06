@@ -7,17 +7,13 @@ import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.domain.entity.ScheduledTask;
 import com.springclaw.domain.entity.ScheduledTaskExecution;
 import com.springclaw.dto.chat.ChatRequest;
-import com.springclaw.service.chat.BuiltinSkillExecutionService;
-import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.chat.impl.ChatServiceImpl;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.memory.MemoryService;
 import com.springclaw.service.prompt.SoulPromptService;
 import com.springclaw.service.session.AgentSessionService;
-import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.SkillService;
-import com.springclaw.service.skill.impl.SkillRegistryService;
-import com.springclaw.service.skill.script.ScriptSkillExecutorService;
+import com.springclaw.service.skill.runtime.SkillRuntimeService;
 import com.springclaw.service.task.ScheduledTaskExecutionService;
 import com.springclaw.service.task.ScheduledTaskService;
 import com.springclaw.service.task.TaskExecutionOutcome;
@@ -47,9 +43,7 @@ public class TaskExecutionService {
     private final ScheduledTaskService scheduledTaskService;
     private final ScheduledTaskExecutionService scheduledTaskExecutionService;
     private final TaskScheduleSupport taskScheduleSupport;
-    private final ScriptSkillExecutorService scriptSkillExecutorService;
-    private final BuiltinSkillExecutionService builtinSkillExecutionService;
-    private final SkillRegistryService skillRegistryService;
+    private final SkillRuntimeService skillRuntimeService;
     private final SkillService skillService;
     private final ChatServiceImpl chatService;
     private final AgentSessionService agentSessionService;
@@ -63,9 +57,7 @@ public class TaskExecutionService {
     public TaskExecutionService(ScheduledTaskService scheduledTaskService,
                                 ScheduledTaskExecutionService scheduledTaskExecutionService,
                                 TaskScheduleSupport taskScheduleSupport,
-                                ScriptSkillExecutorService scriptSkillExecutorService,
-                                BuiltinSkillExecutionService builtinSkillExecutionService,
-                                SkillRegistryService skillRegistryService,
+                                SkillRuntimeService skillRuntimeService,
                                 SkillService skillService,
                                 ChatServiceImpl chatService,
                                 AgentSessionService agentSessionService,
@@ -78,9 +70,7 @@ public class TaskExecutionService {
         this.scheduledTaskService = scheduledTaskService;
         this.scheduledTaskExecutionService = scheduledTaskExecutionService;
         this.taskScheduleSupport = taskScheduleSupport;
-        this.scriptSkillExecutorService = scriptSkillExecutorService;
-        this.builtinSkillExecutionService = builtinSkillExecutionService;
-        this.skillRegistryService = skillRegistryService;
+        this.skillRuntimeService = skillRuntimeService;
         this.skillService = skillService;
         this.chatService = chatService;
         this.agentSessionService = agentSessionService;
@@ -158,18 +148,7 @@ public class TaskExecutionService {
     private TaskExecutionOutcome executeSkillTask(ScheduledTask task, String requestId) {
         String skillId = safe(task.getTargetRef());
         Set<String> allowedToolPacks = skillService.resolveAllowedToolPacks(task.getChannel(), task.getOwnerUserId());
-        SkillDefinition definition = skillRegistryService.listAgentVisibleDefinitions(allowedToolPacks).stream()
-                .filter(candidate -> skillId.equalsIgnoreCase(candidate.skillId()))
-                .findFirst()
-                .orElseThrow(() -> new BusinessException(40362, "当前账号无权执行 skill: " + skillId));
-        String payload = safe(task.getInputPayload());
-        String answer = switch (normalize(definition.executorType())) {
-            case "script" -> runScriptSkill(skillId, payload);
-            case "builtin" -> builtinSkillExecutionService.executeBySkillId(skillId, payload)
-                    .map(LocalSkillFallbackService.LocalSkillResult::fallbackAnswer)
-                    .orElseThrow(() -> new BusinessException(50096, "builtin skill 未返回结果: " + skillId));
-            default -> throw new BusinessException(40080, "该 skill 当前不可直接执行: " + skillId);
-        };
+        String answer = skillRuntimeService.executeBySkillId(skillId, task.getInputPayload(), allowedToolPacks);
         return new TaskExecutionOutcome(buildSummary(task, answer), answer, requestId, resolveTaskSessionKey(task));
     }
 
@@ -228,17 +207,6 @@ public class TaskExecutionService {
             return resolveTaskSessionKey(task);
         }
         return task.getDeliveryTarget().trim();
-    }
-
-    private String runScriptSkill(String skillId, String payload) {
-        String trimmed = payload == null ? "" : payload.trim();
-        if (!StringUtils.hasText(trimmed)) {
-            return scriptSkillExecutorService.runScriptSkillByGoal(skillId, "请执行默认任务");
-        }
-        if (looksLikeJson(trimmed)) {
-            return scriptSkillExecutorService.runScriptSkill(skillId, trimmed);
-        }
-        return scriptSkillExecutorService.runScriptSkillByGoal(skillId, trimmed);
     }
 
     private String resolveAgentPrompt(String rawInputPayload) {

@@ -6,6 +6,7 @@ import com.springclaw.tool.pack.FileToolPack;
 import com.springclaw.tool.pack.LocalFilesystemToolPack;
 import com.springclaw.tool.pack.NewsToolPack;
 import com.springclaw.tool.pack.ScriptSkillToolPack;
+import com.springclaw.tool.pack.SkillLibraryToolPack;
 import com.springclaw.tool.pack.SystemToolPack;
 import com.springclaw.tool.pack.WebSearchToolPack;
 import com.springclaw.tool.pack.WeatherToolPack;
@@ -40,6 +41,7 @@ public class ToolOrchestrator {
     private final ExchangeRateToolPack exchangeRateToolPack;
     private final NewsToolPack newsToolPack;
     private final ScriptSkillToolPack scriptSkillToolPack;
+    private final SkillLibraryToolPack skillLibraryToolPack;
     private final SkillService skillService;
     private final List<String> fileTriggerKeywords;
     private final List<String> localFileTriggerKeywords;
@@ -60,6 +62,7 @@ public class ToolOrchestrator {
                             ExchangeRateToolPack exchangeRateToolPack,
                             NewsToolPack newsToolPack,
                             ScriptSkillToolPack scriptSkillToolPack,
+                            SkillLibraryToolPack skillLibraryToolPack,
                             SkillService skillService,
                             @Value("${springclaw.skill.file-trigger-keywords:文件,目录,path,read,write,list,保存,读取}") String fileTriggerKeywords,
                             @Value("${springclaw.skill.local-file-trigger-keywords:本地文件,电脑文件,授权文件,授权目录,本机文件,桌面,下载,文档,Desktop,Downloads,Documents,简历,论文}") String localFileTriggerKeywords,
@@ -79,6 +82,7 @@ public class ToolOrchestrator {
         this.exchangeRateToolPack = exchangeRateToolPack;
         this.newsToolPack = newsToolPack;
         this.scriptSkillToolPack = scriptSkillToolPack;
+        this.skillLibraryToolPack = skillLibraryToolPack;
         this.skillService = skillService;
         this.fileTriggerKeywords = Arrays.stream(fileTriggerKeywords.split(","))
                 .map(String::trim)
@@ -157,6 +161,9 @@ public class ToolOrchestrator {
         if (allowedToolPacks.contains("news") && needNewsTools(merged)) {
             tools.add(newsToolPack);
         }
+        if (allowedToolPacks.contains("script") && needSkillLibraryTools(merged)) {
+            tools.add(skillLibraryToolPack);
+        }
         if (allowedToolPacks.contains("script") && needScriptTools(merged)) {
             tools.add(scriptSkillToolPack);
         }
@@ -192,6 +199,7 @@ public class ToolOrchestrator {
             tools.add(newsToolPack);
         }
         if (allowedToolPacks.contains("script")) {
+            tools.add(skillLibraryToolPack);
             tools.add(scriptSkillToolPack);
         }
 
@@ -244,6 +252,13 @@ public class ToolOrchestrator {
 
     private boolean needScriptTools(String text) {
         return containsAnyKeyword(text, scriptTriggerKeywords);
+    }
+
+    private boolean needSkillLibraryTools(String text) {
+        return containsAnyLiteral(text,
+                "有哪些 skill", "有哪些 skills", "skill 列表", "skills 列表", "查看 skill", "打开 skill",
+                "skill_view", "skills_list", "skills_status", "列出 skill", "列出 skills", "技能列表", "查看技能", "打开技能",
+                "skill 使用统计", "skill 使用情况", "技能使用统计", "技能使用情况", "最近使用 skill", "curator");
     }
 
     private boolean containsAnyKeyword(String text, List<String> keywords) {

@@ -11,6 +11,7 @@ import com.springclaw.tool.pack.FileToolPack;
 import com.springclaw.tool.pack.NewsToolPack;
 import com.springclaw.tool.pack.LocalFilesystemToolPack;
 import com.springclaw.tool.pack.ScriptSkillToolPack;
+import com.springclaw.tool.pack.SkillLibraryToolPack;
 import com.springclaw.tool.pack.SystemToolPack;
 import com.springclaw.tool.pack.WebSearchToolPack;
 import com.springclaw.tool.pack.WeatherToolPack;
@@ -81,6 +82,32 @@ class ToolOrchestratorTest {
         Assertions.assertTrue(Arrays.asList(tools).contains(fixture.localFilesystemToolPack));
     }
 
+    @Test
+    void shouldIncludeSkillLibraryToolForSkillDiscoveryQuestion() {
+        ToolFixture fixture = buildFixture();
+        Object[] tools = fixture.orchestrator.selectTools(
+                "api",
+                "u1",
+                "你现在有哪些 skills，可以打开 repo_inspector 看一下吗",
+                "先按 Hermes 方式列出和查看 skill"
+        );
+
+        Assertions.assertTrue(Arrays.asList(tools).contains(fixture.skillLibraryToolPack));
+    }
+
+    @Test
+    void shouldIncludeSkillLibraryToolForSkillUsageStatusQuestion() {
+        ToolFixture fixture = buildFixture();
+        Object[] tools = fixture.orchestrator.selectTools(
+                "api",
+                "u1",
+                "查看 skill 使用统计和最近使用情况",
+                "调用 skills_status"
+        );
+
+        Assertions.assertTrue(Arrays.asList(tools).contains(fixture.skillLibraryToolPack));
+    }
+
     private ToolFixture buildFixture() {
         FileToolPack fileToolPack = new FileToolPack(tempDir.toString(), 12000);
         LocalFilesystemToolPack localFilesystemToolPack = new LocalFilesystemToolPack(
@@ -112,6 +139,7 @@ class ToolOrchestratorTest {
         NewsToolPack newsToolPack = new NewsToolPack(false, "https://example.com/{query}", 5, 3);
         ScriptSkillCatalogService scriptSkillCatalogService = new ScriptSkillCatalogService(false, tempDir.toString(), "echo", new ObjectMapper());
         ScriptSkillToolPack scriptSkillToolPack = new ScriptSkillToolPack(false, scriptSkillCatalogService, "python3", 3, 1000, new ObjectMapper());
+        SkillLibraryToolPack skillLibraryToolPack = new SkillLibraryToolPack(false, new com.springclaw.service.skill.bundle.SkillCatalogService(false, tempDir.toString()));
         SkillService skillService = new StubSkillService();
 
         ToolOrchestrator orchestrator = new ToolOrchestrator(
@@ -125,6 +153,7 @@ class ToolOrchestratorTest {
                 exchangeRateToolPack,
                 newsToolPack,
                 scriptSkillToolPack,
+                skillLibraryToolPack,
                 skillService,
                 "文件,目录,path,read,write,list,保存,读取",
                 "本地文件,电脑文件,授权文件,授权目录,本机文件,桌面,下载,文档,Desktop,Downloads,Documents,简历,论文",
@@ -136,14 +165,15 @@ class ToolOrchestratorTest {
                 "脚本,skill,执行技能,python,run skill"
         );
 
-        return new ToolFixture(orchestrator, fileToolPack, localFilesystemToolPack, workspaceSearchToolPack, workspaceReviewToolPack);
+        return new ToolFixture(orchestrator, fileToolPack, localFilesystemToolPack, workspaceSearchToolPack, workspaceReviewToolPack, skillLibraryToolPack);
     }
 
     private record ToolFixture(ToolOrchestrator orchestrator,
                                FileToolPack fileToolPack,
-                               LocalFilesystemToolPack localFilesystemToolPack,
-                               WorkspaceSearchToolPack workspaceSearchToolPack,
-                               WorkspaceReviewToolPack workspaceReviewToolPack) {
+	                               LocalFilesystemToolPack localFilesystemToolPack,
+	                               WorkspaceSearchToolPack workspaceSearchToolPack,
+	                               WorkspaceReviewToolPack workspaceReviewToolPack,
+                                   SkillLibraryToolPack skillLibraryToolPack) {
     }
 
     private static class StubSkillService implements SkillService {

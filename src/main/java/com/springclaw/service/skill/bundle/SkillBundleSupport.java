@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -20,7 +21,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * package skill 的 SKILL.md 解析与写回工具。
+ * skill 目录的 SKILL.md 解析与写回工具。
  * 支持扁平 frontmatter（所有字段在顶层），不再使用嵌套 metadata 路径。
  */
 public final class SkillBundleSupport {
@@ -49,18 +50,22 @@ public final class SkillBundleSupport {
 
             String slug = normalizedBundlePath.getFileName() == null
                     ? "skill" : normalizedBundlePath.getFileName().toString();
-            // skillId 优先取 frontmatter 中显式指定的 skillId，否则取 displayName，最后回退到目录名
+            String markdownTitle = extractFirstHeading(parsed.body());
+            String markdownDescription = extractDescriptionSection(parsed.body());
+            // skillId 优先取 frontmatter 中显式指定的 skillId，否则回退到目录名。
+            // 兼容 OpenClaw4J 风格：只有 SKILL.md 正文和 scripts/*.py，也能按目录名注册。
             String skillId = firstNonBlank(getString(fm, "skillId"), slug);
-            String name = firstNonBlank(getString(fm, "displayName"), getString(fm, "name"), skillId);
-            String description = firstNonBlank(getString(fm, "description"), name + " skill");
+            String name = firstNonBlank(getString(fm, "displayName"), getString(fm, "name"), markdownTitle, skillId);
+            String description = firstNonBlank(getString(fm, "description"), markdownDescription, name + " skill");
+
+            String entrypoint = firstNonBlank(getString(fm, "entrypoint"), discoverDefaultEntrypoint(normalizedBundlePath));
 
             String executorType = normalizeExecutorType(firstNonBlank(
                     getString(fm, "type"),
-                    guessExecutorTypeFromEntrypoint(getString(fm, "entrypoint")),
+                    guessExecutorTypeFromEntrypoint(entrypoint),
                     "prompt"
             ));
 
-            String entrypoint = firstNonBlank(getString(fm, "entrypoint"), null);
             Path entrypointPath = null;
             if (StringUtils.hasText(entrypoint)) {
                 entrypointPath = normalizedBundlePath.resolve(entrypoint).normalize();
@@ -333,6 +338,92 @@ public final class SkillBundleSupport {
 
     private static boolean isPromptExecutor(String executorType) {
         return "prompt".equals(executorType) || "markdown".equals(executorType);
+    }
+
+    private static String extractFirstHeading(String body) {
+        if (!StringUtils.hasText(body)) {
+            return null;
+        }
+        for (String line : body.replace("\r\n", "\n").split("\n")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("# ")) {
+                return trimmed.substring(2).trim();
+            }
+        }
+        return null;
+    }
+
+    private static String extractDescriptionSection(String body) {
+        if (!StringUtils.hasText(body)) {
+            return null;
+        }
+        String[] lines = body.replace("\r\n", "\n").split("\n");
+        boolean inDescription = false;
+        List<String> paragraph = new ArrayList<>();
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (trimmed.matches("(?i)^#{2,6}\\s+description\\s*$")) {
+                inDescription = true;
+                continue;
+            }
+            if (!inDescription) {
+                continue;
+            }
+            if (trimmed.startsWith("#")) {
+                break;
+            }
+            if (!StringUtils.hasText(trimmed)) {
+                if (!paragraph.isEmpty()) {
+                    break;
+                }
+                continue;
+            }
+            paragraph.add(trimmed);
+        }
+        if (paragraph.isEmpty()) {
+            return null;
+        }
+        String description = String.join(" ", paragraph).trim();
+        return description.length() <= 512 ? description : description.substring(0, 512);
+    }
+
+    private static String discoverDefaultEntrypoint(Path bundlePath) {
+        Path scriptsDir = bundlePath.resolve("scripts").normalize();
+        if (!Files.isDirectory(scriptsDir)) {
+            return null;
+        }
+        for (String preferred : List.of("run.py", "main.py", "run.js", "main.js", "run.mjs", "main.mjs", "run.cjs", "main.cjs")) {
+            Path candidate = scriptsDir.resolve(preferred).normalize();
+            if (Files.isRegularFile(candidate)) {
+                return relativePath(bundlePath, candidate);
+            }
+        }
+        try (var stream = Files.list(scriptsDir)) {
+            return stream
+                    .filter(Files::isRegularFile)
+                    .filter(SkillBundleSupport::isSupportedScriptFile)
+                    .sorted(Comparator.comparing(path -> path.getFileName().toString().toLowerCase(Locale.ROOT)))
+                    .map(candidate -> relativePath(bundlePath, candidate))
+                    .findFirst()
+                    .orElse(null);
+        } catch (IOException ex) {
+            return null;
+        }
+    }
+
+    private static boolean isSupportedScriptFile(Path path) {
+        String filename = path.getFileName().toString().toLowerCase(Locale.ROOT);
+        return filename.endsWith(".py")
+                || filename.endsWith(".js")
+                || filename.endsWith(".mjs")
+                || filename.endsWith(".cjs");
+    }
+
+    private static String relativePath(Path bundlePath, Path candidate) {
+        return bundlePath.toAbsolutePath().normalize()
+                .relativize(candidate.toAbsolutePath().normalize())
+                .toString()
+                .replace('\\', '/');
     }
 
     private static String normalizeExecutorType(String raw) {

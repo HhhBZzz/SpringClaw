@@ -12,6 +12,31 @@ STOPWORDS = {
     "spring", "skill", "请", "一下", "当前", "java", "openclaw", "相关文件", "核心"
 }
 
+DOMAIN_HINTS = [
+    (("skill", "skills", "技能"), [
+        "SkillRegistryService",
+        "SkillPackageCatalogService",
+        "ScriptSkillToolPack",
+        "SkillLibraryToolPack",
+        "SKILL.md",
+    ]),
+    (("定时任务", "任务调度", "xxl", "cron"), [
+        "TaskExecutionService",
+        "ScheduledTask",
+        "ScheduledTaskDispatchJob",
+    ]),
+    (("本地文件", "授权文件", "电脑文件"), [
+        "LocalFilesystemToolPack",
+        "LocalFilesystemService",
+        "local-files",
+    ]),
+    (("前端", "页面", "vue", "登录"), [
+        "frontend",
+        "AgentView",
+        "ConsoleHomeView",
+    ]),
+]
+
 
 def parse_payload() -> dict:
     raw = sys.argv[1] if len(sys.argv) > 1 else "{}"
@@ -32,7 +57,14 @@ def extract_keywords(goal: str):
             result.append(value)
         if len(result) >= 6:
             break
-    return result or [goal.strip() or "ChatServiceImpl"]
+    normalized_goal = (goal or "").lower()
+    for triggers, hints in DOMAIN_HINTS:
+        if any(trigger.lower() in normalized_goal for trigger in triggers):
+            for hint in hints:
+                if hint not in result:
+                    result.append(hint)
+            break
+    return result[:10] or [goal.strip() or "ChatServiceImpl"]
 
 
 def should_skip(path: Path) -> bool:
@@ -60,6 +92,12 @@ def score_file(path: Path, keywords):
         text = path.read_text(encoding="utf-8", errors="ignore")
     except Exception:
         return 0, ""
+    if "/src/main/" in rel or rel.startswith("src/main/"):
+        score += 5
+    if "/src/test/" in rel or rel.startswith("src/test/"):
+        score -= 4
+    if path.name.lower() in {"changelog.md", "readme.md"}:
+        score -= 12
     text_lower = text.lower()
     for keyword in keywords:
         lower = keyword.lower()

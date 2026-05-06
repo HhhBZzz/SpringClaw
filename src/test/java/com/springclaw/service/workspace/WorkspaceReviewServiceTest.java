@@ -17,7 +17,7 @@ class WorkspaceReviewServiceTest {
         Files.createDirectories(tempDir.resolve("src/main/java/com/demo/service"));
         Files.createDirectories(tempDir.resolve("src/test/java/com/demo/service"));
         Files.createDirectories(tempDir.resolve("frontend/src"));
-        Files.createDirectories(tempDir.resolve("skills/packages/workspace-review"));
+        Files.createDirectories(tempDir.resolve("skills/workspace-review"));
         Files.createDirectories(tempDir.resolve("target/classes"));
 
         Files.writeString(tempDir.resolve("pom.xml"), "<project><artifactId>demo</artifactId></project>");
@@ -38,7 +38,7 @@ class WorkspaceReviewServiceTest {
                 }
                 """);
         Files.writeString(tempDir.resolve("frontend/package.json"), "{\"dependencies\":{\"vue\":\"latest\",\"vite\":\"latest\"}}");
-        Files.writeString(tempDir.resolve("skills/packages/workspace-review/SKILL.md"), "---\nname: Workspace Review\n---\n");
+        Files.writeString(tempDir.resolve("skills/workspace-review/SKILL.md"), "---\nname: Workspace Review\n---\n");
         Files.writeString(tempDir.resolve(".env.local"), "OPENCLAW_DEEPSEEK_API_KEY=sk-secret-value\nMYSQL_PASSWORD=plain-password\n");
         Files.writeString(tempDir.resolve("target/classes/App.class"), "generated");
 
@@ -55,7 +55,7 @@ class WorkspaceReviewServiceTest {
         Assertions.assertTrue(result.contains("LOCAL_WORKSPACE_REVIEW"));
         Assertions.assertTrue(result.contains("Spring Boot"));
         Assertions.assertTrue(result.contains("Vue/Vite"));
-        Assertions.assertTrue(result.contains("Skill 包"));
+        Assertions.assertTrue(result.contains("Skill 体系"));
         Assertions.assertTrue(result.contains(".env.local"));
         Assertions.assertTrue(result.contains("敏感配置"));
         Assertions.assertTrue(result.contains("已跳过生成/依赖目录"));

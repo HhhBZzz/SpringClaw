@@ -59,7 +59,7 @@ class WorkspaceTaskServiceTest {
         Files.createDirectories(tempDir.resolve("src/main/java/com/demo/service"));
         Files.createDirectories(tempDir.resolve("src/main/resources"));
         Files.createDirectories(tempDir.resolve("frontend/src"));
-        Files.createDirectories(tempDir.resolve("skills/packages/repo_inspector"));
+        Files.createDirectories(tempDir.resolve("skills/repo_inspector"));
 
         Files.writeString(tempDir.resolve("pom.xml"), "<project><artifactId>demo</artifactId></project>");
         Files.writeString(tempDir.resolve("src/main/java/com/demo/DemoApplication.java"), "class DemoApplication {}");
@@ -68,7 +68,7 @@ class WorkspaceTaskServiceTest {
         Files.writeString(tempDir.resolve("src/main/resources/application.yml"), "server:\\n  port: 18080\\n");
         Files.writeString(tempDir.resolve("frontend/package.json"), "{\"scripts\":{\"dev\":\"vite\"}}");
         Files.writeString(tempDir.resolve("frontend/src/App.vue"), "<template>demo</template>");
-        Files.writeString(tempDir.resolve("skills/packages/repo_inspector/SKILL.md"), "---\\nname: repo inspector\\n---\\n");
+        Files.writeString(tempDir.resolve("skills/repo_inspector/SKILL.md"), "---\\nname: repo inspector\\n---\\n");
 
         WorkspaceTaskService service = new WorkspaceTaskService(
                 tempDir.toString(),
@@ -86,6 +86,6 @@ class WorkspaceTaskServiceTest {
         Assertions.assertTrue(result.contains("Spring Boot 后端"));
         Assertions.assertTrue(result.contains("src/main/java"));
         Assertions.assertTrue(result.contains("frontend"));
-        Assertions.assertTrue(result.contains("skills/packages"));
+        Assertions.assertTrue(result.contains("skills"));
     }
 }

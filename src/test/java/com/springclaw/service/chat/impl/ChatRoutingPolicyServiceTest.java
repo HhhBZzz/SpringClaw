@@ -1,6 +1,6 @@
 package com.springclaw.service.chat.impl;
 
-import com.springclaw.service.skill.bundle.SkillPackageCatalogService;
+import com.springclaw.service.skill.bundle.SkillCatalogService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -11,7 +11,7 @@ class ChatRoutingPolicyServiceTest {
 
     private final ChatRoutingPolicyService service = new ChatRoutingPolicyService(
             new SkillRegistryService(
-                    new SkillPackageCatalogService(true, "./target/test-skills")
+                    new SkillCatalogService(true, "./skills")
             )
     );
 

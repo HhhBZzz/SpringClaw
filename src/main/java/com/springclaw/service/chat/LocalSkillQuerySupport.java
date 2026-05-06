@@ -3,11 +3,13 @@ package com.springclaw.service.chat;
 import com.springclaw.service.skill.script.ScriptSkillCatalogService;
 import com.springclaw.service.skill.script.ScriptSkillExecutorService;
 import com.springclaw.service.skill.script.ScriptSkillDefinition;
+import com.springclaw.service.skill.runtime.SkillRuntimeService;
 import org.springframework.util.StringUtils;
 
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -18,13 +20,23 @@ final class LocalSkillQuerySupport {
     private static final Pattern URL_PATTERN =
             Pattern.compile("((?:https?://|www\\.)[^\\s]+)", Pattern.CASE_INSENSITIVE);
 
-    private final ScriptSkillExecutorService scriptSkillExecutorService;
+    private final ScriptSkillRunner scriptSkillRunner;
     private final ScriptSkillCatalogService scriptSkillCatalogService;
     private final Map<String, String> currencyAliasMap = new LinkedHashMap<>();
 
     LocalSkillQuerySupport(ScriptSkillExecutorService scriptSkillExecutorService,
                            ScriptSkillCatalogService scriptSkillCatalogService) {
-        this.scriptSkillExecutorService = scriptSkillExecutorService;
+        this(scriptSkillExecutorService::runScriptSkillByGoal, scriptSkillCatalogService);
+    }
+
+    LocalSkillQuerySupport(SkillRuntimeService skillRuntimeService,
+                           ScriptSkillCatalogService scriptSkillCatalogService) {
+        this((skillName, goal) -> skillRuntimeService.executeBySkillId(skillName, goal, Set.of("script")), scriptSkillCatalogService);
+    }
+
+    private LocalSkillQuerySupport(ScriptSkillRunner scriptSkillRunner,
+                                   ScriptSkillCatalogService scriptSkillCatalogService) {
+        this.scriptSkillRunner = scriptSkillRunner;
         this.scriptSkillCatalogService = scriptSkillCatalogService;
 
         currencyAliasMap.put("美元", "USD");
@@ -152,12 +164,23 @@ final class LocalSkillQuerySupport {
                 .orElse("");
     }
 
+    String runScriptSkillByName(String skillName, String goal) {
+        if (!StringUtils.hasText(skillName)) {
+            return "";
+        }
+        return tryScriptSkill(skillName, goal);
+    }
+
     ScriptSkillDefinition resolveRequestedScriptSkill(String question) {
         String skillName = extractScriptSkillName(question);
         if (StringUtils.hasText(skillName)) {
             return scriptSkillCatalogService.findDefinition(skillName).orElse(null);
         }
         return scriptSkillCatalogService.matchBestDefinition(question).orElse(null);
+    }
+
+    ScriptSkillDefinition resolveHighConfidenceScriptSkill(String question) {
+        return scriptSkillCatalogService.matchBestDefinition(question, 3).orElse(null);
     }
 
     boolean looksLikeFailure(String answer) {
@@ -169,6 +192,9 @@ final class LocalSkillQuerySupport {
                 || text.contains("不可用")
                 || text.contains("为空")
                 || text.contains("未开启")
+                || text.contains("status=failed")
+                || text.contains("traceback")
+                || text.matches("(?s).*exitcode=[1-9]\\d*.*")
                 || text.contains("error")
                 || text.contains("exception");
     }
@@ -299,7 +325,7 @@ final class LocalSkillQuerySupport {
 
     private String tryScriptSkill(String skillName, String goal) {
         try {
-            return scriptSkillExecutorService.runScriptSkillByGoal(skillName, goal);
+            return scriptSkillRunner.run(skillName, goal);
         } catch (Exception ignore) {
             return "";
         }
@@ -322,5 +348,10 @@ final class LocalSkillQuerySupport {
                 .replace("　", "")
                 .replace("-", "")
                 .replace("_", "");
+    }
+
+    @FunctionalInterface
+    private interface ScriptSkillRunner {
+        String run(String skillName, String goal);
     }
 }

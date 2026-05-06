@@ -1,7 +1,7 @@
 package com.springclaw.service.skill;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.springclaw.service.skill.bundle.SkillPackageCatalogService;
+import com.springclaw.service.skill.bundle.SkillCatalogService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import com.springclaw.service.skill.impl.SkillServiceImpl;
 import com.springclaw.service.skill.markdown.MarkdownSkillCatalogService;
@@ -98,7 +98,7 @@ class SkillServiceImplTest {
 
     private SkillRegistryService registryService() {
         return new SkillRegistryService(
-                new SkillPackageCatalogService(true, "./target/test-skills")
+                new SkillCatalogService(true, "./skills")
         );
     }
 }

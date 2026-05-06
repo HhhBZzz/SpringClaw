@@ -1,37 +1,30 @@
 package com.springclaw.service.skill.markdown;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sun.net.httpserver.HttpServer;
 import com.springclaw.service.skill.SkillDefinition;
-import org.junit.jupiter.api.AfterEach;
+import com.springclaw.service.skill.bundle.SkillCatalogService;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
-import java.io.OutputStream;
-import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.util.Set;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class MarkdownSkillCatalogServiceTest {
 
     @TempDir
     Path tempDir;
 
-    private HttpServer server;
-
-    @AfterEach
-    void tearDown() {
-        if (server != null) {
-            server.stop(0);
-        }
-    }
-
     @Test
     void shouldImportMarkdownSkillFromUrlAndExposeItInRegistry() throws Exception {
-        server = HttpServer.create(new InetSocketAddress(0), 0);
         String skillMarkdown = """
                 ---
                 name: group-summary
@@ -46,25 +39,23 @@ class MarkdownSkillCatalogServiceTest {
                 2. Open questions
                 3. Next actions
                 """;
-        server.createContext("/skills/group-summary/SKILL.md", exchange -> {
-            byte[] body = skillMarkdown.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().add("Content-Type", "text/markdown; charset=utf-8");
-            exchange.sendResponseHeaders(200, body.length);
-            try (OutputStream output = exchange.getResponseBody()) {
-                output.write(body);
-            }
-        });
-        server.start();
+        HttpClient httpClient = mock(HttpClient.class);
+        @SuppressWarnings("unchecked")
+        HttpResponse<String> response = mock(HttpResponse.class);
+        when(response.statusCode()).thenReturn(200);
+        when(response.body()).thenReturn(skillMarkdown);
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenReturn(response);
 
         MarkdownSkillCatalogService service = new MarkdownSkillCatalogService(
                 true,
                 tempDir.toString(),
-                new ObjectMapper()
+                new SkillCatalogService(true, tempDir.toString()),
+                httpClient
         );
 
         MarkdownSkillCatalogService.ImportedSkillImportResult result = service.importFromUrl(
                 new MarkdownSkillCatalogService.ImportMarkdownSkillRequest(
-                        "http://127.0.0.1:" + server.getAddress().getPort() + "/skills/group-summary/SKILL.md",
+                        "https://example.test/skills/group-summary/SKILL.md",
                         null,
                         null,
                         null,

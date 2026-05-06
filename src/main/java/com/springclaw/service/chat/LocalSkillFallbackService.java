@@ -4,6 +4,7 @@ import com.springclaw.common.exception.BusinessException;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.files.LocalFilesystemService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
+import com.springclaw.service.skill.runtime.SkillRuntimeService;
 import com.springclaw.service.skill.script.ScriptSkillCatalogService;
 import com.springclaw.service.skill.script.ScriptSkillExecutorService;
 import com.springclaw.service.skill.script.ScriptSkillDefinition;
@@ -64,8 +65,7 @@ public class LocalSkillFallbackService {
                 newsToolPack,
                 scriptSkillToolPack,
                 createBuiltinSkillExecutionService(enabled, workspaceSearchToolPack, scriptSkillCatalogService, skillRegistryService),
-                createScriptSkillExecutorService(enabled, scriptSkillCatalogService),
-                scriptSkillCatalogService,
+                new LocalSkillQuerySupport(createScriptSkillExecutorService(enabled, scriptSkillCatalogService), scriptSkillCatalogService),
                 aiProviderService,
                 null);
     }
@@ -91,14 +91,12 @@ public class LocalSkillFallbackService {
                 newsToolPack,
                 scriptSkillToolPack,
                 builtinSkillExecutionService,
-                scriptSkillExecutorService,
-                scriptSkillCatalogService,
+                new LocalSkillQuerySupport(scriptSkillExecutorService, scriptSkillCatalogService),
                 aiProviderService,
                 null);
     }
 
-    @Autowired
-    public LocalSkillFallbackService(@Value("${springclaw.chat.local-fallback-enabled:true}") boolean enabled,
+    public LocalSkillFallbackService(boolean enabled,
                                      SystemToolPack systemToolPack,
                                      WorkspaceSearchToolPack workspaceSearchToolPack,
                                      WebSearchToolPack webSearchToolPack,
@@ -111,6 +109,32 @@ public class LocalSkillFallbackService {
                                      ScriptSkillCatalogService scriptSkillCatalogService,
                                      AiProviderService aiProviderService,
                                      LocalFilesystemService localFilesystemService) {
+        this(enabled,
+                systemToolPack,
+                workspaceSearchToolPack,
+                webSearchToolPack,
+                weatherToolPack,
+                exchangeRateToolPack,
+                newsToolPack,
+                scriptSkillToolPack,
+                builtinSkillExecutionService,
+                new LocalSkillQuerySupport(scriptSkillExecutorService, scriptSkillCatalogService),
+                aiProviderService,
+                localFilesystemService);
+    }
+
+    public LocalSkillFallbackService(boolean enabled,
+                                     SystemToolPack systemToolPack,
+                                     WorkspaceSearchToolPack workspaceSearchToolPack,
+                                     WebSearchToolPack webSearchToolPack,
+                                     WeatherToolPack weatherToolPack,
+                                     ExchangeRateToolPack exchangeRateToolPack,
+                                     NewsToolPack newsToolPack,
+                                     ScriptSkillToolPack scriptSkillToolPack,
+                                     BuiltinSkillExecutionService builtinSkillExecutionService,
+                                     SkillRuntimeService skillRuntimeService,
+                                     ScriptSkillCatalogService scriptSkillCatalogService,
+                                     AiProviderService aiProviderService) {
         this.enabled = enabled;
         this.workspaceSearchToolPack = workspaceSearchToolPack;
         this.webSearchToolPack = webSearchToolPack;
@@ -120,7 +144,59 @@ public class LocalSkillFallbackService {
         this.scriptSkillToolPack = scriptSkillToolPack;
         this.builtinSkillExecutionService = builtinSkillExecutionService;
         this.modelControlSupport = new LocalSkillModelControlSupport(systemToolPack, aiProviderService);
-        this.querySupport = new LocalSkillQuerySupport(scriptSkillExecutorService, scriptSkillCatalogService);
+        this.querySupport = new LocalSkillQuerySupport(skillRuntimeService, scriptSkillCatalogService);
+        this.localFilesystemService = null;
+    }
+
+    private LocalSkillFallbackService(boolean enabled,
+                                      SystemToolPack systemToolPack,
+                                      WorkspaceSearchToolPack workspaceSearchToolPack,
+                                      WebSearchToolPack webSearchToolPack,
+                                      WeatherToolPack weatherToolPack,
+                                      ExchangeRateToolPack exchangeRateToolPack,
+                                      NewsToolPack newsToolPack,
+                                      ScriptSkillToolPack scriptSkillToolPack,
+                                      BuiltinSkillExecutionService builtinSkillExecutionService,
+                                      LocalSkillQuerySupport querySupport,
+                                      AiProviderService aiProviderService,
+                                      LocalFilesystemService localFilesystemService) {
+        this.enabled = enabled;
+        this.workspaceSearchToolPack = workspaceSearchToolPack;
+        this.webSearchToolPack = webSearchToolPack;
+        this.weatherToolPack = weatherToolPack;
+        this.exchangeRateToolPack = exchangeRateToolPack;
+        this.newsToolPack = newsToolPack;
+        this.scriptSkillToolPack = scriptSkillToolPack;
+        this.builtinSkillExecutionService = builtinSkillExecutionService;
+        this.modelControlSupport = new LocalSkillModelControlSupport(systemToolPack, aiProviderService);
+        this.querySupport = querySupport;
+        this.localFilesystemService = localFilesystemService;
+    }
+
+    @Autowired
+    public LocalSkillFallbackService(@Value("${springclaw.chat.local-fallback-enabled:true}") boolean enabled,
+                                     SystemToolPack systemToolPack,
+                                     WorkspaceSearchToolPack workspaceSearchToolPack,
+                                     WebSearchToolPack webSearchToolPack,
+                                     WeatherToolPack weatherToolPack,
+                                     ExchangeRateToolPack exchangeRateToolPack,
+                                     NewsToolPack newsToolPack,
+                                     ScriptSkillToolPack scriptSkillToolPack,
+                                     BuiltinSkillExecutionService builtinSkillExecutionService,
+                                     SkillRuntimeService skillRuntimeService,
+                                     ScriptSkillCatalogService scriptSkillCatalogService,
+                                     AiProviderService aiProviderService,
+                                     LocalFilesystemService localFilesystemService) {
+        this.enabled = enabled;
+        this.workspaceSearchToolPack = workspaceSearchToolPack;
+        this.webSearchToolPack = webSearchToolPack;
+        this.weatherToolPack = weatherToolPack;
+        this.exchangeRateToolPack = exchangeRateToolPack;
+        this.newsToolPack = newsToolPack;
+        this.scriptSkillToolPack = scriptSkillToolPack;
+        this.builtinSkillExecutionService = builtinSkillExecutionService;
+        this.modelControlSupport = new LocalSkillModelControlSupport(systemToolPack, aiProviderService);
+        this.querySupport = new LocalSkillQuerySupport(skillRuntimeService, scriptSkillCatalogService);
         this.localFilesystemService = localFilesystemService;
     }
 
@@ -266,8 +342,16 @@ public class LocalSkillFallbackService {
                 String answer = scriptSkillToolPack.listScriptSkills();
                 return localResult("SCRIPT_SKILL_LIST", answer, answer, true);
             }
-            String answer = scriptSkillToolPack.runScriptSkillByGoal(skillDefinition.skillName(), q);
+            String answer = querySupport.runScriptSkillByName(skillDefinition.skillName(), q);
             return localResult("SCRIPT_SKILL_RUN", answer, answer, true);
+        }
+
+        ScriptSkillDefinition autoSkill = querySupport.resolveHighConfidenceScriptSkill(q);
+        if (autoSkill != null) {
+            String answer = querySupport.runScriptSkillByName(autoSkill.skillName(), q);
+            if (StringUtils.hasText(answer) && !querySupport.looksLikeFailure(answer)) {
+                return localResult("SCRIPT_SKILL_AUTO", answer, answer, true);
+            }
         }
 
         return Optional.empty();

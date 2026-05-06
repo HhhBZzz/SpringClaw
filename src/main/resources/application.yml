@@ -258,11 +258,13 @@ springclaw:
       redis-retry-seconds: 30
   skills:
     enabled: ${SPRINGCLAW_SKILLS_ENABLED:true}
-    root: ${SPRINGCLAW_SKILLS_ROOT:${user.dir}/skills/packages}
+    root: ${SPRINGCLAW_SKILLS_ROOT:${user.dir}/skills}
+    external-roots: ${SPRINGCLAW_SKILLS_EXTERNAL_ROOTS:}
     allowed: ${SPRINGCLAW_SKILLS_ALLOWED:*}
     python: ${SPRINGCLAW_SKILLS_PYTHON:python3}
     timeout-seconds: ${SPRINGCLAW_SKILLS_TIMEOUT_SECONDS:8}
     max-output-chars: ${SPRINGCLAW_SKILLS_MAX_OUTPUT_CHARS:3000}
+    scaffold-enabled: ${SPRINGCLAW_SKILLS_SCAFFOLD_ENABLED:true}
     markdown-enabled: ${SPRINGCLAW_MARKDOWN_SKILL_ENABLED:true}
   webhook:
     security:

@@ -41,6 +41,38 @@ class ToolPermissionServiceImplTest {
         Assertions.assertDoesNotThrow(() -> service.checkPermission("u1", "SystemToolPack.now"));
     }
 
+    @Test
+    void shouldApplyWildcardDefaultDenyForUser() {
+        ToolPermissionServiceImpl service = new ToolPermissionServiceImpl(
+                null,
+                new FixedAuthService("USER"),
+                true,
+                false,
+                false,
+                "ScriptSkillToolPack.*",
+                "SystemToolPack.now"
+        );
+
+        BusinessException ex = Assertions.assertThrows(BusinessException.class,
+                () -> service.checkPermission("u1", "ScriptSkillToolPack.runScriptSkill"));
+        Assertions.assertEquals(40311, ex.getCode());
+    }
+
+    @Test
+    void shouldApplyWildcardDefaultAllowForGuest() {
+        ToolPermissionServiceImpl service = new ToolPermissionServiceImpl(
+                null,
+                new FixedAuthService("GUEST"),
+                true,
+                false,
+                false,
+                "SystemToolPack.runCommand",
+                "SystemToolPack.*"
+        );
+
+        Assertions.assertDoesNotThrow(() -> service.checkPermission("u1", "SystemToolPack.uuid"));
+    }
+
     private record FixedAuthService(String roleCode) implements AuthService {
 
         @Override

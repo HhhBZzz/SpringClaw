@@ -76,7 +76,7 @@ class OparContextAwareSupportTest {
                 "u1",
                 "用代码分析分析他",
                 """
-                - SYSTEM: tool=FileToolPack.listFiles, status=SUCCESS, phase=ACT, detail=[F] skills/packages/runtime_probe/scripts/run.py
+                - SYSTEM: tool=FileToolPack.listFiles, status=SUCCESS, phase=ACT, detail=[F] skills/runtime_probe/scripts/run.py
                 - SYSTEM: java.net.SocketTimeoutException: Read timed out
                 - SYSTEM: tool-session/tool-user
                 """,

@@ -1,7 +1,7 @@
 package com.springclaw.service.skill.impl;
 
 import com.springclaw.service.skill.SkillDefinition;
-import com.springclaw.service.skill.bundle.SkillPackageCatalogService;
+import com.springclaw.service.skill.bundle.SkillCatalogService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -21,7 +21,7 @@ class BuiltinSkillCatalogServiceTest {
     Path tempDir;
 
     @Test
-    void shouldLoadBuiltinDefinitionsFromPackageSkills() throws Exception {
+    void shouldLoadBuiltinDefinitionsFromSkillDirectories() throws Exception {
         writeBuiltinSkill(
                 "code-analysis",
                 "代码分析",
@@ -33,7 +33,7 @@ class BuiltinSkillCatalogServiceTest {
         );
 
         SkillRegistryService service = new SkillRegistryService(
-                new SkillPackageCatalogService(true, tempDir.toString()));
+                new SkillCatalogService(true, tempDir.toString()));
 
         List<SkillDefinition> definitions = service.listAllDefinitions();
 
@@ -59,7 +59,7 @@ class BuiltinSkillCatalogServiceTest {
         );
 
         SkillRegistryService service = new SkillRegistryService(
-                new SkillPackageCatalogService(true, tempDir.toString()));
+                new SkillCatalogService(true, tempDir.toString()));
 
         assertThat(service.matchHighConfidenceDefinition("读取这个网页 https://example.com"))
                 .map(SkillDefinition::skillId)
@@ -79,7 +79,7 @@ class BuiltinSkillCatalogServiceTest {
         );
 
         SkillRegistryService service = new SkillRegistryService(
-                new SkillPackageCatalogService(true, tempDir.toString()));
+                new SkillCatalogService(true, tempDir.toString()));
 
         assertThat(service.matchHighConfidenceDefinition("帮我看看这个项目里结构是怎样的"))
                 .map(SkillDefinition::skillId)

@@ -154,8 +154,8 @@ public class WorkspaceReviewService {
         if ("frontend/package.json".equals(relative)) {
             state.stack.add("Vue/Vite 前端");
         }
-        if (relative.startsWith("skills/packages/")) {
-            state.stack.add("Skill 包体系");
+        if (relative.startsWith("skills/")) {
+            state.stack.add("Skill 体系");
         }
         if ("docker-compose.yml".equals(relative)) {
             state.stack.add("Docker 本地依赖编排");
@@ -219,7 +219,7 @@ public class WorkspaceReviewService {
         appendIfExists(builder, state, "src/main/resources/application.yml", "后端核心配置");
         appendIfPrefixExists(builder, state, "src/main/java", "Java 后端源码");
         appendIfPrefixExists(builder, state, "frontend", "前端工程");
-        appendIfPrefixExists(builder, state, "skills/packages", "Agent skill 单源目录");
+        appendIfPrefixExists(builder, state, "skills", "Agent skill 单源目录");
         appendIfExists(builder, state, "docker-compose.yml", "本地依赖编排");
         builder.append('\n');
     }

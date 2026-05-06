@@ -6,7 +6,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 /**
- * package skill 的统一解析结果。
+ * skill 目录的统一解析结果。
  */
 public record SkillBundleDefinition(String skillId,
                                     String slug,

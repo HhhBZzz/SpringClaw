@@ -2,7 +2,7 @@ package com.springclaw.service.skill.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.service.skill.SkillDefinition;
-import com.springclaw.service.skill.bundle.SkillPackageCatalogService;
+import com.springclaw.service.skill.bundle.SkillCatalogService;
 import com.springclaw.service.skill.markdown.MarkdownSkillCatalogService;
 import com.springclaw.service.skill.script.ScriptSkillCatalogService;
 import org.junit.jupiter.api.Assertions;
@@ -71,7 +71,7 @@ class SkillRegistryServiceTest {
                 """);
 
         SkillRegistryService registryService = new SkillRegistryService(
-                new SkillPackageCatalogService(true, tempDir.toString())
+                new SkillCatalogService(true, tempDir.toString())
         );
 
         List<SkillDefinition> definitions = registryService.listAllDefinitions();

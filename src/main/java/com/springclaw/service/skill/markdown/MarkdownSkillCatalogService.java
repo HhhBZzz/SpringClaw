@@ -3,7 +3,7 @@ package com.springclaw.service.skill.markdown;
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.bundle.SkillBundleDefinition;
-import com.springclaw.service.skill.bundle.SkillPackageCatalogService;
+import com.springclaw.service.skill.bundle.SkillCatalogService;
 import com.springclaw.service.skill.bundle.SkillBundleSupport;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -47,25 +47,32 @@ public class MarkdownSkillCatalogService {
     private final boolean enabled;
     private final Path rootPath;
     private final HttpClient httpClient;
-    private final SkillPackageCatalogService packageCatalogService;
+    private final SkillCatalogService skillCatalogService;
 
     public MarkdownSkillCatalogService(boolean enabled,
                                        String root,
                                        com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
-        this(enabled, root, new SkillPackageCatalogService(enabled, root));
+        this(enabled, root, new SkillCatalogService(enabled, root));
     }
 
     @Autowired
     public MarkdownSkillCatalogService(@Value("${springclaw.skills.markdown-enabled:true}") boolean enabled,
-                                       @Value("${springclaw.skills.root:${user.dir}/skills/packages}") String root,
-                                       SkillPackageCatalogService packageCatalogService) {
-        this.enabled = enabled;
-        this.rootPath = Path.of(root).toAbsolutePath().normalize();
-        this.packageCatalogService = packageCatalogService;
-        this.httpClient = HttpClient.newBuilder()
+                                       @Value("${springclaw.skills.root:${user.dir}/skills}") String root,
+                                       SkillCatalogService skillCatalogService) {
+        this(enabled, root, skillCatalogService, HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .followRedirects(HttpClient.Redirect.NORMAL)
-                .build();
+                .build());
+    }
+
+    MarkdownSkillCatalogService(boolean enabled,
+                                String root,
+                                SkillCatalogService skillCatalogService,
+                                HttpClient httpClient) {
+        this.enabled = enabled;
+        this.rootPath = Path.of(root).toAbsolutePath().normalize();
+        this.skillCatalogService = skillCatalogService;
+        this.httpClient = httpClient;
     }
 
     public boolean enabled() {
@@ -80,7 +87,7 @@ public class MarkdownSkillCatalogService {
         if (!enabled) {
             return List.of();
         }
-        return packageCatalogService.listBundles().stream()
+        return skillCatalogService.listBundles().stream()
                 .filter(this::isPromptBundle)
                 .map(SkillBundleDefinition::toRuntimeDefinition)
                 .sorted(Comparator.comparingInt(SkillDefinition::priority)

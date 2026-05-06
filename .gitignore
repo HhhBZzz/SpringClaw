@@ -19,6 +19,7 @@ docs/PROJECT_MEMORY.md
 
 # Logs
 *.log
+skills/.usage.json
 
 # Browser automation artifacts
 .playwright-cli/

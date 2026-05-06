@@ -2,7 +2,7 @@ package com.springclaw.service.skill.script;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.service.skill.bundle.SkillBundleDefinition;
-import com.springclaw.service.skill.bundle.SkillPackageCatalogService;
+import com.springclaw.service.skill.bundle.SkillCatalogService;
 import com.springclaw.service.skill.bundle.SkillBundleSupport;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,13 +22,13 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * package script skill 目录服务。
+ * Python script skill 目录服务。
  */
 @Service
 public class ScriptSkillCatalogService {
 
     private final boolean enabled;
-    private final SkillPackageCatalogService packageCatalogService;
+    private final SkillCatalogService skillCatalogService;
     private final Set<String> allowedSkills;
 
     public ScriptSkillCatalogService(boolean enabled,
@@ -36,16 +36,16 @@ public class ScriptSkillCatalogService {
                                      String allowedSkills,
                                      ObjectMapper objectMapper) {
         this.enabled = enabled;
-        this.packageCatalogService = new SkillPackageCatalogService(enabled, root);
+        this.skillCatalogService = new SkillCatalogService(enabled, root);
         this.allowedSkills = parseAllowedSkills(allowedSkills);
     }
 
     @Autowired
     public ScriptSkillCatalogService(@Value("${springclaw.skills.enabled:true}") boolean enabled,
                                      @Value("${springclaw.skills.allowed:*}") String allowedSkills,
-                                     SkillPackageCatalogService packageCatalogService) {
+                                     SkillCatalogService skillCatalogService) {
         this.enabled = enabled;
-        this.packageCatalogService = packageCatalogService;
+        this.skillCatalogService = skillCatalogService;
         this.allowedSkills = parseAllowedSkills(allowedSkills);
     }
 
@@ -54,7 +54,7 @@ public class ScriptSkillCatalogService {
     }
 
     public Path rootPath() {
-        return packageCatalogService.rootPath();
+        return skillCatalogService.rootPath();
     }
 
     public List<ScriptSkillDefinition> listDefinitions() {
@@ -88,13 +88,17 @@ public class ScriptSkillCatalogService {
     }
 
     public Optional<ScriptSkillDefinition> matchBestDefinition(String goal) {
+        return matchBestDefinition(goal, 1);
+    }
+
+    public Optional<ScriptSkillDefinition> matchBestDefinition(String goal, int minScore) {
         String normalizedGoal = normalizeText(goal);
         if (!StringUtils.hasText(normalizedGoal)) {
             return Optional.empty();
         }
         return listPublicDefinitions().stream()
                 .map(definition -> Map.entry(definition, scoreDefinition(definition, normalizedGoal)))
-                .filter(entry -> entry.getValue() > 0)
+                .filter(entry -> entry.getValue() >= minScore)
                 .max(Map.Entry.comparingByValue())
                 .map(Map.Entry::getKey);
     }
@@ -154,7 +158,7 @@ public class ScriptSkillCatalogService {
         if (!enabled) {
             return List.of();
         }
-        return packageCatalogService.listBundles().stream()
+        return skillCatalogService.listBundles().stream()
                 .filter(this::isScriptBundle)
                 .filter(bundle -> isAllowed(bundle.skillId()))
                 .map(this::toDefinition)

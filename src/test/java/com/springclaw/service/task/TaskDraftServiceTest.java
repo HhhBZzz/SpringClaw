@@ -1,7 +1,7 @@
 package com.springclaw.service.task;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.springclaw.service.skill.bundle.SkillPackageCatalogService;
+import com.springclaw.service.skill.bundle.SkillCatalogService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import com.springclaw.service.skill.script.ScriptSkillCatalogService;
 import com.springclaw.service.task.impl.TaskDraftServiceImpl;
@@ -23,7 +23,7 @@ class TaskDraftServiceTest {
         writeScriptSkill("web_crawler", "网页抓取", "web");
         ScriptSkillCatalogService scriptCatalog = new ScriptSkillCatalogService(true, tempDir.toString(), "*", new ObjectMapper());
         SkillRegistryService registryService = new SkillRegistryService(
-                new SkillPackageCatalogService(true, tempDir.toString())
+                new SkillCatalogService(true, tempDir.toString())
         );
         TaskDraftService service = new TaskDraftServiceImpl(new TaskScheduleSupport(), scriptCatalog, registryService);
 
@@ -40,7 +40,7 @@ class TaskDraftServiceTest {
     void shouldFallbackToAgentPrompt() throws Exception {
         ScriptSkillCatalogService scriptCatalog = new ScriptSkillCatalogService(true, tempDir.toString(), "*", new ObjectMapper());
         SkillRegistryService registryService = new SkillRegistryService(
-                new SkillPackageCatalogService(true, tempDir.toString())
+                new SkillCatalogService(true, tempDir.toString())
         );
         TaskDraftService service = new TaskDraftServiceImpl(new TaskScheduleSupport(), scriptCatalog, registryService);
 

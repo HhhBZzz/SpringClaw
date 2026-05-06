@@ -156,8 +156,8 @@ public class WorkspaceTaskService {
                     : "Node 前端";
             stack.add(stackName + ": 前端工程在 frontend。");
         }
-        if (isDirectory("skills/packages")) {
-            stack.add("Skill 包体系: skills/packages 存放可被 Agent 调用的能力包。");
+        if (isDirectory("skills")) {
+            stack.add("Skill 体系: skills 目录直接存放可被 Agent 调用的能力包。");
         }
         if (exists("docker-compose.yml")) {
             stack.add("Docker 编排: docker-compose.yml 管理 MySQL、Redis、RabbitMQ 等本地依赖。");
@@ -171,7 +171,7 @@ public class WorkspaceTaskService {
         addDirectoryDescription(directories, "src/main/resources", "后端配置、SQL、静态资源目录。");
         addDirectoryDescription(directories, "src/main/resources/static", "Spring Boot 直接托管的静态页面。");
         addDirectoryDescription(directories, "frontend", "独立前端工程，开发态通常由 Vite 启动。");
-        addDirectoryDescription(directories, "skills/packages", "项目内 skill 单源目录，每个子目录通常有 SKILL.md 和执行脚本。");
+        addDirectoryDescription(directories, "skills", "项目内 skill 单源目录，每个子目录通常有 SKILL.md 和执行脚本。");
         addDirectoryDescription(directories, "docs", "项目文档和设计说明。");
         addDirectoryDescription(directories, "http", "接口调试样例。");
         return directories;

@@ -28,7 +28,6 @@ class SimplifiedOparEngineTest {
         AiProviderService aiProviderService = mock(AiProviderService.class);
         ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
         LocalSkillFallbackService localSkillFallbackService = mock(LocalSkillFallbackService.class);
-        ModelControlIntentService modelControlIntentService = mock(ModelControlIntentService.class);
         LocalExecutionNarrator localExecutionNarrator = mock(LocalExecutionNarrator.class);
         ModelTransportGuardService modelTransportGuardService = mock(ModelTransportGuardService.class);
         ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
@@ -40,7 +39,6 @@ class SimplifiedOparEngineTest {
                 aiProviderService,
                 toolOrchestrator,
                 localSkillFallbackService,
-                modelControlIntentService,
                 localExecutionNarrator,
                 modelTransportGuardService,
                 modelCallExecutor,
@@ -94,7 +92,7 @@ class SimplifiedOparEngineTest {
         assertThat(result.action()).contains("skill=web-crawl");
         assertThat(result.reflect()).isEqualTo("已读取 Example Domain");
         assertThat(result.modelEnabled()).isFalse();
-        verifyNoInteractions(modelCallExecutor, toolOrchestrator, modelControlIntentService, conversationAdvisorSupport, messageEventService);
+        verifyNoInteractions(modelCallExecutor, toolOrchestrator, conversationAdvisorSupport, messageEventService);
     }
 
     @Test
@@ -102,7 +100,6 @@ class SimplifiedOparEngineTest {
         AiProviderService aiProviderService = mock(AiProviderService.class);
         ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
         LocalSkillFallbackService localSkillFallbackService = mock(LocalSkillFallbackService.class);
-        ModelControlIntentService modelControlIntentService = mock(ModelControlIntentService.class);
         LocalExecutionNarrator localExecutionNarrator = mock(LocalExecutionNarrator.class);
         ModelTransportGuardService modelTransportGuardService = mock(ModelTransportGuardService.class);
         ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
@@ -114,7 +111,6 @@ class SimplifiedOparEngineTest {
                 aiProviderService,
                 toolOrchestrator,
                 localSkillFallbackService,
-                modelControlIntentService,
                 localExecutionNarrator,
                 modelTransportGuardService,
                 modelCallExecutor,
@@ -154,7 +150,7 @@ class SimplifiedOparEngineTest {
                 any()
         );
         when(messageEventService.listSessionEvents("feishu:p2p:s1", "SYSTEM", "TOOL", 24, false))
-                .thenReturn(List.of(toolSuccess("req-1", "FileToolPack.listFiles", "[F] skills/packages/runtime_probe/scripts/run.py")));
+                .thenReturn(List.of(toolSuccess("req-1", "FileToolPack.listFiles", "[F] skills/runtime_probe/scripts/run.py")));
 
         ChatExecutionResult result = engine.run(
                 activeClient,
@@ -168,7 +164,7 @@ class SimplifiedOparEngineTest {
         assertThat(result.reflect()).doesNotContain("远程模型");
         assertThat(result.reflect()).doesNotContain("Error while extracting response");
         assertThat(result.reflect()).contains("文件检索");
-        assertThat(result.reflect()).contains("skills/packages/runtime_probe/scripts/run.py");
+        assertThat(result.reflect()).contains("skills/runtime_probe/scripts/run.py");
         assertThat(result.plan()).contains("工具已执行，但模型总结超时");
         assertThat(result.modelEnabled()).isFalse();
     }

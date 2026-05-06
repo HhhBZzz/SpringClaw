@@ -4,6 +4,7 @@ import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.client.ChatClient;
 
 import java.net.SocketTimeoutException;
 import java.util.List;
@@ -24,7 +25,7 @@ class LocalExecutionNarratorTest {
 
     @Test
     void shouldReturnNarratedAnswerWhenModelCallSucceeds() throws Exception {
-        AiProviderService.ActiveChatClient activeClient = mock(AiProviderService.ActiveChatClient.class);
+        AiProviderService.ActiveChatClient activeClient = activeClient();
         when(modelCallExecutor.executeChat(any(), anyString(), any(), anyBoolean(), any()))
                 .thenReturn(new ModelCallExecutor.ModelCallResult<>(
                         "这是整理后的自然回答。",
@@ -51,7 +52,7 @@ class LocalExecutionNarratorTest {
 
     @Test
     void shouldFallBackToDeterministicAnswerWhenNarrationTimesOut() throws Exception {
-        AiProviderService.ActiveChatClient activeClient = mock(AiProviderService.ActiveChatClient.class);
+        AiProviderService.ActiveChatClient activeClient = activeClient();
         when(modelCallExecutor.executeChat(any(), anyString(), any(), anyBoolean(), any()))
                 .thenThrow(new SocketTimeoutException("Read timed out"));
 
@@ -73,7 +74,7 @@ class LocalExecutionNarratorTest {
 
     @Test
     void shouldReturnDeterministicWorkspaceAnswerWithoutModelNarration() {
-        AiProviderService.ActiveChatClient activeClient = mock(AiProviderService.ActiveChatClient.class);
+        AiProviderService.ActiveChatClient activeClient = activeClient();
 
         String answer = narrator.narrate(
                 "system",
@@ -94,7 +95,7 @@ class LocalExecutionNarratorTest {
 
     @Test
     void shouldReturnDeterministicControlPlaneAnswerWithoutModelNarration() {
-        AiProviderService.ActiveChatClient activeClient = mock(AiProviderService.ActiveChatClient.class);
+        AiProviderService.ActiveChatClient activeClient = activeClient();
 
         String answer = narrator.narrate(
                 "system",
@@ -115,5 +116,16 @@ class LocalExecutionNarratorTest {
 
     private AssembledContext assembled(String question) {
         return new AssembledContext("s1", "api", "u1", question, "", "", question);
+    }
+
+    private AiProviderService.ActiveChatClient activeClient() {
+        return new AiProviderService.ActiveChatClient(
+                "coding-plan",
+                "qwen3.5-plus",
+                "https://example.invalid/v1",
+                mock(ChatClient.class),
+                true,
+                ""
+        );
     }
 }

@@ -6,7 +6,98 @@
 2. 出现了什么问题
 3. 最后怎么解决
 
-当前日志先补到 `2026-03-21`。
+最近记录按日期倒序维护。
+
+## 2026-05-06
+
+### 今日完成
+
+1. 清理本地运行产物
+   - 删除本地 `target/`
+   - 删除本地 `frontend/node_modules/`
+   - 删除本地 `frontend/dist/`
+   - 删除本地 `frontend/.npm-cache/`
+   - 删除本地 `.playwright-cli/`
+   - 删除本地 `cp.txt`
+2. 删除已被替代的模型控制旧链路
+   - 删除 `ModelControlIntentService`
+   - 删除两个 Agent 引擎中已无调用的 `tryAiAssistedModelControl` / `dispatchAiModelControlCommand`
+   - 模型查询/切换继续由规则式 `LocalSkillModelControlSupport` 承担
+3. 删除误放和过期文件
+   - 删除根目录误放的 `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`
+   - 删除过期的 Superpowers 临时设计/实施计划文档
+4. 修正忽略规则
+   - 根 `.gitignore` 增加 `logs/` 和 `*.pid`
+   - `frontend/.gitignore` 改为面向 frontend 子目录的正确规则
+5. 修复本地测试环境稳定性
+   - 新增 Mockito mock maker 配置，避免测试依赖 JDK attach 权限
+   - Markdown skill 导入测试改为注入 fake `HttpClient`，不再依赖本地开端口
+   - final record 类型测试改为构造真实对象，不再强行 mock
+6. 借鉴 Hermes Agent 继续收口 skill 体系
+   - `SKILL.md` 支持无 frontmatter 的 OpenClaw/Hermes 风格 skill 目录
+   - 如果目录下存在 `scripts/*.py`，会自动推断为 Python script skill
+   - 从一级标题和 `## Description` 自动提取名称与描述
+   - 新增 `inspectScriptSkill`，按需查看单个 skill 说明和支持文件列表
+   - 新增 `runScriptSkillChain`，支持 `a -> b -> c` 顺序执行并传递上一步结果
+   - 新增安全模板创建服务 `SkillScaffoldService`
+   - Python skill 执行环境同时提供 `SPRINGCLAW_*` 和 `OPENCLAW_*` 变量
+   - 定时任务执行层支持 `executorType=python`
+   - 默认工具权限开始支持 `ScriptSkillToolPack.*` 这种通配符
+7. 更新 skill 使用文档
+   - 重写 `docs/SCRIPT_SKILL_GUIDE.md`
+   - 明确 skill 是“说明书 + 附件包 + 可选脚本入口”，不是继续堆 Java 方法
+   - 明确哪些能力适合放 skill，哪些应该留在平台底座
+8. 继续向 Hermes Agent 的 skill 模式收口
+   - 新增 `SkillLibraryToolPack`
+   - 暴露 Hermes 风格工具名：`skills_list`、`skill_view`、`skill_view_file`
+   - `skills_list` 只返回摘要，`skill_view` 才加载单个 `SKILL.md`
+   - `skill_view_file` 只允许读取 `references/templates/scripts/assets` 下的支持文件
+   - `ToolOrchestrator` 在用户询问 skill 列表/查看 skill 时自动加入 skill library 工具
+   - `SkillCatalogService` 支持 `springclaw.skills.external-roots`
+   - `repo_inspector` 增强中文领域提示，对“skill 体系怎么实现”这类泛问能命中主代码
+9. 按 OpenClaw4J 思路补入真实可执行 skill
+   - 新增 `system_status`，查看 CPU、内存、磁盘和进程概览
+   - 新增 `content_summarizer`，对文本、工作区文件或网页做轻量摘要
+   - 新增 `rss_blog_watcher`，管理 RSS/Atom 订阅并扫描最新文章
+   - 新增 `crypto_price`，查询 BTC、ETH 等币价，并支持 `dryRun` 离线预检
+   - 这些 skill 都走 SpringClaw 标准目录化 skill 结构，避免自动安装依赖和强绑外部账号
+10. 继续收口 script skill 调用方式
+   - `LocalSkillFallbackService` 新增通用高置信 script skill 自动路由
+   - 新增 skill 后只要 `SKILL.md` 的名称/关键词命中，就能自动执行对应 Python skill
+   - 不再要求每个新 skill 都在 Java 本地兜底里手写一个分支
+   - 自动路由会过滤 `Traceback`、非零 `exitCode`、`status=failed` 等失败输出，避免坏脚本污染回答
+11. 借鉴 Hermes `skill_usage.py` 增加 skill 使用侧写
+   - 新增 `SkillUsageService`
+   - 使用记录写入 `skills/.usage.json`，不污染 `SKILL.md`
+   - `skill_view` / `skill_view_file` 会记录 `view_count`
+   - Python skill 真实执行时会记录 `use_count`
+   - `SkillLibraryToolPack` 新增 `skills_status`，可查看使用次数、查看次数和最近活动
+   - 为后续 curator 清理、归档、合并 skill 留出 `state`、`pinned`、`patch_count` 字段
+12. 继续收口 skill 执行入口
+   - 新增 `SkillRuntimeService`
+   - 定时任务执行 skill 时不再直接判断 `python` / `builtin` / `prompt`
+   - `python`、历史兼容 `script`、`builtin` 都通过统一 runtime 分发
+   - `prompt` 类型保留为说明型 skill，不允许被当作可执行任务直接运行
+13. 完成 skill 命名和执行边界收口
+   - `SkillPackageCatalogService` 更名为 `SkillCatalogService`
+   - `SkillPackageScaffoldService` 更名为 `SkillScaffoldService`
+   - `ScriptSkillToolPack` 和本地兜底脚本执行都改走 `SkillRuntimeService`
+   - 新增边界测试，防止业务代码绕过 runtime 直接调用脚本执行器
+
+### 今日验证
+
+1. `mvn -q -DskipTests compile` 通过
+2. `mvn -q -Dtest=SimplifiedOparEngineTest,LocalSkillFallbackServiceTest,ApplicationYamlPolicyTest test` 通过
+3. `mvn -q test` 通过
+4. `git diff --check` 通过
+5. `mvn -q -Dtest=SkillCatalogServiceTest,SkillScaffoldServiceTest,ScriptSkillToolPackTest,TaskExecutionServiceTest,ToolPermissionServiceImplTest test` 通过
+6. `mvn -q -Dtest=SkillCatalogServiceTest,SkillLibraryToolPackTest,ToolOrchestratorTest test` 通过
+7. 真实运行 `repo_inspector` Python skill，确认可执行并能定位 skill 主链路文件
+8. `mvn -q -Dtest=OpenClawRealSkillsSmokeTest test` 先失败后通过，确认新 skill 能被 catalog 发现并经 Java executor 执行
+9. `mvn -q -Dtest=LocalSkillFallbackServiceTest#shouldAutoRouteHighConfidenceScriptSkillWithoutHardcodedJavaBranch test` 先失败后通过，确认自然语言能直接触发新 Python skill
+10. `mvn -q -Dtest=SkillLibraryToolPackTest#shouldTrackSkillViewAndRunUsageInSidecar test` 先失败后通过，确认 view/run 会写入 sidecar 并通过 `skills_status` 展示
+11. `mvn -q -Dtest=SkillRuntimeServiceTest test` 先失败后通过，确认统一 skill runtime 是真实入口
+12. `mvn -q -Dtest=SkillRuntimeServiceTest,TaskExecutionServiceTest,SkillCatalogServiceTest,SkillLibraryToolPackTest,OpenClawRealSkillsSmokeTest,LocalSkillFallbackServiceTest test` 通过
 
 ## 2026-05-03
 

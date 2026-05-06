@@ -30,7 +30,6 @@ public class OparLoopEngine {
     private final AiProviderService aiProviderService;
     private final ToolOrchestrator toolOrchestrator;
     private final LocalSkillFallbackService localSkillFallbackService;
-    private final ModelControlIntentService modelControlIntentService;
     private final LocalExecutionNarrator localExecutionNarrator;
     private final ModelTransportGuardService modelTransportGuardService;
     private final ModelCallExecutor modelCallExecutor;
@@ -45,7 +44,6 @@ public class OparLoopEngine {
     public OparLoopEngine(AiProviderService aiProviderService,
                           ToolOrchestrator toolOrchestrator,
                           LocalSkillFallbackService localSkillFallbackService,
-                          ModelControlIntentService modelControlIntentService,
                           LocalExecutionNarrator localExecutionNarrator,
                           ModelTransportGuardService modelTransportGuardService,
                           ModelCallExecutor modelCallExecutor,
@@ -58,7 +56,6 @@ public class OparLoopEngine {
         this.aiProviderService = aiProviderService;
         this.toolOrchestrator = toolOrchestrator;
         this.localSkillFallbackService = localSkillFallbackService;
-        this.modelControlIntentService = modelControlIntentService;
         this.localExecutionNarrator = localExecutionNarrator;
         this.modelTransportGuardService = modelTransportGuardService;
         this.modelCallExecutor = modelCallExecutor;
@@ -433,41 +430,6 @@ public class OparLoopEngine {
                 reflect,
                 false
         );
-    }
-
-    private LocalSkillFallbackService.LocalSkillResult tryAiAssistedModelControl(AiProviderService.ActiveChatClient activeClient,
-                                                                                 AssembledContext assembled,
-                                                                                 String requestId) {
-        return null;
-    }
-
-    private LocalSkillFallbackService.LocalSkillResult dispatchAiModelControlCommand(String rawCommand) {
-        String command = safe(rawCommand).trim();
-        String upper = command.toUpperCase();
-        if ("QUERY".equals(upper)) {
-            return tryLocalFallbackResult("当前模型是什么");
-        }
-        if ("SWITCH_PROVIDER:PRIMARY".equals(upper)) {
-            return tryLocalFallbackResult("切换到 claude");
-        }
-        if ("SWITCH_PROVIDER:QWEN".equals(upper)) {
-            return tryLocalFallbackResult("切换到千问");
-        }
-        if ("SWITCH_PROVIDER:CODING-PLAN".equals(upper)) {
-            return tryLocalFallbackResult("切换到 coding plan");
-        }
-        if (upper.startsWith("SWITCH_MODEL:")) {
-            String payload = command.substring("SWITCH_MODEL:".length()).trim();
-            int separator = payload.indexOf(':');
-            if (separator > 0 && separator < payload.length() - 1) {
-                String providerId = payload.substring(0, separator).trim();
-                String modelId = payload.substring(separator + 1).trim();
-                if (StringUtils.hasText(providerId) && StringUtils.hasText(modelId)) {
-                    return tryLocalFallbackResult("切换到 " + providerId + " 的 " + modelId);
-                }
-            }
-        }
-        return null;
     }
 
     private static String safe(String text) {

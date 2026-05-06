@@ -19,6 +19,8 @@ docs/PROJECT_MEMORY.md
 
 # Logs
 *.log
+logs/
+*.pid
 skills/.usage.json
 
 # Browser automation artifacts

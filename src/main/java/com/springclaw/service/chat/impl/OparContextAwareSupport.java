@@ -20,6 +20,9 @@ class OparContextAwareSupport {
     }
 
     LocalSkillFallbackService.LocalSkillResult tryContextAwareLocalResult(AssembledContext assembled) {
+        if (assembled == null) {
+            return null;
+        }
         String lower = safe(assembled.question()).toLowerCase();
         if (looksLikeFirstMessageTimeQuestion(lower)) {
             return conversationHistoryService.findFirstUserQuestionEntry(assembled.sessionKey())
@@ -271,12 +274,12 @@ class OparContextAwareSupport {
             String suffix = toolContextMissing
                     ? "另外，工具审计里出现了 tool-session/tool-user，这说明当时工具调用没有绑定真实会话上下文，已经需要在简化模式里补上。"
                     : "";
-            return "从最近日志看，这次不是工具没执行，而是工具执行成功后，远程模型在整理最终回答时 Read timed out。"
+            return "从最近日志看，这次不是工具没执行，而是工具执行成功后，远程模型在整理最终回答时响应超时。"
                     + " 本地数据库、飞书链路和工具调用本身是通的，真正故障点在上游模型返回阶段。"
                     + suffix;
         }
         if (remoteTimeout) {
-            return "从最近日志看，核心问题是上游模型 Read timed out。数据库查询、消息入库和主服务线程都还在，失败点在远程模型响应阶段。";
+            return "从最近日志看，核心问题是上游模型响应超时。数据库查询、消息入库和主服务线程都还在，失败点在远程模型响应阶段。";
         }
         if (lower.contains("sqlsession") && !lower.contains("exception")) {
             return "这些 SqlSession 日志本身不是故障，只是在提示当前读写没有放进 Spring 事务同步。真正要看的还是后面有没有超时、异常堆栈或模型调用失败。";

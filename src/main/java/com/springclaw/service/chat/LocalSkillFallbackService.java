@@ -20,6 +20,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
@@ -239,6 +243,10 @@ public class LocalSkillFallbackService {
         if (!enabled || !StringUtils.hasText(question)) {
             return Optional.empty();
         }
+        Optional<LocalSkillResult> localFileResult = tryHandleLocalFileBrowse(question.trim());
+        if (localFileResult.isPresent()) {
+            return localFileResult;
+        }
         return builtinSkillExecutionService.tryExecuteHighConfidence(question.trim());
     }
 
@@ -253,6 +261,11 @@ public class LocalSkillFallbackService {
         Optional<LocalSkillResult> controlPlane = tryHandleControlPlane(q);
         if (controlPlane.isPresent()) {
             return controlPlane;
+        }
+
+        Optional<LocalSkillResult> localFileResult = tryHandleLocalFileBrowse(q);
+        if (localFileResult.isPresent()) {
+            return localFileResult;
         }
 
         if (looksLikeLocalFileBoundaryQuestion(lower)) {
@@ -357,6 +370,169 @@ public class LocalSkillFallbackService {
         return Optional.empty();
     }
 
+    private Optional<LocalSkillResult> tryHandleLocalFileBrowse(String question) {
+        if (localFilesystemService == null || !StringUtils.hasText(question)) {
+            return Optional.empty();
+        }
+        String lower = question.toLowerCase(Locale.ROOT);
+        if (!looksLikeDesktopListQuestion(lower)) {
+            return Optional.empty();
+        }
+        return renderDesktopListing();
+    }
+
+    private boolean looksLikeDesktopListQuestion(String lower) {
+        boolean mentionsDesktop = lower.contains("桌面") || lower.contains("desktop");
+        if (!mentionsDesktop) {
+            return false;
+        }
+        return containsAny(lower,
+                "授权桌面", "桌面全部", "桌面所有", "桌面文件", "桌面目录",
+                "列出", "列表", "有哪些", "有什么", "查看", "看看", "全部", "所有", "文件清单");
+    }
+
+    private Optional<LocalSkillResult> renderDesktopListing() {
+        String roots = safeReadAuthorizedRoots();
+        String listing = safeListDesktop();
+        String answer = renderDesktopListingAnswer(roots, listing);
+        return localResult("LOCAL_FILES_DESKTOP_LIST", listing, answer, true);
+    }
+
+    private String safeReadAuthorizedRoots() {
+        try {
+            return localFilesystemService.listAuthorizedRoots();
+        } catch (Exception ex) {
+            return "授权目录读取失败: " + ex.getMessage();
+        }
+    }
+
+    private String safeListDesktop() {
+        try {
+            String listing = localFilesystemService.listFiles("", "Desktop");
+            if (StringUtils.hasText(listing) && !listing.startsWith("目录不存在")) {
+                return listing;
+            }
+        } catch (Exception ignored) {
+            // 继续尝试 rootRef=Desktop，兼容直接把 Desktop 配成授权根目录的场景。
+        }
+        try {
+            return localFilesystemService.listFiles("Desktop", "");
+        } catch (Exception ex) {
+            return "桌面目录读取失败: " + ex.getMessage();
+        }
+    }
+
+    private String renderDesktopListingAnswer(String roots, String listing) {
+        String desktopPath = System.getProperty("user.home", "/Users/<username>") + "/Desktop";
+        if (!StringUtils.hasText(listing) || listing.startsWith("目录不存在") || listing.startsWith("桌面目录读取失败")) {
+            return """
+                    ### 结论
+                    我现在没有成功列出桌面目录。
+
+                    ### 原因
+                    %s
+
+                    ### 当前授权根目录
+                    %s
+
+                    ### 说明
+                    “授权桌面全部”不能只靠聊天临时扩大权限；真实读取范围由后端启动配置 `SPRINGCLAW_LOCAL_FILES_ROOTS` 决定。
+                    如果要完整读取桌面，请把 `%s` 或用户主目录配进该变量后重启后端。
+                    """.formatted(listing, roots, desktopPath);
+        }
+
+        List<DesktopEntry> entries = parseDesktopEntries(listing);
+        StringBuilder builder = new StringBuilder();
+        builder.append("### 结论\n");
+        builder.append("桌面在当前授权范围内。我可以列出文件和文件夹；读取内容时仍只允许非敏感文本文件，`.docx` 这类二进制文档当前先展示文件名。\n\n");
+        builder.append("### 桌面文件清单\n");
+        if (entries.isEmpty()) {
+            builder.append("桌面目录为空，或只有受保护/不可列出的文件。\n\n");
+        } else {
+            builder.append("| 序号 | 类型 | 文件名 |\n");
+            builder.append("| --- | --- | --- |\n");
+            int index = 1;
+            for (DesktopEntry entry : entries) {
+                builder.append("| ")
+                        .append(index++)
+                        .append(" | ")
+                        .append(entry.type())
+                        .append(" | ")
+                        .append(escapeMarkdownCell(entry.name()))
+                        .append(" |\n");
+            }
+            builder.append("\n");
+        }
+        builder.append("### 授权说明\n");
+        builder.append("当前授权根目录：\n");
+        builder.append(roots).append("\n\n");
+        builder.append("“授权桌面全部”不会在聊天里临时扩权；它只能使用后端已经配置好的授权根目录。\n");
+        return builder.toString().trim();
+    }
+
+    private List<DesktopEntry> parseDesktopEntries(String listing) {
+        List<DesktopEntry> entries = new ArrayList<>();
+        List<String> seenNames = new ArrayList<>();
+        for (String rawLine : safe(listing).split("\\R")) {
+            String line = rawLine.trim();
+            if (!StringUtils.hasText(line)) {
+                continue;
+            }
+            String type;
+            if (line.startsWith("[F] ")) {
+                type = "文件";
+                line = line.substring(4).trim();
+            } else if (line.startsWith("[D] ")) {
+                type = "文件夹";
+                line = line.substring(4).trim();
+            } else {
+                continue;
+            }
+            String name = decodeFileName(extractFileName(line));
+            if (StringUtils.hasText(name) && !isDesktopNoiseFile(name) && !seenNames.contains(name)) {
+                seenNames.add(name);
+                entries.add(new DesktopEntry(type, name));
+            }
+        }
+        return entries;
+    }
+
+    private String decodeFileName(String name) {
+        String text = safe(name);
+        if (!text.contains("%")) {
+            return text;
+        }
+        try {
+            return URLDecoder.decode(text, StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException ex) {
+            return text;
+        }
+    }
+
+    private boolean isDesktopNoiseFile(String name) {
+        String text = safe(name).trim();
+        return !StringUtils.hasText(text)
+                || text.startsWith(".")
+                || text.startsWith("~$");
+    }
+
+    private String extractFileName(String path) {
+        String text = safe(path).trim();
+        int slash = text.lastIndexOf('/');
+        if (slash >= 0 && slash < text.length() - 1) {
+            return text.substring(slash + 1);
+        }
+        int colon = text.indexOf(':');
+        if (colon >= 0 && colon < text.length() - 1) {
+            return text.substring(colon + 1);
+        }
+        return text;
+    }
+
+    private String escapeMarkdownCell(String text) {
+        return safe(text).replace("|", "\\|");
+    }
+
     private boolean looksLikeLocalFileBoundaryQuestion(String lower) {
         return containsAny(lower,
                 "本地文件边界", "本地文件权限", "授权本地目录", "授权目录", "授权根目录",
@@ -396,6 +572,10 @@ public class LocalSkillFallbackService {
         return Optional.of(new LocalSkillResult(route, executionDetails, fallbackAnswer, detailed));
     }
 
+    private String safe(String text) {
+        return text == null ? "" : text;
+    }
+
     private boolean containsAny(String text, String... keys) {
         for (String key : keys) {
             if (text.contains(key)) {
@@ -409,5 +589,8 @@ public class LocalSkillFallbackService {
                                    String executionDetails,
                                    String fallbackAnswer,
                                    boolean detailed) {
+    }
+
+    private record DesktopEntry(String type, String name) {
     }
 }

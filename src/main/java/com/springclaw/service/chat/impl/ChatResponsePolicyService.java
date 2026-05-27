@@ -145,11 +145,17 @@ public class ChatResponsePolicyService {
         if (lowerReason.contains("504")) {
             return "上游模型服务返回 504，请求超时。";
         }
+        if (lowerReason.contains("read timed out") || lowerReason.contains("sockettimeoutexception")) {
+            return "上游模型响应超时，已超过本地等待时间。";
+        }
         if (lowerReason.contains("429")) {
             return "上游模型服务限流，当前请求被拒绝。";
         }
         if (lowerReason.contains("handshake") || lowerReason.contains("ssl") || lowerReason.contains("tls")) {
             return "上游模型服务 TLS/网络握手异常。";
+        }
+        if (looksLikeConnectionClosedEarly(lowerReason)) {
+            return "上游模型服务连接中断。";
         }
         if (lowerReason.contains("/v1/v1/")) {
             return "当前 provider 的 OpenAI-compatible base-url 路径重复，实际请求成了 /v1/v1/...。";
@@ -222,9 +228,18 @@ public class ChatResponsePolicyService {
                 || lowerReason.contains("tls")
                 || lowerReason.contains("i/o error")
                 || lowerReason.contains("remote host terminated")
-                || lowerReason.contains("unexpected end of file")
+                || looksLikeConnectionClosedEarly(lowerReason)
                 || lowerReason.contains("timeout")
                 || lowerReason.contains("请求超时");
+    }
+
+    private boolean looksLikeConnectionClosedEarly(String lowerReason) {
+        return lowerReason.contains("eof reached while reading")
+                || lowerReason.contains("premature eof")
+                || lowerReason.contains("premature end")
+                || lowerReason.contains("premature close")
+                || lowerReason.contains("prematurely closed")
+                || lowerReason.contains("unexpected end of file");
     }
 
     private static String safe(String text) {

@@ -12,7 +12,7 @@ import java.util.List;
 public class SpringClawAiProperties {
 
     private String activeProvider = "primary";
-    private int requestTimeoutSeconds = 12;
+    private int requestTimeoutSeconds = 60;
     private final Providers providers = new Providers();
     private final State state = new State();
 

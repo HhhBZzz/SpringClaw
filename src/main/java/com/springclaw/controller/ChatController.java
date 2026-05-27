@@ -2,14 +2,21 @@ package com.springclaw.controller;
 
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.common.response.ApiResponse;
+import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.dto.chat.AsyncChatAcceptedResponse;
+import com.springclaw.dto.chat.ChatHistoryMessage;
+import com.springclaw.dto.chat.ChatHistoryResponse;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
+import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.chat.ChatService;
 import com.springclaw.service.chat.async.AsyncChatRequestMessage;
 import com.springclaw.service.chat.async.AsyncChatResultPayload;
 import com.springclaw.service.chat.async.AsyncChatResultStore;
 import com.springclaw.service.chat.async.ChatMessageProducer;
+import com.springclaw.service.event.MessageEventService;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
 import org.springframework.util.StringUtils;
@@ -18,11 +25,15 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.springclaw.web.auth.RequestUserContext;
 import com.springclaw.web.auth.RequestUserContextHolder;
 
+import java.time.ZoneId;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -39,13 +50,19 @@ public class ChatController {
     private final ChatService chatService;
     private final ChatMessageProducer chatMessageProducer;
     private final AsyncChatResultStore asyncChatResultStore;
+    private final MessageEventService messageEventService;
+    private final AiProviderService aiProviderService;
 
     public ChatController(ChatService chatService,
                           ChatMessageProducer chatMessageProducer,
-                          AsyncChatResultStore asyncChatResultStore) {
+                          AsyncChatResultStore asyncChatResultStore,
+                          MessageEventService messageEventService,
+                          AiProviderService aiProviderService) {
         this.chatService = chatService;
         this.chatMessageProducer = chatMessageProducer;
         this.asyncChatResultStore = asyncChatResultStore;
+        this.messageEventService = messageEventService;
+        this.aiProviderService = aiProviderService;
     }
 
     @PostMapping("/send")
@@ -69,7 +86,8 @@ public class ChatController {
                 normalizedRequest.userId(),
                 normalizedRequest.message(),
                 channel,
-                System.currentTimeMillis()
+                System.currentTimeMillis(),
+                normalizedRequest.responseMode()
         );
         asyncChatResultStore.markQueued(message);
         chatMessageProducer.sendRequest(message);
@@ -90,6 +108,49 @@ public class ChatController {
         return ApiResponse.success(payload);
     }
 
+    @GetMapping("/history")
+    public ApiResponse<ChatHistoryResponse> history(@RequestParam String sessionKey,
+                                                    @RequestParam(defaultValue = "80") @Min(1) @Max(100) int limit) {
+        if (!StringUtils.hasText(sessionKey)) {
+            throw new BusinessException(40065, "sessionKey 不能为空");
+        }
+        RequestUserContext context = RequestUserContextHolder.get();
+        if (context == null || !StringUtils.hasText(context.username())) {
+            throw new BusinessException(40101, "请先登录");
+        }
+        int safeLimit = Math.max(1, Math.min(limit, 100));
+        String normalizedSessionKey = sessionKey.trim();
+        String username = context.username().trim();
+        long sessionChatEvents = messageEventService.countSessionEvents(normalizedSessionKey, null, null, "CHAT");
+        long ownedChatEvents = messageEventService.countSessionEvents(normalizedSessionKey, username, null, "CHAT");
+        if (sessionChatEvents > 0 && ownedChatEvents == 0) {
+            throw new BusinessException(40315, "无权查看该会话历史");
+        }
+        var messages = messageEventService.listSessionEvents(normalizedSessionKey, username, null, "CHAT", safeLimit, true)
+                .stream()
+                .filter(this::isRenderableChatMessage)
+                .map(this::toHistoryMessage)
+                .toList();
+        return ApiResponse.success(new ChatHistoryResponse(normalizedSessionKey, messages));
+    }
+
+    @GetMapping("/model-status")
+    public ApiResponse<Map<String, Object>> modelStatus() {
+        AiProviderService.ActiveChatClient active = aiProviderService.activeClient();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("activeProvider", active.providerId());
+        payload.put("activeModel", active.model());
+        payload.put("activeDisplay", active.displayName());
+        payload.put("available", active.available());
+        payload.put("status", active.available() ? "online" : "degraded");
+        payload.put("unavailableReason", active.unavailableReason());
+        payload.put("checkedAt", System.currentTimeMillis());
+        payload.put("recommendation", active.available()
+                ? "模型通道可用，可以走实时 Agent 主链路。"
+                : "请检查 active-provider、api-key、base-url 和 model 后重启后端。Spring Boot 不会热更新启动时读取的模型配置。");
+        return ApiResponse.success(payload);
+    }
+
     private ChatRequest normalizeRequest(ChatRequest request) {
         RequestUserContext context = RequestUserContextHolder.get();
         String effectiveUserId = context == null ? request.userId() : context.username();
@@ -104,7 +165,40 @@ public class ChatController {
                 request.sessionKey(),
                 effectiveUserId.trim(),
                 request.message(),
-                request.channel()
+                request.channel(),
+                request.responseMode()
         );
+    }
+
+    private boolean isRenderableChatMessage(MessageEvent event) {
+        if (event == null || !StringUtils.hasText(event.getContent())) {
+            return false;
+        }
+        return "USER".equalsIgnoreCase(event.getRole()) || "ASSISTANT".equalsIgnoreCase(event.getRole());
+    }
+
+    private ChatHistoryMessage toHistoryMessage(MessageEvent event) {
+        String role = "USER".equalsIgnoreCase(event.getRole()) ? "user" : "agent";
+        long createdAt = event.getCreateTime() == null
+                ? 0L
+                : event.getCreateTime().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        String id = event.getId() == null
+                ? "%s:%s:%d".formatted(event.getSessionKey(), role, createdAt)
+                : String.valueOf(event.getId());
+        return new ChatHistoryMessage(
+                id,
+                role,
+                normalizeHistoryContent(role, event.getContent()),
+                "",
+                createdAt
+        );
+    }
+
+    private String normalizeHistoryContent(String role, String content) {
+        String text = content == null ? "" : content.trim();
+        if ("agent".equals(role) && text.startsWith("[REFLECT]")) {
+            return text.substring("[REFLECT]".length()).trim();
+        }
+        return text;
     }
 }

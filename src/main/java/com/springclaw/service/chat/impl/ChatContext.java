@@ -18,5 +18,22 @@ public record ChatContext(AgentSession session,
                           AssembledContext assembled,
                           AiProviderService.ActiveChatClient activeClient,
                           String executionMode,
-                          String routingReason) {
+                          String routingReason,
+                          String responseMode,
+                          String intent) {
+    public ChatContext(AgentSession session,
+                       String channel,
+                       String userId,
+                       String roleCode,
+                       String userMessage,
+                       String effectiveUserMessage,
+                       String requestId,
+                       String systemPrompt,
+                       AssembledContext assembled,
+                       AiProviderService.ActiveChatClient activeClient,
+                       String executionMode,
+                       String routingReason) {
+        this(session, channel, userId, roleCode, userMessage, effectiveUserMessage, requestId, systemPrompt,
+                assembled, activeClient, executionMode, routingReason, "agent", "general");
+    }
 }

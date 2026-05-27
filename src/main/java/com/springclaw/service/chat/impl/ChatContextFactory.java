@@ -74,7 +74,8 @@ public class ChatContextFactory {
                 roleCode,
                 effectiveDefaultMode,
                 effectiveAutoUpgrade,
-                allowedToolPacks
+                allowedToolPacks,
+                request.responseMode()
         );
         if (routingDecision == null) {
             routingDecision = new ChatRoutingPolicyService.RoutingDecision(
@@ -110,7 +111,9 @@ public class ChatContextFactory {
                 assembled,
                 activeClient,
                 routingDecision.executionMode(),
-                routingDecision.reason()
+                routingDecision.reason(),
+                routingDecision.responseMode(),
+                routingDecision.intent()
         );
     }
 

@@ -65,9 +65,8 @@ final class LocalSkillModelControlSupport {
             return localResult("SYSTEM_UUID", answer, answer, false);
         }
         if (looksLikeExplicitCommandIntent(lower)) {
-            String commandLine = extractCommandLine(q);
-            String answer = systemToolPack.runCommand(commandLine);
-            return localResult("SYSTEM_COMMAND", answer, answer, true);
+            String answer = "聊天兜底层不会直接执行用户输入的 shell 命令。请改用受控工具、脚本 skill，或在后台显式开启并白名单化 SystemToolPack.runCommand。";
+            return localResult("SYSTEM_COMMAND_BLOCKED", answer, answer, false);
         }
 
         return Optional.empty();

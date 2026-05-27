@@ -8,6 +8,41 @@
 
 最近记录按日期倒序维护。
 
+## 2026-05-27
+
+### 今日完成
+
+1. 修复 CodeRabbit 审查出的关键问题
+   - `/admin` Vue 路由增加登录和管理员权限守卫
+   - 历史聊天接口改为按当前登录用户在数据层过滤
+   - 当会话已有聊天事件但当前用户没有归属事件时，直接拒绝查看历史
+   - Webhook nonce 本地缓存增加容量上限，避免唯一 nonce 过多导致内存无界增长
+   - 认证 Cookie 默认改为 `secure=true`，并新增 `application-dev.yml` 供本地开发显式关闭
+   - `web_crawler` 的私网 IP 判断只对真实 IP 字面量生效，避免误伤 `10best.com` 这类正常域名
+   - 桌面授权提示移除个人硬编码路径，改为运行时用户主目录
+   - 后台 runtime skill 指标增加数字兜底
+2. 修复 DeepSeek V4 Pro 和 Spring AI 原生 tool-calling 的兼容风险
+   - 新增 `DeepSeekChatCompatibility`
+   - DeepSeek V4 Pro 默认不再走 Spring AI 原生 `.tools(...)`
+   - 简化链路、OPAR action 链路和 model-led streaming 链路均加上同一兼容判断
+   - 避免再次出现 `reasoning_content in the thinking mode must be passed back` 这类 400 错误
+3. 补充回归测试
+   - 新增用户维度消息事件查询测试
+   - 新增历史消息越权访问拒绝测试
+   - 新增 DeepSeek V4 原生 tool-calling 禁用策略测试
+   - 更新 Webhook nonce 缓存测试，从“无容量淘汰”改为“有明确容量上限”
+
+### 今日验证
+
+1. `mvn -q -Dtest=ChatControllerAuthTest,MessageEventServiceImplTest test` 先失败后通过，确认用户维度历史消息过滤真实生效
+2. `mvn -q -Dtest=DeepSeekChatCompatibilityTest test` 先失败后通过，确认 DeepSeek V4 兼容策略真实生效
+3. `mvn -q -Dtest=ChatControllerAuthTest,MessageEventServiceImplTest,AuthControllerTest,DefaultWebhookSecurityServiceTest,DeepSeekChatCompatibilityTest,ChatServiceImplModeTest,SimplifiedOparEngineTest,ModelCallExecutorTest,ModelTransportGuardServiceTest,ChatResponsePolicyServiceTest,AiProviderServiceTest test` 通过
+4. `npm --prefix frontend run build` 通过
+5. `mvn -q -DskipTests compile` 通过
+6. `python3` 直接导入 `skills/web_crawler/scripts/run.py` 验证正常域名不误拦、内网 IP 仍拦截，通过
+7. `coderabbit review --agent -t uncommitted` 复审通过，CodeRabbit raised 0 issues
+8. `mvn -q test` 完整后端测试通过
+
 ## 2026-05-06
 
 ### 今日完成

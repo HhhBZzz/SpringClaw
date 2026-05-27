@@ -1,30 +1,30 @@
-import type { ApiEnvelope, AuthProfileResponse, AuthTokenResponse, ChatResponse } from '../types';
+import type { AdminDashboard, ApiEnvelope, AuditLogPage, AuthProfileResponse, AuthTokenResponse, ChatHistoryResponse, ChatResponse, ChatResponseMode, ChatStreamMeta, ModelStatusResponse } from '../types';
 
 const TOKEN_KEY = 'springclaw.frontend.token';
+let memoryToken = '';
+export type ApiErrorKind = 'empty' | 'http' | 'network' | 'non_json';
 
-export function backendOrigin(): string {
-  if (typeof window === 'undefined') return '';
-  const { protocol, hostname, port } = window.location;
-  if (port === '5173' || port === '4173' || port === '3000') {
-    return `${protocol}//${hostname}:18080`;
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code?: number;
+  readonly kind: ApiErrorKind;
+
+  constructor(message: string, status: number, code?: number, kind: ApiErrorKind = 'http') {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+    this.kind = kind;
   }
-  return '';
-}
-
-export function adminConsoleUrl(): string {
-  return `${backendOrigin()}/admin`;
 }
 
 export function readToken(): string {
-  return localStorage.getItem(TOKEN_KEY) || localStorage.getItem('springclaw.admin.token') || '';
+  return memoryToken;
 }
 
 export function writeToken(token: string) {
-  if (token) {
-    localStorage.setItem(TOKEN_KEY, token);
-  } else {
-    localStorage.removeItem(TOKEN_KEY);
-  }
+  memoryToken = token || '';
+  localStorage.removeItem(TOKEN_KEY);
 }
 
 async function request<T>(url: string, options: RequestInit & { auth?: boolean } = {}): Promise<T> {
@@ -35,19 +35,22 @@ async function request<T>(url: string, options: RequestInit & { auth?: boolean }
   if (options.auth !== false && token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
-  const response = await fetch(url, { ...options, headers });
+  const response = await fetch(url, { ...options, headers, credentials: 'include' });
   const raw = await response.text();
   let payload: ApiEnvelope<T>;
+  if (!raw) {
+    throw new ApiError('响应为空', response.status, undefined, 'empty');
+  }
   try {
-    payload = raw ? JSON.parse(raw) as ApiEnvelope<T> : { code: response.status, message: '响应为空', data: null as T };
+    payload = JSON.parse(raw) as ApiEnvelope<T>;
   } catch {
     const contentType = response.headers.get('Content-Type') || 'unknown';
     const method = options.method || 'GET';
     const snippet = raw.replace(/\s+/g, ' ').slice(0, 120);
-    throw new Error(`接口返回非 JSON：${method} ${url} -> HTTP ${response.status} (${contentType})。请确认后端 18080 已启动，且当前页面通过 Vite 5173 或 Spring Boot 静态页访问。响应片段：${snippet || '空响应'}`);
+    throw new ApiError(`接口返回非 JSON：${method} ${url} -> HTTP ${response.status} (${contentType})。请确认后端 18080 已启动，且当前页面通过 Vue/Vite 5173 访问。响应片段：${snippet || '空响应'}`, response.status, undefined, 'non_json');
   }
   if (!response.ok || payload.code !== 0) {
-    throw new Error(payload.message || `请求失败 (${response.status})`);
+    throw new ApiError(payload.message || `请求失败 (${response.status})`, response.status, payload.code);
   }
   return payload.data;
 }
@@ -72,57 +75,117 @@ export function me() {
   return request<AuthProfileResponse>('/api/auth/me');
 }
 
-export function sendChat(input: { sessionKey: string; userId: string; message: string; channel?: string }) {
+export function logoutRequest() {
+  return request<void>('/api/auth/logout', {
+    method: 'POST',
+    body: JSON.stringify({})
+  });
+}
+
+export function sendChat(input: { sessionKey: string; userId: string; message: string; channel?: string; responseMode?: ChatResponseMode }) {
   return request<ChatResponse>('/api/chat/send', {
     method: 'POST',
     body: JSON.stringify({ ...input, channel: input.channel || 'api' })
   });
 }
 
+export function getChatHistory(sessionKey: string, limit = 80) {
+  const params = new URLSearchParams({
+    sessionKey,
+    limit: String(limit)
+  });
+  return request<ChatHistoryResponse>(`/api/chat/history?${params.toString()}`);
+}
+
+export function getModelStatus() {
+  return request<ModelStatusResponse>('/api/chat/model-status');
+}
+
+export function getAdminDashboard() {
+  return request<AdminDashboard>('/api/admin/manage/dashboard');
+}
+
+export function getAuditLogs(input: { page?: number; size?: number } = {}) {
+  const page = input.page ?? 1;
+  const size = input.size ?? 12;
+  return request<AuditLogPage>(`/api/admin/audit/logs?page=${page}&size=${size}`);
+}
+
 export interface ChatStreamHandlers {
   onToken?: (token: string) => void;
   onStatus?: (status: string) => void;
+  onMeta?: (meta: ChatStreamMeta) => void;
   onError?: (message: string) => void;
   onDone?: () => void;
 }
 
+export interface ChatStreamOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
 export async function streamChat(
-  input: { sessionKey: string; userId: string; message: string; channel?: string },
-  handlers: ChatStreamHandlers = {}
+  input: { sessionKey: string; userId: string; message: string; channel?: string; responseMode?: ChatResponseMode },
+  handlers: ChatStreamHandlers = {},
+  options: ChatStreamOptions = {}
 ) {
   const token = readToken();
   const headers = new Headers();
   headers.set('Content-Type', 'application/json');
   headers.set('Accept', 'text/event-stream');
   if (token) {
-    headers.set('Authorization', `Bearer ${token}`);
+      headers.set('Authorization', `Bearer ${token}`);
   }
 
-  const response = await fetch('/api/chat/stream', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ ...input, channel: input.channel || 'api' })
-  });
-
-  if (!response.ok) {
-    const raw = await response.text();
-    throw new Error(extractHttpError(raw, response.status));
-  }
-  if (!response.body) {
-    throw new Error('浏览器不支持流式响应。');
+  const controller = new AbortController();
+  const timeoutMs = Math.max(1000, options.timeoutMs ?? 60_000);
+  const timeout = window.setTimeout(() => controller.abort('timeout'), timeoutMs);
+  const abortFromCaller = () => controller.abort(options.signal?.reason || 'cancelled');
+  if (options.signal?.aborted) {
+    controller.abort(options.signal.reason || 'cancelled');
+  } else {
+    options.signal?.addEventListener('abort', abortFromCaller, { once: true });
   }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let buffer = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    buffer = consumeSseBuffer(buffer, handlers);
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  try {
+    const response = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers,
+      signal: controller.signal,
+      credentials: 'include',
+      body: JSON.stringify({ ...input, channel: input.channel || 'api', responseMode: input.responseMode || 'agent' })
+    });
+
+    if (!response.ok) {
+      const raw = await response.text();
+      throw new Error(extractHttpError(raw, response.status));
+    }
+    if (!response.body) {
+      throw new Error('浏览器不支持流式响应。');
+    }
+
+    reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      buffer = consumeSseBuffer(buffer, handlers);
+    }
+    buffer += decoder.decode();
+    consumeSseBuffer(buffer + '\n\n', handlers);
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(controller.signal.reason === 'timeout' ? 'Agent 流式响应超时，请稍后重试。' : 'Agent 流式请求已取消。');
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', abortFromCaller);
+    reader?.releaseLock();
   }
-  buffer += decoder.decode();
-  consumeSseBuffer(buffer + '\n\n', handlers);
 }
 
 function consumeSseBuffer(buffer: string, handlers: ChatStreamHandlers) {
@@ -149,6 +212,12 @@ function dispatchSseEvent(raw: string, handlers: ChatStreamHandlers) {
     handlers.onToken?.(data);
   } else if (eventName === 'status') {
     handlers.onStatus?.(data);
+  } else if (eventName === 'meta') {
+    try {
+      handlers.onMeta?.(JSON.parse(data) as ChatStreamMeta);
+    } catch {
+      handlers.onMeta?.({ routingReason: data });
+    }
   } else if (eventName === 'error') {
     handlers.onError?.(data);
   } else if (eventName === 'done') {

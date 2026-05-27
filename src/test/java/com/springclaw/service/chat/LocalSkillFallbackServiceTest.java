@@ -93,6 +93,68 @@ class LocalSkillFallbackServiceTest {
     }
 
     @Test
+    void shouldListDesktopFilesDeterministicallyForAuthorizedDesktopRequest() throws Exception {
+        Path desktop = tempDir.resolve("Desktop");
+        Files.createDirectories(desktop.resolve("大夏资料"));
+        Files.createDirectories(desktop.resolve(".idea"));
+        Files.createDirectories(desktop.resolve("01_%E4%BB%A3%E7%A0%81%E9%A1%B9%E7%9B%AE"));
+        Files.writeString(desktop.resolve("时间序列试卷_完整试卷带答案清晰版.docx"), "binary-placeholder");
+        Files.writeString(desktop.resolve("计算题补全清晰版.docx"), "binary-placeholder");
+        Files.writeString(desktop.resolve(".DS_Store"), "noise");
+        Files.writeString(desktop.resolve("~$计算题补全清晰版.docx"), "noise");
+
+        ScriptSkillCatalogService scriptSkillCatalogService = new ScriptSkillCatalogService(false, tempDir.toString(), "echo", new ObjectMapper());
+        ScriptSkillExecutorService scriptSkillExecutorService = new ScriptSkillExecutorService(false, scriptSkillCatalogService, "python3", 3, 1000, new ObjectMapper());
+        ScriptSkillToolPack scriptSkillToolPack = new ScriptSkillToolPack(false, scriptSkillCatalogService, "python3", 3, 1000, new ObjectMapper());
+        WorkspaceSearchToolPack workspaceSearchToolPack = new WorkspaceSearchToolPack(
+                new WorkspaceTaskService(tempDir.toString(), 8, 4, 6, 1200, 512),
+                tempDir.toString(),
+                8,
+                4000,
+                30,
+                5000,
+                512
+        );
+
+        LocalSkillFallbackService service = new LocalSkillFallbackService(
+                true,
+                new SystemToolPack(false, "pwd,ls", 5, 2000),
+                workspaceSearchToolPack,
+                new WebSearchToolPack(false, "https://example.com?q={query}", true, 3, 2000),
+                new StubWeatherToolPack(),
+                new ExchangeRateToolPack(false, "https://example.com/{base}", 3),
+                new NewsToolPack(false, "https://example.com/{query}", 5, 3),
+                scriptSkillToolPack,
+                new BuiltinSkillExecutionService(
+                        registryService(),
+                        workspaceSearchToolPack,
+                        new WorkspaceReviewService(tempDir.toString(), 8, 300, 20, 512),
+                        scriptSkillExecutorService,
+                        scriptSkillCatalogService
+                ),
+                scriptSkillExecutorService,
+                scriptSkillCatalogService,
+                null,
+                new LocalFilesystemService(tempDir.toString(), ".ssh,.env", 12000, 8, 100, 20, 512)
+        );
+
+        LocalSkillFallbackService.LocalSkillResult result = service.tryHandlePriorityStructured("授权桌面全部")
+                .orElseThrow();
+
+        Assertions.assertEquals("LOCAL_FILES_DESKTOP_LIST", result.route());
+        Assertions.assertTrue(result.fallbackAnswer().contains("桌面在当前授权范围内"));
+        Assertions.assertTrue(result.fallbackAnswer().contains("时间序列试卷_完整试卷带答案清晰版.docx"));
+        Assertions.assertTrue(result.fallbackAnswer().contains("计算题补全清晰版.docx"));
+        Assertions.assertTrue(result.fallbackAnswer().contains("大夏资料"));
+        Assertions.assertTrue(result.fallbackAnswer().contains("01_代码项目"));
+        Assertions.assertFalse(result.fallbackAnswer().contains(".DS_Store"));
+        Assertions.assertFalse(result.fallbackAnswer().contains(".idea"));
+        Assertions.assertFalse(result.fallbackAnswer().contains("~$计算题"));
+        Assertions.assertFalse(result.fallbackAnswer().contains("大夏..."));
+        Assertions.assertFalse(result.fallbackAnswer().contains("EOF reached while reading"));
+    }
+
+    @Test
     void shouldRouteProjectFileQuestionToWorkspaceAnalysis() throws Exception {
         writeBuiltinSkill("code-analysis", "代码分析", "分析项目结构",
                 "workspace,file,script", "opar",

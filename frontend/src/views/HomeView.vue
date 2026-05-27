@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { adminConsoleUrl } from '../services/api';
-
 const promptModes = ['智能问答', 'Skill 执行', '任务编排', '项目洞察'] as const;
 
 const flows = [
@@ -29,18 +27,48 @@ const capabilities = [
 ] as const;
 
 const productPillars = [
-  { title: 'Agent Console', body: '像 Codex / Claude Code 一样围绕目标输入、执行状态和结果沉淀组织界面。' },
-  { title: 'Workspace Review', body: 'Agent 可以读取当前项目工作区并审查源码、架构、冗余和风险，敏感配置只报位置不泄露值。' },
-  { title: 'Local Files', body: '通过授权根目录浏览本机文件，支持搜索简历、论文、文档和项目资料，不做全盘裸奔式读取。' },
-  { title: 'Skill Runtime', body: '把爬虫、项目分析、探针这类能力放进 skill 包，降低 Java 主链路耦合。' },
-  { title: 'Admin Cockpit', body: '管理员能看到模型、用户、任务、用量、审计和策略，不再只是一张静态页面。' },
-  { title: 'DeepSeek V4 Pro', body: 'DeepSeek 通道收束到官方 V4 Pro 模型，普通聊天链路默认关闭 thinking 以保证兼容。' }
+  {
+    title: 'Agent 工作台',
+    body: '面向真实任务输入，不再是普通聊天框。源码审查、Skill 执行、任务草稿都从这里进入主链路。',
+    to: '/agent',
+    action: '打开工作台'
+  },
+  {
+    title: '项目审查',
+    body: '读取当前项目工作区，分析架构、冗余、风险和可维护性；敏感配置只报告位置，不展示值。',
+    to: '/agent',
+    action: '发起审查'
+  },
+  {
+    title: '本地文件',
+    body: '通过授权根目录浏览电脑文件，适合找论文、简历、资料和其他项目，不做无边界全盘读取。',
+    to: '/agent',
+    action: '查看边界'
+  },
+  {
+    title: 'Skill 运行时',
+    body: '把爬虫、办公文件、项目分析这类能力放进 skill 包，让 Java 主链路保持轻，扩展能力放到外部单元。',
+    to: '/agent',
+    action: '查看 Skills'
+  },
+  {
+    title: '后台驾驶舱',
+    body: '管理员可以看 Token、用户、会话、审计、运行时 Skill 和调度状态，不再只是一张静态页面。',
+    to: '/admin',
+    action: '进入后台'
+  },
+  {
+    title: 'DeepSeek V4 Pro',
+    body: '模型入口收束到 DeepSeek V4 Pro，减少无效切换，让前端表达和后端真实配置保持一致。',
+    to: '/agent',
+    action: '检查模型'
+  }
 ] as const;
 </script>
 
 <template>
   <div class="site-shell calm-site">
-    <a class="skip-link" href="#main-content">跳到主要内容</a>
+    <RouterLink class="skip-link" :to="{ path: '/', hash: '#main-content' }">跳到主要内容</RouterLink>
 
     <header class="clean-nav" aria-label="主导航">
       <RouterLink class="site-brand" to="/" aria-label="SpringClaw 首页">
@@ -52,24 +80,24 @@ const productPillars = [
       </RouterLink>
 
       <nav class="nav-links" aria-label="页面导航">
-        <a href="#how-it-works">工作流</a>
-        <a href="#capabilities">能力边界</a>
-        <a href="#product-system">产品结构</a>
+        <RouterLink :to="{ path: '/', hash: '#how-it-works' }">工作流</RouterLink>
+        <RouterLink :to="{ path: '/', hash: '#capabilities' }">能力边界</RouterLink>
+        <RouterLink :to="{ path: '/', hash: '#product-system' }">产品结构</RouterLink>
         <RouterLink to="/agent">进入工作台</RouterLink>
       </nav>
     </header>
 
     <main id="main-content">
       <section class="stitch-hero" aria-label="SpringClaw Agent 产品入口">
-        <p class="eyebrow">Agent-native workspace</p>
-        <h1>把想法交给 Agent，让执行路径自己展开。</h1>
+        <p class="eyebrow">SpringClaw Agent Platform</p>
+        <h1>把本地项目、Skills 和定时任务收进一个 Agent 工作台。</h1>
         <p class="hero-lede">
-          SpringClaw 把聊天、Skills、定时任务和执行日志收束成一个可解释的工作台。你只描述目标，系统负责选择问答、脚本执行或任务编排。
+          SpringClaw 不是聊天壳，而是一个本地可运行、可审计、可扩展的 Agent 底座。你描述目标，系统负责进入问答、脚本 Skill、项目文件或定时任务链路。
         </p>
 
         <RouterLink class="hero-prompt-card" to="/agent" aria-label="进入 Agent 工作台">
           <div class="prompt-textarea-mock">
-            <span>帮我监控一个网页：每天早上 9 点抓取内容，提取变化，并把摘要写入任务日志。</span>
+            <span>审查当前项目结构，列出冗余代码、可合并模块和下一步重构优先级。</span>
           </div>
           <div class="prompt-toolbar">
             <div class="mode-chips" aria-label="能力模式">
@@ -81,21 +109,22 @@ const productPillars = [
 
         <div class="quiet-actions">
           <RouterLink class="btn-primary" to="/agent">开始使用</RouterLink>
-          <a class="btn-subtle light" :href="adminConsoleUrl()">查看后台</a>
+          <RouterLink class="btn-subtle light" to="/admin">查看后台</RouterLink>
         </div>
       </section>
 
       <section id="product-system" class="calm-section product-system">
         <div class="section-kicker">
           <p class="eyebrow">Product System</p>
-          <h2>一个成熟 Agent 产品应该有前台、工作台和运维后台。</h2>
-          <p>SpringClaw 现在按“官网入口、Agent Console、Admin Console、Skill Runtime”四块表达，不再把能力散落在不可点击的装饰文案里。</p>
+          <h2>所有像按钮的东西，都应该真的能带你到下一步。</h2>
+          <p>这里把产品能力拆成可进入的真实入口：工作台负责执行，后台负责观测，Skill Runtime 负责扩展。</p>
         </div>
         <div class="product-grid">
-          <article v-for="item in productPillars" :key="item.title" class="product-card">
+          <RouterLink v-for="item in productPillars" :key="item.title" class="product-card product-link" :to="item.to">
             <h3>{{ item.title }}</h3>
             <p>{{ item.body }}</p>
-          </article>
+            <span class="card-action">{{ item.action }}</span>
+          </RouterLink>
         </div>
       </section>
 
@@ -117,8 +146,8 @@ const productPillars = [
       <section id="capabilities" class="calm-section capability-strip">
         <div>
           <p class="eyebrow">Capabilities</p>
-          <h2>不是聊天壳，而是能继续长大的 Agent 底座。</h2>
-          <p>当前前端先呈现核心心智，后续可以自然接入任务管理、Skill 市场、执行日志和记忆检索。</p>
+          <h2>不是演示页，而是能继续长大的 Agent 底座。</h2>
+          <p>前端只呈现真实能力：能点开的入口、能解释的执行链路、能审计的后台数据，以及后续可扩展的 Skill 体系。</p>
         </div>
         <div class="capability-list">
           <span v-for="item in capabilities" :key="item">{{ item }}</span>

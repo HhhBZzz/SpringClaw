@@ -1,5 +1,7 @@
 package com.springclaw.service.chat.async;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.redisson.api.RBucket;
 import org.redisson.api.RedissonClient;
@@ -8,9 +10,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -20,7 +19,7 @@ public class AsyncChatResultStore {
     private final ObjectMapper objectMapper;
     private final String keyPrefix;
     private final long ttlHours;
-    private final ConcurrentMap<String, AsyncChatResultPayload> localStore = new ConcurrentHashMap<>();
+    private final Cache<String, AsyncChatResultPayload> localStore;
 
     public AsyncChatResultStore(ObjectProvider<RedissonClient> redissonClientProvider,
                                 ObjectMapper objectMapper,
@@ -30,6 +29,10 @@ public class AsyncChatResultStore {
         this.objectMapper = objectMapper;
         this.keyPrefix = StringUtils.hasText(keyPrefix) ? keyPrefix.trim() : "springclaw:chat:async:";
         this.ttlHours = Math.max(1, ttlHours);
+        this.localStore = Caffeine.newBuilder()
+                .maximumSize(10_000)
+                .expireAfterWrite(this.ttlHours, TimeUnit.HOURS)
+                .build();
     }
 
     public AsyncChatResultPayload markQueued(AsyncChatRequestMessage message) {
@@ -81,22 +84,38 @@ public class AsyncChatResultStore {
     }
 
     public AsyncChatResultPayload find(String requestId) {
-        AsyncChatResultPayload cached = readFromRedis(requestId);
+        String normalizedRequestId = normalizeRequestId(requestId);
+        AsyncChatResultPayload cached = readFromRedis(normalizedRequestId);
         if (cached != null) {
             return cached;
         }
-        return localStore.get(requestId);
+        return localStore.getIfPresent(normalizedRequestId);
     }
 
     private void save(AsyncChatResultPayload payload) {
-        localStore.put(payload.requestId(), payload);
+        String requestId = normalizeRequestId(payload.requestId());
+        if (!StringUtils.hasText(requestId)) {
+            return;
+        }
+        AsyncChatResultPayload normalizedPayload = new AsyncChatResultPayload(
+                requestId,
+                payload.status(),
+                payload.sessionKey(),
+                payload.channel(),
+                payload.answer(),
+                payload.model(),
+                payload.createdAt(),
+                payload.completedAt(),
+                payload.errorMessage()
+        );
+        localStore.put(requestId, normalizedPayload);
         RedissonClient redissonClient = redissonClientProvider.getIfAvailable();
         if (redissonClient == null) {
             return;
         }
         try {
-            RBucket<String> bucket = redissonClient.getBucket(keyPrefix + payload.requestId());
-            bucket.set(objectMapper.writeValueAsString(payload), ttlHours, TimeUnit.HOURS);
+            RBucket<String> bucket = redissonClient.getBucket(keyPrefix + requestId);
+            bucket.set(objectMapper.writeValueAsString(normalizedPayload), ttlHours, TimeUnit.HOURS);
         } catch (Exception ignore) {
             // Redis/Redisson 不可用时保留本地兜底。
         }
@@ -104,11 +123,12 @@ public class AsyncChatResultStore {
 
     private AsyncChatResultPayload readFromRedis(String requestId) {
         RedissonClient redissonClient = redissonClientProvider.getIfAvailable();
-        if (redissonClient == null || !StringUtils.hasText(requestId)) {
+        String normalizedRequestId = normalizeRequestId(requestId);
+        if (redissonClient == null || !StringUtils.hasText(normalizedRequestId)) {
             return null;
         }
         try {
-            RBucket<String> bucket = redissonClient.getBucket(keyPrefix + requestId.trim());
+            RBucket<String> bucket = redissonClient.getBucket(keyPrefix + normalizedRequestId);
             String json = bucket.get();
             if (!StringUtils.hasText(json)) {
                 return null;
@@ -117,5 +137,9 @@ public class AsyncChatResultStore {
         } catch (Exception ignore) {
             return null;
         }
+    }
+
+    private String normalizeRequestId(String requestId) {
+        return requestId == null ? "" : requestId.trim();
     }
 }

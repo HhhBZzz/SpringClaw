@@ -15,6 +15,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 
 import java.net.SocketTimeoutException;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -77,6 +78,37 @@ class ModelCallExecutorTest {
         assertThat(result.value()).isEqualTo("ok:qwen3.5-plus");
         assertThat(result.client().model()).isEqualTo("qwen3.5-plus");
         assertThat(result.failedOver()).isTrue();
+    }
+
+    @Test
+    void shouldRetrySameModelOnceBeforeFailingOver() throws Exception {
+        AiProviderService providerService = newProviderService();
+        ModelTransportGuardService guardService = new ModelTransportGuardService(new ChatResponsePolicyService(""), 30);
+        ModelCallExecutor executor = new ModelCallExecutor(
+                providerService,
+                guardService,
+                mock(LlmUsageRecordService.class),
+                0,
+                1
+        );
+        AtomicInteger attempts = new AtomicInteger();
+
+        ModelCallExecutor.ModelCallResult<String> result = executor.execute(
+                providerService.activeClient(),
+                "test-same-model-retry",
+                true,
+                client -> {
+                    if (attempts.incrementAndGet() == 1) {
+                        throw new RuntimeException("Premature EOF");
+                    }
+                    return "ok:" + client.model();
+                }
+        );
+
+        assertThat(result.value()).isEqualTo("ok:qwen3.5-plus");
+        assertThat(result.failedOver()).isFalse();
+        assertThat(attempts).hasValue(2);
+        assertThat(guardService.isModelCallEnabled(providerService.activeClient())).isTrue();
     }
 
     private AiProviderService newProviderService() {

@@ -14,6 +14,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -73,8 +74,38 @@ class LocalExecutionNarratorTest {
     }
 
     @Test
-    void shouldReturnDeterministicWorkspaceAnswerWithoutModelNarration() {
+    void shouldNarrateWorkspaceAnswerWhenModelIsAvailable() throws Exception {
         AiProviderService.ActiveChatClient activeClient = activeClient();
+        when(modelCallExecutor.executeChat(any(), anyString(), any(), anyBoolean(), any()))
+                .thenReturn(new ModelCallExecutor.ModelCallResult<>(
+                        "整理后的项目结构说明。",
+                        activeClient,
+                        List.of("qwen3.5-plus"),
+                        false
+                ));
+
+        String answer = narrator.narrate(
+                "system",
+                assembled("帮我看看这个项目里结构是怎样的"),
+                new LocalSkillFallbackService.LocalSkillResult(
+                        "BUILTIN_SKILL:CODE_ANALYSIS",
+                        "skill=code-analysis\n项目结构概览\n- src/main/java",
+                        "项目结构概览\n- src/main/java",
+                        true
+                ),
+                activeClient,
+                true
+        );
+
+        assertThat(answer).isEqualTo("整理后的项目结构说明。");
+        verify(modelCallExecutor).executeChat(any(), anyString(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void shouldFallBackToDeterministicWorkspaceAnswerWhenModelNarrationFails() throws Exception {
+        AiProviderService.ActiveChatClient activeClient = activeClient();
+        when(modelCallExecutor.executeChat(any(), anyString(), any(), anyBoolean(), any()))
+                .thenThrow(new SocketTimeoutException("Read timed out"));
 
         String answer = narrator.narrate(
                 "system",
@@ -90,7 +121,6 @@ class LocalExecutionNarratorTest {
         );
 
         assertThat(answer).contains("项目结构概览");
-        verifyNoInteractions(modelCallExecutor);
     }
 
     @Test
@@ -111,6 +141,28 @@ class LocalExecutionNarratorTest {
         );
 
         assertThat(answer).contains("暂不支持");
+        verifyNoInteractions(modelCallExecutor);
+    }
+
+    @Test
+    void shouldReturnDeterministicLocalFileAnswerWithoutModelNarration() {
+        AiProviderService.ActiveChatClient activeClient = activeClient();
+
+        String answer = narrator.narrate(
+                "system",
+                assembled("授权桌面全部"),
+                new LocalSkillFallbackService.LocalSkillResult(
+                        "LOCAL_FILES_DESKTOP_LIST",
+                        "[F] root1:Desktop/时间序列试卷_完整试卷带答案清晰版.docx",
+                        "### 结论\n桌面在当前授权范围内。\n\n### 桌面文件清单\n| 序号 | 类型 | 文件名 |\n| --- | --- | --- |\n| 1 | 文件 | 时间序列试卷_完整试卷带答案清晰版.docx |",
+                        true
+                ),
+                activeClient,
+                true
+        );
+
+        assertThat(answer).contains("桌面在当前授权范围内");
+        assertThat(answer).contains("时间序列试卷_完整试卷带答案清晰版.docx");
         verifyNoInteractions(modelCallExecutor);
     }
 

@@ -6,6 +6,7 @@ import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
 import com.springclaw.service.usage.LlmUsageRecordService;
+import com.springclaw.tool.runtime.ToolOrchestrator;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
@@ -87,6 +88,42 @@ class ChatServiceImplModeTest {
         Assertions.assertTrue(elapsed < 180, "stream endpoint should return immediately, elapsed=" + elapsed);
     }
 
+    @Test
+    void shouldDisableModelLedStreamingByDefaultBecauseToolContextIsThreadLocal() {
+        Fixture fixture = new Fixture();
+        ChatContext context = fixture.buildChatContext("帮我分析当前项目结构", "simplified", "默认", "agent");
+        ChatServiceImpl service = fixture.build();
+
+        Assertions.assertFalse(service.shouldUseModelLedStreaming(context));
+    }
+
+    @Test
+    void shouldNotUseModelLedStreamingForFastMode() {
+        Fixture fixture = new Fixture();
+        ChatContext context = fixture.buildChatContext("帮我分析当前项目结构", "simplified", "默认", "fast");
+        ChatServiceImpl service = fixture.build();
+
+        Assertions.assertFalse(service.shouldUseModelLedStreaming(context));
+    }
+
+    @Test
+    void shouldNotUseModelLedStreamingForControlIntent() {
+        Fixture fixture = new Fixture();
+        ChatContext context = fixture.buildChatContext("当前模型是什么", "simplified", "默认", "agent", "control-plane");
+        ChatServiceImpl service = fixture.build();
+
+        Assertions.assertFalse(service.shouldUseModelLedStreaming(context));
+    }
+
+    @Test
+    void shouldNotUseModelLedStreamingForLocalFileIntent() {
+        Fixture fixture = new Fixture();
+        ChatContext context = fixture.buildChatContext("授权桌面全部", "simplified", "默认", "agent", "local-files");
+        ChatServiceImpl service = fixture.build();
+
+        Assertions.assertFalse(service.shouldUseModelLedStreaming(context));
+    }
+
     private static final class Fixture {
 
         private final AiProviderService aiProviderService = mock(AiProviderService.class);
@@ -100,6 +137,7 @@ class ChatServiceImplModeTest {
         private final ChatContextFactory chatContextFactory = mock(ChatContextFactory.class);
         private final ChatResultPersister chatResultPersister = mock(ChatResultPersister.class);
         private final MetaGuardExecutor metaGuardExecutor = mock(MetaGuardExecutor.class);
+        private final ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
         private final AgentSession session = new AgentSession();
         private final AssembledContext assembled = new AssembledContext(
                 "s1",
@@ -124,9 +162,18 @@ class ChatServiceImplModeTest {
             session.setSessionKey("s1");
             when(chatGuardService.acquireSessionLock("s1")).thenReturn("lock");
             when(aiProviderService.activeClient()).thenReturn(activeClient);
+            when(modelTransportGuardService.isModelCallEnabled(activeClient)).thenReturn(true);
         }
 
         private ChatContext buildChatContext(String message, String executionMode, String routingReason) {
+            return buildChatContext(message, executionMode, routingReason, "agent");
+        }
+
+        private ChatContext buildChatContext(String message, String executionMode, String routingReason, String responseMode) {
+            return buildChatContext(message, executionMode, routingReason, responseMode, "general");
+        }
+
+        private ChatContext buildChatContext(String message, String executionMode, String routingReason, String responseMode, String intent) {
             return new ChatContext(
                     session,
                     "api",
@@ -139,7 +186,9 @@ class ChatServiceImplModeTest {
                     assembled,
                     activeClient,
                     executionMode,
-                    routingReason
+                    routingReason,
+                    responseMode,
+                    intent
             );
         }
 
@@ -155,7 +204,8 @@ class ChatServiceImplModeTest {
                     conversationAdvisorSupport,
                     chatContextFactory,
                     chatResultPersister,
-                    metaGuardExecutor
+                    metaGuardExecutor,
+                    toolOrchestrator
             );
         }
     }

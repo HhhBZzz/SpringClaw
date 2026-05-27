@@ -6,8 +6,14 @@ import os
 import sys
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
 from pathlib import Path
+
+try:
+    import defusedxml.ElementTree as ET
+    HAS_SAFE_XML = True
+except ImportError:
+    import xml.etree.ElementTree as ET
+    HAS_SAFE_XML = False
 
 
 def parse_payload() -> dict:
@@ -15,7 +21,7 @@ def parse_payload() -> dict:
     try:
         payload = json.loads(raw)
         return payload if isinstance(payload, dict) else {"action": str(payload)}
-    except Exception:
+    except json.JSONDecodeError:
         parts = raw.split()
         return {"action": parts[0] if parts else "list", "args": parts[1:]}
 
@@ -82,6 +88,8 @@ def entry_link(element: ET.Element) -> str:
 
 
 def parse_feed(xml_bytes: bytes, limit: int) -> list[dict]:
+    if not HAS_SAFE_XML:
+        raise RuntimeError("missingDependency=defusedxml; please install defusedxml before scanning external RSS XML")
     root = ET.fromstring(xml_bytes)
     entries = []
     for element in root.iter():

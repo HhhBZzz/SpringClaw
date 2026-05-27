@@ -2,6 +2,7 @@ package com.springclaw.web.auth;
 
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.service.auth.AuthService;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.stereotype.Component;
@@ -13,6 +14,8 @@ import org.springframework.web.servlet.HandlerInterceptor;
  */
 @Component
 public class TokenAuthenticationInterceptor implements HandlerInterceptor {
+
+    public static final String AUTH_COOKIE_NAME = "SPRINGCLAW_AUTH_TOKEN";
 
     private final AuthService authService;
 
@@ -42,13 +45,21 @@ public class TokenAuthenticationInterceptor implements HandlerInterceptor {
 
     private String resolveToken(HttpServletRequest request) {
         String authorization = request.getHeader("Authorization");
-        if (!StringUtils.hasText(authorization)) {
+        if (StringUtils.hasText(authorization)) {
+            String text = authorization.trim();
+            if (text.regionMatches(true, 0, "Bearer ", 0, 7)) {
+                return text.substring(7).trim();
+            }
+        }
+        Cookie[] cookies = request.getCookies();
+        if (cookies == null) {
             return "";
         }
-        String text = authorization.trim();
-        if (text.regionMatches(true, 0, "Bearer ", 0, 7)) {
-            return text.substring(7).trim();
+        for (Cookie cookie : cookies) {
+            if (AUTH_COOKIE_NAME.equals(cookie.getName()) && StringUtils.hasText(cookie.getValue())) {
+                return cookie.getValue().trim();
+            }
         }
-        return text;
+        return "";
     }
 }

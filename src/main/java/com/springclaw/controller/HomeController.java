@@ -18,17 +18,18 @@ public class HomeController {
 
     @GetMapping("/")
     public ApiResponse<Map<String, Object>> home() {
-        return ApiResponse.success(Map.of(
-                "project", "springclaw-java",
-                "status", "running",
-                "chatEndpoint", "/api/chat/send",
-                "streamEndpoint", "/api/chat/stream",
-                "authLoginEndpoint", "/api/auth/login",
-                "auditLogsEndpoint", "/api/admin/audit/logs",
-                "adminPage", "/admin",
-                "staticAgentPage", "/agent/index.html",
-                "vueAgentPage", "http://localhost:5173/#/agent",
-                "healthEndpoint", "/actuator/health"
+        return ApiResponse.success(Map.ofEntries(
+                Map.entry("project", "springclaw-java"),
+                Map.entry("status", "running"),
+                Map.entry("chatEndpoint", "/api/chat/send"),
+                Map.entry("streamEndpoint", "/api/chat/stream"),
+                Map.entry("authLoginEndpoint", "/api/auth/login"),
+                Map.entry("auditLogsEndpoint", "/api/admin/audit/logs"),
+                Map.entry("frontend", "Vue 3 + Vite"),
+                Map.entry("vueHomePage", "http://localhost:5173/#/"),
+                Map.entry("vueAgentPage", "http://localhost:5173/#/agent"),
+                Map.entry("vueAdminPage", "http://localhost:5173/#/admin"),
+                Map.entry("healthEndpoint", "/actuator/health")
         ));
     }
 }

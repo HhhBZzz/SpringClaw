@@ -1,0 +1,4 @@
+springclaw:
+  auth:
+    cookie:
+      secure: ${SPRINGCLAW_AUTH_COOKIE_SECURE:false}

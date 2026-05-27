@@ -41,4 +41,5 @@ triggerExamples:
 - 搜索未知文件时优先调用 `searchAuthorizedFiles`。
 - 读取内容时使用 `readAuthorizedTextFile(rootRef, relativeFilePath)`。
 - 不读取授权根目录之外的路径。
-- 不读取 `.ssh`、`.gnupg`、Keychains、浏览器 Profile、`.env` 等敏感路径。
+- 符号链接必须解析真实路径，并确认目标仍在授权根目录内；否则拒绝读取。
+- 不读取 `.ssh`、`.gnupg`、`.aws`、`.azure`、`.gcloud`、`.kube`、`.docker`、Keychains、浏览器 Profile、`.env`、`.git-credentials`、`.netrc`、`.npmrc`、私钥文件（`.pem`、`.key`、`.p12`、`.pfx`）、密码管理器数据库等敏感路径。

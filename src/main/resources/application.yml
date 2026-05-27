@@ -75,14 +75,18 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 springclaw:
+  frontend:
+    base-url: ${SPRINGCLAW_FRONTEND_BASE_URL:http://localhost:5173}
+    allowed-hosts: ${SPRINGCLAW_FRONTEND_ALLOWED_HOSTS:localhost,127.0.0.1,::1}
   web:
     cors:
-      allowed-origins: ${SPRINGCLAW_WEB_CORS_ALLOWED_ORIGINS:}
-      allowed-origin-patterns: ${SPRINGCLAW_WEB_CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173,http://localhost:3000,http://127.0.0.1:3000,http://192.168.*:*}
+      allowed-origins: ${SPRINGCLAW_WEB_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://[::1]:5173,http://localhost:4173,http://127.0.0.1:4173,http://[::1]:4173,http://localhost:3000,http://127.0.0.1:3000,http://[::1]:3000}
+      allowed-origin-patterns: ${SPRINGCLAW_WEB_CORS_ALLOWED_ORIGIN_PATTERNS:}
   ai:
     active-provider: ${SPRINGCLAW_AI_ACTIVE_PROVIDER:${OPENCLAW_AI_ACTIVE_PROVIDER:primary}}
-    request-timeout-seconds: ${SPRINGCLAW_AI_REQUEST_TIMEOUT_SECONDS:12}
+    request-timeout-seconds: ${SPRINGCLAW_AI_REQUEST_TIMEOUT_SECONDS:60}
     max-failover-attempts: ${SPRINGCLAW_AI_MAX_FAILOVER_ATTEMPTS:1}
+    same-model-retry-attempts: ${SPRINGCLAW_AI_SAME_MODEL_RETRY_ATTEMPTS:1}
     state:
       redis-enabled: ${SPRINGCLAW_AI_STATE_REDIS_ENABLED:true}
       redis-key: ${SPRINGCLAW_AI_STATE_REDIS_KEY:springclaw:ai:active-provider}
@@ -172,6 +176,8 @@ springclaw:
     bootstrap-first-user-admin: true
     token-ttl-hours: 24
     token-prefix: "springclaw:auth:token:"
+    cookie:
+      secure: ${SPRINGCLAW_AUTH_COOKIE_SECURE:true}
     password-pepper: ${SPRINGCLAW_PASSWORD_PEPPER:}
     tool-permission-enabled: true
     default-deny: false
@@ -184,6 +190,8 @@ springclaw:
     local-fallback-first: true
     max-steps: 3
     model-transport-cooldown-seconds: ${SPRINGCLAW_MODEL_TRANSPORT_COOLDOWN_SECONDS:30}
+    model-led-streaming-enabled: ${SPRINGCLAW_CHAT_MODEL_LED_STREAMING_ENABLED:false}
+    spring-ai-chat-memory-enabled: ${SPRINGCLAW_CHAT_SPRING_AI_CHAT_MEMORY_ENABLED:false}
     routing:
       auto-upgrade-enabled: ${SPRINGCLAW_CHAT_ROUTING_AUTO_UPGRADE_ENABLED:true}
     meta-guard:

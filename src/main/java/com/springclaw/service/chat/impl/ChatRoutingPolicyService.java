@@ -38,9 +38,59 @@ public class ChatRoutingPolicyService {
                                   String defaultMode,
                                   boolean autoUpgradeEnabled,
                                   Set<String> allowedToolPacks) {
+        return decide(question, roleCode, defaultMode, autoUpgradeEnabled, allowedToolPacks, null);
+    }
+
+    public RoutingDecision decide(String question,
+                                  String roleCode,
+                                  String defaultMode,
+                                  boolean autoUpgradeEnabled,
+                                  Set<String> allowedToolPacks,
+                                  String responseMode) {
         String normalizedQuestion = StringUtils.hasText(question) ? question.trim() : "";
         String normalizedRole = normalizeRole(roleCode);
         String normalizedDefaultMode = normalizeMode(defaultMode);
+        String normalizedResponseMode = normalizeResponseMode(responseMode);
+        String intent = detectIntent(normalizedQuestion, allowedToolPacks);
+
+        if ("fast".equals(normalizedResponseMode)) {
+            PrefixMatch stripped = stripAnyModePrefix(normalizedQuestion);
+            return new RoutingDecision(
+                    stripped.content(),
+                    "simplified",
+                    true,
+                    false,
+                    "用户显式选择快速模式，使用轻量链路。",
+                    normalizedResponseMode,
+                    intent
+            );
+        }
+
+        if ("tool".equals(normalizedResponseMode)) {
+            PrefixMatch stripped = stripAnyModePrefix(normalizedQuestion);
+            return new RoutingDecision(
+                    stripped.content(),
+                    "simplified",
+                    true,
+                    false,
+                    "用户显式选择工具优先模式，使用轻量链路并优先暴露工具能力。",
+                    normalizedResponseMode,
+                    "tool:" + intent
+            );
+        }
+
+        if ("deep".equals(normalizedResponseMode)) {
+            PrefixMatch stripped = stripAnyModePrefix(normalizedQuestion);
+            return new RoutingDecision(
+                    stripped.content(),
+                    "opar",
+                    true,
+                    false,
+                    "用户显式选择深度模式，使用 OPAR 链路。",
+                    normalizedResponseMode,
+                    intent
+            );
+        }
 
         PrefixMatch forceOpar = stripPrefix(normalizedQuestion, FORCE_OPAR_PREFIXES);
         if (forceOpar.matched()) {
@@ -50,7 +100,9 @@ public class ChatRoutingPolicyService {
                         "opar",
                         true,
                         false,
-                        "用户显式要求深度分析，当前角色允许手动切换。"
+                        "用户显式要求深度分析，当前角色允许手动切换。",
+                        "deep",
+                        detectIntent(forceOpar.content(), allowedToolPacks)
                 );
             }
             return new RoutingDecision(
@@ -58,27 +110,22 @@ public class ChatRoutingPolicyService {
                     normalizedDefaultMode,
                     false,
                     false,
-                    "检测到深度分析前缀，但当前角色无手动切换权限，继续使用默认链路。"
+                    "检测到深度分析前缀，但当前角色无手动切换权限，继续使用默认链路。",
+                    normalizedResponseMode,
+                    detectIntent(forceOpar.content(), allowedToolPacks)
             );
         }
 
         PrefixMatch forceSimplified = stripPrefix(normalizedQuestion, FORCE_SIMPLIFIED_PREFIXES);
         if (forceSimplified.matched()) {
-            if (canManuallyOverride(normalizedRole)) {
-                return new RoutingDecision(
-                        forceSimplified.content(),
-                        "simplified",
-                        true,
-                        false,
-                        "用户显式要求普通回答，当前角色允许手动切换。"
-                );
-            }
             return new RoutingDecision(
                     forceSimplified.content(),
-                    normalizedDefaultMode,
+                    "simplified",
+                    canManuallyOverride(normalizedRole),
                     false,
-                    false,
-                    "检测到普通回答前缀，但当前角色无手动切换权限，继续使用默认链路。"
+                    "用户显式要求快速/普通回答，降级到轻量链路。",
+                    "fast",
+                    detectIntent(forceSimplified.content(), allowedToolPacks)
             );
         }
 
@@ -88,7 +135,9 @@ public class ChatRoutingPolicyService {
                     "opar",
                     false,
                     true,
-                    "命中复杂任务特征，自动升级到深度分析链路。"
+                    "命中复杂任务特征，自动升级到深度分析链路。",
+                    normalizedResponseMode,
+                    intent
             );
         }
 
@@ -97,7 +146,9 @@ public class ChatRoutingPolicyService {
                 normalizedDefaultMode,
                 false,
                 false,
-                "使用当前默认链路。"
+                "使用当前默认链路。",
+                normalizedResponseMode,
+                intent
         );
     }
 
@@ -144,6 +195,15 @@ public class ChatRoutingPolicyService {
         return new PrefixMatch(false, question);
     }
 
+    private PrefixMatch stripAnyModePrefix(String question) {
+        PrefixMatch deep = stripPrefix(question, FORCE_OPAR_PREFIXES);
+        if (deep.matched()) {
+            return deep;
+        }
+        PrefixMatch fast = stripPrefix(question, FORCE_SIMPLIFIED_PREFIXES);
+        return fast.matched() ? fast : new PrefixMatch(false, StringUtils.hasText(question) ? question.trim() : "");
+    }
+
     private boolean canManuallyOverride(String roleCode) {
         return "ADMIN".equals(roleCode) || "DEVELOPER".equals(roleCode);
     }
@@ -164,6 +224,48 @@ public class ChatRoutingPolicyService {
         return "opar".equalsIgnoreCase(mode.trim()) ? "opar" : "simplified";
     }
 
+    private String normalizeResponseMode(String mode) {
+        if (!StringUtils.hasText(mode)) {
+            return "agent";
+        }
+        return switch (mode.trim().toLowerCase(Locale.ROOT)) {
+            case "fast", "deep", "tool" -> mode.trim().toLowerCase(Locale.ROOT);
+            default -> "agent";
+        };
+    }
+
+    private String detectIntent(String question, Set<String> allowedToolPacks) {
+        if (!StringUtils.hasText(question)) {
+            return "general";
+        }
+        String normalized = question.trim().toLowerCase(Locale.ROOT);
+        if (containsAny(normalized,
+                "当前模型", "目前模型", "现在用什么模型", "你是什么模型", "provider", "当前通道",
+                "当前时间", "现在几点", "今天几号", "今天星期", "jvm", "uuid", "执行命令", "shell 命令")) {
+            return "control-plane";
+        }
+        if (containsAny(normalized, "skill", "工具", "执行", "运行", "run skill", "脚本")) {
+            return "tool-skill";
+        }
+        if (containsAny(normalized, "本地文件", "授权文件", "电脑文件", "桌面", "下载", "文档", "简历", "论文")) {
+            return "local-files";
+        }
+        if (containsAny(normalized, "项目", "源码", "代码", "架构", "模块", "文件", "类", "方法")) {
+            return "workspace-analysis";
+        }
+        if (containsAny(normalized, "http://", "https://", "网页", "官网", "抓取", "爬取", "搜索")) {
+            return "web-research";
+        }
+        if (containsAny(normalized, "天气", "气温", "温度")) {
+            return "weather";
+        }
+        if (allowedToolPacks != null && allowedToolPacks.contains("script")
+                && skillRegistryService.matchBestAgentVisibleDefinition(question, allowedToolPacks).isPresent()) {
+            return "tool-skill";
+        }
+        return "general";
+    }
+
     private String normalizeRole(String roleCode) {
         if (!StringUtils.hasText(roleCode)) {
             return "USER";
@@ -178,6 +280,15 @@ public class ChatRoutingPolicyService {
                                   String executionMode,
                                   boolean manualOverride,
                                   boolean autoUpgraded,
-                                  String reason) {
+                                  String reason,
+                                  String responseMode,
+                                  String intent) {
+        public RoutingDecision(String effectiveQuestion,
+                               String executionMode,
+                               boolean manualOverride,
+                               boolean autoUpgraded,
+                               String reason) {
+            this(effectiveQuestion, executionMode, manualOverride, autoUpgraded, reason, "agent", "general");
+        }
     }
 }

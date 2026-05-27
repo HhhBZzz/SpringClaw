@@ -29,7 +29,7 @@ class OparPromptSupport {
                 {action}
                 """);
         return template.render(Map.of(
-                "question", safe(context.question()),
+                "question", safe(context == null ? null : context.question()),
                 "plan", safe(plan),
                 "action", safe(action)
         ));
@@ -56,7 +56,7 @@ class OparPromptSupport {
                 {badAnswer}
                 """);
         return template.render(Map.of(
-                "question", safe(context.question()),
+                "question", safe(context == null ? null : context.question()),
                 "plan", safe(plan),
                 "action", safe(action),
                 "badAnswer", truncate(safe(badAnswer), 500)
@@ -90,10 +90,10 @@ class OparPromptSupport {
                 """);
         return template.render(Map.of(
                 "stepNo", stepNo,
-                "history", history,
-                "question", safe(context.question()),
-                "observe", context.observePrompt(),
-                "format", structuredFormat
+                "history", safe(history),
+                "question", safe(context == null ? null : context.question()),
+                "observe", safe(context == null ? null : context.observePrompt()),
+                "format", safe(structuredFormat)
         ));
     }
 
@@ -124,9 +124,9 @@ class OparPromptSupport {
         return template.render(Map.of(
                 "stepNo", stepNo,
                 "plan", safe(plan),
-                "history", history,
-                "question", safe(context.question()),
-                "observe", context.observePrompt()
+                "history", safe(history),
+                "question", safe(context == null ? null : context.question()),
+                "observe", safe(context == null ? null : context.observePrompt())
         ));
     }
 

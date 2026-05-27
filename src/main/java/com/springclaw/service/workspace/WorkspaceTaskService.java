@@ -137,7 +137,7 @@ public class WorkspaceTaskService {
         builder.append("\n建议阅读顺序:\n")
                 .append("1. 先看根目录构建文件和 application.yml，确认技术栈与运行配置。\n")
                 .append("2. 再看 controller/service/tool/skill 相关目录，理解请求如何进入业务和工具执行。\n")
-                .append("3. 最后看 frontend 与 static 页面，确认前端如何调用后端接口。");
+                .append("3. 最后看 frontend Vue 工程，确认页面如何调用后端接口。");
 
         return trim(builder.toString().trim());
     }
@@ -169,7 +169,6 @@ public class WorkspaceTaskService {
         List<String> directories = new ArrayList<>();
         addDirectoryDescription(directories, "src/main/java", "Java 后端源码，通常包含 controller、service、domain、tool、strategy 等模块。");
         addDirectoryDescription(directories, "src/main/resources", "后端配置、SQL、静态资源目录。");
-        addDirectoryDescription(directories, "src/main/resources/static", "Spring Boot 直接托管的静态页面。");
         addDirectoryDescription(directories, "frontend", "独立前端工程，开发态通常由 Vite 启动。");
         addDirectoryDescription(directories, "skills", "项目内 skill 单源目录，每个子目录通常有 SKILL.md 和执行脚本。");
         addDirectoryDescription(directories, "docs", "项目文档和设计说明。");

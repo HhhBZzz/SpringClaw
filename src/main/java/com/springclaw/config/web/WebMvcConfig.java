@@ -25,8 +25,8 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     public WebMvcConfig(TokenAuthenticationInterceptor tokenAuthenticationInterceptor,
                         RoleAuthorizationInterceptor roleAuthorizationInterceptor,
-                        @Value("${springclaw.web.cors.allowed-origins:}") String corsAllowedOrigins,
-                        @Value("${springclaw.web.cors.allowed-origin-patterns:http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173,http://localhost:3000,http://127.0.0.1:3000,http://192.168.*:*}") String corsAllowedOriginPatterns) {
+                        @Value("${springclaw.web.cors.allowed-origins:http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173,http://localhost:3000,http://127.0.0.1:3000}") String corsAllowedOrigins,
+                        @Value("${springclaw.web.cors.allowed-origin-patterns:}") String corsAllowedOriginPatterns) {
         this.tokenAuthenticationInterceptor = tokenAuthenticationInterceptor;
         this.roleAuthorizationInterceptor = roleAuthorizationInterceptor;
         this.corsAllowedOrigins = corsAllowedOrigins;
@@ -40,10 +40,15 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .allowedHeaders("*")
                 .exposedHeaders("Authorization")
                 .maxAge(3600);
-        if (StringUtils.hasText(corsAllowedOrigins)) {
-            registration.allowedOrigins(splitCsv(corsAllowedOrigins));
+        String[] allowedOrigins = splitCsv(corsAllowedOrigins);
+        if (allowedOrigins.length > 0) {
+            registration.allowedOrigins(allowedOrigins)
+                    .allowCredentials(true);
         } else {
-            registration.allowedOriginPatterns(splitCsv(corsAllowedOriginPatterns));
+            // Origin patterns are development-only escape hatches. Keep credentials off
+            // unless the deployment lists exact trusted origins above.
+            registration.allowedOriginPatterns(splitCsv(corsAllowedOriginPatterns))
+                    .allowCredentials(false);
         }
     }
 

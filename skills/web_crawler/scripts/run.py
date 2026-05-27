@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 import html
+import http.client
+import ipaddress
 import json
 import os
 import re
+import socket
+import ssl
 import sys
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.parse import urljoin, urlparse
 
 TIMEOUT_SECONDS = 12
 MAX_CHARS = 6000
+MAX_REDIRECTS = 5
 
 URL_PATTERN = re.compile(r'((?:https?://|www\.)[^\s]+)', re.IGNORECASE)
 TITLE_PATTERN = re.compile(r'(?is)<title[^>]*>(.*?)</title>')
@@ -55,8 +59,9 @@ class TextExtractor(HTMLParser):
 def parse_payload():
     raw = sys.argv[1] if len(sys.argv) > 1 else '{}'
     try:
-        return json.loads(raw)
-    except Exception:
+        payload = json.loads(raw)
+        return payload if isinstance(payload, dict) else {'goal': str(payload)}
+    except json.JSONDecodeError:
         return {'goal': raw}
 
 
@@ -85,37 +90,123 @@ def normalize_url(raw):
     if parsed.scheme not in {'http', 'https'}:
         raise ValueError(f'仅支持 http/https URL: {raw}')
     host = (parsed.hostname or '').lower()
-    if not host:
-        raise ValueError(f'URL 缺少 host: {raw}')
-    if host == 'localhost' or host == '::1' or host.endswith('.local'):
-        raise ValueError(f'禁止访问本机或内网地址: {host}')
-    if host.startswith(PRIVATE_IPV4_PREFIXES):
-        raise ValueError(f'禁止访问本机或内网地址: {host}')
-    if host.startswith('172.'):
-        try:
-            second = int(host.split('.')[1])
-            if 16 <= second <= 31:
-                raise ValueError(f'禁止访问本机或内网地址: {host}')
-        except Exception:
-            pass
+    validate_public_host(host, raw)
     return value
 
 
-def fetch(url):
-    request = Request(
-        url,
-        headers={
-            'User-Agent': 'OpenClaw-WebCrawlerSkill/1.0',
-            'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        },
-        method='GET',
+def validate_public_host(host, raw):
+    if not host:
+        raise ValueError(f'URL 缺少 host: {raw}')
+    normalized_host = host.strip('[]').rstrip('.').lower()
+    if normalized_host == 'localhost' or normalized_host.endswith('.local'):
+        raise ValueError(f'禁止访问本机或内网地址: {host}')
+    try:
+        ip = ipaddress.ip_address(normalized_host)
+    except ValueError:
+        return
+    if ip.version == 4:
+        if normalized_host.startswith(PRIVATE_IPV4_PREFIXES):
+            raise ValueError(f'禁止访问本机或内网地址: {host}')
+        if normalized_host.startswith('172.'):
+            try:
+                second = int(normalized_host.split('.')[1])
+                if 16 <= second <= 31:
+                    raise ValueError(f'禁止访问本机或内网地址: {host}')
+            except (IndexError, ValueError) as exc:
+                raise ValueError(f'URL host 格式异常: {host}') from exc
+    if is_blocked_ip(ip):
+        raise ValueError(f'禁止访问本机或内网地址: {host}')
+
+
+def is_blocked_ip(ip):
+    mapped_ipv4 = getattr(ip, 'ipv4_mapped', None)
+    if mapped_ipv4 is not None:
+        ip = mapped_ipv4
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_unspecified
+        or ip.is_reserved
+        or ip.is_multicast
     )
-    with urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+
+
+def resolve_public_addresses(host, port):
+    normalized_host = host.strip('[]').rstrip('.').lower()
+    try:
+        addresses = socket.getaddrinfo(normalized_host, port, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(f'URL host 无法解析: {host}') from exc
+    public_addresses = []
+    for family, socktype, proto, _canonname, sockaddr in addresses:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if is_blocked_ip(ip):
+            raise ValueError(f'禁止访问本机或内网地址: {host}')
+        public_addresses.append((family, socktype, proto, str(ip)))
+    if not public_addresses:
+        raise ValueError(f'URL host 无可用公网地址: {host}')
+    return public_addresses
+
+
+class PinnedHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, host, port, pinned_ip, timeout):
+        super().__init__(host, port=port, timeout=timeout)
+        self.pinned_ip = pinned_ip
+
+    def connect(self):
+        self.sock = socket.create_connection((self.pinned_ip, self.port), self.timeout, self.source_address)
+
+
+class PinnedHTTPSConnection(PinnedHTTPConnection):
+    default_port = 443
+
+    def __init__(self, host, port, pinned_ip, timeout):
+        super().__init__(host, port, pinned_ip, timeout)
+        self.context = ssl.create_default_context()
+
+    def connect(self):
+        super().connect()
+        self.sock = self.context.wrap_socket(self.sock, server_hostname=self.host)
+
+
+def fetch(url, redirects=0):
+    if redirects > MAX_REDIRECTS:
+        raise ValueError('网页跳转次数过多')
+    normalized_url = normalize_url(url)
+    parsed = urlparse(normalized_url)
+    host = parsed.hostname or ''
+    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+    _family, _socktype, _proto, pinned_ip = resolve_public_addresses(host, port)[0]
+    connection_cls = PinnedHTTPSConnection if parsed.scheme == 'https' else PinnedHTTPConnection
+    connection = connection_cls(host, port, pinned_ip, TIMEOUT_SECONDS)
+    path = parsed.path or '/'
+    if parsed.query:
+        path += '?' + parsed.query
+    host_header = host
+    if (parsed.scheme == 'http' and port != 80) or (parsed.scheme == 'https' and port != 443):
+        host_header = f'{host}:{port}'
+    headers = {
+        'Host': host_header,
+        'User-Agent': 'OpenClaw-WebCrawlerSkill/1.0',
+        'Accept': 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    }
+    try:
+        connection.request('GET', path, headers=headers)
+        response = connection.getresponse()
+        if response.status in {301, 302, 303, 307, 308}:
+            location = response.getheader('Location')
+            response.read(1024)
+            if not location:
+                raise ValueError('网页返回跳转但缺少 Location')
+            return fetch(urljoin(normalized_url, location), redirects + 1)
         body = response.read(MAX_CHARS * 4)
-        content_type = response.headers.get_content_type()
-        charset = response.headers.get_content_charset() or 'utf-8'
+        content_type = response.msg.get_content_type()
+        charset = response.msg.get_content_charset() or 'utf-8'
         return body.decode(charset, errors='ignore'), content_type
+    finally:
+        connection.close()
 
 
 def extract_title(raw_html):

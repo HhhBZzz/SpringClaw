@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.PathMatcher;
 import java.nio.file.SimpleFileVisitor;
@@ -35,6 +36,26 @@ public class LocalFilesystemService {
             "java", "xml", "yml", "yaml", "md", "txt", "json", "sql",
             "properties", "js", "ts", "tsx", "jsx", "html", "css", "sh", "py", "vue",
             "csv", "log"
+    );
+    private static final Set<String> SENSITIVE_SEGMENTS = Set.of(
+            ".ssh", ".gnupg", ".aws", ".azure", ".gcloud", ".kube", ".docker",
+            "keychains", "chrome", "firefox", "mozilla", "profiles", "profile"
+    );
+    private static final Set<String> SENSITIVE_PATH_TOKENS = Set.of(
+            "library/keychains",
+            "library/application support/google/chrome",
+            "library/application support/firefox",
+            "appdata/local/google/chrome",
+            "appdata/roaming/mozilla/firefox",
+            ".config/google-chrome",
+            ".config/chromium",
+            ".mozilla/firefox"
+    );
+    private static final Set<String> SENSITIVE_FILE_NAMES = Set.of(
+            ".env", ".git-credentials", ".netrc", ".npmrc", "1password.sqlite"
+    );
+    private static final Set<String> SENSITIVE_EXTENSIONS = Set.of(
+            "pem", "key", "p12", "pfx", "kdbx"
     );
 
     private final List<AuthorizedRoot> roots;
@@ -251,7 +272,11 @@ public class LocalFilesystemService {
         if (!target.startsWith(root.path())) {
             throw new BusinessException(40092, "文件路径越界，禁止访问授权目录外路径");
         }
-        if (isDenied(target)) {
+        Path realTarget = resolveExistingRealPath(target);
+        if (realTarget != null && !realTarget.startsWith(root.path())) {
+            throw new BusinessException(40092, "文件路径越界，符号链接目标不在授权目录内");
+        }
+        if (isDenied(target) || realTarget != null && isDenied(realTarget)) {
             throw new BusinessException(40095, "该路径受保护，禁止读取: " + displayPath(target));
         }
         return target;
@@ -292,10 +317,21 @@ public class LocalFilesystemService {
         } catch (BusinessException ex) {
             return true;
         }
+        Path realPath = resolveExistingRealPath(path);
+        if (realPath != null && !realPath.startsWith(root.path())) {
+            return true;
+        }
         String relative = toRelative(root, path).toLowerCase(Locale.ROOT);
         String fileName = path.getFileName() == null ? "" : path.getFileName().toString().toLowerCase(Locale.ROOT);
-        if (fileName.equals(".env") || fileName.startsWith(".env.")) {
+        if (isSensitiveFileName(fileName) || isSensitivePath(relative)) {
             return true;
+        }
+        if (realPath != null && realPath.startsWith(root.path())) {
+            String realRelative = toRelative(root, realPath).toLowerCase(Locale.ROOT);
+            String realFileName = realPath.getFileName() == null ? "" : realPath.getFileName().toString().toLowerCase(Locale.ROOT);
+            if (isSensitiveFileName(realFileName) || isSensitivePath(realRelative)) {
+                return true;
+            }
         }
         for (String denied : deniedPathTokens) {
             if (!StringUtils.hasText(denied)) {
@@ -311,6 +347,49 @@ public class LocalFilesystemService {
             }
         }
         return false;
+    }
+
+    private boolean isSensitivePath(String relative) {
+        String normalized = relative.replace("\\", "/").toLowerCase(Locale.ROOT);
+        for (String token : SENSITIVE_PATH_TOKENS) {
+            if (normalized.contains(token)) {
+                return true;
+            }
+        }
+        for (String segment : normalized.split("/")) {
+            if (SENSITIVE_SEGMENTS.contains(segment) || isSensitiveFileName(segment)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isSensitiveFileName(String fileName) {
+        if (!StringUtils.hasText(fileName)) {
+            return false;
+        }
+        String normalized = fileName.toLowerCase(Locale.ROOT);
+        if (normalized.equals(".env") || normalized.startsWith(".env.")) {
+            return true;
+        }
+        if (SENSITIVE_FILE_NAMES.contains(normalized)) {
+            return true;
+        }
+        int idx = normalized.lastIndexOf('.');
+        return idx >= 0
+                && idx < normalized.length() - 1
+                && SENSITIVE_EXTENSIONS.contains(normalized.substring(idx + 1));
+    }
+
+    private Path resolveExistingRealPath(Path path) {
+        try {
+            if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+                return null;
+            }
+            return path.toRealPath();
+        } catch (IOException ex) {
+            throw new BusinessException(50094, "本地授权路径解析失败: " + ex.getMessage());
+        }
     }
 
     private boolean isLikelyTextFile(Path file) {
@@ -373,12 +452,12 @@ public class LocalFilesystemService {
         if (StringUtils.hasText(rawRoots)) {
             for (String token : rawRoots.split(",")) {
                 if (StringUtils.hasText(token)) {
-                    paths.add(Path.of(token.trim()).toAbsolutePath().normalize());
+                    paths.add(normalizeAuthorizedRoot(Path.of(token.trim())));
                 }
             }
         }
         if (paths.isEmpty()) {
-            paths.add(Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize());
+            paths.add(normalizeAuthorizedRoot(Path.of(System.getProperty("user.dir"))));
         }
         List<AuthorizedRoot> result = new ArrayList<>();
         int index = 1;
@@ -399,6 +478,18 @@ public class LocalFilesystemService {
             }
         }
         return List.copyOf(values);
+    }
+
+    private Path normalizeAuthorizedRoot(Path rawPath) {
+        Path absolute = rawPath.toAbsolutePath().normalize();
+        try {
+            if (Files.exists(absolute, LinkOption.NOFOLLOW_LINKS)) {
+                return absolute.toRealPath();
+            }
+        } catch (IOException ex) {
+            throw new BusinessException(50095, "授权根目录解析失败: " + ex.getMessage());
+        }
+        return absolute;
     }
 
     private record AuthorizedRoot(String alias, Path path) {

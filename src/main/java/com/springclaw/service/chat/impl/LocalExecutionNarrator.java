@@ -115,9 +115,8 @@ public class LocalExecutionNarrator {
             return false;
         }
         String route = localResult.route();
-        return route.contains("WORKSPACE_ANALYSIS")
-                || route.contains("BUILTIN_SKILL:CODE_ANALYSIS")
-                || route.startsWith("MODEL_")
-                || route.startsWith("SYSTEM_");
+        return route.startsWith("MODEL_")
+                || route.startsWith("SYSTEM_")
+                || route.startsWith("LOCAL_FILES_");
     }
 }

@@ -35,6 +35,27 @@ class AuthServiceImplTest {
     }
 
     @Test
+    void shouldStoreNewLocalPasswordsWithBcryptHashVersion() throws Exception {
+        AuthServiceImpl service = new AuthServiceImpl(
+                null,
+                true,
+                false,
+                false,
+                "USER",
+                "USER",
+                false,
+                24,
+                "",
+                "springclaw:auth:token:"
+        );
+
+        service.register("bcrypt_user", "123456");
+
+        String hash = localPasswordHash(service, "bcrypt_user");
+        Assertions.assertTrue(hash.startsWith("v2:$2"), "new password hashes should use versioned BCrypt");
+    }
+
+    @Test
     void shouldResolveDefaultRoleForUnknownUser() {
         AuthServiceImpl service = new AuthServiceImpl(
                 null,
@@ -149,12 +170,36 @@ class AuthServiceImplTest {
         Assertions.assertTrue(service.listActiveSessions(10).isEmpty());
     }
 
+    @Test
+    void shouldRevokeLocalToken() {
+        AuthServiceImpl service = new AuthServiceImpl(
+                null,
+                true,
+                false,
+                false,
+                "USER",
+                "USER",
+                false,
+                24,
+                "",
+                "springclaw:auth:token:"
+        );
+
+        AuthService.LoginSession session = service.register("logout_user", "123456");
+        service.revokeToken(session.token());
+
+        Assertions.assertThrows(RuntimeException.class, () -> service.authenticateToken(session.token()));
+    }
+
     @SuppressWarnings("unchecked")
     private void disableLocalUser(AuthServiceImpl service, String username) throws Exception {
         Field localUsersField = AuthServiceImpl.class.getDeclaredField("localUsers");
         localUsersField.setAccessible(true);
         ConcurrentMap<String, Object> localUsers = (ConcurrentMap<String, Object>) localUsersField.get(service);
         Object localUser = localUsers.get(username);
+        if (localUser == null) {
+            throw new AssertionError("local user not found: " + username);
+        }
         Method passwordHash = localUser.getClass().getDeclaredMethod("passwordHash");
         Method roleCode = localUser.getClass().getDeclaredMethod("roleCode");
         passwordHash.setAccessible(true);
@@ -167,5 +212,16 @@ class AuthServiceImplTest {
         constructor.setAccessible(true);
         Object disabled = constructor.newInstance(hash, role, "DISABLED");
         localUsers.put(username, disabled);
+    }
+
+    @SuppressWarnings("unchecked")
+    private String localPasswordHash(AuthServiceImpl service, String username) throws Exception {
+        Field localUsersField = AuthServiceImpl.class.getDeclaredField("localUsers");
+        localUsersField.setAccessible(true);
+        ConcurrentMap<String, Object> localUsers = (ConcurrentMap<String, Object>) localUsersField.get(service);
+        Object localUser = localUsers.get(username);
+        Method passwordHash = localUser.getClass().getDeclaredMethod("passwordHash");
+        passwordHash.setAccessible(true);
+        return (String) passwordHash.invoke(localUser);
     }
 }

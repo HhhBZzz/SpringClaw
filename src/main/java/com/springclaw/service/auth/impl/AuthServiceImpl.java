@@ -10,12 +10,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -41,6 +42,9 @@ public class AuthServiceImpl extends ServiceImpl<UserAccountMapper, UserAccount>
     private static final Logger log = LoggerFactory.getLogger(AuthServiceImpl.class);
     private static final long DB_RETRY_INTERVAL_MS = 30_000L;
     private static final int MAX_LOCAL_TOKENS = 5000;
+    private static final String HASH_PREFIX_BCRYPT = "v2:";
+    private static final String HASH_VERSION_LEGACY_SHA256 = "v1";
+    private static final PasswordEncoder PASSWORD_ENCODER = new BCryptPasswordEncoder(12);
 
     private final StringRedisTemplate redisTemplate;
     private final boolean authEnabled;
@@ -170,6 +174,23 @@ public class AuthServiceImpl extends ServiceImpl<UserAccountMapper, UserAccount>
             throw new BusinessException(40104, "token 已过期");
         }
         return buildValidatedIdentity(localToken.username(), localToken.roleCode(), localToken.expireAt());
+    }
+
+    @Override
+    public void revokeToken(String token) {
+        ensureAuthEnabled();
+        if (!StringUtils.hasText(token)) {
+            return;
+        }
+        String raw = token.trim();
+        localTokens.remove(raw);
+        if (canUseRedis()) {
+            try {
+                redisTemplate.delete(tokenPrefix + raw);
+            } catch (Exception ex) {
+                markRedisTemporarilyUnavailable(ex);
+            }
+        }
     }
 
     @Override
@@ -402,29 +423,32 @@ public class AuthServiceImpl extends ServiceImpl<UserAccountMapper, UserAccount>
     }
 
     private String buildPasswordHash(String rawPassword) {
-        String saltHex = randomSaltHex();
-        String digestHex = digestHex(saltHex + "|" + rawPassword + "|" + passwordPepper);
-        return "v1$" + saltHex + "$" + digestHex;
+        return HASH_PREFIX_BCRYPT + PASSWORD_ENCODER.encode(passwordMaterial(rawPassword));
     }
 
     private boolean verifyPassword(String rawPassword, String storedHash) {
         if (!StringUtils.hasText(storedHash)) {
             return false;
         }
+        if (storedHash.startsWith(HASH_PREFIX_BCRYPT)) {
+            String encoded = storedHash.substring(HASH_PREFIX_BCRYPT.length());
+            return PASSWORD_ENCODER.matches(passwordMaterial(rawPassword), encoded);
+        }
         String[] parts = storedHash.split("\\$");
-        if (parts.length != 3 || !"v1".equals(parts[0])) {
+        if (parts.length != 3 || !HASH_VERSION_LEGACY_SHA256.equals(parts[0])) {
             return false;
         }
         String saltHex = parts[1];
         String expected = parts[2];
         String actual = digestHex(saltHex + "|" + rawPassword + "|" + passwordPepper);
-        return expected.equalsIgnoreCase(actual);
+        return MessageDigest.isEqual(
+                expected.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8),
+                actual.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8)
+        );
     }
 
-    private String randomSaltHex() {
-        byte[] bytes = new byte[16];
-        new SecureRandom().nextBytes(bytes);
-        return HexFormat.of().formatHex(bytes);
+    private String passwordMaterial(String rawPassword) {
+        return rawPassword + "|" + passwordPepper;
     }
 
     private String digestHex(String text) {

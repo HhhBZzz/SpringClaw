@@ -87,7 +87,8 @@ class OparContextAwareSupportTest {
         assertThat(result).isNotNull();
         assertThat(result.route()).isEqualTo("RECENT_DIAGNOSTIC_ANALYSIS");
         assertThat(result.fallbackAnswer()).contains("工具执行成功后");
-        assertThat(result.fallbackAnswer()).contains("Read timed out");
+        assertThat(result.fallbackAnswer()).contains("响应超时");
+        assertThat(result.fallbackAnswer()).doesNotContain("Read timed out");
         assertThat(result.fallbackAnswer()).contains("tool-session/tool-user");
     }
 

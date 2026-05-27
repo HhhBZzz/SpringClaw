@@ -25,19 +25,34 @@ DEFAULT_HEADERS = {
 def parse_payload():
     raw = sys.argv[1] if len(sys.argv) > 1 else "{}"
     try:
-        return json.loads(raw)
-    except Exception:
+        payload = json.loads(raw)
+        return payload if isinstance(payload, dict) else {"goal": str(payload)}
+    except json.JSONDecodeError:
         return {"goal": raw}
+
+
+def ensure_workspace_path(path, workspace_root, allowed_extensions, must_exist=False):
+    root = Path(workspace_root).resolve()
+    resolved = Path(path).resolve()
+    if resolved != root and root not in resolved.parents:
+        raise ValueError(f"输入路径必须位于 workspace 内: {resolved}")
+    if ".." in Path(path).parts:
+        raise ValueError(f"输入路径不能包含路径穿越片段: {path}")
+    if allowed_extensions and resolved.suffix.lower() not in allowed_extensions:
+        raise ValueError(f"不支持的输入文件类型: {resolved.suffix}")
+    if must_exist and not resolved.exists():
+        raise ValueError(f"输入文件不存在: {resolved}")
+    return resolved
 
 
 def extract_config_path(payload, workspace_root):
     for key in ("configPath", "config", "sourcePath"):
         value = normalize_text(payload.get(key))
         if value and value.lower().endswith(".json"):
-            return resolve_local_path(value, workspace_root)
+            return ensure_workspace_path(resolve_local_path(value, workspace_root), workspace_root, {".json"})
     goal = normalize_text(payload.get("goal") or payload.get("message"))
     for token in JSON_PATH_PATTERN.findall(goal):
-        candidate = resolve_local_path(token, workspace_root)
+        candidate = ensure_workspace_path(resolve_local_path(token, workspace_root), workspace_root, {".json"})
         if candidate.exists():
             return candidate
     return None
@@ -48,10 +63,10 @@ def extract_inline_html_paths(payload, workspace_root):
     for key in ("inputPath", "htmlPath", "file"):
         value = normalize_text(payload.get(key))
         if value and value.lower().endswith((".html", ".htm")):
-            result.append(resolve_local_path(value, workspace_root))
+            result.append(ensure_workspace_path(resolve_local_path(value, workspace_root), workspace_root, {".html", ".htm"}))
     goal = normalize_text(payload.get("goal") or payload.get("message"))
     for token in HTML_PATH_PATTERN.findall(goal):
-        candidate = resolve_local_path(token, workspace_root)
+        candidate = ensure_workspace_path(resolve_local_path(token, workspace_root), workspace_root, {".html", ".htm"})
         if candidate.exists():
             result.append(candidate)
     deduped = []
@@ -65,8 +80,13 @@ def extract_inline_html_paths(payload, workspace_root):
 
 
 def load_json_config(path):
-    with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+            return payload if isinstance(payload, dict) else {}
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"Warning: failed to load config from {path}: {exc}", file=sys.stderr)
+        return {}
 
 
 def merge_headers(config, workspace_root):
@@ -77,15 +97,19 @@ def merge_headers(config, workspace_root):
                 headers[str(key)] = str(value)
     headers_path = normalize_text(config.get("headersPath"))
     if headers_path:
-        path = resolve_local_path(headers_path, workspace_root)
+        path = ensure_workspace_path(resolve_local_path(headers_path, workspace_root), workspace_root, {".json"})
         if path.exists():
-            with path.open("r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-                if isinstance(payload, dict):
-                    for key, value in payload.items():
-                        if normalize_text(key):
-                            headers[str(key)] = str(value)
-    cookies = normalize_text(config.get("cookie") or config.get("cookies"))
+            try:
+                with path.open("r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+                    if isinstance(payload, dict):
+                        for key, value in payload.items():
+                            if normalize_text(key):
+                                headers[str(key)] = str(value)
+            except (json.JSONDecodeError, OSError) as exc:
+                print(f"Warning: failed to load headers from {path}: {exc}", file=sys.stderr)
+    cookie_env = normalize_text(config.get("cookieEnv") or config.get("cookiesEnv") or "BOSS_AUTH_COOKIE")
+    cookies = normalize_text(config.get("cookie") or config.get("cookies") or os.environ.get(cookie_env))
     if cookies:
         headers["Cookie"] = cookies
     referer = normalize_text(config.get("referer"))
@@ -119,8 +143,12 @@ def save_raw_html(output_dir, prefix, page_no, url, body):
     safe_prefix = re.sub(r"[^a-zA-Z0-9_-]+", "_", prefix).strip("_") or "boss"
     safe_name = f"{safe_prefix}_page_{page_no:03d}.html"
     path = output_dir / safe_name
-    path.write_text(body, encoding="utf-8", errors="ignore")
-    return path
+    try:
+        path.write_text(body, encoding="utf-8", errors="ignore")
+        return path
+    except OSError as exc:
+        print(f"Warning: failed to save raw html {path}: {exc}", file=sys.stderr)
+        return None
 
 
 def first_text(node, selectors):
@@ -223,11 +251,23 @@ def crawl_start_url(session, start_url, output_dir, max_pages, delay_seconds, ti
     records = []
     raw_paths = []
     while current and page_no <= max_pages:
-        response = session.get(current, timeout=timeout_seconds, allow_redirects=True)
-        response.raise_for_status()
+        response = None
+        for attempt in range(1, 4):
+            try:
+                response = session.get(current, timeout=timeout_seconds, allow_redirects=True)
+                response.raise_for_status()
+                break
+            except requests.RequestException as exc:
+                if attempt >= 3:
+                    print(f"Warning: failed to fetch {current}: {exc}", file=sys.stderr)
+                    return records, raw_paths
+                time.sleep(min(delay_seconds + attempt, 8))
+        if response is None:
+            break
         response.encoding = response.encoding or "utf-8"
         raw_path = save_raw_html(output_dir, "boss_authorized", page_no, current, response.text)
-        raw_paths.append(str(raw_path))
+        if raw_path is not None:
+            raw_paths.append(str(raw_path))
         page_records, next_url = parse_boss_list_html(response.text, current)
         records.extend(page_records)
         if not next_url or next_url == current:
@@ -240,7 +280,11 @@ def crawl_start_url(session, start_url, output_dir, max_pages, delay_seconds, ti
 
 
 def parse_local_html(path):
-    body = path.read_text(encoding="utf-8", errors="ignore")
+    try:
+        body = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError as exc:
+        print(f"Warning: failed to read local html {path}: {exc}", file=sys.stderr)
+        return []
     records, _ = parse_boss_list_html(body, path.name)
     if records:
         return records
@@ -270,7 +314,7 @@ def render_summary(skill_name, mode, config_ref, raw_records, clean_records, out
     return "\n".join(lines)
 
 
-def main():
+def run():
     payload = parse_payload()
     workspace_root = Path(os.environ.get("OPENCLAW_WORKSPACE_ROOT", os.getcwd())).resolve()
     skill_name = os.environ.get("OPENCLAW_SKILL_NAME", "boss_authorized_collector")
@@ -298,9 +342,7 @@ def main():
 
     if local_html_files:
         for raw_path in local_html_files:
-            path = resolve_local_path(raw_path, workspace_root)
-            if not path.exists():
-                continue
+            path = ensure_workspace_path(resolve_local_path(raw_path, workspace_root), workspace_root, {".html", ".htm"}, must_exist=True)
             raw_records.extend(parse_local_html(path))
             raw_paths.append(str(path))
     elif start_urls:
@@ -359,6 +401,14 @@ def main():
     print(render_summary(skill_name, mode, config_ref, raw_records, clean_records, output_dir, raw_paths))
     print(f"rawJsonl={raw_output}")
     print(f"cleanCsv={clean_output}")
+
+
+def main():
+    try:
+        run()
+    except Exception as exc:
+        skill_name = os.environ.get("OPENCLAW_SKILL_NAME", "boss_authorized_collector")
+        print("\n".join([f"skill={skill_name}", "status=failed", f"error={exc}"]))
 
 
 if __name__ == "__main__":

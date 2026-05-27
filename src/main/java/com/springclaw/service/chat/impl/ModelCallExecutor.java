@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -25,15 +26,26 @@ public class ModelCallExecutor {
     private final ModelTransportGuardService modelTransportGuardService;
     private final LlmUsageRecordService llmUsageRecordService;
     private final int maxFailoverAttempts;
+    private final int maxSameModelRetries;
 
+    @Autowired
     public ModelCallExecutor(AiProviderService aiProviderService,
                              ModelTransportGuardService modelTransportGuardService,
                              LlmUsageRecordService llmUsageRecordService,
-                             @Value("${springclaw.ai.max-failover-attempts:1}") int maxFailoverAttempts) {
+                             @Value("${springclaw.ai.max-failover-attempts:1}") int maxFailoverAttempts,
+                             @Value("${springclaw.ai.same-model-retry-attempts:1}") int maxSameModelRetries) {
         this.aiProviderService = aiProviderService;
         this.modelTransportGuardService = modelTransportGuardService;
         this.llmUsageRecordService = llmUsageRecordService;
         this.maxFailoverAttempts = Math.max(0, maxFailoverAttempts);
+        this.maxSameModelRetries = Math.max(0, maxSameModelRetries);
+    }
+
+    ModelCallExecutor(AiProviderService aiProviderService,
+                      ModelTransportGuardService modelTransportGuardService,
+                      LlmUsageRecordService llmUsageRecordService,
+                      int maxFailoverAttempts) {
+        this(aiProviderService, modelTransportGuardService, llmUsageRecordService, maxFailoverAttempts, 0);
     }
 
     public <T> ModelCallResult<T> execute(AiProviderService.ActiveChatClient activeClient,
@@ -82,6 +94,7 @@ public class ModelCallExecutor {
         boolean failedOver = !sameModel(activeClient.model(), currentClient.model());
         Exception lastFailure = null;
         int failoversUsed = failedOver ? 1 : 0;
+        int sameModelRetriesUsed = 0;
 
         while (currentClient != null) {
             attemptedModels.add(currentClient.model());
@@ -96,11 +109,22 @@ public class ModelCallExecutor {
                 if (!allowFailover || !modelTransportGuardService.isTransportFailure(failure)) {
                     throw failure;
                 }
-                modelTransportGuardService.markModelFailure(currentClient.providerId(), currentClient.model(), failure);
                 if (lastFailure != null) {
                     failure.addSuppressed(lastFailure);
                 }
                 lastFailure = failure;
+                if (sameModelRetriesUsed < maxSameModelRetries) {
+                    sameModelRetriesUsed++;
+                    log.warn("模型调用出现传输中断，重试同一模型: provider={}, model={}, attempt={}/{}, source={}, reason={}",
+                            currentClient.providerId(),
+                            currentClient.model(),
+                            sameModelRetriesUsed,
+                            maxSameModelRetries,
+                            source,
+                            failure.getMessage());
+                    continue;
+                }
+                modelTransportGuardService.markModelFailure(currentClient.providerId(), currentClient.model(), failure);
                 if (failoversUsed >= maxFailoverAttempts) {
                     break;
                 }
@@ -117,6 +141,7 @@ public class ModelCallExecutor {
                 log.warn("模型调用失败，尝试同 provider 模型切换: provider={}, from={}, to={}, source={}",
                         currentClient.providerId(), currentClient.model(), nextClient.model(), source);
                 currentClient = nextClient;
+                sameModelRetriesUsed = 0;
             }
         }
         if (lastFailure != null) {

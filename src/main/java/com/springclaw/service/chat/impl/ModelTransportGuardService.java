@@ -55,6 +55,11 @@ public class ModelTransportGuardService {
         }
         String reason = rootMessage(throwable);
         lastReason(providerId).set(reason);
+        if (!shouldCooldownProvider(throwable, reason)) {
+            log.warn("检测到模型请求超时/连接中断，但不熔断整个 provider；下次请求继续尝试远程模型。provider={}, reason={}",
+                    providerId, reason);
+            return;
+        }
         long disabledUntil = System.currentTimeMillis() + cooldownMillis;
         long previous = disabledUntil(providerId).getAndUpdate(current -> Math.max(current, disabledUntil));
         if (disabledUntil > previous) {
@@ -89,7 +94,11 @@ public class ModelTransportGuardService {
             }
             return "模型服务临时不可用，已临时熔断远程模型调用。";
         }
-        return "未配置可用模型提供方，已返回本地降级响应。";
+        String reason = lastReason(activeClient.providerId()).get();
+        if (StringUtils.hasText(reason)) {
+            return chatResponsePolicyService.simplifyFailureReason(reason);
+        }
+        return "模型服务这次没有返回可用结果。";
     }
 
     public boolean isModelCoolingDown(String providerId, String model) {
@@ -143,7 +152,35 @@ public class ModelTransportGuardService {
                 || text.contains("service unavailable")
                 || text.contains("rate limit")
                 || text.contains("too many requests")
-                || text.contains("no available account");
+                || text.contains("no available account")
+                || looksLikeConnectionClosedEarly(text);
+    }
+
+    private boolean shouldCooldownProvider(Throwable throwable, String reason) {
+        String text = safe(reason).toLowerCase();
+        if (text.contains("read timed out")
+                || text.contains("sockettimeoutexception")
+                || looksLikeConnectionClosedEarly(text)) {
+            return false;
+        }
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof SocketTimeoutException) {
+                return false;
+            }
+            current = current.getCause();
+        }
+        return true;
+    }
+
+    private boolean looksLikeConnectionClosedEarly(String text) {
+        String lower = safe(text).toLowerCase();
+        return lower.contains("eof reached while reading")
+                || lower.contains("premature eof")
+                || lower.contains("premature end")
+                || lower.contains("premature close")
+                || lower.contains("prematurely closed")
+                || lower.contains("unexpected end of file");
     }
 
     private String rootMessage(Throwable throwable) {

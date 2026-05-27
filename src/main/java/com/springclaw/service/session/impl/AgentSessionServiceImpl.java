@@ -1,6 +1,8 @@
 package com.springclaw.service.session.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.mapper.AgentSessionMapper;
 import com.springclaw.service.session.AgentSessionService;
@@ -9,8 +11,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -26,10 +27,10 @@ public class AgentSessionServiceImpl extends ServiceImpl<AgentSessionMapper, Age
 
     private static final Logger log = LoggerFactory.getLogger(AgentSessionServiceImpl.class);
 
-    /**
+     /**
      * 数据库异常时的本地降级存储，保障接口可用性。
      */
-    private final Map<String, AgentSession> localSessionCache = new ConcurrentHashMap<>();
+    private final Cache<String, AgentSession> localSessionCache;
     private final AtomicLong localIdGenerator = new AtomicLong(1);
     private final boolean dbEnabled;
     /**
@@ -38,8 +39,14 @@ public class AgentSessionServiceImpl extends ServiceImpl<AgentSessionMapper, Age
     private static final long DB_RETRY_INTERVAL_MS = 30_000L;
     private volatile long dbRetryAt = 0L;
 
-    public AgentSessionServiceImpl(@Value("${springclaw.persistence.db-enabled:false}") boolean dbEnabled) {
+    public AgentSessionServiceImpl(@Value("${springclaw.persistence.db-enabled:false}") boolean dbEnabled,
+                                   @Value("${springclaw.session.local-cache-max-size:5000}") long localCacheMaxSize,
+                                   @Value("${springclaw.session.local-cache-ttl-hours:24}") long localCacheTtlHours) {
         this.dbEnabled = dbEnabled;
+        this.localSessionCache = Caffeine.newBuilder()
+                .maximumSize(Math.max(100, localCacheMaxSize))
+                .expireAfterAccess(Math.max(1, localCacheTtlHours), TimeUnit.HOURS)
+                .build();
     }
 
     @Override
@@ -106,7 +113,7 @@ public class AgentSessionServiceImpl extends ServiceImpl<AgentSessionMapper, Age
     }
 
     private AgentSession getOrCreateFromLocal(String sessionKey, String channel, String userId) {
-        return localSessionCache.computeIfAbsent(sessionKey, key -> {
+        return localSessionCache.get(sessionKey, key -> {
             AgentSession local = buildSession(sessionKey, channel, userId);
             local.setId(-localIdGenerator.getAndIncrement());
             return local;

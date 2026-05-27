@@ -97,11 +97,14 @@ public class SimplifiedOparEngine {
                     ),
                     true,
                     client -> {
+                        var requestSpec = client.chatClient().prompt()
+                                .system(systemPrompt)
+                                .user(renderUserPrompt(assembled.question()));
+                        if (DeepSeekChatCompatibility.supportsNativeToolCalling(client) && tools != null && tools.length > 0) {
+                            requestSpec = requestSpec.tools(tools);
+                        }
                         var response = conversationAdvisorSupport.apply(
-                                        client.chatClient().prompt()
-                                                .system(systemPrompt)
-                                                .user(renderUserPrompt(assembled.question()))
-                                                .tools(tools),
+                                        requestSpec,
                                         assembled.sessionKey(),
                                         assembled.userId())
                                 .call()

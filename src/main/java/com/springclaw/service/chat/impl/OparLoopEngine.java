@@ -311,11 +311,14 @@ public class OparLoopEngine {
                     ),
                     allowFailover,
                     client -> {
+                        var requestSpec = client.chatClient().prompt()
+                                .system(systemPrompt)
+                                .user(actionPrompt);
+                        if (DeepSeekChatCompatibility.supportsNativeToolCalling(client) && tools != null && tools.length > 0) {
+                            requestSpec = requestSpec.tools(tools);
+                        }
                         var response = conversationAdvisorSupport.apply(
-                                        client.chatClient().prompt()
-                                                .system(systemPrompt)
-                                                .user(actionPrompt)
-                                                .tools(tools),
+                                        requestSpec,
                                         assembled.sessionKey(),
                                         assembled.userId())
                                 .call()

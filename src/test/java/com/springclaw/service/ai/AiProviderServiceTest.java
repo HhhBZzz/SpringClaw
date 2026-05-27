@@ -23,6 +23,13 @@ import static org.mockito.Mockito.when;
 class AiProviderServiceTest {
 
     @Test
+    void shouldDefaultToDeepSeekFriendlyRequestTimeout() {
+        SpringClawAiProperties properties = new SpringClawAiProperties();
+
+        assertThat(properties.getRequestTimeoutSeconds()).isGreaterThanOrEqualTo(60);
+    }
+
+    @Test
     void shouldSwitchToQwenWhenConfigured() {
         SpringClawAiProperties properties = new SpringClawAiProperties();
         properties.getProviders().getPrimary().setApiKey("primary-test-key");

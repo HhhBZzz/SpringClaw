@@ -1,5 +1,6 @@
 package com.springclaw.service.webhook;
 
+import com.springclaw.common.exception.BusinessException;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
 import com.springclaw.dto.webhook.WebhookDispatchResponse;
@@ -49,16 +50,26 @@ public class WebhookRouterService {
             return new WebhookDispatchResponse(channel, "feishu-self-message", "ignored");
         }
 
-        ChannelAdapter adapter = channelAdapterFactory.getRequired(channel);
-        UnifiedInboundMessage inboundMessage = adapter.adapt(payload);
         String requestId = UUID.randomUUID().toString().replace("-", "");
+        UnifiedInboundMessage inboundMessage = null;
+        ChatResponse response = null;
+        try {
+            ChannelAdapter adapter = channelAdapterFactory.getRequired(channel);
+            inboundMessage = adapter.adapt(payload);
+            response = chatService.chat(new ChatRequest(
+                    inboundMessage.sessionKey(),
+                    inboundMessage.userId(),
+                    inboundMessage.text(),
+                    inboundMessage.channel()
+            ));
+        } catch (Exception ex) {
+            log.warn("Webhook 处理失败，channel={}, requestId={}", channel, requestId, ex);
+            throw new BusinessException(50041, "Webhook 处理失败");
+        }
+        if (inboundMessage == null || response == null) {
+            throw new BusinessException(50041, "Webhook 处理失败");
+        }
 
-        ChatResponse response = chatService.chat(new ChatRequest(
-                inboundMessage.sessionKey(),
-                inboundMessage.userId(),
-                inboundMessage.text(),
-                inboundMessage.channel()
-        ));
         messageEventService.recordSingle(
                 inboundMessage.sessionKey(),
                 inboundMessage.channel(),
@@ -79,6 +90,16 @@ public class WebhookRouterService {
                         "SYSTEM",
                         "WEBHOOK_OUTBOUND",
                         "渠道回消息发送成功，requestId=" + requestId,
+                        requestId
+                );
+            } else {
+                messageEventService.recordSingle(
+                        inboundMessage.sessionKey(),
+                        inboundMessage.channel(),
+                        inboundMessage.userId(),
+                        "SYSTEM",
+                        "WEBHOOK_OUTBOUND",
+                        "渠道回消息未发送，requestId=" + requestId,
                         requestId
                 );
             }

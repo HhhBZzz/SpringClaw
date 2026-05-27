@@ -91,6 +91,11 @@ class ToolPermissionServiceImplTest {
         }
 
         @Override
+        public void revokeToken(String token) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public String resolveRoleByUserId(String userId) {
             return roleCode;
         }

@@ -55,25 +55,37 @@ def is_private_host(hostname: str) -> bool:
         return True
     for address in addresses:
         ip = ipaddress.ip_address(address[4][0])
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast:
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
             return True
     return False
 
 
-def fetch_url(url: str) -> str:
+def validate_public_url(url: str) -> urllib.parse.ParseResult:
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("only http/https urls are supported")
     if is_private_host(parsed.hostname):
         raise ValueError("private or localhost urls are blocked")
+    return parsed
+
+
+class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        validate_public_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def fetch_url(url: str) -> str:
+    validate_public_url(url)
     request = urllib.request.Request(url, headers={"User-Agent": "SpringClawSkill/1.0"})
-    with urllib.request.urlopen(request, timeout=8) as response:
+    opener = urllib.request.build_opener(SafeRedirectHandler)
+    with opener.open(request, timeout=8) as response:
         raw = response.read(2_000_000)
-    content_type = response.headers.get("content-type", "")
-    charset = "utf-8"
-    match = re.search(r"charset=([^;\s]+)", content_type, re.I)
-    if match:
-        charset = match.group(1)
+        content_type = response.headers.get("content-type", "")
+        charset = "utf-8"
+        match = re.search(r"charset=([^;\s]+)", content_type, re.I)
+        if match:
+            charset = match.group(1)
     html = raw.decode(charset, errors="replace")
     extractor = TextExtractor()
     extractor.feed(html)

@@ -1,5 +1,7 @@
 package com.springclaw.service.security.impl;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.service.security.WebhookSecurityService;
 import org.slf4j.Logger;
@@ -17,7 +19,7 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 默认 Webhook 安全校验实现。
@@ -32,6 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class DefaultWebhookSecurityService implements WebhookSecurityService {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultWebhookSecurityService.class);
+    private static final long LOCAL_NONCE_CACHE_MAX_SIZE = 10_000L;
 
     private final StringRedisTemplate redisTemplate;
     private final boolean enabled;
@@ -42,7 +45,7 @@ public class DefaultWebhookSecurityService implements WebhookSecurityService {
     private final String wechatSecret;
     private final String feishuSecret;
 
-    private final Map<String, Long> localNonceCache = new ConcurrentHashMap<>();
+    private final Cache<String, Boolean> localNonceCache;
 
     public DefaultWebhookSecurityService(@Autowired(required = false) StringRedisTemplate redisTemplate,
                                          @Value("${springclaw.webhook.security.enabled:false}") boolean enabled,
@@ -60,6 +63,10 @@ public class DefaultWebhookSecurityService implements WebhookSecurityService {
         this.telegramSecret = telegramSecret;
         this.wechatSecret = wechatSecret;
         this.feishuSecret = feishuSecret;
+        this.localNonceCache = Caffeine.newBuilder()
+                .maximumSize(LOCAL_NONCE_CACHE_MAX_SIZE)
+                .expireAfterWrite(2 * this.replaySeconds, TimeUnit.SECONDS)
+                .build();
     }
 
     @Override
@@ -116,11 +123,7 @@ public class DefaultWebhookSecurityService implements WebhookSecurityService {
             }
         }
 
-        long nowMs = System.currentTimeMillis();
-        localNonceCache.entrySet().removeIf(entry -> entry.getValue() < nowMs);
-        long expireAt = nowMs + replaySeconds * 1000L;
-        Long existing = localNonceCache.putIfAbsent(nonceKey, expireAt);
-        if (existing != null && existing >= nowMs) {
+        if (localNonceCache.asMap().putIfAbsent(nonceKey, Boolean.TRUE) != null) {
             throw new BusinessException(40104, "Webhook 重放请求");
         }
     }

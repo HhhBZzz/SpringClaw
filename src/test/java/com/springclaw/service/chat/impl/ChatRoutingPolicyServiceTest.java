@@ -82,4 +82,116 @@ class ChatRoutingPolicyServiceTest {
         Assertions.assertEquals("当前模型是什么", decision.effectiveQuestion());
         Assertions.assertFalse(decision.manualOverride());
     }
+
+    @Test
+    void shouldAllowNormalUserToForceSimplifiedMode() {
+        ChatRoutingPolicyService.RoutingDecision decision = service.decide(
+                "快速回答：先查启动日志，再定位报错原因，并给出修复方案",
+                "USER",
+                "opar",
+                true,
+                Set.of("workspace", "file", "script")
+        );
+
+        Assertions.assertEquals("simplified", decision.executionMode());
+        Assertions.assertEquals("先查启动日志，再定位报错原因，并给出修复方案", decision.effectiveQuestion());
+        Assertions.assertFalse(decision.autoUpgraded());
+    }
+
+    @Test
+    void shouldUseAgentResponseModeByDefault() {
+        ChatRoutingPolicyService.RoutingDecision decision = service.decide(
+                "你好",
+                "USER",
+                "simplified",
+                true,
+                Set.of("workspace", "file", "script"),
+                null
+        );
+
+        Assertions.assertEquals("agent", decision.responseMode());
+        Assertions.assertEquals("simplified", decision.executionMode());
+        Assertions.assertEquals("你好", decision.effectiveQuestion());
+        Assertions.assertEquals("general", decision.intent());
+    }
+
+    @Test
+    void shouldKeepAgentResponseModeWhenComplexWorkspaceTaskAutoUpgrades() {
+        ChatRoutingPolicyService.RoutingDecision decision = service.decide(
+                "帮我分析当前项目结构",
+                "USER",
+                "simplified",
+                true,
+                Set.of("workspace", "file", "script"),
+                null
+        );
+
+        Assertions.assertEquals("agent", decision.responseMode());
+        Assertions.assertEquals("opar", decision.executionMode());
+        Assertions.assertTrue(decision.intent().contains("workspace"));
+    }
+
+    @Test
+    void shouldRespectExplicitFastResponseMode() {
+        ChatRoutingPolicyService.RoutingDecision decision = service.decide(
+                "先查启动日志，再定位报错原因，并给出修复方案",
+                "USER",
+                "opar",
+                true,
+                Set.of("workspace", "file", "script"),
+                "fast"
+        );
+
+        Assertions.assertEquals("fast", decision.responseMode());
+        Assertions.assertEquals("simplified", decision.executionMode());
+        Assertions.assertFalse(decision.autoUpgraded());
+    }
+
+    @Test
+    void shouldRespectExplicitDeepResponseMode() {
+        ChatRoutingPolicyService.RoutingDecision decision = service.decide(
+                "帮我看这段启动报错",
+                "USER",
+                "simplified",
+                false,
+                Set.of("workspace", "file", "script"),
+                "deep"
+        );
+
+        Assertions.assertEquals("deep", decision.responseMode());
+        Assertions.assertEquals("opar", decision.executionMode());
+        Assertions.assertTrue(decision.manualOverride());
+    }
+
+    @Test
+    void shouldRespectExplicitToolResponseMode() {
+        ChatRoutingPolicyService.RoutingDecision decision = service.decide(
+                "运行 web_crawler 抓取 https://example.com",
+                "USER",
+                "opar",
+                true,
+                Set.of("script"),
+                "tool"
+        );
+
+        Assertions.assertEquals("tool", decision.responseMode());
+        Assertions.assertEquals("simplified", decision.executionMode());
+        Assertions.assertTrue(decision.intent().contains("tool"));
+    }
+
+    @Test
+    void shouldMarkModelStatusQuestionAsControlIntent() {
+        ChatRoutingPolicyService.RoutingDecision decision = service.decide(
+                "当前模型是什么",
+                "USER",
+                "simplified",
+                true,
+                Set.of("system"),
+                null
+        );
+
+        Assertions.assertEquals("agent", decision.responseMode());
+        Assertions.assertEquals("simplified", decision.executionMode());
+        Assertions.assertEquals("control-plane", decision.intent());
+    }
 }

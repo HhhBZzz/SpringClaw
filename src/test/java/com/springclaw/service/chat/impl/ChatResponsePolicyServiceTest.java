@@ -27,6 +27,33 @@ class ChatResponsePolicyServiceTest {
     }
 
     @Test
+    void shouldTreatEofAsTemporaryUpstreamIssue() {
+        String reply = service.buildUserFacingFailureReply("EOF reached while reading", "授权桌面全部");
+
+        assertThat(reply).contains("上游模型服务连接中断");
+        assertThat(reply).contains("稍后再试");
+        assertThat(reply).doesNotContain("key、base-url");
+    }
+
+    @Test
+    void shouldTreatPrematureEofAsTemporaryUpstreamIssue() {
+        String reply = service.buildUserFacingFailureReply("Premature EOF", "你好");
+
+        assertThat(reply).contains("上游模型服务连接中断");
+        assertThat(reply).doesNotContain("Premature EOF");
+        assertThat(reply).doesNotContain("key、base-url");
+    }
+
+    @Test
+    void shouldNotExposeRawReadTimeoutToUser() {
+        String reply = service.buildUserFacingFailureReply("java.net.SocketTimeoutException: Read timed out", "帮我分析项目");
+
+        assertThat(reply).contains("上游模型响应超时");
+        assertThat(reply).doesNotContain("Read timed out");
+        assertThat(reply).doesNotContain("SocketTimeoutException");
+    }
+
+    @Test
     void shouldReturnPartialAnswerWhenActionAlreadyContainsUsefulResult() {
         String reply = service.buildPartialAnswerFromAction("""
                 [STEP 1]

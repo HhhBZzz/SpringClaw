@@ -2,7 +2,10 @@ package com.springclaw.service.skill.bundle;
 
 import org.springframework.util.StringUtils;
 import org.yaml.snakeyaml.DumperOptions;
+import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.constructor.SafeConstructor;
+import org.yaml.snakeyaml.error.YAMLException;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -133,7 +136,7 @@ public final class SkillBundleSupport {
                     skillPath,
                     entrypointPath
             ));
-        } catch (IOException ex) {
+        } catch (IOException | IllegalArgumentException ex) {
             return Optional.empty();
         }
     }
@@ -181,12 +184,18 @@ public final class SkillBundleSupport {
         if (!StringUtils.hasText(frontmatterText)) {
             return new LinkedHashMap<>();
         }
-        Yaml yaml = new Yaml();
-        Object loaded = yaml.load(frontmatterText);
-        if (loaded instanceof Map<?, ?> rawMap) {
-            return toStringKeyMap(rawMap);
+        LoaderOptions options = new LoaderOptions();
+        options.setAllowDuplicateKeys(false);
+        Yaml yaml = new Yaml(new SafeConstructor(options));
+        try {
+            Object loaded = yaml.load(frontmatterText);
+            if (loaded instanceof Map<?, ?> rawMap) {
+                return toStringKeyMap(rawMap);
+            }
+            return new LinkedHashMap<>();
+        } catch (YAMLException ex) {
+            throw new IllegalArgumentException("Invalid skill frontmatter YAML: " + ex.getMessage(), ex);
         }
-        return new LinkedHashMap<>();
     }
 
     /**

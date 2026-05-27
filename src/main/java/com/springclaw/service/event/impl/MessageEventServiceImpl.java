@@ -12,7 +12,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
@@ -21,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -105,8 +105,8 @@ public class MessageEventServiceImpl extends ServiceImpl<MessageEventMapper, Mes
                 List<MessageEvent> list = lambdaQuery()
                         .eq(MessageEvent::getSessionKey, sessionKey)
                         .orderByDesc(MessageEvent::getId)
-                        .last("limit " + safeLimit)
-                        .list();
+                        .page(new Page<MessageEvent>(1, safeLimit, false))
+                        .getRecords();
                 Collections.reverse(list);
                 return list;
             } catch (Exception ex) {
@@ -132,12 +132,25 @@ public class MessageEventServiceImpl extends ServiceImpl<MessageEventMapper, Mes
                                                 String eventType,
                                                 int limit,
                                                 boolean ascending) {
+        return listSessionEvents(sessionKey, null, role, eventType, limit, ascending);
+    }
+
+    @Override
+    public List<MessageEvent> listSessionEvents(String sessionKey,
+                                                String userId,
+                                                String role,
+                                                String eventType,
+                                                int limit,
+                                                boolean ascending) {
         int safeLimit = Math.max(1, Math.min(limit, 5000));
 
         if (dbEnabled) {
             try {
                 var query = lambdaQuery()
                         .eq(MessageEvent::getSessionKey, sessionKey);
+                if (StringUtils.hasText(userId)) {
+                    query.eq(MessageEvent::getUserId, userId.trim());
+                }
                 if (StringUtils.hasText(role)) {
                     query.eq(MessageEvent::getRole, role.trim().toUpperCase());
                 }
@@ -149,7 +162,7 @@ public class MessageEventServiceImpl extends ServiceImpl<MessageEventMapper, Mes
                 } else {
                     query.orderByDesc(MessageEvent::getId);
                 }
-                return query.last("limit " + safeLimit).list();
+                return query.page(new Page<MessageEvent>(1, safeLimit, false)).getRecords();
             } catch (Exception ex) {
                 log.warn("按条件查询事件流失败，降级读取本地缓存。sessionKey={}, reason={}", sessionKey, ex.getMessage());
             }
@@ -157,6 +170,7 @@ public class MessageEventServiceImpl extends ServiceImpl<MessageEventMapper, Mes
 
         return localAllEventsSnapshot().stream()
                 .filter(evt -> sessionKey.equals(evt.getSessionKey()))
+                .filter(evt -> !StringUtils.hasText(userId) || userId.trim().equals(evt.getUserId()))
                 .filter(evt -> !StringUtils.hasText(role) || role.trim().equalsIgnoreCase(evt.getRole()))
                 .filter(evt -> !StringUtils.hasText(eventType) || eventType.trim().equalsIgnoreCase(evt.getEventType()))
                 .sorted(ascending
@@ -168,6 +182,11 @@ public class MessageEventServiceImpl extends ServiceImpl<MessageEventMapper, Mes
 
     @Override
     public long countSessionEvents(String sessionKey, String role, String eventType) {
+        return countSessionEvents(sessionKey, null, role, eventType);
+    }
+
+    @Override
+    public long countSessionEvents(String sessionKey, String userId, String role, String eventType) {
         if (!StringUtils.hasText(sessionKey)) {
             return 0L;
         }
@@ -176,6 +195,9 @@ public class MessageEventServiceImpl extends ServiceImpl<MessageEventMapper, Mes
             try {
                 var query = lambdaQuery()
                         .eq(MessageEvent::getSessionKey, sessionKey);
+                if (StringUtils.hasText(userId)) {
+                    query.eq(MessageEvent::getUserId, userId.trim());
+                }
                 if (StringUtils.hasText(role)) {
                     query.eq(MessageEvent::getRole, role.trim().toUpperCase());
                 }
@@ -190,6 +212,7 @@ public class MessageEventServiceImpl extends ServiceImpl<MessageEventMapper, Mes
 
         return localAllEventsSnapshot().stream()
                 .filter(evt -> sessionKey.equals(evt.getSessionKey()))
+                .filter(evt -> !StringUtils.hasText(userId) || userId.trim().equals(evt.getUserId()))
                 .filter(evt -> !StringUtils.hasText(role) || role.trim().equalsIgnoreCase(evt.getRole()))
                 .filter(evt -> !StringUtils.hasText(eventType) || eventType.trim().equalsIgnoreCase(evt.getEventType()))
                 .count();
@@ -259,8 +282,8 @@ public class MessageEventServiceImpl extends ServiceImpl<MessageEventMapper, Mes
                 total = lambdaQuery().count();
                 sample = lambdaQuery()
                         .orderByDesc(MessageEvent::getId)
-                        .last("limit " + safeRecentLimit)
-                        .list();
+                        .page(new Page<MessageEvent>(1, safeRecentLimit, false))
+                        .getRecords();
                 return buildStats(total, sample);
             } catch (Exception ex) {
                 log.warn("审计统计查询失败，降级本地缓存。reason={}", ex.getMessage());
@@ -277,7 +300,7 @@ public class MessageEventServiceImpl extends ServiceImpl<MessageEventMapper, Mes
 
     private void cacheLocalEvent(String sessionKey, MessageEvent event) {
         event.setId(-localIdGenerator.getAndIncrement());
-        Deque<MessageEvent> deque = localEventCache.computeIfAbsent(sessionKey, key -> new ArrayDeque<>());
+        Deque<MessageEvent> deque = localEventCache.computeIfAbsent(sessionKey, key -> new ConcurrentLinkedDeque<>());
         deque.addLast(event);
         while (deque.size() > LOCAL_MAX_EVENTS_PER_SESSION) {
             deque.pollFirst();

@@ -36,7 +36,8 @@ public class ChatMessageConsumer {
                     message.sessionKey(),
                     message.userId(),
                     message.message(),
-                    message.channel()
+                    message.channel(),
+                    message.responseMode()
             ));
             AsyncChatResultPayload payload = asyncChatResultStore.markCompleted(
                     message,

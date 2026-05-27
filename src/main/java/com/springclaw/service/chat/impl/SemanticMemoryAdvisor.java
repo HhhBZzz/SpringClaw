@@ -61,9 +61,12 @@ public class SemanticMemoryAdvisor implements CallAdvisor, StreamAdvisor {
     }
 
     private ChatClientRequest augment(ChatClientRequest request) {
+        if (request == null || request.prompt() == null) {
+            return request;
+        }
         String conversationId = asText(request.context().get(CONTEXT_CONVERSATION_ID));
         String userId = asText(request.context().get(CONTEXT_USER_ID));
-        String query = request.prompt() == null || request.prompt().getUserMessage() == null
+        String query = request.prompt().getUserMessage() == null
                 ? ""
                 : request.prompt().getUserMessage().getText();
         String semanticMemory = renderSemanticMemory(conversationId, userId, query);

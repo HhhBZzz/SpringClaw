@@ -13,6 +13,8 @@ public interface AuthService {
 
     UserIdentity authenticateToken(String token);
 
+    void revokeToken(String token);
+
     /**
      * 根据业务 userId 解析角色。
      * 约定：默认将 userId 视作 username。

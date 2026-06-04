@@ -36,4 +36,14 @@ class WebCapabilityExecutorTest {
         verify(scriptSkillToolPack).executeSkillByGoal("web_crawler", "用web_crawler抓取https://example.com");
         verifyNoInteractions(webSearchToolPack);
     }
+
+    @Test
+    void shouldSkipGenericWebWhenRealtimeCapabilityIsSelected() {
+        WebCapabilityExecutor executor = new WebCapabilityExecutor(mock(WebSearchToolPack.class), mock(ScriptSkillToolPack.class));
+
+        assertThat(executor.supports(new AgentDecision("web_research", "agent_tools", List.of("weather", "web"), "read", false, "天气查询")))
+                .isFalse();
+        assertThat(executor.supports(new AgentDecision("web_research", "agent_tools", List.of("web"), "read", false, "网页搜索")))
+                .isTrue();
+    }
 }

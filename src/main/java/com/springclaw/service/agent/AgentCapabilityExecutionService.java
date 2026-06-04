@@ -3,11 +3,14 @@ package com.springclaw.service.agent;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.tool.pack.LocalFilesystemToolPack;
+import com.springclaw.tool.pack.ExchangeRateToolPack;
+import com.springclaw.tool.pack.NewsToolPack;
 import com.springclaw.tool.pack.ScriptSkillToolPack;
 import com.springclaw.tool.pack.SkillLibraryToolPack;
 import com.springclaw.tool.pack.SystemHealthToolPack;
 import com.springclaw.tool.pack.SystemToolPack;
 import com.springclaw.tool.pack.WebSearchToolPack;
+import com.springclaw.tool.pack.WeatherToolPack;
 import com.springclaw.tool.pack.WorkspaceReviewToolPack;
 import com.springclaw.tool.pack.WorkspaceSearchToolPack;
 import com.springclaw.tool.runtime.ToolExecutionContext;
@@ -21,6 +24,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Executes safe read-only capabilities before model summarization.
@@ -29,6 +34,7 @@ import java.util.concurrent.Callable;
 public class AgentCapabilityExecutionService {
 
     private static final int MAX_PAYLOAD_CHARS = 5000;
+    private static final Pattern CURRENCY_CODE_PATTERN = Pattern.compile("\\b([A-Za-z]{3})\\b");
     private static final Set<String> PROVIDER_CAPABILITIES = Set.of(
             "system", "workspace-search", "workspace-review", "file", "local-files",
             "web", "weather", "news", "exchange", "script-skill", "skill-library",
@@ -40,6 +46,9 @@ public class AgentCapabilityExecutionService {
     private final WorkspaceSearchToolPack workspaceSearchToolPack;
     private final LocalFilesystemToolPack localFilesystemToolPack;
     private final WebSearchToolPack webSearchToolPack;
+    private final WeatherToolPack weatherToolPack;
+    private final NewsToolPack newsToolPack;
+    private final ExchangeRateToolPack exchangeRateToolPack;
     private final SkillLibraryToolPack skillLibraryToolPack;
     private final ScriptSkillToolPack scriptSkillToolPack;
     private final SystemToolPack systemToolPack;
@@ -52,6 +61,9 @@ public class AgentCapabilityExecutionService {
         this.workspaceSearchToolPack = null;
         this.localFilesystemToolPack = null;
         this.webSearchToolPack = null;
+        this.weatherToolPack = null;
+        this.newsToolPack = null;
+        this.exchangeRateToolPack = null;
         this.skillLibraryToolPack = null;
         this.scriptSkillToolPack = null;
         this.systemToolPack = null;
@@ -65,6 +77,9 @@ public class AgentCapabilityExecutionService {
                                            WorkspaceSearchToolPack workspaceSearchToolPack,
                                            LocalFilesystemToolPack localFilesystemToolPack,
                                            WebSearchToolPack webSearchToolPack,
+                                           WeatherToolPack weatherToolPack,
+                                           NewsToolPack newsToolPack,
+                                           ExchangeRateToolPack exchangeRateToolPack,
                                            SkillLibraryToolPack skillLibraryToolPack,
                                            ScriptSkillToolPack scriptSkillToolPack,
                                            SystemToolPack systemToolPack,
@@ -74,6 +89,9 @@ public class AgentCapabilityExecutionService {
         this.workspaceSearchToolPack = workspaceSearchToolPack;
         this.localFilesystemToolPack = localFilesystemToolPack;
         this.webSearchToolPack = webSearchToolPack;
+        this.weatherToolPack = weatherToolPack;
+        this.newsToolPack = newsToolPack;
+        this.exchangeRateToolPack = exchangeRateToolPack;
         this.skillLibraryToolPack = skillLibraryToolPack;
         this.scriptSkillToolPack = scriptSkillToolPack;
         this.systemToolPack = systemToolPack;
@@ -104,7 +122,7 @@ public class AgentCapabilityExecutionService {
             return switch (decision.intent()) {
                 case "workspace_analysis" -> executeWorkspace(assembled);
                 case "local_files" -> executeLocalFiles(assembled);
-                case "web_research" -> executeWeb(assembled);
+                case "web_research" -> executeWeb(decision, assembled);
                 case "skill_task" -> executeSkill(decision, assembled);
                 case "model_control" -> executeModelControl();
                 default -> List.of();
@@ -129,7 +147,23 @@ public class AgentCapabilityExecutionService {
         return results;
     }
 
-    private List<AgentCapabilityResult> executeWeb(AssembledContext assembled) {
+    private List<AgentCapabilityResult> executeWeb(AgentDecision decision, AssembledContext assembled) {
+        List<AgentCapabilityResult> results = new ArrayList<>();
+        if (selected(decision, "weather")) {
+            String city = extractWeatherCity(assembled.question());
+            results.add(runRealtime("weather.current", "查询实时天气", () -> weatherToolPack.queryWeather(city)));
+        }
+        if (selected(decision, "news")) {
+            String keyword = extractNewsKeyword(assembled.question());
+            results.add(runRealtime("news.search", "检索新闻摘要", () -> newsToolPack.searchNews(keyword)));
+        }
+        if (selected(decision, "exchange")) {
+            CurrencyPair pair = extractCurrencyPair(assembled.question());
+            results.add(runRealtime("exchange.rate", "查询汇率", () -> exchangeRateToolPack.queryExchangeRate(pair.base(), pair.target())));
+        }
+        if (!results.isEmpty()) {
+            return List.copyOf(results);
+        }
         return List.of(run("web", "联网搜索公开信息", () -> webSearchToolPack.webSearch(assembled.question())));
     }
 
@@ -164,6 +198,16 @@ public class AgentCapabilityExecutionService {
         }
     }
 
+    private AgentCapabilityResult runRealtime(String capabilityId, String summary, Callable<String> action) {
+        try {
+            String payload = trim(action.call());
+            String status = looksLikeFailure(payload) ? "failed" : "success";
+            return new AgentCapabilityResult(capabilityId, status, summary, payload);
+        } catch (Exception ex) {
+            return new AgentCapabilityResult(capabilityId, "failed", summary, ex.getClass().getSimpleName() + ": " + ex.getMessage());
+        }
+    }
+
     private String modelStatus() {
         AiProviderService.ActiveChatClient client = aiProviderService.activeClient();
         return "provider=" + client.providerId()
@@ -186,6 +230,88 @@ public class AgentCapabilityExecutionService {
         return text.length() <= 40 ? text : "";
     }
 
+    private boolean selected(AgentDecision decision, String capabilityId) {
+        if (decision == null || decision.selectedCapabilities() == null) {
+            return false;
+        }
+        String expected = normalize(capabilityId);
+        return decision.selectedCapabilities().stream()
+                .map(this::normalize)
+                .anyMatch(expected::equals);
+    }
+
+    private String extractWeatherCity(String question) {
+        String text = question == null ? "" : question.trim();
+        String cleaned = text
+                .replaceAll("(?i)weather", "")
+                .replace("天气怎么样", "")
+                .replace("天气怎样", "")
+                .replace("天气如何", "")
+                .replace("天气", "")
+                .replace("气温", "")
+                .replace("温度", "")
+                .replace("实时", "")
+                .replace("今天", "")
+                .replace("现在", "")
+                .replace("查询", "")
+                .replace("请问", "")
+                .replace("帮我", "")
+                .replace("一下", "")
+                .replaceAll("[，。！？、,.!?\\s]", "")
+                .trim();
+        return StringUtils.hasText(cleaned) ? cleaned : text;
+    }
+
+    private String extractNewsKeyword(String question) {
+        String text = question == null ? "" : question.trim();
+        String cleaned = text
+                .replace("新闻", "")
+                .replace("最新", "")
+                .replace("检索", "")
+                .replace("搜索", "")
+                .replace("查询", "")
+                .replace("看看", "")
+                .trim();
+        return StringUtils.hasText(cleaned) ? cleaned : text;
+    }
+
+    private CurrencyPair extractCurrencyPair(String question) {
+        String text = question == null ? "" : question;
+        String lower = text.toLowerCase(Locale.ROOT);
+        if (lower.contains("美元") && (lower.contains("人民币") || lower.contains("cny"))) {
+            return new CurrencyPair("USD", "CNY");
+        }
+        if (lower.contains("人民币") && (lower.contains("美元") || lower.contains("usd"))) {
+            return new CurrencyPair("CNY", "USD");
+        }
+        List<String> codes = new ArrayList<>();
+        Matcher matcher = CURRENCY_CODE_PATTERN.matcher(text);
+        while (matcher.find()) {
+            codes.add(matcher.group(1).toUpperCase(Locale.ROOT));
+        }
+        if (codes.size() >= 2) {
+            return new CurrencyPair(codes.get(0), codes.get(1));
+        }
+        if (codes.size() == 1) {
+            return new CurrencyPair(codes.get(0), "CNY");
+        }
+        return new CurrencyPair("USD", "CNY");
+    }
+
+    private boolean looksLikeFailure(String payload) {
+        String lower = payload == null ? "" : payload.toLowerCase(Locale.ROOT);
+        return !StringUtils.hasText(lower)
+                || lower.contains("查询失败")
+                || lower.contains("检索失败")
+                || lower.contains("未返回有效")
+                || lower.contains("服务返回为空")
+                || lower.contains("工具未开启")
+                || lower.contains("请输入")
+                || lower.contains("不能为空")
+                || lower.contains("未找到币种")
+                || lower.contains("暂不可用");
+    }
+
     private String normalize(String value) {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replace('_', '-');
     }
@@ -196,5 +322,8 @@ public class AgentCapabilityExecutionService {
             return text;
         }
         return text.substring(0, MAX_PAYLOAD_CHARS) + "\n...<TRUNCATED>";
+    }
+
+    private record CurrencyPair(String base, String target) {
     }
 }

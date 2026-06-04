@@ -247,7 +247,10 @@ class AgentRuntimeEngineTest {
         AgentRun run = engine.run(context);
 
         assertThat(executor.questions).containsExactly("哈尔滨天气", "哈尔滨 今日 天气 wttr.in");
+        assertThat(executor.capabilities).containsExactly(List.of("web"), List.of("weather"));
         assertThat(run.capabilityResults()).hasSize(2);
+        assertThat(run.capabilityResults()).extracting(CapabilityResult::capabilityId)
+                .containsExactly("web.search", "weather.current");
         assertThat(run.verification().sufficient()).isTrue();
         assertThat(run.executionResult().reflect()).isEqualTo("哈尔滨今天有明确天气结果。");
         assertThat(run.steps()).extracting(AgentStep::stepName).contains("REFLECT_EVIDENCE");
@@ -307,6 +310,7 @@ class AgentRuntimeEngineTest {
     private static final class RecordingExecutor implements CapabilityExecutor {
 
         private final List<String> questions = new ArrayList<>();
+        private final List<List<String>> capabilities = new ArrayList<>();
 
         @Override
         public String toolset() {
@@ -321,14 +325,18 @@ class AgentRuntimeEngineTest {
         @Override
         public List<CapabilityResult> execute(AgentDecision decision, AssembledContext assembled, String requestId) {
             questions.add(assembled.question());
-            String payload = questions.size() == 1
-                    ? "All Images News Argentina Australia Brazil Canada"
-                    : "哈尔滨天气 18C 多云";
+            capabilities.add(decision.selectedCapabilities());
+            boolean weatherSelected = decision.selectedCapabilities().stream()
+                    .anyMatch("weather"::equalsIgnoreCase);
+            String capabilityId = weatherSelected ? "weather.current" : "web.search";
+            String payload = weatherSelected
+                    ? "城市: 哈尔滨\n来源: weather.com.cn\n温度: 18℃"
+                    : "All Images News Argentina Australia Brazil Canada";
             return List.of(new CapabilityResult(
-                    "web.search",
-                    "web",
+                    capabilityId,
+                    weatherSelected ? "weather" : "web",
                     "success",
-                    "联网搜索公开信息",
+                    weatherSelected ? "查询实时天气" : "联网搜索公开信息",
                     payload,
                     10L,
                     "read"

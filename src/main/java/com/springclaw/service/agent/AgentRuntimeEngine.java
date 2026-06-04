@@ -403,7 +403,12 @@ public class AgentRuntimeEngine {
             case "skill_task" -> "skill_direct";
             default -> "agent_tools";
         };
-        List<String> capabilities = capabilitiesForIntent(intent, previous == null ? List.of() : previous.selectedCapabilities());
+        List<String> capabilities = capabilitiesForIntent(
+                intent,
+                previous == null ? List.of() : previous.selectedCapabilities(),
+                reflection == null ? "" : reflection.preferredIntent(),
+                reflection == null ? "" : reflection.nextQuery()
+        );
         return new AgentDecision(
                 intent,
                 executionPath,
@@ -414,11 +419,14 @@ public class AgentRuntimeEngine {
         );
     }
 
-    private List<String> capabilitiesForIntent(String intent, List<String> previousCapabilities) {
+    private List<String> capabilitiesForIntent(String intent,
+                                               List<String> previousCapabilities,
+                                               String preferredIntent,
+                                               String nextQuery) {
         return switch (normalizeIntent(intent, "unknown")) {
             case "workspace_analysis" -> List.of("workspace-search", "workspace-review", "file", "skill-library");
             case "local_files" -> List.of("local-files", "file");
-            case "web_research" -> webCapabilitiesForRetry(previousCapabilities);
+            case "web_research" -> webCapabilitiesForRetry(previousCapabilities, preferredIntent, nextQuery);
             case "skill_task" -> previousCapabilities == null || previousCapabilities.isEmpty()
                     ? List.of("script-skill", "skill-library")
                     : previousCapabilities;
@@ -470,7 +478,13 @@ public class AgentRuntimeEngine {
                         && !looksLikeSearchEngineNoise(result));
     }
 
-    private List<String> webCapabilitiesForRetry(List<String> previousCapabilities) {
+    private List<String> webCapabilitiesForRetry(List<String> previousCapabilities,
+                                                 String preferredIntent,
+                                                 String nextQuery) {
+        List<String> inferred = realtimeCapabilities(preferredIntent + " " + nextQuery);
+        if (!inferred.isEmpty()) {
+            return inferred;
+        }
         if (previousCapabilities == null || previousCapabilities.isEmpty()) {
             return List.of("web");
         }
@@ -480,6 +494,21 @@ public class AgentRuntimeEngine {
                 .distinct()
                 .toList();
         return normalized.isEmpty() ? List.of("web") : normalized;
+    }
+
+    private List<String> realtimeCapabilities(String text) {
+        String lower = safe(text).toLowerCase(Locale.ROOT);
+        List<String> capabilities = new ArrayList<>();
+        if (containsAny(lower, "天气", "气温", "温度", "下雨", "weather", "forecast")) {
+            capabilities.add("weather");
+        }
+        if (containsAny(lower, "新闻", "news")) {
+            capabilities.add("news");
+        }
+        if (containsAny(lower, "汇率", "exchange", "usd", "cny", "eur", "jpy", "美元", "人民币", "欧元", "日元")) {
+            capabilities.add("exchange");
+        }
+        return List.copyOf(capabilities);
     }
 
     private boolean looksLikeSearchEngineNoise(List<CapabilityResult> results) {

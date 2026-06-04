@@ -108,7 +108,16 @@ class AgentDecisionRouterTest {
 
         assertThat(decision.intent()).isEqualTo("web_research");
         assertThat(decision.executionPath()).isEqualTo("agent_tools");
-        assertThat(decision.selectedCapabilities()).containsExactly("weather", "web");
+        assertThat(decision.selectedCapabilities()).containsExactly("weather");
+    }
+
+    @Test
+    void shouldRouteWeatherSynonymsToWeatherCapability() {
+        AgentDecisionRouter router = router();
+
+        assertThat(router.routeByRules(request("北京温度多少")).selectedCapabilities()).containsExactly("weather");
+        assertThat(router.routeByRules(request("明天上海下雨吗")).selectedCapabilities()).containsExactly("weather");
+        assertThat(router.routeByRules(request("Beijing weather")).selectedCapabilities()).containsExactly("weather");
     }
 
     private AgentDecisionRouter router() {

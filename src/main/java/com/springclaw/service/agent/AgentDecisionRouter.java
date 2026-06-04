@@ -8,8 +8,8 @@ import org.springframework.util.StringUtils;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.Set;
 import java.util.ArrayList;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -100,12 +100,12 @@ public class AgentDecisionRouter {
 
     private boolean looksLikeWeb(String lower) {
         return URL_PATTERN.matcher(lower).find()
-                || containsAny(lower, "网页", "官网", "联网", "搜索", "新闻", "天气", "气温", "汇率", "爬取", "抓取", "http://", "https://");
+                || containsAny(lower, "网页", "官网", "联网", "搜索", "新闻", "天气", "气温", "温度", "下雨", "weather", "forecast", "汇率", "爬取", "抓取", "http://", "https://");
     }
 
     private List<String> webCapabilities(String lower) {
         List<String> capabilities = new ArrayList<>();
-        if (containsAny(lower, "天气", "气温", "温度", "weather")) {
+        if (containsAny(lower, "天气", "气温", "温度", "下雨", "weather", "forecast")) {
             capabilities.add("weather");
         }
         if (containsAny(lower, "新闻", "news")) {
@@ -114,11 +114,7 @@ public class AgentDecisionRouter {
         if (containsAny(lower, "汇率", "exchange", "usd", "cny", "eur", "jpy", "美元", "人民币", "欧元", "日元")) {
             capabilities.add("exchange");
         }
-        if (capabilities.isEmpty()
-                || URL_PATTERN.matcher(lower).find()
-                || containsAny(lower, "网页", "官网", "联网", "搜索", "爬取", "抓取", "http://", "https://")) {
-            capabilities.add("web");
-        } else {
+        if (capabilities.isEmpty()) {
             capabilities.add("web");
         }
         return List.copyOf(capabilities);

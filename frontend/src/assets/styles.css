@@ -6070,6 +6070,7 @@ button.runtime-nav-item {
 }
 
 .runtime-inspector .run-facts-card,
+.runtime-inspector .quality-score-card,
 .runtime-inspector .current-step-card,
 .runtime-inspector .memory-summary-card,
 .runtime-inspector .tool-proposal-card,
@@ -6100,6 +6101,90 @@ button.runtime-nav-item {
 
 .runtime-inspector .context-row:nth-child(2) strong {
   color: #38d979;
+}
+
+.runtime-inspector .quality-score-card {
+  display: grid;
+  gap: 12px;
+}
+
+.quality-score-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.quality-score-head span {
+  color: #a6aebc;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.quality-score-head strong {
+  color: #f6c945;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.quality-score-head em {
+  color: #38d979;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.quality-score-card.is-weak .quality-score-head em {
+  color: #f6c945;
+}
+
+.quality-score-card.is-failed .quality-score-head em {
+  color: #ff7d74;
+}
+
+.quality-metric-list {
+  display: grid;
+  gap: 8px;
+}
+
+.quality-metric-row {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+}
+
+.quality-metric-row span,
+.quality-metric-row strong {
+  color: #c9d0dc;
+  font-size: 12px;
+}
+
+.quality-metric-row strong {
+  text-align: right;
+}
+
+.quality-meter {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.quality-meter i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #f6c945, #38d979);
+}
+
+.quality-score-card p {
+  margin: 0;
+  color: #aeb6c3;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .runtime-inspector .sub-panel-title {

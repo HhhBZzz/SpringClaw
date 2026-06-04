@@ -52,8 +52,30 @@ public class AgentRunTraceService {
                                      String status,
                                      String detail,
                                      long durationMs) {
+        return record(sessionKey, channel, userId, requestId, stepName, type, status, detail, durationMs, null);
+    }
+
+    public AgentRunTraceEvent record(String sessionKey,
+                                     String channel,
+                                     String userId,
+                                     String requestId,
+                                     String stepName,
+                                     String type,
+                                     String status,
+                                     String detail,
+                                     long durationMs,
+                                     AgentQualityScore quality) {
         AgentRunTraceEvent event = new AgentRunTraceEvent(
-                safe(requestId), safe(stepName), safe(type), safe(status), safe(detail), Math.max(0L, durationMs), System.currentTimeMillis()
+                safe(requestId),
+                safe(stepName),
+                safe(type),
+                safe(status),
+                safe(detail),
+                Math.max(0L, durationMs),
+                System.currentTimeMillis(),
+                quality == null ? null : quality.overallScore(),
+                quality == null ? "" : quality.level(),
+                serializeQuality(quality)
         );
         if (StringUtils.hasText(sessionKey) && StringUtils.hasText(requestId)) {
             try {
@@ -147,12 +169,15 @@ public class AgentRunTraceService {
         String runStatus = toRunStatus(event);
         jdbcTemplate.update("""
                         INSERT INTO agent_run
-                        (id, request_id, session_key, channel, user_id, response_mode, execution_mode, intent, status, started_at, finished_at, duration_ms, create_time, update_time, deleted)
-                        VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, 0)
+                        (id, request_id, session_key, channel, user_id, response_mode, execution_mode, intent, status, started_at, finished_at, duration_ms, quality_score, quality_level, evaluation_json, create_time, update_time, deleted)
+                        VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                         ON DUPLICATE KEY UPDATE
                           status = IF(VALUES(status) = 'RUNNING' AND status <> 'RUNNING', status, VALUES(status)),
                           finished_at = COALESCE(VALUES(finished_at), finished_at),
                           duration_ms = COALESCE(VALUES(duration_ms), duration_ms),
+                          quality_score = COALESCE(VALUES(quality_score), quality_score),
+                          quality_level = COALESCE(NULLIF(VALUES(quality_level), ''), quality_level),
+                          evaluation_json = COALESCE(NULLIF(VALUES(evaluation_json), ''), evaluation_json),
                           update_time = VALUES(update_time)
                         """,
                 IdWorker.getId(),
@@ -164,6 +189,9 @@ public class AgentRunTraceService {
                 now,
                 "RUNNING".equals(runStatus) ? null : now,
                 "RUNNING".equals(runStatus) ? null : event.durationMs(),
+                event.qualityScore(),
+                emptyToNull(event.qualityLevel()),
+                emptyToNull(event.evaluationJson()),
                 now,
                 now);
     }
@@ -173,8 +201,8 @@ public class AgentRunTraceService {
         LocalDateTime now = LocalDateTime.now();
         jdbcTemplate.update("""
                         INSERT INTO agent_run_step
-                        (id, request_id, sequence_no, step_name, step_type, status, detail_json, started_at, finished_at, duration_ms, create_time, update_time, deleted)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                        (id, request_id, sequence_no, step_name, step_type, status, detail_json, started_at, finished_at, duration_ms, quality_score, quality_level, create_time, update_time, deleted)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                         """,
                 IdWorker.getId(),
                 requestId,
@@ -186,6 +214,8 @@ public class AgentRunTraceService {
                 now,
                 "started".equalsIgnoreCase(event.status()) ? null : now,
                 event.durationMs(),
+                event.qualityScore(),
+                emptyToNull(event.qualityLevel()),
                 now,
                 now);
     }
@@ -248,5 +278,16 @@ public class AgentRunTraceService {
     private String truncate(String text, int maxLen) {
         String value = safe(text);
         return value.length() <= maxLen ? value : value.substring(0, maxLen);
+    }
+
+    private String serializeQuality(AgentQualityScore quality) {
+        if (quality == null) {
+            return "";
+        }
+        try {
+            return objectMapper.writeValueAsString(quality);
+        } catch (Exception ex) {
+            return "";
+        }
     }
 }

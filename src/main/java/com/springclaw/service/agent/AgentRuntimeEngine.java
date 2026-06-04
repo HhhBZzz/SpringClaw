@@ -37,6 +37,7 @@ public class AgentRuntimeEngine {
     private final ModelTransportGuardService modelTransportGuardService;
     private final ChatResponsePolicyService chatResponsePolicyService;
     private final ObjectMapper objectMapper;
+    private final AgentQualityEvaluator qualityEvaluator = new AgentQualityEvaluator();
 
     public AgentRuntimeEngine(CapabilityExecutorRegistry capabilityExecutorRegistry,
                               ModelCallExecutor modelCallExecutor,
@@ -102,9 +103,11 @@ public class AgentRuntimeEngine {
                     elapsed(executeStartedAt)));
 
             reflection = reflectEvidence(context, decision, plan, allResults, originalQuestion, currentQuestion, attempt);
-            verification = toVerification(reflection, allResults);
+            verification = toVerification(decision, plan, reflection, allResults, elapsed(startedAt));
             steps.add(new AgentStep("REFLECT_EVIDENCE", "verification", verification.status(),
                     renderReflectionSummary(reflection), 0L));
+            steps.add(new AgentStep("EVALUATE_RUN", "evaluation", verification.status(),
+                    renderQualitySummary(verification.quality()), 0L));
 
             if (reflection.sufficient()) {
                 sufficient = true;
@@ -117,7 +120,7 @@ public class AgentRuntimeEngine {
             String nextQuery = normalizeNextQuery(reflection.nextQuery(), currentQuestion);
             if (!StringUtils.hasText(nextQuery) || currentQuestion.equalsIgnoreCase(nextQuery)) {
                 reflection = ReflectionResult.degraded("反思要求重试，但没有给出有效的新查询。", reflection.preferredIntent());
-                verification = toVerification(reflection, allResults);
+                verification = toVerification(decision, plan, reflection, allResults, elapsed(startedAt));
                 finalDegraded = true;
                 break;
             }
@@ -335,21 +338,45 @@ public class AgentRuntimeEngine {
         return ReflectionResult.sufficient("能力执行完成，证据足够生成回答。", intentOf(decision));
     }
 
-    private VerificationResult toVerification(ReflectionResult reflection, List<CapabilityResult> allResults) {
+    private VerificationResult toVerification(AgentDecision decision,
+                                              CapabilityPlan plan,
+                                              ReflectionResult reflection,
+                                              List<CapabilityResult> allResults,
+                                              long elapsedMs) {
+        AgentQualityScore quality = qualityEvaluator.evaluate(decision, plan, reflection, allResults, elapsedMs);
         if (reflection == null) {
-            return new VerificationResult("failed", false, "证据反思未返回结果。");
+            return new VerificationResult("failed", false, "证据反思未返回结果。", quality);
         }
         if (reflection.sufficient()) {
             return new VerificationResult("success", true, StringUtils.hasText(reflection.problem())
                     ? reflection.problem()
-                    : "证据反思判断当前结果足够回答用户问题。");
+                    : "证据反思判断当前结果足够回答用户问题。", quality);
         }
         boolean allFailed = allResults != null && !allResults.isEmpty()
                 && allResults.stream().noneMatch(CapabilityResult::successful);
         String status = allResults == null || allResults.isEmpty() || allFailed ? "failed" : "insufficient";
         return new VerificationResult(status, false, StringUtils.hasText(reflection.problem())
                 ? reflection.problem()
-                : "证据反思判断当前结果仍不足。");
+                : "证据反思判断当前结果仍不足。", quality);
+    }
+
+    private String renderQualitySummary(AgentQualityScore quality) {
+        if (quality == null) {
+            return "quality=unknown";
+        }
+        return "overall=%d，level=%s，route=%d，tool=%d，evidence=%d，reflection=%d，answer=%d，cost=%d，risk=%d，reason=%s"
+                .formatted(
+                        quality.overallScore(),
+                        quality.level(),
+                        quality.routeScore(),
+                        quality.toolScore(),
+                        quality.evidenceScore(),
+                        quality.reflectionScore(),
+                        quality.answerScore(),
+                        quality.costScore(),
+                        quality.riskScore(),
+                        quality.reason()
+                );
     }
 
     private ChatExecutionResult buildFinalDegradedResult(ChatContext context,

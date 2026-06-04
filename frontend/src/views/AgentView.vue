@@ -20,7 +20,7 @@ import {
   switchRuntimeModelProvider
 } from '../services/api';
 import { useAuthStore } from '../stores/auth';
-import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary } from '../types';
+import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary } from '../types';
 
 const auth = useAuthStore();
 const SESSION_KEY = 'springclaw.frontend.session';
@@ -248,6 +248,43 @@ const runDurationLabel = computed(() => {
   return totalDuration > 0 ? formatMs(totalDuration) : '-';
 });
 
+const agentQuality = computed<AgentQualityScore | null>(() => {
+  if (verificationEvent.value?.quality) return verificationEvent.value.quality;
+  const traceQuality = [...traceEvents.value].reverse().find((event) => event.evaluation)?.evaluation;
+  if (traceQuality) return traceQuality;
+  if (typeof verificationEvent.value?.qualityScore === 'number') {
+    return qualityFromFlatEvent(verificationEvent.value.qualityScore, verificationEvent.value.qualityLevel || 'weak', verificationEvent.value.summary || '');
+  }
+  const flatTrace = [...traceEvents.value].reverse().find((event) => typeof event.qualityScore === 'number');
+  if (flatTrace && typeof flatTrace.qualityScore === 'number') {
+    return qualityFromFlatEvent(flatTrace.qualityScore, flatTrace.qualityLevel || 'weak', flatTrace.detail || '');
+  }
+  return null;
+});
+
+const qualityLevelLabel = computed(() => {
+  const level = agentQuality.value?.level || '';
+  if (level === 'strong') return 'Strong';
+  if (level === 'acceptable') return 'Acceptable';
+  if (level === 'weak') return 'Weak';
+  if (level === 'failed') return 'Failed';
+  return '-';
+});
+
+const qualityMetricRows = computed(() => {
+  const quality = agentQuality.value;
+  if (!quality) return [];
+  return [
+    { key: 'route', label: 'Route', score: quality.routeScore },
+    { key: 'tool', label: 'Tool', score: quality.toolScore },
+    { key: 'evidence', label: 'Evidence', score: quality.evidenceScore },
+    { key: 'reflect', label: 'Reflect', score: quality.reflectionScore },
+    { key: 'answer', label: 'Answer', score: quality.answerScore },
+    { key: 'cost', label: 'Cost', score: quality.costScore },
+    { key: 'risk', label: 'Risk', score: quality.riskScore }
+  ];
+});
+
 const visibleRunSteps = computed(() => {
   return traceEvents.value.map((event, index) => ({
     label: event.stepName || `Step ${index + 1}`,
@@ -308,6 +345,7 @@ const executionPayload = computed(() => {
     status: step?.status || 'pending',
     progress: step?.status === 'completed' ? 100 : step?.status === 'running' ? 68 : 0,
     verification: verificationEvent.value?.status || 'pending',
+    quality: agentQuality.value?.overallScore ?? null,
     model: modelStatus.value?.activeModel || modelStatusLabel.value,
     requestId: currentRequestId.value
   }, null, 2);
@@ -1216,6 +1254,28 @@ function formatClock(value: number) {
   return new Date(value).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+function qualityFromFlatEvent(score: number, level: string, reason: string): AgentQualityScore {
+  const normalized = clampScore(score);
+  return {
+    overallScore: normalized,
+    routeScore: normalized,
+    toolScore: normalized,
+    evidenceScore: normalized,
+    reflectionScore: normalized,
+    answerScore: normalized,
+    costScore: normalized,
+    riskScore: normalized,
+    level,
+    reason,
+    reasons: reason ? [reason] : []
+  };
+}
+
+function clampScore(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
 function normalizeStepStatus(status?: string): RunStepStatus {
   if (status === 'success') return 'completed';
   if (status === 'started') return 'running';
@@ -1713,6 +1773,24 @@ onUnmounted(() => {
                   <div class="context-row"><span>Start Time</span><strong>{{ taskCreatedLabel }}</strong></div>
                   <div class="context-row"><span>Duration</span><strong>{{ runDurationLabel }}</strong></div>
                   <div class="context-row"><span>Model</span><strong>{{ runtimeModelDisplay }}</strong></div>
+                  <div class="context-row"><span>Quality</span><strong>{{ agentQuality ? `${agentQuality.overallScore} · ${qualityLevelLabel}` : '-' }}</strong></div>
+                </div>
+                <div v-if="agentQuality" class="quality-score-card" :class="`is-${agentQuality.level}`">
+                  <div class="quality-score-head">
+                    <span>Agent Quality</span>
+                    <strong>{{ agentQuality.overallScore }}</strong>
+                    <em>{{ qualityLevelLabel }}</em>
+                  </div>
+                  <div class="quality-metric-list">
+                    <div v-for="metric in qualityMetricRows" :key="metric.key" class="quality-metric-row">
+                      <span>{{ metric.label }}</span>
+                      <div class="quality-meter" aria-hidden="true">
+                        <i :style="{ width: `${clampScore(metric.score)}%` }"></i>
+                      </div>
+                      <strong>{{ clampScore(metric.score) }}</strong>
+                    </div>
+                  </div>
+                  <p>{{ agentQuality.reason || verificationEvent?.summary || '等待评分原因。' }}</p>
                 </div>
                 <div class="panel-title-row sub-panel-title">
                   <div>

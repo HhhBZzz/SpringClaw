@@ -17,6 +17,9 @@ class DatabaseSchemaPolicyTest {
                 .contains("CREATE TABLE IF NOT EXISTS `agent_run`")
                 .contains("CREATE TABLE IF NOT EXISTS `agent_run_step`")
                 .contains("CREATE TABLE IF NOT EXISTS `tool_invocation`")
+                .contains("quality_score")
+                .contains("quality_level")
+                .contains("evaluation_json")
                 .contains("uk_agent_run_request")
                 .contains("idx_agent_run_user_time")
                 .contains("idx_agent_run_step_request_sequence")
@@ -29,6 +32,18 @@ class DatabaseSchemaPolicyTest {
                 .contains("idx_llm_usage_cache_create")
                 .contains("idx_scheduled_task_due_dispatch")
                 .contains("idx_scheduled_task_execution_task_recent");
+    }
+
+    @Test
+    void migrationShouldAddAgentQualityColumnsForExistingDatabases() throws Exception {
+        String migration = Files.readString(Path.of("src/main/resources/sql/migrations/2026-06-05-agent-quality-score.sql"));
+
+        assertThat(migration)
+                .contains("agent_run")
+                .contains("quality_score")
+                .contains("quality_level")
+                .contains("evaluation_json")
+                .contains("information_schema.columns");
     }
 
     @Test

@@ -48,6 +48,7 @@ public class RuntimeConsoleSchemaInitializer implements ApplicationRunner {
             for (String statement : splitSqlStatements(sql)) {
                 jdbcTemplate.execute(statement);
             }
+            ensureQualityColumns();
         } catch (Exception ex) {
             log.warn("Runtime Console trace schema initialization skipped, reason={}", ex.getMessage());
         }
@@ -81,5 +82,34 @@ public class RuntimeConsoleSchemaInitializer implements ApplicationRunner {
             statements.add(tail);
         }
         return List.copyOf(statements);
+    }
+
+    private void ensureQualityColumns() {
+        addColumnIfMissing("agent_run", "quality_score",
+                "ALTER TABLE agent_run ADD COLUMN quality_score INT NULL AFTER total_tokens");
+        addColumnIfMissing("agent_run", "quality_level",
+                "ALTER TABLE agent_run ADD COLUMN quality_level VARCHAR(32) NULL AFTER quality_score");
+        addColumnIfMissing("agent_run", "evaluation_json",
+                "ALTER TABLE agent_run ADD COLUMN evaluation_json TEXT NULL AFTER quality_level");
+        addColumnIfMissing("agent_run_step", "quality_score",
+                "ALTER TABLE agent_run_step ADD COLUMN quality_score INT NULL AFTER duration_ms");
+        addColumnIfMissing("agent_run_step", "quality_level",
+                "ALTER TABLE agent_run_step ADD COLUMN quality_level VARCHAR(32) NULL AFTER quality_score");
+    }
+
+    private void addColumnIfMissing(String tableName, String columnName, String alterSql) {
+        Integer count = jdbcTemplate.queryForObject("""
+                        SELECT COUNT(1)
+                        FROM information_schema.columns
+                        WHERE table_schema = DATABASE()
+                          AND table_name = ?
+                          AND column_name = ?
+                        """,
+                Integer.class,
+                tableName,
+                columnName);
+        if (count == null || count == 0) {
+            jdbcTemplate.execute(alterSql);
+        }
     }
 }

@@ -42,6 +42,9 @@ export interface AgentTraceEvent {
   detail?: string;
   durationMs?: number;
   timestamp?: number;
+  qualityScore?: number | null;
+  qualityLevel?: string;
+  evaluation?: AgentQualityScore | null;
 }
 
 export interface AgentCapabilityEvent {
@@ -60,6 +63,23 @@ export interface AgentVerificationEvent {
   status: string;
   sufficient: boolean;
   summary?: string;
+  qualityScore?: number;
+  qualityLevel?: string;
+  quality?: AgentQualityScore | null;
+}
+
+export interface AgentQualityScore {
+  overallScore: number;
+  routeScore: number;
+  toolScore: number;
+  evidenceScore: number;
+  reflectionScore: number;
+  answerScore: number;
+  costScore: number;
+  riskScore: number;
+  level: string;
+  reason?: string;
+  reasons?: string[];
 }
 
 export interface AgentDecisionEvent {

@@ -6,6 +6,7 @@ import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentActionProposal;
 import com.springclaw.service.agent.AgentActionProposalService;
 import com.springclaw.service.agent.AgentDecision;
+import com.springclaw.service.agent.AgentQualityScore;
 import com.springclaw.service.agent.AgentRun;
 import com.springclaw.service.agent.AgentRunTraceEvent;
 import com.springclaw.service.agent.AgentRunTraceService;
@@ -502,7 +503,8 @@ public class ChatServiceImpl implements ChatService {
                     "verification",
                     run.verification().status(),
                     run.verification().summary(),
-                    0L);
+                    0L,
+                    run.verification().quality());
         }
     }
 
@@ -1092,14 +1094,47 @@ public class ChatServiceImpl implements ChatService {
             return;
         }
         String payload = """
-                {"requestId":"%s","status":"%s","sufficient":%s,"summary":"%s"}
+                {"requestId":"%s","status":"%s","sufficient":%s,"summary":"%s","qualityScore":%d,"qualityLevel":"%s","quality":%s}
                 """.formatted(
                 jsonEscape(requestId),
                 jsonEscape(verification.status()),
                 verification.sufficient(),
-                jsonEscape(verification.summary())
+                jsonEscape(verification.summary()),
+                verification.quality().overallScore(),
+                jsonEscape(verification.quality().level()),
+                renderQualityObject(verification.quality())
         ).trim();
         sendEvent(emitter, "verification", payload);
+    }
+
+    private String renderQualityObject(AgentQualityScore quality) {
+        if (quality == null) {
+            return "null";
+        }
+        return """
+                {"overallScore":%d,"routeScore":%d,"toolScore":%d,"evidenceScore":%d,"reflectionScore":%d,"answerScore":%d,"costScore":%d,"riskScore":%d,"level":"%s","reason":"%s","reasons":%s}
+                """.formatted(
+                quality.overallScore(),
+                quality.routeScore(),
+                quality.toolScore(),
+                quality.evidenceScore(),
+                quality.reflectionScore(),
+                quality.answerScore(),
+                quality.costScore(),
+                quality.riskScore(),
+                jsonEscape(quality.level()),
+                jsonEscape(quality.reason()),
+                renderJsonArray(quality.reasons())
+        ).trim();
+    }
+
+    private String renderJsonArray(java.util.List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return "[]";
+        }
+        return values.stream()
+                .map(value -> "\"" + jsonEscape(value) + "\"")
+                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
     }
 
     private void sendTrace(SseEmitter emitter,
@@ -1129,12 +1164,26 @@ public class ChatServiceImpl implements ChatService {
                            String status,
                            String detail,
                            long durationMs) {
+        sendTrace(emitter, context, stepName, type, status, detail, durationMs, null);
+    }
+
+    private void sendTrace(SseEmitter emitter,
+                           ChatContext context,
+                           String stepName,
+                           String type,
+                           String status,
+                           String detail,
+                           long durationMs,
+                           AgentQualityScore quality) {
         if (context == null) {
             sendTrace(emitter, "", stepName, type, status, detail, durationMs);
             return;
         }
         AgentRunTraceEvent event = agentRunTraceService == null
-                ? new AgentRunTraceEvent(context.requestId(), stepName, type, status, safe(detail), Math.max(0L, durationMs), System.currentTimeMillis())
+                ? new AgentRunTraceEvent(context.requestId(), stepName, type, status, safe(detail), Math.max(0L, durationMs), System.currentTimeMillis(),
+                quality == null ? null : quality.overallScore(),
+                quality == null ? "" : quality.level(),
+                quality == null ? "" : renderQualityObject(quality))
                 : agentRunTraceService.record(
                 context.session().getSessionKey(),
                 context.channel(),
@@ -1144,14 +1193,15 @@ public class ChatServiceImpl implements ChatService {
                 type,
                 status,
                 detail,
-                durationMs
+                durationMs,
+                quality
         );
         sendEvent(emitter, "trace", renderTracePayload(event));
     }
 
     private String renderTracePayload(AgentRunTraceEvent event) {
         return """
-                {"requestId":"%s","stepName":"%s","type":"%s","status":"%s","detail":"%s","durationMs":%d,"timestamp":%d}
+                {"requestId":"%s","stepName":"%s","type":"%s","status":"%s","detail":"%s","durationMs":%d,"timestamp":%d,"qualityScore":%s,"qualityLevel":"%s","evaluation":%s}
                 """.formatted(
                 jsonEscape(event.requestId()),
                 jsonEscape(event.stepName()),
@@ -1159,7 +1209,10 @@ public class ChatServiceImpl implements ChatService {
                 jsonEscape(event.status()),
                 jsonEscape(event.detail()),
                 Math.max(0L, event.durationMs()),
-                event.timestamp()
+                event.timestamp(),
+                event.qualityScore() == null ? "null" : String.valueOf(event.qualityScore()),
+                jsonEscape(event.qualityLevel()),
+                StringUtils.hasText(event.evaluationJson()) ? event.evaluationJson() : "null"
         ).trim();
     }
 

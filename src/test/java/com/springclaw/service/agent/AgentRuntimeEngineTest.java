@@ -65,6 +65,86 @@ class AgentRuntimeEngineTest {
     }
 
     @Test
+    void shouldAttachQualityScoreWhenEvidenceIsSufficient() {
+        CapabilityExecutorRegistry registry = mock(CapabilityExecutorRegistry.class);
+        ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
+        ConversationAdvisorSupport conversationAdvisorSupport = mock(ConversationAdvisorSupport.class);
+        ModelTransportGuardService modelTransportGuardService = mock(ModelTransportGuardService.class);
+        AgentRuntimeEngine engine = new AgentRuntimeEngine(
+                registry,
+                modelCallExecutor,
+                conversationAdvisorSupport,
+                modelTransportGuardService,
+                new ChatResponsePolicyService("")
+        );
+        AgentDecision decision = new AgentDecision("web_research", "agent_tools", List.of("weather"), "read", false, "天气查询");
+        CapabilityPlan plan = new CapabilityPlan("web_research", "agent_tools", List.of("weather"), List.of("weather"), "read", false, "天气查询");
+        List<CapabilityResult> results = List.of(new CapabilityResult(
+                "weather.current",
+                "weather",
+                "success",
+                "查询实时天气",
+                "城市: 北京\n来源: open-meteo\n温度: 18℃\n湿度: 75%",
+                42L,
+                "read"
+        ));
+        AiProviderService.ActiveChatClient activeClient = activeClient(false);
+        when(registry.plan(decision)).thenReturn(plan);
+        when(registry.execute(eq(decision), any(AssembledContext.class), eq("req-1"))).thenReturn(results);
+        when(modelTransportGuardService.isModelCallEnabled(activeClient)).thenReturn(false);
+        when(modelTransportGuardService.disabledModelReason(activeClient)).thenReturn("未配置可用模型提供方");
+
+        AgentRun run = engine.run(context(decision, activeClient, "今天北京天气怎样"));
+
+        assertThat(run.verification().sufficient()).isTrue();
+        assertThat(run.verification().quality().overallScore()).isGreaterThanOrEqualTo(80);
+        assertThat(run.verification().quality().toolScore()).isGreaterThanOrEqualTo(90);
+        assertThat(run.verification().quality().evidenceScore()).isGreaterThanOrEqualTo(85);
+        assertThat(run.verification().quality().level()).isIn("strong", "acceptable");
+        assertThat(run.steps()).extracting(AgentStep::stepName).contains("EVALUATE_RUN");
+        verifyNoInteractions(modelCallExecutor);
+    }
+
+    @Test
+    void shouldKeepQualityLowWhenWeatherQuestionNeverUsesWeatherTool() {
+        CapabilityExecutorRegistry registry = mock(CapabilityExecutorRegistry.class);
+        ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
+        ConversationAdvisorSupport conversationAdvisorSupport = mock(ConversationAdvisorSupport.class);
+        ModelTransportGuardService modelTransportGuardService = mock(ModelTransportGuardService.class);
+        AgentRuntimeEngine engine = new AgentRuntimeEngine(
+                registry,
+                modelCallExecutor,
+                conversationAdvisorSupport,
+                modelTransportGuardService,
+                new ChatResponsePolicyService("")
+        );
+        AgentDecision decision = new AgentDecision("web_research", "agent_tools", List.of("weather"), "read", false, "天气查询");
+        CapabilityPlan plan = new CapabilityPlan("web_research", "agent_tools", List.of("weather"), List.of("web"), "read", false, "天气查询");
+        List<CapabilityResult> results = List.of(new CapabilityResult(
+                "web.search",
+                "web",
+                "success",
+                "联网搜索公开信息",
+                "北京天气 - 搜索结果来自 weather.com.cn，但摘要被截断。",
+                120L,
+                "read"
+        ));
+        AiProviderService.ActiveChatClient activeClient = activeClient(true);
+        when(registry.plan(decision)).thenReturn(plan);
+        when(registry.execute(eq(decision), any(AssembledContext.class), eq("req-1"))).thenReturn(results);
+        when(modelTransportGuardService.isModelCallEnabled(activeClient)).thenReturn(true);
+
+        AgentRun run = engine.run(context(decision, activeClient, "今天北京天气怎样"));
+
+        assertThat(run.verification().sufficient()).isFalse();
+        assertThat(run.verification().quality().overallScore()).isLessThan(60);
+        assertThat(run.verification().quality().toolScore()).isLessThan(70);
+        assertThat(run.verification().quality().evidenceScore()).isLessThan(60);
+        assertThat(run.verification().quality().reasons()).contains("weather 工具未成功执行");
+        verifyNoInteractions(modelCallExecutor);
+    }
+
+    @Test
     void shouldNotAskModelToPolishAnswerWhenEvidenceVerificationFails() {
         CapabilityExecutorRegistry registry = mock(CapabilityExecutorRegistry.class);
         ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);

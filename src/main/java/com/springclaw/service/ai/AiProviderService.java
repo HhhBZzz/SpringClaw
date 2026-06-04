@@ -219,6 +219,24 @@ public class AiProviderService {
                 .toList();
     }
 
+    public List<ProviderModelTarget> listProviderFailoverTargets(String failedProviderId) {
+        String normalizedFailedProvider = normalizeProviderId(failedProviderId);
+        List<ProviderModelTarget> targets = new ArrayList<>();
+        for (AiProviderRuntime runtime : providers.values()) {
+            if (runtime == null
+                    || !runtime.available()
+                    || runtime.providerId().equals(normalizedFailedProvider)) {
+                continue;
+            }
+            for (String model : chatCompatibleModels(runtime)) {
+                if (StringUtils.hasText(model)) {
+                    targets.add(new ProviderModelTarget(runtime.providerId(), model));
+                }
+            }
+        }
+        return List.copyOf(targets);
+    }
+
     public String findProviderByModelHint(String modelHint, String preferredProviderId) {
         String preferred = normalizeProviderId(preferredProviderId);
         String current = activeProviderId.get();
@@ -499,6 +517,9 @@ public class AiProviderService {
     }
 
     record RequestPaths(String completionsPath, String embeddingsPath) {
+    }
+
+    public record ProviderModelTarget(String providerId, String model) {
     }
 
     private record StartupModelChoice(String model, boolean repaired) {

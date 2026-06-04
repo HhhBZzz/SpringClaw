@@ -90,17 +90,28 @@ public class ModelCallExecutor {
                                                    boolean allowFailover,
                                                    ModelOperation<T> operation) throws Exception {
         List<String> attemptedModels = new ArrayList<>();
-        AiProviderService.ActiveChatClient currentClient = resolveInitialClient(activeClient, source, attemptedModels);
-        boolean failedOver = !sameModel(activeClient.model(), currentClient.model());
+        List<String> attemptedClientKeys = new ArrayList<>();
+        AiProviderService.ActiveChatClient currentClient = resolveInitialClient(activeClient, source, attemptedClientKeys);
+        boolean failedOver = !sameClient(activeClient, currentClient);
         Exception lastFailure = null;
         int failoversUsed = failedOver ? 1 : 0;
         int sameModelRetriesUsed = 0;
 
         while (currentClient != null) {
-            attemptedModels.add(currentClient.model());
+            attemptedModels.add(displayModel(currentClient));
+            attemptedClientKeys.add(clientKey(currentClient.providerId(), currentClient.model()));
+            long startedAt = System.currentTimeMillis();
             try {
+                T value = operation.execute(currentClient);
+                modelTransportGuardService.markSuccess(currentClient.providerId(), currentClient.model());
+                log.info("模型调用成功: provider={}, model={}, source={}, elapsedMs={}, failedOver={}",
+                        currentClient.providerId(),
+                        currentClient.model(),
+                        source,
+                        System.currentTimeMillis() - startedAt,
+                        failedOver);
                 return new ModelCallResult<>(
-                        operation.execute(currentClient),
+                        value,
                         currentClient,
                         List.copyOf(attemptedModels),
                         failedOver
@@ -131,15 +142,15 @@ public class ModelCallExecutor {
                 AiProviderService.ActiveChatClient nextClient = resolveNextClient(
                         currentClient,
                         source,
-                        attemptedModels
+                        attemptedClientKeys
                 );
                 if (nextClient == null) {
                     break;
                 }
                 failedOver = true;
                 failoversUsed++;
-                log.warn("模型调用失败，尝试同 provider 模型切换: provider={}, from={}, to={}, source={}",
-                        currentClient.providerId(), currentClient.model(), nextClient.model(), source);
+                log.warn("模型调用失败，尝试备用模型: from={}:{}, to={}:{}, source={}",
+                        currentClient.providerId(), currentClient.model(), nextClient.providerId(), nextClient.model(), source);
                 currentClient = nextClient;
                 sameModelRetriesUsed = 0;
             }
@@ -164,14 +175,14 @@ public class ModelCallExecutor {
 
     private AiProviderService.ActiveChatClient resolveInitialClient(AiProviderService.ActiveChatClient activeClient,
                                                                     String source,
-                                                                    List<String> attemptedModels) {
+                                                                    List<String> attemptedClientKeys) {
         if (!modelTransportGuardService.isModelCoolingDown(activeClient.providerId(), activeClient.model())) {
             return activeClient;
         }
-        AiProviderService.ActiveChatClient nextClient = resolveNextClient(activeClient, source, attemptedModels);
+        AiProviderService.ActiveChatClient nextClient = resolveNextClient(activeClient, source, attemptedClientKeys);
         if (nextClient != null) {
-            log.info("当前模型仍在冷却，直接切换到同 provider 备用模型: provider={}, from={}, to={}, source={}",
-                    activeClient.providerId(), activeClient.model(), nextClient.model(), source);
+            log.info("当前模型仍在冷却，直接切换到备用模型: from={}:{}, to={}:{}, source={}",
+                    activeClient.providerId(), activeClient.model(), nextClient.providerId(), nextClient.model(), source);
             return nextClient;
         }
         return activeClient;
@@ -179,14 +190,26 @@ public class ModelCallExecutor {
 
     private AiProviderService.ActiveChatClient resolveNextClient(AiProviderService.ActiveChatClient currentClient,
                                                                  String source,
-                                                                 List<String> attemptedModels) {
+                                                                 List<String> attemptedClientKeys) {
         for (String candidateModel : aiProviderService.listFailoverModels(currentClient.providerId(), currentClient.model())) {
+            String candidateKey = clientKey(currentClient.providerId(), candidateModel);
             if (!StringUtils.hasText(candidateModel)
-                    || attemptedModels.contains(candidateModel)
+                    || attemptedClientKeys.contains(candidateKey)
                     || modelTransportGuardService.isModelCoolingDown(currentClient.providerId(), candidateModel)) {
                 continue;
             }
             return aiProviderService.activateModel(currentClient.providerId(), candidateModel, source);
+        }
+        for (AiProviderService.ProviderModelTarget target : aiProviderService.listProviderFailoverTargets(currentClient.providerId())) {
+            String candidateKey = clientKey(target.providerId(), target.model());
+            if (!StringUtils.hasText(target.providerId())
+                    || !StringUtils.hasText(target.model())
+                    || attemptedClientKeys.contains(candidateKey)
+                    || modelTransportGuardService.isProviderCoolingDown(target.providerId())
+                    || modelTransportGuardService.isModelCoolingDown(target.providerId(), target.model())) {
+                continue;
+            }
+            return aiProviderService.activateModel(target.providerId(), target.model(), source);
         }
         return null;
     }
@@ -195,6 +218,26 @@ public class ModelCallExecutor {
         return StringUtils.hasText(left)
                 && StringUtils.hasText(right)
                 && left.trim().equalsIgnoreCase(right.trim());
+    }
+
+    private boolean sameClient(AiProviderService.ActiveChatClient left,
+                               AiProviderService.ActiveChatClient right) {
+        return left != null
+                && right != null
+                && sameModel(left.providerId(), right.providerId())
+                && sameModel(left.model(), right.model());
+    }
+
+    private String clientKey(String providerId, String model) {
+        return safe(providerId).trim().toLowerCase() + "::" + safe(model).trim().toLowerCase();
+    }
+
+    private String displayModel(AiProviderService.ActiveChatClient client) {
+        return client == null ? "" : client.providerId() + ":" + client.model();
+    }
+
+    private String safe(String text) {
+        return text == null ? "" : text;
     }
 
     @FunctionalInterface

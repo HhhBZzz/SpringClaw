@@ -24,6 +24,20 @@ triggerKeywords:
   - 提取正文
   - 打开链接
   - 总结网页
+highConfidenceRequiresUrl: true
+highConfidenceKeywords:
+  - 抓取
+  - 爬取
+  - 读取
+  - 打开
+  - 提取
+  - 总结
+  - 网页
+  - 页面
+  - 链接
+  - 网址
+  - url
+  - 正文
 triggerExamples:
   - 读取这个网页 https://example.com
   - 帮我抓取这个链接的正文

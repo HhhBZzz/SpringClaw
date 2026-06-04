@@ -24,6 +24,21 @@ triggerKeywords:
   - 定位代码
   - 看看类
   - 看看文件
+  - 项目结构
+  - 是否存在
+  - 有没有
+highConfidenceKeywords:
+  - 项目结构
+  - 工程结构
+  - 目录结构
+  - 代码结构
+  - 项目架构
+  - 找实现
+  - 定位代码
+  - 怎么实现
+  - 实现在哪
+  - 是否存在
+  - 有没有
 triggerExamples:
   - 用代码分析分析 ChatServiceImpl
   - 帮我找这个功能在哪实现

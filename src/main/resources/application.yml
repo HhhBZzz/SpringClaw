@@ -85,8 +85,8 @@ springclaw:
   ai:
     active-provider: ${SPRINGCLAW_AI_ACTIVE_PROVIDER:${OPENCLAW_AI_ACTIVE_PROVIDER:primary}}
     request-timeout-seconds: ${SPRINGCLAW_AI_REQUEST_TIMEOUT_SECONDS:60}
-    max-failover-attempts: ${SPRINGCLAW_AI_MAX_FAILOVER_ATTEMPTS:1}
-    same-model-retry-attempts: ${SPRINGCLAW_AI_SAME_MODEL_RETRY_ATTEMPTS:1}
+    max-failover-attempts: ${SPRINGCLAW_AI_MAX_FAILOVER_ATTEMPTS:2}
+    same-model-retry-attempts: ${SPRINGCLAW_AI_SAME_MODEL_RETRY_ATTEMPTS:0}
     state:
       redis-enabled: ${SPRINGCLAW_AI_STATE_REDIS_ENABLED:true}
       redis-key: ${SPRINGCLAW_AI_STATE_REDIS_KEY:springclaw:ai:active-provider}
@@ -132,6 +132,9 @@ springclaw:
         models:
           - deepseek-v4-pro
         temperature: ${SPRINGCLAW_DEEPSEEK_TEMPERATURE:0.2}
+  agent:
+    decision:
+      model-router-enabled: ${SPRINGCLAW_AGENT_DECISION_MODEL_ROUTER_ENABLED:true}
   soul:
     path: ${SOUL_PATH:${user.dir}/SOUL.md}
   embedding:
@@ -174,6 +177,7 @@ springclaw:
     default-role: USER
     anonymous-role: USER
     bootstrap-first-user-admin: true
+    admin-usernames: ${SPRINGCLAW_ADMIN_USERNAMES:}
     token-ttl-hours: 24
     token-prefix: "springclaw:auth:token:"
     cookie:
@@ -187,9 +191,11 @@ springclaw:
     agent-mode: ${SPRINGCLAW_CHAT_AGENT_MODE:simplified}
     memory-window-size: ${SPRINGCLAW_CHAT_MEMORY_WINDOW_SIZE:8}
     local-fallback-enabled: true
-    local-fallback-first: true
+    local-fallback-first: false
     max-steps: 3
     model-transport-cooldown-seconds: ${SPRINGCLAW_MODEL_TRANSPORT_COOLDOWN_SECONDS:30}
+    provider-failure-cooldown-threshold: ${SPRINGCLAW_PROVIDER_FAILURE_COOLDOWN_THRESHOLD:2}
+    basic-streaming-enabled: ${SPRINGCLAW_CHAT_BASIC_STREAMING_ENABLED:true}
     model-led-streaming-enabled: ${SPRINGCLAW_CHAT_MODEL_LED_STREAMING_ENABLED:false}
     spring-ai-chat-memory-enabled: ${SPRINGCLAW_CHAT_SPRING_AI_CHAT_MEMORY_ENABLED:false}
     routing:

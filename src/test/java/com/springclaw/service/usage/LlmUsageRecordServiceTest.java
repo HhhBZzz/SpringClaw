@@ -82,6 +82,38 @@ class LlmUsageRecordServiceTest {
         assertThat(service.listRecent(10).get(0).getUsageKnown()).isEqualTo(0);
     }
 
+    @Test
+    void shouldAggregatePromptCacheUsageWhenNativeProviderUsageExists() {
+        LlmUsageRecordServiceImpl service = new LlmUsageRecordServiceImpl(false);
+
+        service.recordChatResponse(
+                new LlmUsageRecordService.ChatResponseContext(
+                        "req-cache",
+                        "s-cache",
+                        "api",
+                        "u-cache",
+                        "deepseek",
+                        "deepseek-v4-pro",
+                        "agent-runtime-summary"
+                ),
+                buildResponse("deepseek-v4-pro", new NativeUsage(200, 40, Map.of(
+                        "prompt_cache_hit_tokens", 160,
+                        "prompt_cache_miss_tokens", 40
+                )))
+        );
+
+        Map<String, Object> summary = service.summary(20);
+        assertThat(summary.get("totalPromptCacheHitTokens")).isEqualTo(160L);
+        assertThat(summary.get("totalPromptCacheMissTokens")).isEqualTo(40L);
+        assertThat(summary.get("promptCacheKnownCount")).isEqualTo(1L);
+        assertThat(summary.get("promptCacheHitRate")).isEqualTo(0.8d);
+
+        var recent = service.listRecent(10).get(0);
+        assertThat(recent.getPromptCacheHitTokens()).isEqualTo(160);
+        assertThat(recent.getPromptCacheMissTokens()).isEqualTo(40);
+        assertThat(recent.getRawUsageJson()).contains("prompt_cache_hit_tokens");
+    }
+
     private ChatResponse buildResponse(String model, int promptTokens, int completionTokens, int totalTokens) {
         return new ChatResponse(
                 List.of(new Generation(new AssistantMessage("ok"))),
@@ -90,5 +122,34 @@ class LlmUsageRecordServiceTest {
                         .usage(new DefaultUsage(promptTokens, completionTokens, totalTokens))
                         .build()
         );
+    }
+
+    private ChatResponse buildResponse(String model, org.springframework.ai.chat.metadata.Usage usage) {
+        return new ChatResponse(
+                List.of(new Generation(new AssistantMessage("ok"))),
+                ChatResponseMetadata.builder()
+                        .model(model)
+                        .usage(usage)
+                        .build()
+        );
+    }
+
+    private record NativeUsage(Integer promptTokens, Integer completionTokens, Object nativeUsage)
+            implements org.springframework.ai.chat.metadata.Usage {
+
+        @Override
+        public Integer getPromptTokens() {
+            return promptTokens;
+        }
+
+        @Override
+        public Integer getCompletionTokens() {
+            return completionTokens;
+        }
+
+        @Override
+        public Object getNativeUsage() {
+            return nativeUsage;
+        }
     }
 }

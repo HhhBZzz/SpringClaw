@@ -1,6 +1,7 @@
 package com.springclaw.tool.runtime;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.skill.SkillService;
 import com.springclaw.service.skill.script.ScriptSkillCatalogService;
 import com.springclaw.service.files.LocalFilesystemService;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
 
 class ToolOrchestratorTest {
@@ -108,6 +110,52 @@ class ToolOrchestratorTest {
         Assertions.assertTrue(Arrays.asList(tools).contains(fixture.skillLibraryToolPack));
     }
 
+    @Test
+    void shouldSupportPluggableProviderWithoutChangingConstructorShape() {
+        Object customTool = new Object();
+        AgentToolProvider provider = new AgentToolProvider() {
+            @Override
+            public String id() {
+                return "custom";
+            }
+
+            @Override
+            public Set<String> requiredToolPacks() {
+                return Set.of("custom");
+            }
+
+            @Override
+            public Object tool() {
+                return customTool;
+            }
+
+            @Override
+            public boolean matches(String text) {
+                return text != null && text.contains("custom-trigger");
+            }
+        };
+        ToolOrchestrator orchestrator = new ToolOrchestrator(new CustomSkillService(), List.of(provider));
+
+        Object[] tools = orchestrator.selectTools("api", "u1", "please custom-trigger now", "");
+
+        Assertions.assertTrue(Arrays.asList(tools).contains(customTool));
+    }
+
+    @Test
+    void shouldFilterAgentToolsByDecisionCapabilities() {
+        ToolFixture fixture = buildFixture();
+
+        Object[] localTools = fixture.orchestrator.selectAgentTools(
+                "api",
+                "u1",
+                new AgentDecision("local_files", "agent_tools", List.of("local-files", "file"), "read", false, "local")
+        );
+
+        Assertions.assertTrue(Arrays.asList(localTools).contains(fixture.localFilesystemToolPack));
+        Assertions.assertTrue(Arrays.asList(localTools).contains(fixture.fileToolPack));
+        Assertions.assertFalse(Arrays.asList(localTools).contains(fixture.workspaceReviewToolPack));
+    }
+
     private ToolFixture buildFixture() {
         FileToolPack fileToolPack = new FileToolPack(tempDir.toString(), 12000);
         LocalFilesystemToolPack localFilesystemToolPack = new LocalFilesystemToolPack(
@@ -181,6 +229,24 @@ class ToolOrchestratorTest {
         @Override
         public Set<String> resolveAllowedToolPacks(String channel, String userId) {
             return Set.of("system", "file", "workspace", "web", "weather", "exchange", "news", "script");
+        }
+
+        @Override
+        public String describeAvailableSkills(String channel, String userId) {
+            return "";
+        }
+
+        @Override
+        public String describeCoreSkills(String channel, String userId) {
+            return "";
+        }
+    }
+
+    private static class CustomSkillService implements SkillService {
+
+        @Override
+        public Set<String> resolveAllowedToolPacks(String channel, String userId) {
+            return Set.of("custom");
         }
 
         @Override

@@ -8,6 +8,10 @@ import com.springclaw.dto.chat.ChatHistoryMessage;
 import com.springclaw.dto.chat.ChatHistoryResponse;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
+import com.springclaw.service.agent.AgentActionProposalResult;
+import com.springclaw.service.agent.AgentActionProposalService;
+import com.springclaw.service.agent.AgentRunTraceEvent;
+import com.springclaw.service.agent.AgentRunTraceService;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.chat.ChatService;
 import com.springclaw.service.chat.async.AsyncChatRequestMessage;
@@ -18,6 +22,7 @@ import com.springclaw.service.event.MessageEventService;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -52,17 +57,32 @@ public class ChatController {
     private final AsyncChatResultStore asyncChatResultStore;
     private final MessageEventService messageEventService;
     private final AiProviderService aiProviderService;
+    private final AgentActionProposalService actionProposalService;
+    private final AgentRunTraceService agentRunTraceService;
 
+    @Autowired
     public ChatController(ChatService chatService,
                           ChatMessageProducer chatMessageProducer,
                           AsyncChatResultStore asyncChatResultStore,
                           MessageEventService messageEventService,
-                          AiProviderService aiProviderService) {
+                          AiProviderService aiProviderService,
+                          AgentActionProposalService actionProposalService,
+                          AgentRunTraceService agentRunTraceService) {
         this.chatService = chatService;
         this.chatMessageProducer = chatMessageProducer;
         this.asyncChatResultStore = asyncChatResultStore;
         this.messageEventService = messageEventService;
         this.aiProviderService = aiProviderService;
+        this.actionProposalService = actionProposalService;
+        this.agentRunTraceService = agentRunTraceService;
+    }
+
+    ChatController(ChatService chatService,
+                   ChatMessageProducer chatMessageProducer,
+                   AsyncChatResultStore asyncChatResultStore,
+                   MessageEventService messageEventService,
+                   AiProviderService aiProviderService) {
+        this(chatService, chatMessageProducer, asyncChatResultStore, messageEventService, aiProviderService, null, null);
     }
 
     @PostMapping("/send")
@@ -151,6 +171,27 @@ public class ChatController {
         return ApiResponse.success(payload);
     }
 
+    @PostMapping("/action-proposals/{proposalId}/confirm")
+    public ApiResponse<AgentActionProposalResult> confirmActionProposal(@PathVariable String proposalId,
+                                                                        @RequestBody(required = false) ActionProposalConfirmRequest request) {
+        RequestUserContext context = requireUserContext();
+        String currentSessionKey = request == null ? "" : request.currentSessionKey();
+        return ApiResponse.success(actionProposalService.confirm(proposalId, context.username(), context.roleCode(), currentSessionKey));
+    }
+
+    @PostMapping("/action-proposals/{proposalId}/cancel")
+    public ApiResponse<AgentActionProposalResult> cancelActionProposal(@PathVariable String proposalId) {
+        RequestUserContext context = requireUserContext();
+        return ApiResponse.success(actionProposalService.cancel(proposalId, context.username(), context.roleCode()));
+    }
+
+    @GetMapping("/runs/{requestId}/trace")
+    public ApiResponse<java.util.List<AgentRunTraceEvent>> runTrace(@PathVariable String requestId,
+                                                                    @RequestParam(defaultValue = "200") int limit) {
+        RequestUserContext context = requireUserContext();
+        return ApiResponse.success(agentRunTraceService.listTrace(requestId, context.username(), limit));
+    }
+
     private ChatRequest normalizeRequest(ChatRequest request) {
         RequestUserContext context = RequestUserContextHolder.get();
         String effectiveUserId = context == null ? request.userId() : context.username();
@@ -168,6 +209,14 @@ public class ChatController {
                 request.channel(),
                 request.responseMode()
         );
+    }
+
+    private RequestUserContext requireUserContext() {
+        RequestUserContext context = RequestUserContextHolder.get();
+        if (context == null || !StringUtils.hasText(context.username())) {
+            throw new BusinessException(40101, "请先登录");
+        }
+        return context;
     }
 
     private boolean isRenderableChatMessage(MessageEvent event) {
@@ -200,5 +249,8 @@ public class ChatController {
             return text.substring("[REFLECT]".length()).trim();
         }
         return text;
+    }
+
+    public record ActionProposalConfirmRequest(String currentSessionKey) {
     }
 }

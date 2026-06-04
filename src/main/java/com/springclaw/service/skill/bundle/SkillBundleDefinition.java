@@ -25,6 +25,8 @@ public record SkillBundleDefinition(String skillId,
                                     boolean enabled,
                                     int priority,
                                     boolean agentVisible,
+                                    boolean highConfidenceRequiresUrl,
+                                    List<String> highConfidenceKeywords,
                                     String category,
                                     String tier,
                                     String inputHint,
@@ -49,7 +51,9 @@ public record SkillBundleDefinition(String skillId,
                 executorRef,
                 enabled,
                 priority,
-                agentVisible
+                agentVisible,
+                highConfidenceRequiresUrl,
+                highConfidenceKeywords
         );
     }
 }

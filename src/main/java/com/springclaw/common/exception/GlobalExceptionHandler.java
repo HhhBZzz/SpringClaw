@@ -4,11 +4,14 @@ import com.springclaw.common.response.ApiResponse;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
-import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 全局异常处理器。
@@ -47,6 +50,16 @@ public class GlobalExceptionHandler {
                 ? ""
                 : "，支持方法: " + ex.getSupportedHttpMethods();
         return ApiResponse.fail(405, "请求方法不支持: " + ex.getMethod() + supported);
+    }
+
+    /**
+     * SSE 流式连接断开是正常现象（客户端关闭/刷新页面），不应输出 ERROR 日志。
+     * 因为响应已是 text/event-stream，无法再写入 JSON 错误信息，直接返回空响应。
+     */
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public ResponseEntity<Void> handleAsyncNotUsable(AsyncRequestNotUsableException ex) {
+        log.debug("SSE 连接已关闭: {}", ex.getMessage());
+        return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM).build();
     }
 
     @ExceptionHandler(Exception.class)

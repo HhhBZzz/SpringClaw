@@ -156,6 +156,13 @@ public class ChatRoutingPolicyService {
         if (!StringUtils.hasText(question)) {
             return false;
         }
+        if (skillRegistryService.matchHighConfidenceDefinition(question)
+                .filter(definition -> definition.matchesAllowedToolPacks(allowedToolPacks))
+                .filter(definition -> definition.enabled()
+                        && "opar".equalsIgnoreCase(definition.preferredMode()))
+                .isPresent()) {
+            return true;
+        }
         if (skillRegistryService.matchBestAgentVisibleDefinition(question, allowedToolPacks)
                 .filter(definition -> definition.enabled()
                         && "opar".equalsIgnoreCase(definition.preferredMode()))

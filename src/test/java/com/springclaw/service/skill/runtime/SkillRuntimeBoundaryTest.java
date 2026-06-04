@@ -20,6 +20,7 @@ class SkillRuntimeBoundaryTest {
                     .filter(path -> path.toString().endsWith(".java"))
                     .filter(path -> !path.endsWith("ScriptSkillExecutorService.java"))
                     .filter(path -> !path.endsWith("SkillRuntimeService.java"))
+                    .filter(path -> !path.endsWith("PythonSkillExecutor.java"))
                     .filter(path -> !path.endsWith("BuiltinSkillExecutionService.java"))
                     .filter(this::containsDirectScriptExecution)
                     .map(sourceRoot::relativize)

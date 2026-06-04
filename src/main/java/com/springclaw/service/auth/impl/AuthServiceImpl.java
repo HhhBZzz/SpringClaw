@@ -53,6 +53,7 @@ public class AuthServiceImpl extends ServiceImpl<UserAccountMapper, UserAccount>
     private final String defaultRole;
     private final String anonymousRole;
     private final boolean bootstrapFirstUserAdmin;
+    private final Set<String> adminUsernames;
     private final long tokenTtlSeconds;
     private final String passwordPepper;
     private final String tokenPrefix;
@@ -70,6 +71,7 @@ public class AuthServiceImpl extends ServiceImpl<UserAccountMapper, UserAccount>
                            @Value("${springclaw.auth.default-role:USER}") String defaultRole,
                            @Value("${springclaw.auth.anonymous-role:USER}") String anonymousRole,
                            @Value("${springclaw.auth.bootstrap-first-user-admin:true}") boolean bootstrapFirstUserAdmin,
+                           @Value("${springclaw.auth.admin-usernames:}") String adminUsernamesConfig,
                            @Value("${springclaw.auth.token-ttl-hours:24}") int tokenTtlHours,
                            @Value("${springclaw.auth.password-pepper:}") String passwordPepper,
                            @Value("${springclaw.auth.token-prefix:springclaw:auth:token:}") String tokenPrefix) {
@@ -80,6 +82,7 @@ public class AuthServiceImpl extends ServiceImpl<UserAccountMapper, UserAccount>
         this.defaultRole = normalizeRole(defaultRole, "USER");
         this.anonymousRole = normalizeRole(anonymousRole, this.defaultRole);
         this.bootstrapFirstUserAdmin = bootstrapFirstUserAdmin;
+        this.adminUsernames = parseAdminUsernames(adminUsernamesConfig);
         this.tokenTtlSeconds = Math.max(1, tokenTtlHours) * 3600L;
         this.passwordPepper = passwordPepper == null ? "" : passwordPepper.trim();
         this.tokenPrefix = StringUtils.hasText(tokenPrefix) ? tokenPrefix.trim() : "springclaw:auth:token:";
@@ -98,6 +101,10 @@ public class AuthServiceImpl extends ServiceImpl<UserAccountMapper, UserAccount>
             }
 
             String roleCode = shouldBootstrapAdmin() ? "ADMIN" : defaultRole;
+            // 配置中指定的管理员用户名自动提权
+            if (!"ADMIN".equals(roleCode) && isAdminUsername(normalizedUsername)) {
+                roleCode = "ADMIN";
+            }
             String passwordHash = buildPasswordHash(rawPassword);
 
             if (canUseDb()) {
@@ -517,5 +524,19 @@ public class AuthServiceImpl extends ServiceImpl<UserAccountMapper, UserAccount>
     }
 
     private record LocalToken(String username, String roleCode, long expireAt) {
+    }
+
+    private boolean isAdminUsername(String username) {
+        return adminUsernames.contains(username);
+    }
+
+    private static Set<String> parseAdminUsernames(String config) {
+        if (config == null || config.isBlank()) {
+            return Set.of();
+        }
+        return java.util.Arrays.stream(config.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(java.util.stream.Collectors.toSet());
     }
 }

@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.springclaw.domain.entity.LlmUsageRecord;
 import com.springclaw.mapper.LlmUsageRecordMapper;
 import com.springclaw.service.usage.LlmUsageRecordService;
+import com.springclaw.service.usage.TokenCacheUsage;
+import com.springclaw.service.usage.TokenCacheUsageExtractor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
@@ -56,6 +58,7 @@ public class LlmUsageRecordServiceImpl extends ServiceImpl<LlmUsageRecordMapper,
         if (totalTokens == null && promptTokens != null && completionTokens != null) {
             totalTokens = promptTokens + completionTokens;
         }
+        TokenCacheUsage promptCacheUsage = TokenCacheUsageExtractor.extract(promptTokens, usage);
         boolean usageKnown = usage != null
                 && !(usage instanceof EmptyUsage)
                 && (promptTokens != null || completionTokens != null || totalTokens != null);
@@ -70,8 +73,11 @@ public class LlmUsageRecordServiceImpl extends ServiceImpl<LlmUsageRecordMapper,
         record.setSource(defaultValue(context.source(), "chat"));
         record.setUsageKnown(usageKnown ? 1 : 0);
         record.setPromptTokens(promptTokens);
+        record.setPromptCacheHitTokens(promptCacheUsage.hitTokens());
+        record.setPromptCacheMissTokens(promptCacheUsage.missTokens());
         record.setCompletionTokens(completionTokens);
         record.setTotalTokens(totalTokens);
+        record.setRawUsageJson(promptCacheUsage.rawUsageJson());
 
         if (dbEnabled) {
             try {
@@ -118,6 +124,11 @@ public class LlmUsageRecordServiceImpl extends ServiceImpl<LlmUsageRecordMapper,
         long totalCalls = all.size();
         long usageKnownCount = all.stream().filter(record -> record.getUsageKnown() != null && record.getUsageKnown() == 1).count();
         long totalPromptTokens = sumTokens(all, LlmUsageRecord::getPromptTokens);
+        long totalPromptCacheHitTokens = sumTokens(all, LlmUsageRecord::getPromptCacheHitTokens);
+        long totalPromptCacheMissTokens = sumTokens(all, LlmUsageRecord::getPromptCacheMissTokens);
+        long promptCacheKnownCount = all.stream()
+                .filter(record -> record.getPromptCacheHitTokens() != null || record.getPromptCacheMissTokens() != null)
+                .count();
         long totalCompletionTokens = sumTokens(all, LlmUsageRecord::getCompletionTokens);
         long totalTokens = sumTokens(all, LlmUsageRecord::getTotalTokens);
 
@@ -126,6 +137,10 @@ public class LlmUsageRecordServiceImpl extends ServiceImpl<LlmUsageRecordMapper,
         result.put("usageKnownCount", usageKnownCount);
         result.put("usageUnknownCount", Math.max(0, totalCalls - usageKnownCount));
         result.put("totalPromptTokens", totalPromptTokens);
+        result.put("totalPromptCacheHitTokens", totalPromptCacheHitTokens);
+        result.put("totalPromptCacheMissTokens", totalPromptCacheMissTokens);
+        result.put("promptCacheKnownCount", promptCacheKnownCount);
+        result.put("promptCacheHitRate", hitRate(totalPromptCacheHitTokens, totalPromptCacheMissTokens));
         result.put("totalCompletionTokens", totalCompletionTokens);
         result.put("totalTokens", totalTokens);
         result.put("recentSampleSize", recent.size());
@@ -136,6 +151,7 @@ public class LlmUsageRecordServiceImpl extends ServiceImpl<LlmUsageRecordMapper,
         result.put("topUserByCalls", topCountMap(all, LlmUsageRecord::getUserId, 8));
         result.put("topUserByTokens", topTokenMap(all, LlmUsageRecord::getUserId, 8));
         result.put("bySourceCalls", topCountMap(all, LlmUsageRecord::getSource, 8));
+        result.put("bySourcePromptCacheHitRate", sourceCacheHitRate(all, 8));
         result.put("topProvider", topKey(topTokenMap(all, LlmUsageRecord::getProviderId, 1), topCountMap(all, LlmUsageRecord::getProviderId, 1)));
         result.put("topModel", topKey(topTokenMap(all, LlmUsageRecord::getModel, 1), topCountMap(all, LlmUsageRecord::getModel, 1)));
         return result;
@@ -192,6 +208,36 @@ public class LlmUsageRecordServiceImpl extends ServiceImpl<LlmUsageRecordMapper,
                         Collectors.summingLong(record -> record.getTotalTokens() == null ? 0L : record.getTotalTokens())
                 ));
         return sortDesc(grouped, limit);
+    }
+
+    private Map<String, Double> sourceCacheHitRate(List<LlmUsageRecord> records, int limit) {
+        return records.stream()
+                .filter(record -> record.getPromptCacheHitTokens() != null || record.getPromptCacheMissTokens() != null)
+                .collect(Collectors.groupingBy(
+                        record -> normalizeBucket(record.getSource()),
+                        Collectors.collectingAndThen(Collectors.toList(), values -> hitRate(
+                                sumTokens(values, LlmUsageRecord::getPromptCacheHitTokens),
+                                sumTokens(values, LlmUsageRecord::getPromptCacheMissTokens)
+                        ))
+                ))
+                .entrySet()
+                .stream()
+                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                .limit(limit)
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        Map.Entry::getValue,
+                        (left, right) -> left,
+                        LinkedHashMap::new
+                ));
+    }
+
+    private double hitRate(long hitTokens, long missTokens) {
+        long total = hitTokens + missTokens;
+        if (total <= 0) {
+            return 0.0d;
+        }
+        return Math.round((hitTokens * 1.0d / total) * 10_000d) / 10_000d;
     }
 
     private Map<String, Long> sortDesc(Map<String, Long> source, int limit) {

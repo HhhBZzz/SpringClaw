@@ -4,6 +4,7 @@ import com.springclaw.service.ai.AiProviderService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.retry.TransientAiException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -28,15 +29,25 @@ public class ModelTransportGuardService {
 
     private final ChatResponsePolicyService chatResponsePolicyService;
     private final long cooldownMillis;
+    private final long providerFailureCooldownThreshold;
     private final ConcurrentMap<String, AtomicLong> providerDisabledUntil = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, AtomicReference<String>> providerLastReason = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, AtomicLong> providerConsecutiveFailures = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, AtomicLong> modelDisabledUntil = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, AtomicReference<String>> modelLastReason = new ConcurrentHashMap<>();
 
+    @Autowired
     public ModelTransportGuardService(ChatResponsePolicyService chatResponsePolicyService,
-                                      @Value("${springclaw.chat.model-transport-cooldown-seconds:90}") long cooldownSeconds) {
+                                      @Value("${springclaw.chat.model-transport-cooldown-seconds:90}") long cooldownSeconds,
+                                      @Value("${springclaw.chat.provider-failure-cooldown-threshold:2}") long providerFailureCooldownThreshold) {
         this.chatResponsePolicyService = chatResponsePolicyService;
         this.cooldownMillis = Math.max(10L, cooldownSeconds) * 1000L;
+        this.providerFailureCooldownThreshold = Math.max(1L, providerFailureCooldownThreshold);
+    }
+
+    ModelTransportGuardService(ChatResponsePolicyService chatResponsePolicyService,
+                               long cooldownSeconds) {
+        this(chatResponsePolicyService, cooldownSeconds, 2L);
     }
 
     public boolean isModelCallEnabled(AiProviderService.ActiveChatClient activeClient) {
@@ -56,16 +67,19 @@ public class ModelTransportGuardService {
         String reason = rootMessage(throwable);
         lastReason(providerId).set(reason);
         if (!shouldCooldownProvider(throwable, reason)) {
-            log.warn("检测到模型请求超时/连接中断，但不熔断整个 provider；下次请求继续尝试远程模型。provider={}, reason={}",
-                    providerId, reason);
+            long consecutiveFailures = providerFailureCount(providerId).incrementAndGet();
+            if (consecutiveFailures < providerFailureCooldownThreshold) {
+                log.warn("检测到模型请求超时/连接中断，暂不熔断整个 provider；failure={}/{}, provider={}, reason={}",
+                        consecutiveFailures, providerFailureCooldownThreshold, providerId, reason);
+                return;
+            }
+            log.warn("模型 provider 连续发生传输异常，进入短冷却；failure={}, provider={}, reason={}",
+                    consecutiveFailures, providerId, reason);
+            cooldownProvider(providerId, reason);
             return;
         }
-        long disabledUntil = System.currentTimeMillis() + cooldownMillis;
-        long previous = disabledUntil(providerId).getAndUpdate(current -> Math.max(current, disabledUntil));
-        if (disabledUntil > previous) {
-            log.warn("检测到模型服务临时异常，provider={}, {} 秒内跳过远程模型调用，优先走本地技能。reason={}",
-                    providerId, cooldownMillis / 1000L, reason);
-        }
+        providerFailureCount(providerId).incrementAndGet();
+        cooldownProvider(providerId, reason);
     }
 
     public void markModelFailure(String providerId, String model, Throwable throwable) {
@@ -81,6 +95,10 @@ public class ModelTransportGuardService {
             log.warn("检测到模型临时异常，provider={}, model={}, {} 秒内跳过该模型。reason={}",
                     providerId, model, cooldownMillis / 1000L, reason);
         }
+    }
+
+    public void markSuccess(String providerId, String model) {
+        providerFailureCount(providerId).set(0L);
     }
 
     public String disabledModelReason(AiProviderService.ActiveChatClient activeClient) {
@@ -108,6 +126,10 @@ public class ModelTransportGuardService {
         return System.currentTimeMillis() < modelDisabledUntil(modelKey(providerId, model)).get();
     }
 
+    public boolean isProviderCoolingDown(String providerId) {
+        return isCoolingDown(providerId);
+    }
+
     public String disabledModelPlanReason(AiProviderService.ActiveChatClient activeClient) {
         return isCoolingDown(activeClient.providerId())
                 ? "模型服务临时不可用，跳过计划阶段。"
@@ -122,6 +144,15 @@ public class ModelTransportGuardService {
 
     private boolean isCoolingDown(String providerId) {
         return System.currentTimeMillis() < disabledUntil(providerId).get();
+    }
+
+    private void cooldownProvider(String providerId, String reason) {
+        long disabledUntil = System.currentTimeMillis() + cooldownMillis;
+        long previous = disabledUntil(providerId).getAndUpdate(current -> Math.max(current, disabledUntil));
+        if (disabledUntil > previous) {
+            log.warn("检测到模型服务临时异常，provider={}, {} 秒内跳过该 provider，优先尝试备用 provider/model。reason={}",
+                    providerId, cooldownMillis / 1000L, reason);
+        }
     }
 
     public boolean isTransportFailure(Throwable throwable) {
@@ -199,6 +230,10 @@ public class ModelTransportGuardService {
 
     private AtomicReference<String> lastReason(String providerId) {
         return providerLastReason.computeIfAbsent(providerId, key -> new AtomicReference(""));
+    }
+
+    private AtomicLong providerFailureCount(String providerId) {
+        return providerConsecutiveFailures.computeIfAbsent(providerId, key -> new AtomicLong(0L));
     }
 
     private AtomicLong modelDisabledUntil(String key) {

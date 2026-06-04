@@ -2,6 +2,9 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.agent.AgentCapabilityExecutionService;
+import com.springclaw.service.agent.AgentCapabilityResult;
+import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.event.MessageEventService;
@@ -24,6 +27,98 @@ import static org.mockito.Mockito.when;
 class SimplifiedOparEngineTest {
 
     @Test
+    void shouldExecuteReadCapabilitiesBeforeModelWhenDecisionNeedsAgentTools() throws Exception {
+        AiProviderService aiProviderService = mock(AiProviderService.class);
+        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
+        LocalSkillFallbackService localSkillFallbackService = mock(LocalSkillFallbackService.class);
+        LocalExecutionNarrator localExecutionNarrator = mock(LocalExecutionNarrator.class);
+        ModelTransportGuardService modelTransportGuardService = mock(ModelTransportGuardService.class);
+        ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
+        OparContextAwareSupport contextAwareSupport = mock(OparContextAwareSupport.class);
+        ConversationAdvisorSupport conversationAdvisorSupport = mock(ConversationAdvisorSupport.class);
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        AgentCapabilityExecutionService capabilityExecutionService = mock(AgentCapabilityExecutionService.class);
+
+        SimplifiedOparEngine engine = new SimplifiedOparEngine(
+                aiProviderService,
+                toolOrchestrator,
+                localSkillFallbackService,
+                localExecutionNarrator,
+                modelTransportGuardService,
+                modelCallExecutor,
+                contextAwareSupport,
+                conversationAdvisorSupport,
+                messageEventService,
+                capabilityExecutionService,
+                mock(ChatResponsePolicyService.class)
+        );
+
+        AiProviderService.ActiveChatClient activeClient = new AiProviderService.ActiveChatClient(
+                "deepseek",
+                "deepseek-v4-pro",
+                "https://api.deepseek.com",
+                mock(ChatClient.class),
+                true,
+                ""
+        );
+        AssembledContext assembled = new AssembledContext(
+                "s1",
+                "api",
+                "u1",
+                "分析当前项目结构",
+                "",
+                "",
+                "# 当前问题\n分析当前项目结构"
+        );
+        AgentDecision decision = new AgentDecision(
+                "workspace_analysis",
+                "agent_tools",
+                List.of("workspace-search", "workspace-review", "file", "skill-library"),
+                "read",
+                false,
+                "检测到项目分析意图"
+        );
+
+        when(contextAwareSupport.tryContextAwareLocalResult(assembled)).thenReturn(null);
+        when(localSkillFallbackService.tryHandleControlPlane(anyString())).thenReturn(Optional.empty());
+        when(localSkillFallbackService.tryHandlePriorityStructured(anyString())).thenReturn(Optional.empty());
+        when(modelTransportGuardService.isModelCallEnabled(activeClient)).thenReturn(true);
+        when(capabilityExecutionService.execute(decision, assembled, "req-1"))
+                .thenReturn(List.of(new AgentCapabilityResult(
+                        "workspace-review",
+                        "success",
+                        "已审查当前工作区",
+                        "LOCAL_WORKSPACE_REVIEW\n根目录: /Users/hanbingzheng/springclaw"
+                )));
+        when(modelCallExecutor.executeChat(
+                eq(activeClient),
+                eq("simplified-answer"),
+                any(ModelCallExecutor.ChatRequestContext.class),
+                eq(true),
+                any()
+        )).thenReturn(new ModelCallExecutor.ModelCallResult<>(
+                "项目是 Spring Boot + Spring AI Agent Runtime。",
+                activeClient,
+                List.of("deepseek:deepseek-v4-pro"),
+                false
+        ));
+
+        ChatExecutionResult result = engine.run(
+                activeClient,
+                "system",
+                assembled,
+                "req-1",
+                (reason, context) -> "fallback:" + reason,
+                decision
+        );
+
+        assertThat(result.action()).contains("主动执行能力数量=1");
+        assertThat(result.action()).contains("workspace-review");
+        assertThat(result.action()).contains("LOCAL_WORKSPACE_REVIEW");
+        assertThat(result.reflect()).isEqualTo("项目是 Spring Boot + Spring AI Agent Runtime。");
+    }
+
+    @Test
     void shouldShortCircuitExplicitWebFetchToPriorityStructuredLocalSkill() {
         AiProviderService aiProviderService = mock(AiProviderService.class);
         ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
@@ -44,7 +139,8 @@ class SimplifiedOparEngineTest {
                 modelCallExecutor,
                 contextAwareSupport,
                 conversationAdvisorSupport,
-                messageEventService
+                messageEventService,
+                mock(ChatResponsePolicyService.class)
         );
 
         AiProviderService.ActiveChatClient activeClient = new AiProviderService.ActiveChatClient(
@@ -116,7 +212,8 @@ class SimplifiedOparEngineTest {
                 modelCallExecutor,
                 contextAwareSupport,
                 conversationAdvisorSupport,
-                messageEventService
+                messageEventService,
+                mock(ChatResponsePolicyService.class)
         );
 
         AiProviderService.ActiveChatClient activeClient = new AiProviderService.ActiveChatClient(

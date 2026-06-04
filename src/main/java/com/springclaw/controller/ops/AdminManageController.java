@@ -11,6 +11,7 @@ import com.springclaw.mapper.SkillPolicyMapper;
 import com.springclaw.mapper.ToolPermissionMapper;
 import com.springclaw.mapper.UserAccountMapper;
 import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.agent.AgentRunTraceService;
 import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.chat.impl.ChatRoutingStateService;
 import com.springclaw.service.event.MessageEventService;
@@ -54,6 +55,7 @@ public class AdminManageController {
     private final AiProviderService aiProviderService;
     private final LlmUsageRecordService llmUsageRecordService;
     private final ChatRoutingStateService chatRoutingStateService;
+    private final AgentRunTraceService agentRunTraceService;
     private final boolean dbEnabled;
     private final String configuredChatAgentMode;
     private final boolean configuredChatRoutingAutoUpgrade;
@@ -70,6 +72,7 @@ public class AdminManageController {
                                  AiProviderService aiProviderService,
                                  LlmUsageRecordService llmUsageRecordService,
                                  ChatRoutingStateService chatRoutingStateService,
+                                 AgentRunTraceService agentRunTraceService,
                                  @Value("${springclaw.persistence.db-enabled:false}") boolean dbEnabled,
                                  @Value("${springclaw.chat.agent-mode:simplified}") String configuredChatAgentMode,
                                  @Value("${springclaw.chat.routing.auto-upgrade-enabled:true}") boolean configuredChatRoutingAutoUpgrade) {
@@ -85,6 +88,7 @@ public class AdminManageController {
         this.aiProviderService = aiProviderService;
         this.llmUsageRecordService = llmUsageRecordService;
         this.chatRoutingStateService = chatRoutingStateService;
+        this.agentRunTraceService = agentRunTraceService;
         this.dbEnabled = dbEnabled;
         this.configuredChatAgentMode = configuredChatAgentMode;
         this.configuredChatRoutingAutoUpgrade = configuredChatRoutingAutoUpgrade;
@@ -104,6 +108,7 @@ public class AdminManageController {
         result.put("providers", aiProviderService.summary());
         result.put("llmUsage", llmUsageRecordService.summary(300));
         result.put("recentLlmUsage", llmUsageRecordService.listRecent(20));
+        result.put("agentRuns", agentRunTraceService.recentRuns(null, 20));
         return ApiResponse.success(result);
     }
 

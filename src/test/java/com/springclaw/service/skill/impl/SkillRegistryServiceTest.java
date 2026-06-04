@@ -82,6 +82,30 @@ class SkillRegistryServiceTest {
         Assertions.assertTrue(registryService.listAgentVisibleDefinitions(Set.of("script", "workspace")).size() >= 3);
     }
 
+    @Test
+    void shouldUseHighConfidenceMetadataWithoutBuiltinHardcoding() throws Exception {
+        writeBuiltinSkill(
+                "metadata-web",
+                "Metadata Web",
+                "metadata driven web skill",
+                "script",
+                "simplified",
+                "网页",
+                "读取网页"
+        );
+        Path skillPath = tempDir.resolve("metadata-web").resolve("SKILL.md");
+        String markdown = Files.readString(skillPath);
+        markdown = markdown.replace("triggerExamples:",
+                "highConfidenceRequiresUrl: true\nhighConfidenceKeywords:\n  - 抓取\n  - 读取\ntriggerExamples:");
+        Files.writeString(skillPath, markdown);
+        SkillRegistryService registryService = new SkillRegistryService(new SkillCatalogService(true, tempDir.toString()));
+
+        var matched = registryService.matchHighConfidenceDefinition("请读取 https://example.com 的正文");
+
+        Assertions.assertTrue(matched.isPresent());
+        Assertions.assertEquals("metadata-web", matched.orElseThrow().skillId());
+    }
+
     private void writeBuiltinSkill(String skillId,
                                    String name,
                                    String description,

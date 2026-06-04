@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS `agent_session` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_session_key` (`session_key`),
   KEY `idx_channel_user` (`channel`, `user_id`),
+  KEY `idx_agent_session_channel_user_update` (`channel`, `user_id`, `deleted`, `update_time`),
   KEY `idx_update_time` (`update_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -38,7 +39,85 @@ CREATE TABLE IF NOT EXISTS `message_event` (
   PRIMARY KEY (`id`),
   KEY `idx_session_role` (`session_key`, `role`),
   KEY `idx_session_create_time` (`session_key`, `create_time`),
-  KEY `idx_request_id` (`request_id`)
+  KEY `idx_request_id` (`request_id`),
+  KEY `idx_message_event_session_id` (`session_key`, `deleted`, `id`),
+  KEY `idx_message_event_session_filter_id` (`session_key`, `user_id`, `event_type`, `role`, `deleted`, `id`),
+  KEY `idx_message_event_request_filter_id` (`request_id`, `user_id`, `event_type`, `role`, `deleted`, `id`),
+  KEY `idx_message_event_trace_recent` (`event_type`, `role`, `deleted`, `id`),
+  KEY `idx_message_event_user_recent` (`user_id`, `deleted`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `agent_run` (
+  `id` BIGINT NOT NULL,
+  `request_id` VARCHAR(64) NOT NULL,
+  `session_key` VARCHAR(128) NULL,
+  `channel` VARCHAR(32) NOT NULL DEFAULT 'api',
+  `user_id` VARCHAR(64) NOT NULL,
+  `response_mode` VARCHAR(32) NULL,
+  `execution_mode` VARCHAR(64) NULL,
+  `intent` VARCHAR(64) NULL,
+  `status` VARCHAR(32) NOT NULL DEFAULT 'RUNNING',
+  `started_at` DATETIME NOT NULL,
+  `finished_at` DATETIME NULL,
+  `duration_ms` BIGINT NULL,
+  `total_tokens` INT NULL,
+  `error_message` VARCHAR(1024) NULL,
+  `create_time` DATETIME NOT NULL,
+  `update_time` DATETIME NOT NULL,
+  `create_by` VARCHAR(64) NULL,
+  `update_by` VARCHAR(64) NULL,
+  `deleted` TINYINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_agent_run_request` (`request_id`),
+  KEY `idx_agent_run_user_time` (`user_id`, `deleted`, `started_at`),
+  KEY `idx_agent_run_session_time` (`session_key`, `deleted`, `started_at`),
+  KEY `idx_agent_run_status_time` (`status`, `deleted`, `started_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `agent_run_step` (
+  `id` BIGINT NOT NULL,
+  `request_id` VARCHAR(64) NOT NULL,
+  `sequence_no` INT NOT NULL,
+  `step_name` VARCHAR(128) NOT NULL,
+  `step_type` VARCHAR(32) NOT NULL,
+  `status` VARCHAR(32) NOT NULL,
+  `detail_json` TEXT NULL,
+  `started_at` DATETIME NULL,
+  `finished_at` DATETIME NULL,
+  `duration_ms` BIGINT NULL,
+  `create_time` DATETIME NOT NULL,
+  `update_time` DATETIME NOT NULL,
+  `create_by` VARCHAR(64) NULL,
+  `update_by` VARCHAR(64) NULL,
+  `deleted` TINYINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  KEY `idx_agent_run_step_request_sequence` (`request_id`, `sequence_no`),
+  KEY `idx_agent_run_step_status_time` (`status`, `deleted`, `create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `tool_invocation` (
+  `id` BIGINT NOT NULL,
+  `request_id` VARCHAR(64) NOT NULL,
+  `session_key` VARCHAR(128) NULL,
+  `user_id` VARCHAR(64) NOT NULL,
+  `tool_name` VARCHAR(128) NOT NULL,
+  `skill_id` VARCHAR(64) NULL,
+  `toolset` VARCHAR(64) NULL,
+  `risk_level` VARCHAR(32) NULL,
+  `status` VARCHAR(32) NOT NULL,
+  `duration_ms` BIGINT NULL,
+  `input_summary` VARCHAR(512) NULL,
+  `output_summary` VARCHAR(1024) NULL,
+  `error_message` VARCHAR(1024) NULL,
+  `create_time` DATETIME NOT NULL,
+  `update_time` DATETIME NOT NULL,
+  `create_by` VARCHAR(64) NULL,
+  `update_by` VARCHAR(64) NULL,
+  `deleted` TINYINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  KEY `idx_tool_invocation_request` (`request_id`, `deleted`, `create_time`),
+  KEY `idx_tool_invocation_user_time` (`user_id`, `deleted`, `create_time`),
+  KEY `idx_tool_invocation_tool_time` (`tool_name`, `deleted`, `create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS `skill_descriptor` (
@@ -71,6 +150,7 @@ CREATE TABLE IF NOT EXISTS `skill_policy` (
   `update_by` VARCHAR(64) NULL,
   `deleted` TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_skill_policy_scope_skill` (`channel`, `user_id`, `skill_id`),
   KEY `idx_scope` (`channel`, `user_id`),
   KEY `idx_skill` (`skill_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -119,8 +199,10 @@ CREATE TABLE IF NOT EXISTS `tool_permission` (
   `update_by` VARCHAR(64) NULL,
   `deleted` TINYINT NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_tool_permission_role_tool` (`role_code`, `tool_name`),
   KEY `idx_tool_permission_role` (`role_code`),
-  KEY `idx_tool_permission_tool` (`tool_name`)
+  KEY `idx_tool_permission_tool` (`tool_name`),
+  KEY `idx_tool_permission_role_enabled_priority` (`role_code`, `enabled`, `priority`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS `llm_usage_record` (
@@ -134,8 +216,11 @@ CREATE TABLE IF NOT EXISTS `llm_usage_record` (
   `source` VARCHAR(64) NOT NULL,
   `usage_known` TINYINT NOT NULL DEFAULT 0,
   `prompt_tokens` INT NULL,
+  `prompt_cache_hit_tokens` INT NULL,
+  `prompt_cache_miss_tokens` INT NULL,
   `completion_tokens` INT NULL,
   `total_tokens` INT NULL,
+  `raw_usage_json` TEXT NULL,
   `create_time` DATETIME NOT NULL,
   `update_time` DATETIME NOT NULL,
   `create_by` VARCHAR(64) NULL,
@@ -145,7 +230,10 @@ CREATE TABLE IF NOT EXISTS `llm_usage_record` (
   KEY `idx_llm_usage_request` (`request_id`),
   KEY `idx_llm_usage_session` (`session_key`, `create_time`),
   KEY `idx_llm_usage_user` (`user_id`, `create_time`),
-  KEY `idx_llm_usage_provider_model` (`provider_id`, `model`, `create_time`)
+  KEY `idx_llm_usage_provider_model` (`provider_id`, `model`, `create_time`),
+  KEY `idx_llm_usage_create_time` (`create_time`),
+  KEY `idx_llm_usage_source_create` (`source`, `create_time`),
+  KEY `idx_llm_usage_cache_create` (`provider_id`, `model`, `source`, `create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS `scheduled_task` (
@@ -175,7 +263,10 @@ CREATE TABLE IF NOT EXISTS `scheduled_task` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_scheduled_task_task_id` (`task_id`),
   KEY `idx_scheduled_task_owner` (`owner_user_id`, `enabled`, `update_time`),
-  KEY `idx_scheduled_task_due` (`enabled`, `next_run_at`)
+  KEY `idx_scheduled_task_due` (`enabled`, `next_run_at`),
+  KEY `idx_scheduled_task_owner_state_update` (`owner_user_id`, `enabled`, `deleted`, `update_time`),
+  KEY `idx_scheduled_task_due_dispatch` (`enabled`, `deleted`, `next_run_at`),
+  KEY `idx_scheduled_task_status_update` (`last_status`, `deleted`, `update_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE IF NOT EXISTS `scheduled_task_execution` (
@@ -199,5 +290,7 @@ CREATE TABLE IF NOT EXISTS `scheduled_task_execution` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_scheduled_task_execution_execution_id` (`execution_id`),
   KEY `idx_scheduled_task_execution_task` (`task_id`, `started_at`),
-  KEY `idx_scheduled_task_execution_request` (`request_id`)
+  KEY `idx_scheduled_task_execution_request` (`request_id`),
+  KEY `idx_scheduled_task_execution_task_recent` (`task_id`, `deleted`, `started_at`),
+  KEY `idx_scheduled_task_execution_status_time` (`status`, `deleted`, `started_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

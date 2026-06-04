@@ -76,6 +76,74 @@ public class ChatResponsePolicyService {
         return directHit || genericFailureTemplate;
     }
 
+    /**
+     * 检测模型输出中是否包含幻觉的 XML/MCP 格式工具调用标签。
+     * 当 DeepSeek V4 Pro 原生 function calling 被禁用时，模型有时会在回答文本中
+     * 嵌入 XML 格式的工具调用标签（如 &lt;use_mcp_tool&gt;、&lt;invoke&gt;、&lt;function_call&gt;），
+     * 这些标签不会被后端拦截执行，会原样泄漏给用户。
+     */
+    public boolean looksLikeHallucinatedXmlToolCall(String answer) {
+        if (!StringUtils.hasText(answer)) {
+            return false;
+        }
+        String lower = answer.toLowerCase();
+        // MCP/Anthropic-style tool call markers
+        if (lower.contains("<use_mcp_tool>")
+                || lower.contains("<invoke name=")
+                || lower.contains("<function_call>")
+                || lower.contains("<tool_call>")
+                || lower.contains("<tool_calls>")
+                || lower.contains("<parameter name=")
+                || lower.contains("<invoke>")) {
+            return true;
+        }
+        // Claude Code XML tool-call block patterns
+        if (lower.contains("</invoke>")
+                || lower.contains("</function_call>")
+                || lower.contains("</tool_call>")
+                || lower.contains("</use_mcp_tool>")) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 去除回答中幻觉的 XML 工具调用标签块，保留正常文本。
+     * 当检测到 XML 工具调用泄漏时，截取第一个 XML 标签之前的内容作为安全回答。
+     */
+    public String stripHallucinatedXmlBlocks(String answer) {
+        if (!StringUtils.hasText(answer)) {
+            return answer;
+        }
+        // 尝试去除完整的 XML 工具调用块
+        String cleaned = answer
+                .replaceAll("(?s)<use_mcp_tool>.*?</use_mcp_tool>", "")
+                .replaceAll("(?s)<function_call>.*?</function_call>", "")
+                .replaceAll("(?s)<invoke[^>]*>.*?</invoke>", "")
+                .replaceAll("(?s)<tool_call>.*?</tool_call>", "")
+                .trim();
+        // 如果清洗后变空了，截取第一个 XML 标签之前的内容
+        if (!StringUtils.hasText(cleaned)) {
+            int firstXmlTag = findFirstXmlTagIndex(answer);
+            if (firstXmlTag > 0) {
+                cleaned = answer.substring(0, firstXmlTag).trim();
+            }
+        }
+        return StringUtils.hasText(cleaned) ? cleaned : answer;
+    }
+
+    private int findFirstXmlTagIndex(String text) {
+        int idx = Integer.MAX_VALUE;
+        String[] tags = {"<use_mcp_tool>", "<function_call>", "<invoke", "<tool_call>", "<tool_calls>"};
+        for (String tag : tags) {
+            int i = text.indexOf(tag);
+            if (i >= 0 && i < idx) {
+                idx = i;
+            }
+        }
+        return idx == Integer.MAX_VALUE ? -1 : idx;
+    }
+
     public String buildFallbackAdvice(String reason) {
         String lowerReason = safe(reason).toLowerCase();
         if (lowerReason.contains("已禁用")

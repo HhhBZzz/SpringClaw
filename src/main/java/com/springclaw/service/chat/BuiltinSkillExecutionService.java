@@ -2,13 +2,14 @@ package com.springclaw.service.chat;
 
 import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.impl.SkillRegistryService;
-import com.springclaw.service.skill.script.ScriptSkillExecutorService;
-import com.springclaw.service.workspace.WorkspaceReviewService;
 import com.springclaw.tool.pack.WorkspaceSearchToolPack;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -19,30 +20,39 @@ import java.util.Optional;
 public class BuiltinSkillExecutionService {
 
     private final SkillRegistryService skillRegistryService;
-    private final WorkspaceSearchToolPack workspaceSearchToolPack;
-    private final WorkspaceReviewService workspaceReviewService;
-    private final LocalSkillQuerySupport querySupport;
+    private final Map<String, BuiltinSkillHandler> handlers;
 
     @Autowired
     public BuiltinSkillExecutionService(SkillRegistryService skillRegistryService,
-                                        WorkspaceSearchToolPack workspaceSearchToolPack,
-                                        WorkspaceReviewService workspaceReviewService,
-                                        ScriptSkillExecutorService scriptSkillExecutorService,
-                                        com.springclaw.service.skill.script.ScriptSkillCatalogService scriptSkillCatalogService) {
+                                        List<BuiltinSkillHandler> handlers) {
         this.skillRegistryService = skillRegistryService;
-        this.workspaceSearchToolPack = workspaceSearchToolPack;
-        this.workspaceReviewService = workspaceReviewService;
-        this.querySupport = new LocalSkillQuerySupport(scriptSkillExecutorService, scriptSkillCatalogService);
+        this.handlers = indexHandlers(handlers);
+    }
+
+    public BuiltinSkillExecutionService(SkillRegistryService skillRegistryService,
+                                        WorkspaceSearchToolPack workspaceSearchToolPack,
+                                        com.springclaw.service.workspace.WorkspaceReviewService workspaceReviewService,
+                                        com.springclaw.service.skill.script.ScriptSkillExecutorService scriptSkillExecutorService,
+                                        com.springclaw.service.skill.script.ScriptSkillCatalogService scriptSkillCatalogService) {
+        this(
+                skillRegistryService,
+                List.of(
+                        new CodeAnalysisSkillHandler(workspaceSearchToolPack, scriptSkillExecutorService, scriptSkillCatalogService),
+                        new WorkspaceReviewSkillHandler(workspaceReviewService),
+                        new WebCrawlSkillHandler(scriptSkillExecutorService, scriptSkillCatalogService),
+                        new LogDiagnosticsSkillHandler(workspaceSearchToolPack, scriptSkillExecutorService, scriptSkillCatalogService)
+                )
+        );
     }
 
     BuiltinSkillExecutionService(SkillRegistryService skillRegistryService,
-                                 WorkspaceSearchToolPack workspaceSearchToolPack,
-                                 ScriptSkillExecutorService scriptSkillExecutorService,
-                                 com.springclaw.service.skill.script.ScriptSkillCatalogService scriptSkillCatalogService) {
+                                        WorkspaceSearchToolPack workspaceSearchToolPack,
+                                        com.springclaw.service.skill.script.ScriptSkillExecutorService scriptSkillExecutorService,
+                                        com.springclaw.service.skill.script.ScriptSkillCatalogService scriptSkillCatalogService) {
         this(
                 skillRegistryService,
                 workspaceSearchToolPack,
-                new WorkspaceReviewService(System.getProperty("user.dir"), 8, 3000, 40, 512),
+                new com.springclaw.service.workspace.WorkspaceReviewService(System.getProperty("user.dir"), 8, 3000, 40, 512),
                 scriptSkillExecutorService,
                 scriptSkillCatalogService
         );
@@ -69,72 +79,23 @@ public class BuiltinSkillExecutionService {
     }
 
     private Optional<LocalSkillFallbackService.LocalSkillResult> execute(SkillDefinition definition, String question) {
-        return switch (definition.skillId()) {
-            case "code-analysis" -> Optional.of(runCodeAnalysis(definition, question));
-            case "workspace-review" -> Optional.of(runWorkspaceReview(definition, question));
-            case "web-crawl" -> Optional.of(runWebCrawl(definition, question));
-            case "log-diagnostics" -> Optional.of(runLogDiagnostics(definition, question));
-            default -> Optional.empty();
-        };
+        if (definition == null || !StringUtils.hasText(definition.skillId())) {
+            return Optional.empty();
+        }
+        BuiltinSkillHandler handler = handlers.get(definition.skillId().trim().toLowerCase());
+        return handler == null ? Optional.empty() : handler.execute(definition, question);
     }
 
-    private LocalSkillFallbackService.LocalSkillResult runWorkspaceReview(SkillDefinition definition, String question) {
-        String answer = workspaceReviewService.reviewWorkspace(question);
-        String detail = "skill=%s\n%s".formatted(definition.skillId(), answer);
-        return new LocalSkillFallbackService.LocalSkillResult(
-                "BUILTIN_SKILL:WORKSPACE_REVIEW",
-                detail,
-                answer,
-                true
-        );
-    }
-
-    private LocalSkillFallbackService.LocalSkillResult runCodeAnalysis(SkillDefinition definition, String question) {
-        String answer = workspaceSearchToolPack.analyzeWorkspaceTask(question);
-        if (querySupport.looksLikeWeakWorkspaceAnswer(answer)) {
-            String scriptAnswer = querySupport.runScriptSkillByCategory("workspace", question);
-            if (StringUtils.hasText(scriptAnswer)) {
-                answer = scriptAnswer;
+    private Map<String, BuiltinSkillHandler> indexHandlers(List<BuiltinSkillHandler> handlers) {
+        Map<String, BuiltinSkillHandler> indexed = new LinkedHashMap<>();
+        if (handlers == null) {
+            return indexed;
+        }
+        for (BuiltinSkillHandler handler : handlers) {
+            if (handler != null && StringUtils.hasText(handler.skillId())) {
+                indexed.putIfAbsent(handler.skillId().trim().toLowerCase(), handler);
             }
         }
-        String fallback = querySupport.renderWorkspaceAnswer(answer);
-        String detail = "skill=%s\n%s".formatted(definition.skillId(), answer);
-        return new LocalSkillFallbackService.LocalSkillResult(
-                "BUILTIN_SKILL:CODE_ANALYSIS",
-                detail,
-                fallback,
-                true
-        );
-    }
-
-    private LocalSkillFallbackService.LocalSkillResult runLogDiagnostics(SkillDefinition definition, String question) {
-        String answer = querySupport.runScriptSkillByCategory("runtime", question);
-        if (!StringUtils.hasText(answer)) {
-            answer = workspaceSearchToolPack.analyzeWorkspaceTask(question);
-        }
-        String detail = "skill=%s\n%s".formatted(definition.skillId(), answer);
-        return new LocalSkillFallbackService.LocalSkillResult(
-                "BUILTIN_SKILL:LOG_DIAGNOSTICS",
-                detail,
-                answer,
-                true
-        );
-    }
-
-    private LocalSkillFallbackService.LocalSkillResult runWebCrawl(SkillDefinition definition, String question) {
-        String answer = querySupport.runScriptSkillByCategory("web", question);
-        if (!StringUtils.hasText(answer)) {
-            String target = querySupport.extractFirstUrl(question);
-            answer = StringUtils.hasText(target)
-                    ? "未找到可用的网页抓取 Python skill，目标链接: " + target
-                    : "未找到可用的网页抓取 Python skill，请在 skills 目录中提供 web 类 skill。";
-        }
-        String detail = "skill=%s\n%s".formatted(definition.skillId(), answer);
-        return new LocalSkillFallbackService.LocalSkillResult(
-                "BUILTIN_SKILL:WEB_CRAWL",
-                detail,
-                answer,
-                true
-        );
+        return indexed;
     }
 }

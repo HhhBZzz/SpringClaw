@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -23,6 +24,38 @@ class SkillRuntimeServiceTest {
     private final ScriptSkillExecutorService scriptExecutor = mock(ScriptSkillExecutorService.class);
     private final BuiltinSkillExecutionService builtinExecutor = mock(BuiltinSkillExecutionService.class);
     private final SkillRuntimeService runtimeService = new SkillRuntimeService(scriptExecutor, builtinExecutor);
+
+    @Test
+    void shouldDispatchThroughRegisteredExecutorList() {
+        AtomicBoolean executed = new AtomicBoolean(false);
+        SkillExecutor customExecutor = new SkillExecutor() {
+            @Override
+            public boolean supports(SkillDefinition definition) {
+                return "custom".equals(definition.executorType());
+            }
+
+            @Override
+            public String execute(SkillDefinition definition, String inputPayload) {
+                executed.set(true);
+                return definition.skillId() + ":" + inputPayload;
+            }
+        };
+        SkillRuntimeService runtimeService = new SkillRuntimeService(List.of(customExecutor), null);
+
+        String result = runtimeService.execute(definition("custom_skill", "custom"), "payload");
+
+        assertThat(result).isEqualTo("custom_skill:payload");
+        assertThat(executed).isTrue();
+    }
+
+    @Test
+    void shouldRejectUnknownExecutorTypeWhenNoRegisteredExecutorSupportsIt() {
+        SkillRuntimeService runtimeService = new SkillRuntimeService(List.of(), null);
+
+        assertThatThrownBy(() -> runtimeService.execute(definition("unknown_skill", "unknown"), "payload"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("该 skill 当前不可直接执行");
+    }
 
     @Test
     void shouldExecutePythonSkillThroughUnifiedRuntime() {

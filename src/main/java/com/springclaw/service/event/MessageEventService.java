@@ -43,6 +43,13 @@ public interface MessageEventService extends IService<MessageEvent> {
                                          int limit,
                                          boolean ascending);
 
+    List<MessageEvent> listRequestEvents(String requestId,
+                                         String userId,
+                                         String role,
+                                         String eventType,
+                                         int limit,
+                                         boolean ascending);
+
     long countSessionEvents(String sessionKey,
                             String role,
                             String eventType);

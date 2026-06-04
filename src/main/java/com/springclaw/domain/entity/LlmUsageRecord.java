@@ -38,7 +38,16 @@ public class LlmUsageRecord extends BaseEntity {
 
     private Integer promptTokens;
 
+    private Integer promptCacheHitTokens;
+
+    private Integer promptCacheMissTokens;
+
     private Integer completionTokens;
 
     private Integer totalTokens;
+
+    /**
+     * Provider-native usage metadata, kept for model-specific billing/debug fields.
+     */
+    private String rawUsageJson;
 }

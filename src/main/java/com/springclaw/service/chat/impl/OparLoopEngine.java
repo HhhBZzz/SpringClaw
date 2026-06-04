@@ -1,6 +1,7 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.tool.pack.FileToolPack;
@@ -72,6 +73,15 @@ public class OparLoopEngine {
                                        AssembledContext assembled,
                                        String requestId,
                                        FallbackResponder fallbackResponder) {
+        return runLoop(activeClient, systemPrompt, assembled, requestId, fallbackResponder, null);
+    }
+
+    public ChatExecutionResult runLoop(AiProviderService.ActiveChatClient activeClient,
+                                       String systemPrompt,
+                                       AssembledContext assembled,
+                                       String requestId,
+                                       FallbackResponder fallbackResponder,
+                                       AgentDecision decision) {
         AiProviderService.ActiveChatClient currentClient = activeClient;
         if (localFallbackFirst) {
             LocalSkillFallbackService.LocalSkillResult contextAwareResult = contextAwareSupport.tryContextAwareLocalResult(assembled);
@@ -146,7 +156,7 @@ public class OparLoopEngine {
                 break;
             }
 
-            ActionCallResult actionCall = runAction(currentClient, systemPrompt, assembled, plan, requestId, steps, stepNo);
+            ActionCallResult actionCall = runAction(currentClient, systemPrompt, assembled, plan, requestId, steps, stepNo, decision);
             currentClient = actionCall.client();
             ActionResult action = actionCall.action();
             steps.add(new AgentStep(stepNo, plan, action));
@@ -282,12 +292,14 @@ public class OparLoopEngine {
                                        PlanResult plan,
                                        String requestId,
                                        List<AgentStep> history,
-                                       int stepNo) {
+                                       int stepNo,
+                                       AgentDecision decision) {
         Object[] tools = toolOrchestrator.selectTools(
                 assembled.channel(),
                 assembled.userId(),
                 assembled.question(),
-                plan.planText()
+                plan.planText(),
+                decision
         );
         boolean allowFailover = isSafeToRetry(tools);
         ToolExecutionContext context = new ToolExecutionContext(

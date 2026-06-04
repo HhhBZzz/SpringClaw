@@ -102,6 +102,8 @@ public final class SkillBundleSupport {
             }
             List<String> triggerExamples = toStringList(fm.get("triggerExamples"));
             List<String> toolPacks = normalizeToolPacks(toStringList(fm.get("toolPacks")));
+            boolean highConfidenceRequiresUrl = getBoolean(fm, false, "highConfidenceRequiresUrl");
+            List<String> highConfidenceKeywords = toStringList(fm.get("highConfidenceKeywords"));
 
             String sourceType = switch (executorType) {
                 case "builtin" -> "BUILTIN";
@@ -129,6 +131,8 @@ public final class SkillBundleSupport {
                     enabled,
                     priority,
                     agentVisible,
+                    highConfidenceRequiresUrl,
+                    highConfidenceKeywords,
                     category,
                     tier,
                     inputHint,

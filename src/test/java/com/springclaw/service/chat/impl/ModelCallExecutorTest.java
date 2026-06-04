@@ -111,12 +111,45 @@ class ModelCallExecutorTest {
         assertThat(guardService.isModelCallEnabled(providerService.activeClient())).isTrue();
     }
 
+    @Test
+    void shouldFailOverToAnotherProviderWhenCurrentProviderHasNoHealthyModel() throws Exception {
+        AiProviderService providerService = newProviderService();
+        providerService.switchActiveProvider("qwen");
+
+        ModelCallExecutor executor = new ModelCallExecutor(
+                providerService,
+                new ModelTransportGuardService(new ChatResponsePolicyService(""), 30),
+                mock(LlmUsageRecordService.class),
+                1
+        );
+
+        ModelCallExecutor.ModelCallResult<String> result = executor.execute(
+                providerService.activeClient(),
+                "test-provider-failover",
+                true,
+                client -> {
+                    if ("qwen".equals(client.providerId())) {
+                        throw new SocketTimeoutException("Read timed out");
+                    }
+                    return "ok:" + client.providerId() + ":" + client.model();
+                }
+        );
+
+        assertThat(result.failedOver()).isTrue();
+        assertThat(result.value()).startsWith("ok:coding-plan:");
+        assertThat(result.client().providerId()).isEqualTo("coding-plan");
+    }
+
     private AiProviderService newProviderService() {
         SpringClawAiProperties properties = new SpringClawAiProperties();
         properties.getProviders().getCodingPlan().setApiKey("coding-plan-test-key");
         properties.getProviders().getCodingPlan().setBaseUrl("https://coding.dashscope.aliyuncs.com/v1");
         properties.getProviders().getCodingPlan().setModel("qwen3.5-plus");
         properties.getProviders().getCodingPlan().setModels(List.of("qwen3.5-plus", "qwen3-coder-plus", "qwen3-coder-next"));
+        properties.getProviders().getQwen().setApiKey("qwen-test-key");
+        properties.getProviders().getQwen().setBaseUrl("https://dashscope.aliyuncs.com/compatible-mode/v1");
+        properties.getProviders().getQwen().setModel("qwen3.5-plus");
+        properties.getProviders().getQwen().setModels(List.of("qwen3.5-plus"));
         properties.setActiveProvider("coding-plan");
 
         StaticListableBeanFactory beanFactory = new StaticListableBeanFactory();

@@ -71,22 +71,43 @@ const auditItems = [
   '后台页面由 Vue 路由 /admin 承载'
 ] as const;
 
+const adminSections = [
+  { label: 'Dashboard', hash: '#admin-status' },
+  { label: 'Users', hash: '#user-activity' },
+  { label: 'Roles', hash: '#token-status' },
+  { label: 'Models', hash: '#runtime-details' },
+  { label: 'Skills', hash: '#runtime-details' },
+  { label: 'Audit', hash: '#audit-logs' },
+  { label: 'Token Usage', hash: '#llm-usage' },
+  { label: 'Runtime Status', hash: '#task-status' }
+] as const;
+
 const metricCards = computed(() => {
   const tokenStats = dashboard.value?.tokenStats;
   const auditStats = dashboard.value?.auditStats || {};
+  const usage = llmUsage.value;
   return [
     { label: '活跃 Token', value: formatNumber(tokenStats?.activeTokenCount), detail: `Redis ${formatNumber(tokenStats?.redisTokenCount)} / Local ${formatNumber(tokenStats?.localTokenCount)}` },
     { label: '活跃用户', value: formatNumber(tokenStats?.activeUserCount), detail: `即将过期 ${formatNumber(tokenStats?.expiringSoonCount)}` },
     { label: '用户数', value: formatNumber(dashboard.value?.userCount), detail: `DB ${dashboard.value?.dbEnabled ? '已启用' : '未启用'}` },
     { label: '运行时 Skills', value: formatNumber(dashboard.value?.runtimeSkillCount ?? dashboard.value?.runtimeSkills?.count ?? 0), detail: renderSourceCounts(dashboard.value?.runtimeSkills?.sourceCounts) },
     { label: '审计事件', value: formatNumber(readNumber(auditStats, 'total') ?? auditLogs.value?.total), detail: `最近 ${auditLogs.value?.records?.length ?? 0} 条已加载` },
-    { label: '会话 TTL', value: tokenStats?.tokenTtlSeconds ? `${Math.round(tokenStats.tokenTtlSeconds / 3600)}h` : '-', detail: tokenStats?.redisBacked ? 'Token 存储 Redis' : 'Token 本地兜底' }
+    { label: 'Prompt Cache', value: formatPercent(readNumber(usage, 'promptCacheHitRate')), detail: `Hit ${formatNumber(readNumber(usage, 'totalPromptCacheHitTokens'))} / Miss ${formatNumber(readNumber(usage, 'totalPromptCacheMissTokens'))}` }
   ];
 });
 
 const activeSessions = computed<ActiveSession[]>(() => dashboard.value?.activeSessions || []);
 const recentUsers = computed<RecentUserActivity[]>(() => dashboard.value?.recentUsers || []);
 const auditRecords = computed<AuditRecord[]>(() => auditLogs.value?.records || []);
+const agentRuns = computed(() => dashboard.value?.agentRuns || []);
+const llmUsage = computed<Record<string, unknown>>(() => dashboard.value?.llmUsage || {});
+const recentLlmUsage = computed<Record<string, unknown>[]>(() => (dashboard.value?.recentLlmUsage || []).filter(isRecord));
+const llmUsageCards = computed(() => [
+  { label: '总调用', value: formatNumber(readNumber(llmUsage.value, 'totalCalls')), detail: `usage known ${formatNumber(readNumber(llmUsage.value, 'usageKnownCount'))}` },
+  { label: '总 Tokens', value: formatNumber(readNumber(llmUsage.value, 'totalTokens')), detail: `Prompt ${formatNumber(readNumber(llmUsage.value, 'totalPromptTokens'))}` },
+  { label: 'Prompt Cache', value: formatPercent(readNumber(llmUsage.value, 'promptCacheHitRate')), detail: `known ${formatNumber(readNumber(llmUsage.value, 'promptCacheKnownCount'))}` },
+  { label: 'Top Model', value: String(llmUsage.value.topModel || '-'), detail: `Provider ${String(llmUsage.value.topProvider || '-')}` }
+]);
 
 onMounted(async () => {
   try {
@@ -131,6 +152,11 @@ function formatNumber(value: unknown) {
   return new Intl.NumberFormat('zh-CN').format(value);
 }
 
+function formatPercent(value: unknown) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '-';
+  return `${Math.round(value * 1000) / 10}%`;
+}
+
 function formatTime(value: unknown) {
   if (typeof value === 'number' && value > 0) {
     return new Date(value).toLocaleString('zh-CN');
@@ -150,6 +176,14 @@ function preview(value: unknown, max = 86) {
 function readNumber(source: Record<string, unknown>, key: string) {
   const value = source[key];
   return typeof value === 'number' ? value : undefined;
+}
+
+function readText(source: Record<string, unknown>, key: string, max = 80) {
+  return preview(source[key], max);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function renderSourceCounts(sourceCounts?: Record<string, number>) {
@@ -193,6 +227,9 @@ function renderSourceCounts(sourceCounts?: Record<string, number>) {
           </button>
         </div>
         <p v-if="adminError" class="status danger admin-inline-status">{{ adminError }}</p>
+        <nav class="admin-console-tabs" aria-label="Admin Console Sections">
+          <a v-for="item in adminSections" :key="item.label" :href="item.hash">{{ item.label }}</a>
+        </nav>
       </section>
 
       <aside class="admin-login">
@@ -254,6 +291,43 @@ function renderSourceCounts(sourceCounts?: Record<string, number>) {
         </div>
       </section>
 
+      <section v-if="isAdmin" class="soft-card admin-data-card" aria-label="Agent Run 执行轨迹">
+        <div class="admin-section-head">
+          <div>
+            <p class="eyebrow">Agent Runs</p>
+            <h2>最近 Agent 执行轨迹</h2>
+            <p>来自 MessageEvent TRACE，用于回看每次请求的自动判断、工具选择和失败位置。</p>
+          </div>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Request</th>
+                <th>User</th>
+                <th>Last Step</th>
+                <th>Status</th>
+                <th>Detail</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="run in agentRuns" :key="run.requestId">
+                <td><code>{{ String(run.requestId || '').slice(0, 10) }}</code></td>
+                <td>{{ run.userId || '-' }}</td>
+                <td>{{ run.lastStep || '-' }}</td>
+                <td><span class="status" :class="run.status === 'failed' ? 'danger' : 'ok'">{{ run.status || '-' }}</span></td>
+                <td>{{ preview(run.detail, 72) }}</td>
+                <td>{{ formatTime(run.timestamp) }}</td>
+              </tr>
+              <tr v-if="agentRuns.length === 0">
+                <td colspan="6">暂无 Agent trace。发送一条 Agent 消息后这里会出现。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section id="file-boundary" class="soft-card admin-data-card" aria-label="本地文件读取边界">
         <div class="admin-section-head">
           <div>
@@ -307,7 +381,59 @@ function renderSourceCounts(sourceCounts?: Record<string, number>) {
         </div>
       </section>
 
-      <section v-if="isAdmin" class="soft-card admin-data-card" aria-label="用户活动统计">
+      <section id="llm-usage" class="soft-card admin-data-card" aria-label="LLM Token 与 Prompt Cache 统计">
+        <div class="admin-section-head">
+          <div>
+            <p class="eyebrow">LLM Usage</p>
+            <h2>模型 Token 与 Prompt Cache</h2>
+            <p>这里展示 provider 返回的真实 usage：普通 token、prompt cache hit/miss，以及最近调用来源。</p>
+          </div>
+        </div>
+        <div v-if="isAdmin" class="admin-fact-grid">
+          <article v-for="item in llmUsageCards" :key="item.label" class="admin-fact-card">
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+            <p>{{ item.detail }}</p>
+          </article>
+        </div>
+        <div v-if="isAdmin" class="admin-table-wrap usage-table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>Request</th>
+                <th>Source</th>
+                <th>Model</th>
+                <th>Prompt</th>
+                <th>Cache Hit / Miss</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="record in recentLlmUsage" :key="`${record.id || record.requestId}-${record.createTime}`">
+                <td><code>{{ readText(record, 'requestId', 12) }}</code></td>
+                <td>{{ readText(record, 'source', 28) }}</td>
+                <td>{{ readText(record, 'model', 34) }}</td>
+                <td>{{ formatNumber(readNumber(record, 'promptTokens')) }}</td>
+                <td>
+                  <span class="status ok">{{ formatNumber(readNumber(record, 'promptCacheHitTokens')) }}</span>
+                  /
+                  <span class="status">{{ formatNumber(readNumber(record, 'promptCacheMissTokens')) }}</span>
+                </td>
+                <td>{{ formatNumber(readNumber(record, 'totalTokens')) }}</td>
+              </tr>
+              <tr v-if="recentLlmUsage.length === 0">
+                <td colspan="6">暂无 LLM usage 记录。完成一次模型调用后这里会出现。</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-else class="admin-empty-state">
+          <strong>需要管理员权限</strong>
+          <p>LLM token 与缓存命中率属于运行成本数据，登录 ADMIN 后展示。</p>
+        </div>
+      </section>
+
+      <section v-if="isAdmin" id="user-activity" class="soft-card admin-data-card" aria-label="用户活动统计">
         <div class="admin-section-head">
           <div>
             <p class="eyebrow">User Activity</p>

@@ -13,6 +13,10 @@ public interface AuthService {
 
     UserIdentity authenticateToken(String token);
 
+    /**
+     * 撤销当前认证 token。
+     * 空 token 或纯空白 token 为 no-op；重复撤销、未命中本地/Redis token 也按成功处理，不抛业务异常。
+     */
     void revokeToken(String token);
 
     /**

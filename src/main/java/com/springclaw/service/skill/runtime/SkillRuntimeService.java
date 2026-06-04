@@ -2,7 +2,6 @@ package com.springclaw.service.skill.runtime;
 
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.service.chat.BuiltinSkillExecutionService;
-import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import com.springclaw.service.skill.script.ScriptSkillExecutorService;
@@ -10,7 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.util.Locale;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -19,21 +18,24 @@ import java.util.Set;
 @Service
 public class SkillRuntimeService {
 
-    private final ScriptSkillExecutorService scriptSkillExecutorService;
-    private final BuiltinSkillExecutionService builtinSkillExecutionService;
+    private final List<SkillExecutor> executors;
     private final SkillRegistryService skillRegistryService;
 
     public SkillRuntimeService(ScriptSkillExecutorService scriptSkillExecutorService,
                                BuiltinSkillExecutionService builtinSkillExecutionService) {
-        this(scriptSkillExecutorService, builtinSkillExecutionService, null);
+        this(defaultExecutors(scriptSkillExecutorService, builtinSkillExecutionService), null);
     }
 
-    @Autowired
     public SkillRuntimeService(ScriptSkillExecutorService scriptSkillExecutorService,
                                BuiltinSkillExecutionService builtinSkillExecutionService,
                                SkillRegistryService skillRegistryService) {
-        this.scriptSkillExecutorService = scriptSkillExecutorService;
-        this.builtinSkillExecutionService = builtinSkillExecutionService;
+        this(defaultExecutors(scriptSkillExecutorService, builtinSkillExecutionService), skillRegistryService);
+    }
+
+    @Autowired
+    public SkillRuntimeService(List<SkillExecutor> executors,
+                               SkillRegistryService skillRegistryService) {
+        this.executors = executors == null ? List.of() : List.copyOf(executors);
         this.skillRegistryService = skillRegistryService;
     }
 
@@ -59,39 +61,23 @@ public class SkillRuntimeService {
         if (definition == null) {
             throw new BusinessException(40083, "skill 定义不能为空");
         }
-        String payload = safe(inputPayload);
-        return switch (normalize(definition.executorType())) {
-            case "script", "python" -> executeScriptSkill(definition.skillId(), payload);
-            case "builtin" -> executeBuiltinSkill(definition.skillId(), payload);
-            default -> throw new BusinessException(40080, "该 skill 当前不可直接执行: " + definition.skillId());
-        };
-    }
-
-    private String executeScriptSkill(String skillId, String payload) {
-        if (!StringUtils.hasText(payload)) {
-            return scriptSkillExecutorService.runScriptSkillByGoal(skillId, "请执行默认任务");
-        }
-        if (looksLikeJson(payload)) {
-            return scriptSkillExecutorService.runScriptSkill(skillId, payload);
-        }
-        return scriptSkillExecutorService.runScriptSkillByGoal(skillId, payload);
-    }
-
-    private String executeBuiltinSkill(String skillId, String payload) {
-        return builtinSkillExecutionService.executeBySkillId(skillId, payload)
-                .map(LocalSkillFallbackService.LocalSkillResult::fallbackAnswer)
-                .orElseThrow(() -> new BusinessException(50096, "builtin skill 未返回结果: " + skillId));
-    }
-
-    private boolean looksLikeJson(String text) {
-        return StringUtils.hasText(text) && text.trim().startsWith("{") && text.trim().endsWith("}");
-    }
-
-    private String normalize(String value) {
-        return StringUtils.hasText(value) ? value.trim().toLowerCase(Locale.ROOT) : "";
+        return executors.stream()
+                .filter(executor -> executor.supports(definition))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(40080, "该 skill 当前不可直接执行: " + definition.skillId()))
+                .execute(definition, safe(inputPayload));
     }
 
     private String safe(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private static List<SkillExecutor> defaultExecutors(ScriptSkillExecutorService scriptSkillExecutorService,
+                                                        BuiltinSkillExecutionService builtinSkillExecutionService) {
+        return List.of(
+                new PythonSkillExecutor(scriptSkillExecutorService),
+                new BuiltinSkillExecutor(builtinSkillExecutionService),
+                new PromptSkillExecutor()
+        );
     }
 }

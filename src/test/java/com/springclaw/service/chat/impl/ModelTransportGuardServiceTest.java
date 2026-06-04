@@ -3,6 +3,7 @@ package com.springclaw.service.chat.impl;
 import com.springclaw.service.ai.AiProviderService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 import java.net.SocketTimeoutException;
 
@@ -10,6 +11,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
 class ModelTransportGuardServiceTest {
+
+    @Test
+    void shouldCreateModelTransportGuardBeanWhenSpringResolvesConstructors() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.registerBean(ChatResponsePolicyService.class, () -> new ChatResponsePolicyService(""));
+            context.register(ModelTransportGuardService.class);
+
+            context.refresh();
+
+            assertThat(context.getBean(ModelTransportGuardService.class)).isNotNull();
+        }
+    }
 
     @Test
     void shouldNotDisableWholeProviderForSingleReadTimeout() {
@@ -30,6 +43,17 @@ class ModelTransportGuardServiceTest {
         guardService.markProviderFailure("deepseek", failure);
 
         assertThat(guardService.isModelCallEnabled(activeClient())).isTrue();
+    }
+
+    @Test
+    void shouldCooldownProviderAfterRepeatedTimeouts() {
+        ModelTransportGuardService guardService = new ModelTransportGuardService(new ChatResponsePolicyService(""), 30);
+
+        guardService.markProviderFailure("deepseek", new SocketTimeoutException("Read timed out"));
+        assertThat(guardService.isModelCallEnabled(activeClient())).isTrue();
+
+        guardService.markProviderFailure("deepseek", new SocketTimeoutException("Read timed out"));
+        assertThat(guardService.isModelCallEnabled(activeClient())).isFalse();
     }
 
     @Test

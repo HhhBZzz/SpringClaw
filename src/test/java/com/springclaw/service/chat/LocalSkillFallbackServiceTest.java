@@ -985,6 +985,7 @@ class LocalSkillFallbackServiceTest {
                 preferredMode: %s
                 triggerKeywords:
                 %s
+                %s
                 triggerExamples:
                   - %s
                 ---
@@ -993,7 +994,38 @@ class LocalSkillFallbackServiceTest {
                 """.formatted(
                 name, description, skillId,
                 indentList(toolPacksCsv), preferredMode,
-                indentList(triggerKeywordsCsv), triggerExample, name));
+                indentList(triggerKeywordsCsv), highConfidenceBlock(skillId), triggerExample, name));
+    }
+
+    private String highConfidenceBlock(String skillId) {
+        return switch (skillId) {
+            case "code-analysis" -> """
+                highConfidenceKeywords:
+                  - 项目结构
+                  - 结构
+                  - 是否存在
+                  - 文件
+                """;
+            case "workspace-review" -> """
+                highConfidenceKeywords:
+                  - 审查
+                  - 项目审查
+                  - 源码审查
+                  - 架构审查
+                  - 冗余代码
+                  - 垃圾代码
+                """;
+            case "web-crawl" -> """
+                highConfidenceRequiresUrl: true
+                highConfidenceKeywords:
+                  - 抓取
+                  - 读取
+                  - 网页
+                  - 链接
+                  - 正文
+                """;
+            default -> "";
+        };
     }
 
     private String indentList(String csv) {

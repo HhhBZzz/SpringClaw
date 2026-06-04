@@ -2,7 +2,13 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.dto.chat.ChatRequest;
+import com.springclaw.dto.chat.ChatResponse;
 import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.agent.AgentDecision;
+import com.springclaw.service.agent.AgentRun;
+import com.springclaw.service.agent.AgentRuntimeEngine;
+import com.springclaw.service.agent.CapabilityPlan;
+import com.springclaw.service.agent.VerificationResult;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
 import com.springclaw.service.usage.LlmUsageRecordService;
@@ -28,14 +34,14 @@ class ChatServiceImplModeTest {
         Fixture fixture = new Fixture();
         ChatContext context = fixture.buildChatContext("你好", "simplified", "默认");
         when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
-        when(fixture.simplifiedOparEngine.run(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any()))
+        when(fixture.simplifiedOparEngine.run(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any(), any()))
                 .thenReturn(new ChatExecutionResult("observe", "SIMPLIFIED", "ACTION", "answer", true));
 
         ChatServiceImpl service = fixture.build();
         service.chat(new ChatRequest("s1", "u1", "你好", "api"));
 
-        verify(fixture.simplifiedOparEngine).run(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any());
-        verify(fixture.oparLoopEngine, never()).runLoop(any(), anyString(), any(), anyString(), any());
+        verify(fixture.simplifiedOparEngine).run(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any(), any());
+        verify(fixture.oparLoopEngine, never()).runLoop(any(), anyString(), any(), anyString(), any(), any());
     }
 
     @Test
@@ -43,14 +49,14 @@ class ChatServiceImplModeTest {
         Fixture fixture = new Fixture();
         ChatContext context = fixture.buildChatContext("你好", "opar", "默认");
         when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
-        when(fixture.oparLoopEngine.runLoop(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any()))
+        when(fixture.oparLoopEngine.runLoop(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any(), any()))
                 .thenReturn(new ChatExecutionResult("observe", "PLAN", "ACTION", "answer", true));
 
         ChatServiceImpl service = fixture.build();
         service.chat(new ChatRequest("s1", "u1", "你好", "api"));
 
-        verify(fixture.oparLoopEngine).runLoop(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any());
-        verify(fixture.simplifiedOparEngine, never()).run(any(), anyString(), any(), anyString(), any());
+        verify(fixture.oparLoopEngine).runLoop(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any(), any());
+        verify(fixture.simplifiedOparEngine, never()).run(any(), anyString(), any(), anyString(), any(), any());
     }
 
     @Test
@@ -58,14 +64,14 @@ class ChatServiceImplModeTest {
         Fixture fixture = new Fixture();
         ChatContext context = fixture.buildChatContext("分析这个启动报错并给修复方案", "opar", "自动升级");
         when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
-        when(fixture.oparLoopEngine.runLoop(eq(fixture.activeClient), eq("system"), any(AssembledContext.class), anyString(), any()))
+        when(fixture.oparLoopEngine.runLoop(eq(fixture.activeClient), eq("system"), any(AssembledContext.class), anyString(), any(), any()))
                 .thenReturn(new ChatExecutionResult("observe", "PLAN", "ACTION", "answer", true));
 
         ChatServiceImpl service = fixture.build();
         service.chat(new ChatRequest("s1", "u1", "分析这个启动报错并给修复方案", "api"));
 
-        verify(fixture.oparLoopEngine).runLoop(eq(fixture.activeClient), eq("system"), any(AssembledContext.class), anyString(), any());
-        verify(fixture.simplifiedOparEngine, never()).run(any(), anyString(), any(), anyString(), any());
+        verify(fixture.oparLoopEngine).runLoop(eq(fixture.activeClient), eq("system"), any(AssembledContext.class), anyString(), any(), any());
+        verify(fixture.simplifiedOparEngine, never()).run(any(), anyString(), any(), anyString(), any(), any());
     }
 
     @Test
@@ -73,7 +79,7 @@ class ChatServiceImplModeTest {
         Fixture fixture = new Fixture();
         ChatContext context = fixture.buildChatContext("你好", "simplified", "默认");
         when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
-        when(fixture.simplifiedOparEngine.run(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any()))
+        when(fixture.simplifiedOparEngine.run(eq(fixture.activeClient), eq("system"), eq(fixture.assembled), anyString(), any(), any()))
                 .thenAnswer(invocation -> {
                     Thread.sleep(350);
                     return new ChatExecutionResult("observe", "SIMPLIFIED", "ACTION", "answer", true);
@@ -95,6 +101,15 @@ class ChatServiceImplModeTest {
         ChatServiceImpl service = fixture.build();
 
         Assertions.assertFalse(service.shouldUseModelLedStreaming(context));
+    }
+
+    @Test
+    void shouldUseBasicStreamingForGeneralQuestionsByDefault() {
+        Fixture fixture = new Fixture();
+        ChatContext context = fixture.buildChatContext("你好", "simplified", "默认", "agent", "general");
+        ChatServiceImpl service = fixture.build();
+
+        Assertions.assertTrue(service.shouldUseBasicModelStreaming(context));
     }
 
     @Test
@@ -122,6 +137,55 @@ class ChatServiceImplModeTest {
         ChatServiceImpl service = fixture.build();
 
         Assertions.assertFalse(service.shouldUseModelLedStreaming(context));
+        Assertions.assertFalse(service.shouldUseBasicModelStreaming(context));
+    }
+
+    @Test
+    void shouldNotUseModelLedStreamingForAgentToolDecisionsEvenWhenEnabled() {
+        Fixture fixture = new Fixture();
+        ChatContext context = fixture.buildChatContext(
+                "分析当前项目结构",
+                "simplified",
+                "默认",
+                "agent",
+                "workspace_analysis",
+                new AgentDecision("workspace_analysis", "agent_tools", java.util.List.of("workspace-review"), "read", false, "项目分析")
+        );
+        ChatServiceImpl service = fixture.build(true, true);
+
+        Assertions.assertFalse(service.shouldUseModelLedStreaming(context));
+    }
+
+    @Test
+    void shouldUseAgentRuntimeForNonGeneralDecisions() {
+        Fixture fixture = new Fixture();
+        AgentDecision decision = new AgentDecision("workspace_analysis", "agent_tools", java.util.List.of("workspace-review"), "read", false, "项目分析");
+        ChatContext context = fixture.buildChatContext(
+                "分析当前项目结构",
+                "simplified",
+                "默认",
+                "agent",
+                "workspace_analysis",
+                decision
+        );
+        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(fixture.agentRuntimeEngine.run(context)).thenReturn(new AgentRun(
+                "req-1",
+                decision,
+                new CapabilityPlan("workspace_analysis", "agent_tools", java.util.List.of("workspace-review"), java.util.List.of("workspace"), "read", false, "项目分析"),
+                java.util.List.of(),
+                java.util.List.of(),
+                new VerificationResult("success", true, "ok"),
+                new ChatExecutionResult("observe", "PLAN", "ACTION", "runtime answer", true)
+        ));
+
+        ChatServiceImpl service = fixture.buildWithRuntime();
+        ChatResponse response = service.chat(new ChatRequest("s1", "u1", "分析当前项目结构", "api"));
+
+        Assertions.assertEquals("runtime answer", response.answer());
+        verify(fixture.agentRuntimeEngine).run(context);
+        verify(fixture.simplifiedOparEngine, never()).run(any(), anyString(), any(), anyString(), any(), any());
+        verify(fixture.oparLoopEngine, never()).runLoop(any(), anyString(), any(), anyString(), any(), any());
     }
 
     private static final class Fixture {
@@ -138,6 +202,7 @@ class ChatServiceImplModeTest {
         private final ChatResultPersister chatResultPersister = mock(ChatResultPersister.class);
         private final MetaGuardExecutor metaGuardExecutor = mock(MetaGuardExecutor.class);
         private final ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
+        private final AgentRuntimeEngine agentRuntimeEngine = mock(AgentRuntimeEngine.class);
         private final AgentSession session = new AgentSession();
         private final AssembledContext assembled = new AssembledContext(
                 "s1",
@@ -174,6 +239,15 @@ class ChatServiceImplModeTest {
         }
 
         private ChatContext buildChatContext(String message, String executionMode, String routingReason, String responseMode, String intent) {
+            return buildChatContext(message, executionMode, routingReason, responseMode, intent, AgentDecision.general("兼容旧构造器，默认普通聊天。"));
+        }
+
+        private ChatContext buildChatContext(String message,
+                                             String executionMode,
+                                             String routingReason,
+                                             String responseMode,
+                                             String intent,
+                                             AgentDecision decision) {
             return new ChatContext(
                     session,
                     "api",
@@ -188,11 +262,16 @@ class ChatServiceImplModeTest {
                     executionMode,
                     routingReason,
                     responseMode,
-                    intent
+                    intent,
+                    decision
             );
         }
 
         private ChatServiceImpl build() {
+            return build(false, true);
+        }
+
+        private ChatServiceImpl build(boolean modelLedStreamingEnabled, boolean basicStreamingEnabled) {
             return new ChatServiceImpl(
                     aiProviderService,
                     chatGuardService,
@@ -205,7 +284,33 @@ class ChatServiceImplModeTest {
                     chatContextFactory,
                     chatResultPersister,
                     metaGuardExecutor,
-                    toolOrchestrator
+                    toolOrchestrator,
+                    null,
+                    null,
+                    modelLedStreamingEnabled,
+                    basicStreamingEnabled
+            );
+        }
+
+        private ChatServiceImpl buildWithRuntime() {
+            return new ChatServiceImpl(
+                    aiProviderService,
+                    chatGuardService,
+                    oparLoopEngine,
+                    simplifiedOparEngine,
+                    chatResponsePolicyService,
+                    modelTransportGuardService,
+                    llmUsageRecordService,
+                    conversationAdvisorSupport,
+                    chatContextFactory,
+                    chatResultPersister,
+                    metaGuardExecutor,
+                    toolOrchestrator,
+                    null,
+                    null,
+                    agentRuntimeEngine,
+                    false,
+                    true
             );
         }
     }

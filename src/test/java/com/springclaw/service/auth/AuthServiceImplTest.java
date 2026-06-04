@@ -20,6 +20,7 @@ class AuthServiceImplTest {
                 "USER",
                 "USER",
                 false,
+                "",
                 24,
                 "",
                 "springclaw:auth:token:"
@@ -44,6 +45,7 @@ class AuthServiceImplTest {
                 "USER",
                 "USER",
                 false,
+                "",
                 24,
                 "",
                 "springclaw:auth:token:"
@@ -65,6 +67,7 @@ class AuthServiceImplTest {
                 "USER",
                 "USER",
                 false,
+                "",
                 24,
                 "",
                 "springclaw:auth:token:"
@@ -82,6 +85,7 @@ class AuthServiceImplTest {
                 "USER",
                 "USER",
                 true,
+                "",
                 24,
                 "",
                 "springclaw:auth:token:"
@@ -104,6 +108,7 @@ class AuthServiceImplTest {
                 "USER",
                 "USER",
                 false,
+                "",
                 24,
                 "",
                 "springclaw:auth:token:"
@@ -125,6 +130,7 @@ class AuthServiceImplTest {
                 "USER",
                 "USER",
                 false,
+                "",
                 24,
                 "",
                 "springclaw:auth:token:"
@@ -155,6 +161,7 @@ class AuthServiceImplTest {
                 "USER",
                 "USER",
                 false,
+                "",
                 24,
                 "",
                 "springclaw:auth:token:"
@@ -180,6 +187,7 @@ class AuthServiceImplTest {
                 "USER",
                 "USER",
                 false,
+                "",
                 24,
                 "",
                 "springclaw:auth:token:"

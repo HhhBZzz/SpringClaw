@@ -1,8 +1,8 @@
 # OpenClaw Java
 
-一个基于 `Spring Boot 3.5 + Spring AI 1.1` 的企业内 AI Agent 后端。
+一个基于 `Spring Boot 3.5 + Spring AI 1.1` 的企业内 AI Agent Runtime。
 
-截至 `2026-03-21`，项目已经完成从“可跑 Demo”到“可持续演进的内部 Agent 服务”的第一轮收敛，具备多模型、短期/长期记忆、权限治理、飞书接入、管理后台和模型用量统计能力。
+截至 `2026-06-01`，项目已经从“可跑 Demo”继续收敛到“可持续演进的内部 Agent 基座”，具备多模型、短期/长期记忆、Agent 决策、工具治理、runtime skill、飞书接入、Vue 管理后台和模型用量统计能力。
 
 ## 当前能力概览
 
@@ -10,20 +10,26 @@
    - 已接入 `coding-plan`、`deepseek`
    - 支持 provider/model 切换
    - 默认主链路已切到 `simplified`
+   - 保留 `opar` 作为复杂任务高级链路
 2. 记忆系统
    - 短期：MySQL 会话事件流
    - 长期：Redis Vector Store + `text-embedding-v4`
 3. 权限与治理
-   - 注册/登录/token
+   - 注册/登录/退出/token revoke
+   - HttpOnly Cookie 登录态
    - `ADMIN` 后台
-   - 工具权限与技能策略
+   - 工具权限、技能策略、动作风险分级与确认
 4. 渠道接入
    - API
    - 飞书 webhook
    - 飞书长连接
 5. 管理后台
-   - `/admin`
-   - 用户、角色、模型、缓存、记忆、审计、活跃 token 会话、模型用量
+   - `/admin` 跳转到 Vue 后台
+   - 用户、角色、模型、缓存、记忆、审计、活跃 token 会话、模型用量、runtime skill
+6. 前端控制台
+   - Vue 3 + Vite + Pinia + Vue Router
+   - Agent 页面支持流式回复、动作确认、运行 trace
+   - 已接入 GSAP 动效，并尊重 `prefers-reduced-motion`
 
 ## 截止今天的项目状态
 
@@ -43,17 +49,28 @@
    - 群聊不再补召回用户私聊/跨场景个人长期记忆
 5. 后台已支持模型用量统计
    - 能查看总调用次数、总 tokens、top provider / model、最近调用样本
-6. 项目已接入 GitHub 记录
+6. Agent runtime 已加入决策与 trace
+   - 规则路由优先，模糊场景可走轻量模型分类
+   - 写入、副作用、危险操作会生成确认 proposal
+   - requestId 维度可追踪 Agent 运行步骤
+7. Skill 执行入口继续收口
+   - Python / builtin / prompt skill 统一走 `SkillRuntimeService`
+   - `ToolOrchestrator` 改为 provider 组合工具包，减少硬编码扩展成本
+8. 项目已接入 GitHub 记录
    - 仓库：[HhhBZzz/SpringClaw](https://github.com/HhhBZzz/SpringClaw)
    - 当前工作分支：[codex/bootstrap-github](https://github.com/HhhBZzz/SpringClaw/tree/codex/bootstrap-github)
 
 ## 先看代码分工
 
-- 接收消息（Controller）：`src/main/java/com/openclaw/controller`
-- 聊天主链路（Service）：`src/main/java/com/openclaw/service/chat/impl/ChatServiceImpl.java`
-- 记忆与上下文：`src/main/java/com/openclaw/service/context`、`src/main/java/com/openclaw/service/memory`
-- 给大模型用的工具（Tool）：`src/main/java/com/openclaw/tool/pack`
-- 后台与运维接口：`src/main/java/com/openclaw/controller/ops`
+- 接收消息（Controller）：`src/main/java/com/springclaw/controller`
+- 聊天主链路（Service）：`src/main/java/com/springclaw/service/chat/impl/ChatServiceImpl.java`
+- Agent 决策与 trace：`src/main/java/com/springclaw/service/agent`
+- 记忆与上下文：`src/main/java/com/springclaw/service/context`、`src/main/java/com/springclaw/service/memory`
+- 给大模型用的工具（Tool）：`src/main/java/com/springclaw/tool/pack`
+- 工具编排与治理：`src/main/java/com/springclaw/tool/runtime`
+- Skill 运行时：`src/main/java/com/springclaw/service/skill/runtime`
+- 后台与运维接口：`src/main/java/com/springclaw/controller/ops`
+- Vue 前端：`frontend/src`
 
 ## 怎么启动
 
@@ -114,18 +131,19 @@ curl -X POST http://127.0.0.1:18080/api/chat/send \
 
 一句话：不连是“可演示版”，连上是“可持续运行版”。
 
-## 这个项目现在最核心的 4 个功能
+## 这个项目现在最核心的 5 个功能
 
 1. 聊天：`POST /api/chat/send`、`POST /api/chat/stream`、`POST /api/chat/async`
-2. Skill + 工具调用：通过 `skill_descriptor/skill_policy` 控制可用技能，再动态注入 `System`、`File`、`WorkspaceSearch`、`WebSearch`、`Weather`、`Exchange`、`News`、`ScriptSkill` 工具包
-3. 记忆：MySQL 事件流 + Redis 向量记忆 + Spring AI Advisor 上下文注入
+2. Agent 决策：规则路由 + 可选轻量模型分类 + 动作 proposal + trace
+3. Skill + 工具调用：通过 `skill_descriptor/skill_policy` 控制可用技能，再动态注入 `System`、`File`、`WorkspaceSearch`、`WorkspaceReview`、`WebSearch`、`Weather`、`Exchange`、`News`、`ScriptSkill`、`SkillLibrary` 等工具包
 4. 企业治理：认证、角色、工具权限、审计、后台管理
+5. 记忆：MySQL 事件流 + Redis 向量记忆 + Spring AI Advisor 上下文注入
 
 ## 3 条面试可背的项目亮点
 
 1. 我做了多模型 Agent 运行时，不把模型写死在代码里，支持 provider/model 切换与故障切换。
-2. 我用 Spring AI 的 `@Tool` + AOP 做工具统一治理，把权限、限流、审计收在同一层。
-3. 我做了双轨记忆（MySQL 事件流 + Redis 向量检索），既能审计，也能做长期语义召回。
+2. 我把 Agent 决策、工具风险分级、动作确认和 trace 做成了平台能力，而不是散落在聊天代码里。
+3. 我用 Spring AI 的 `@Tool` + AOP 做工具统一治理，把权限、限流、审计收在同一层。
 
 ## Skill 快速使用（可选）
 

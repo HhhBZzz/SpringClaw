@@ -6,6 +6,8 @@ import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.dto.chat.ChatHistoryResponse;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
+import com.springclaw.service.agent.AgentActionProposalService;
+import com.springclaw.service.agent.AgentRunTraceService;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.chat.ChatService;
 import com.springclaw.service.chat.async.AsyncChatResultStore;
@@ -17,6 +19,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 import java.util.List;
 
@@ -31,6 +34,24 @@ class ChatControllerAuthTest {
     @AfterEach
     void clearContext() {
         RequestUserContextHolder.clear();
+    }
+
+    @Test
+    void shouldCreateChatControllerBeanWhenSpringResolvesConstructors() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.registerBean(ChatService.class, () -> mock(ChatService.class));
+            context.registerBean(ChatMessageProducer.class, () -> mock(ChatMessageProducer.class));
+            context.registerBean(AsyncChatResultStore.class, () -> mock(AsyncChatResultStore.class));
+            context.registerBean(MessageEventService.class, () -> mock(MessageEventService.class));
+            context.registerBean(AiProviderService.class, () -> mock(AiProviderService.class));
+            context.registerBean(AgentActionProposalService.class, () -> mock(AgentActionProposalService.class));
+            context.registerBean(AgentRunTraceService.class, () -> mock(AgentRunTraceService.class));
+            context.register(ChatController.class);
+
+            context.refresh();
+
+            Assertions.assertNotNull(context.getBean(ChatController.class));
+        }
     }
 
     @Test

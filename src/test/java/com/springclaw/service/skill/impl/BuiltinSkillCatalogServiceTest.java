@@ -112,6 +112,7 @@ class BuiltinSkillCatalogServiceTest {
                 preferredMode: %s
                 triggerKeywords:
                 %s
+                %s
                 triggerExamples:
                   - %s
                 ---
@@ -126,9 +127,32 @@ class BuiltinSkillCatalogServiceTest {
                 indentList(toolPacksCsv),
                 preferredMode,
                 indentList(triggerKeywordsCsv),
+                highConfidenceBlock(skillId),
                 triggerExample,
                 name
         ));
+    }
+
+    private String highConfidenceBlock(String skillId) {
+        return switch (skillId) {
+            case "code-analysis" -> """
+                highConfidenceKeywords:
+                  - 项目结构
+                  - 结构
+                  - 是否存在
+                  - 文件
+                """;
+            case "web-crawl" -> """
+                highConfidenceRequiresUrl: true
+                highConfidenceKeywords:
+                  - 抓取
+                  - 读取
+                  - 网页
+                  - 链接
+                  - 正文
+                """;
+            default -> "";
+        };
     }
 
     private String indentList(String csv) {

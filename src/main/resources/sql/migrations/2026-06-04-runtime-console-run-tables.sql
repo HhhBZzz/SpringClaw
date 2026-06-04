@@ -1,0 +1,75 @@
+-- SpringClaw Runtime Console run observability tables.
+-- Non-destructive migration for existing databases.
+
+CREATE TABLE IF NOT EXISTS `agent_run` (
+  `id` BIGINT NOT NULL,
+  `request_id` VARCHAR(64) NOT NULL,
+  `session_key` VARCHAR(128) NULL,
+  `channel` VARCHAR(32) NOT NULL DEFAULT 'api',
+  `user_id` VARCHAR(64) NOT NULL,
+  `response_mode` VARCHAR(32) NULL,
+  `execution_mode` VARCHAR(64) NULL,
+  `intent` VARCHAR(64) NULL,
+  `status` VARCHAR(32) NOT NULL DEFAULT 'RUNNING',
+  `started_at` DATETIME NOT NULL,
+  `finished_at` DATETIME NULL,
+  `duration_ms` BIGINT NULL,
+  `total_tokens` INT NULL,
+  `error_message` VARCHAR(1024) NULL,
+  `create_time` DATETIME NOT NULL,
+  `update_time` DATETIME NOT NULL,
+  `create_by` VARCHAR(64) NULL,
+  `update_by` VARCHAR(64) NULL,
+  `deleted` TINYINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_agent_run_request` (`request_id`),
+  KEY `idx_agent_run_user_time` (`user_id`, `deleted`, `started_at`),
+  KEY `idx_agent_run_session_time` (`session_key`, `deleted`, `started_at`),
+  KEY `idx_agent_run_status_time` (`status`, `deleted`, `started_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `agent_run_step` (
+  `id` BIGINT NOT NULL,
+  `request_id` VARCHAR(64) NOT NULL,
+  `sequence_no` INT NOT NULL,
+  `step_name` VARCHAR(128) NOT NULL,
+  `step_type` VARCHAR(32) NOT NULL,
+  `status` VARCHAR(32) NOT NULL,
+  `detail_json` TEXT NULL,
+  `started_at` DATETIME NULL,
+  `finished_at` DATETIME NULL,
+  `duration_ms` BIGINT NULL,
+  `create_time` DATETIME NOT NULL,
+  `update_time` DATETIME NOT NULL,
+  `create_by` VARCHAR(64) NULL,
+  `update_by` VARCHAR(64) NULL,
+  `deleted` TINYINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  KEY `idx_agent_run_step_request_sequence` (`request_id`, `sequence_no`),
+  KEY `idx_agent_run_step_status_time` (`status`, `deleted`, `create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `tool_invocation` (
+  `id` BIGINT NOT NULL,
+  `request_id` VARCHAR(64) NOT NULL,
+  `session_key` VARCHAR(128) NULL,
+  `user_id` VARCHAR(64) NOT NULL,
+  `tool_name` VARCHAR(128) NOT NULL,
+  `skill_id` VARCHAR(64) NULL,
+  `toolset` VARCHAR(64) NULL,
+  `risk_level` VARCHAR(32) NULL,
+  `status` VARCHAR(32) NOT NULL,
+  `duration_ms` BIGINT NULL,
+  `input_summary` VARCHAR(512) NULL,
+  `output_summary` VARCHAR(1024) NULL,
+  `error_message` VARCHAR(1024) NULL,
+  `create_time` DATETIME NOT NULL,
+  `update_time` DATETIME NOT NULL,
+  `create_by` VARCHAR(64) NULL,
+  `update_by` VARCHAR(64) NULL,
+  `deleted` TINYINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  KEY `idx_tool_invocation_request` (`request_id`, `deleted`, `create_time`),
+  KEY `idx_tool_invocation_user_time` (`user_id`, `deleted`, `create_time`),
+  KEY `idx_tool_invocation_tool_time` (`tool_name`, `deleted`, `create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

@@ -181,6 +181,54 @@ public class MessageEventServiceImpl extends ServiceImpl<MessageEventMapper, Mes
     }
 
     @Override
+    public List<MessageEvent> listRequestEvents(String requestId,
+                                                String userId,
+                                                String role,
+                                                String eventType,
+                                                int limit,
+                                                boolean ascending) {
+        if (!StringUtils.hasText(requestId)) {
+            return List.of();
+        }
+        int safeLimit = Math.max(1, Math.min(limit, 5000));
+
+        if (dbEnabled) {
+            try {
+                var query = lambdaQuery()
+                        .eq(MessageEvent::getRequestId, requestId.trim());
+                if (StringUtils.hasText(userId)) {
+                    query.eq(MessageEvent::getUserId, userId.trim());
+                }
+                if (StringUtils.hasText(role)) {
+                    query.eq(MessageEvent::getRole, role.trim().toUpperCase());
+                }
+                if (StringUtils.hasText(eventType)) {
+                    query.eq(MessageEvent::getEventType, eventType.trim().toUpperCase());
+                }
+                if (ascending) {
+                    query.orderByAsc(MessageEvent::getId);
+                } else {
+                    query.orderByDesc(MessageEvent::getId);
+                }
+                return query.page(new Page<MessageEvent>(1, safeLimit, false)).getRecords();
+            } catch (Exception ex) {
+                log.warn("按 requestId 查询事件流失败，降级读取本地缓存。requestId={}, reason={}", requestId, ex.getMessage());
+            }
+        }
+
+        return localAllEventsSnapshot().stream()
+                .filter(evt -> requestId.trim().equals(evt.getRequestId()))
+                .filter(evt -> !StringUtils.hasText(userId) || userId.trim().equals(evt.getUserId()))
+                .filter(evt -> !StringUtils.hasText(role) || role.trim().equalsIgnoreCase(evt.getRole()))
+                .filter(evt -> !StringUtils.hasText(eventType) || eventType.trim().equalsIgnoreCase(evt.getEventType()))
+                .sorted(ascending
+                        ? Comparator.comparingLong((MessageEvent evt) -> evt.getId() == null ? 0L : evt.getId())
+                        : Comparator.comparingLong((MessageEvent evt) -> evt.getId() == null ? 0L : evt.getId()).reversed())
+                .limit(safeLimit)
+                .toList();
+    }
+
+    @Override
     public long countSessionEvents(String sessionKey, String role, String eventType) {
         return countSessionEvents(sessionKey, null, role, eventType);
     }

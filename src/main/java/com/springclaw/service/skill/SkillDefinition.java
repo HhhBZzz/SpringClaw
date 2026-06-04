@@ -25,7 +25,45 @@ public record SkillDefinition(String skillId,
                               String executorRef,
                               boolean enabled,
                               int priority,
-                              boolean agentVisible) {
+                              boolean agentVisible,
+                              boolean highConfidenceRequiresUrl,
+                              List<String> highConfidenceKeywords) {
+
+    public SkillDefinition(String skillId,
+                           String name,
+                           String description,
+                           String sourceType,
+                           String sourceRef,
+                           String instructions,
+                           List<String> triggerKeywords,
+                           List<String> triggerExamples,
+                           List<String> toolPacks,
+                           String preferredMode,
+                           String contextPolicy,
+                           String executorType,
+                           String executorRef,
+                           boolean enabled,
+                           int priority,
+                           boolean agentVisible) {
+        this(skillId,
+                name,
+                description,
+                sourceType,
+                sourceRef,
+                instructions,
+                triggerKeywords,
+                triggerExamples,
+                toolPacks,
+                preferredMode,
+                contextPolicy,
+                executorType,
+                executorRef,
+                enabled,
+                priority,
+                agentVisible,
+                false,
+                List.of());
+    }
 
     public boolean matchesAllowedToolPacks(Set<String> allowedToolPacks) {
         if (toolPacks == null || toolPacks.isEmpty()) {

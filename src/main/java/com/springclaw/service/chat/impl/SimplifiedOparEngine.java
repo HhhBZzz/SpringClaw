@@ -1,6 +1,9 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.agent.AgentCapabilityExecutionService;
+import com.springclaw.service.agent.AgentCapabilityResult;
+import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.event.MessageEventService;
@@ -32,6 +35,8 @@ public class SimplifiedOparEngine {
     private final OparContextAwareSupport contextAwareSupport;
     private final ConversationAdvisorSupport conversationAdvisorSupport;
     private final MessageEventService messageEventService;
+    private final AgentCapabilityExecutionService capabilityExecutionService;
+    private final ChatResponsePolicyService chatResponsePolicyService;
 
     public SimplifiedOparEngine(AiProviderService aiProviderService,
                                 ToolOrchestrator toolOrchestrator,
@@ -41,7 +46,35 @@ public class SimplifiedOparEngine {
                                 ModelCallExecutor modelCallExecutor,
                                 OparContextAwareSupport contextAwareSupport,
                                 ConversationAdvisorSupport conversationAdvisorSupport,
-                                MessageEventService messageEventService) {
+                                MessageEventService messageEventService,
+                                ChatResponsePolicyService chatResponsePolicyService) {
+        this(
+                aiProviderService,
+                toolOrchestrator,
+                localSkillFallbackService,
+                localExecutionNarrator,
+                modelTransportGuardService,
+                modelCallExecutor,
+                contextAwareSupport,
+                conversationAdvisorSupport,
+                messageEventService,
+                AgentCapabilityExecutionService.noop(),
+                chatResponsePolicyService
+        );
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public SimplifiedOparEngine(AiProviderService aiProviderService,
+                                ToolOrchestrator toolOrchestrator,
+                                LocalSkillFallbackService localSkillFallbackService,
+                                LocalExecutionNarrator localExecutionNarrator,
+                                ModelTransportGuardService modelTransportGuardService,
+                                ModelCallExecutor modelCallExecutor,
+                                OparContextAwareSupport contextAwareSupport,
+                                ConversationAdvisorSupport conversationAdvisorSupport,
+                                MessageEventService messageEventService,
+                                AgentCapabilityExecutionService capabilityExecutionService,
+                                ChatResponsePolicyService chatResponsePolicyService) {
         this.aiProviderService = aiProviderService;
         this.toolOrchestrator = toolOrchestrator;
         this.localSkillFallbackService = localSkillFallbackService;
@@ -51,6 +84,10 @@ public class SimplifiedOparEngine {
         this.contextAwareSupport = contextAwareSupport;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
         this.messageEventService = messageEventService;
+        this.capabilityExecutionService = capabilityExecutionService == null
+                ? AgentCapabilityExecutionService.noop()
+                : capabilityExecutionService;
+        this.chatResponsePolicyService = chatResponsePolicyService;
     }
 
     public ChatExecutionResult run(AiProviderService.ActiveChatClient activeClient,
@@ -58,6 +95,15 @@ public class SimplifiedOparEngine {
                                    AssembledContext assembled,
                                    String requestId,
                                    OparLoopEngine.FallbackResponder fallbackResponder) {
+        return run(activeClient, systemPrompt, assembled, requestId, fallbackResponder, null);
+    }
+
+    public ChatExecutionResult run(AiProviderService.ActiveChatClient activeClient,
+                                   String systemPrompt,
+                                   AssembledContext assembled,
+                                   String requestId,
+                                   OparLoopEngine.FallbackResponder fallbackResponder,
+                                   AgentDecision decision) {
         LocalSkillFallbackService.LocalSkillResult contextAware = contextAwareSupport.tryContextAwareLocalResult(assembled);
         if (contextAware != null) {
             return buildLocalResult(systemPrompt, assembled, contextAware, "SIMPLIFIED:CONTEXT_AWARE");
@@ -77,7 +123,8 @@ public class SimplifiedOparEngine {
             return buildDisabledResult(systemPrompt, activeClient, assembled, fallbackResponder);
         }
 
-        Object[] tools = toolOrchestrator.selectAgentTools(assembled.channel(), assembled.userId());
+        List<AgentCapabilityResult> capabilityResults = capabilityExecutionService.execute(decision, assembled, requestId);
+        Object[] tools = toolOrchestrator.selectAgentTools(assembled.channel(), assembled.userId(), decision);
         ToolExecutionContext toolContext = new ToolExecutionContext(
                 assembled.sessionKey(),
                 assembled.channel(),
@@ -99,7 +146,7 @@ public class SimplifiedOparEngine {
                     client -> {
                         var requestSpec = client.chatClient().prompt()
                                 .system(systemPrompt)
-                                .user(renderUserPrompt(assembled.question()));
+                                .user(renderUserPrompt(assembled.question(), capabilityResults));
                         if (DeepSeekChatCompatibility.supportsNativeToolCalling(client) && tools != null && tools.length > 0) {
                             requestSpec = requestSpec.tools(tools);
                         }
@@ -116,6 +163,11 @@ public class SimplifiedOparEngine {
                     }
             );
             String answer = safe(result.value());
+            // 检测并清洗 DeepSeek V4 Pro 在禁用原生 tool calling 时可能产生的 XML 工具调用幻觉
+            if (chatResponsePolicyService.looksLikeHallucinatedXmlToolCall(answer)) {
+                log.warn("简化模式检测到模型回答包含幻觉 XML 工具调用标签，执行清洗。sessionKey={}", assembled.sessionKey());
+                answer = chatResponsePolicyService.stripHallucinatedXmlBlocks(answer);
+            }
             if (!StringUtils.hasText(answer)) {
                 LocalSkillFallbackService.LocalSkillResult localResult = tryLocalFallbackResult(assembled.question());
                 if (localResult != null) {
@@ -136,7 +188,7 @@ public class SimplifiedOparEngine {
             return new ChatExecutionResult(
                     assembled.observePrompt(),
                     "SIMPLIFIED: 模型自行判断是否需要工具。",
-                    buildActionTrace(result, tools),
+                    buildActionTrace(result, tools, capabilityResults),
                     answer,
                     true
             );
@@ -231,19 +283,39 @@ public class SimplifiedOparEngine {
         }
     }
 
-    private String renderUserPrompt(String question) {
+    private String renderUserPrompt(String question, List<AgentCapabilityResult> capabilityResults) {
+        String capabilityContext = renderCapabilityContext(capabilityResults);
         return """
                 用户问题：%s
 
+                后端已主动执行的能力结果：
+                %s
+
                 直接回答用户问题。
-                如果需要工具，你可以自行决定调用合适的工具；如果不需要工具，就直接给出最终答案。
+                如果上面已有能力结果，必须基于这些证据回答，不要声称无法访问本地项目或运行环境。
+                如果仍需要更多工具，你可以自行决定调用合适的工具；如果不需要工具，就直接给出最终答案。
                 不要输出阶段名、计划过程、内部系统说明。
-                """.formatted(safe(question));
+                """.formatted(safe(question), capabilityContext);
     }
 
-    private String buildActionTrace(ModelCallExecutor.ModelCallResult<String> result, Object[] tools) {
+    private String buildActionTrace(ModelCallExecutor.ModelCallResult<String> result,
+                                    Object[] tools,
+                                    List<AgentCapabilityResult> capabilityResults) {
         StringBuilder builder = new StringBuilder();
         builder.append("SIMPLIFIED: 已完成一次模型回答");
+        if (capabilityResults != null && !capabilityResults.isEmpty()) {
+            builder.append("。主动执行能力数量=").append(capabilityResults.size());
+            for (AgentCapabilityResult capabilityResult : capabilityResults) {
+                builder.append("\n- ")
+                        .append(capabilityResult.capabilityId())
+                        .append(" [")
+                        .append(capabilityResult.status())
+                        .append("] ")
+                        .append(capabilityResult.summary())
+                        .append(": ")
+                        .append(truncateToolDetail(capabilityResult.payload(), 520));
+            }
+        }
         if (result.failedOver()) {
             builder.append("，并执行了同 provider 模型切换");
         }
@@ -254,6 +326,25 @@ public class SimplifiedOparEngine {
             builder.append("。尝试模型=").append(String.join(" -> ", result.attemptedModels()));
         }
         return builder.toString();
+    }
+
+    private String renderCapabilityContext(List<AgentCapabilityResult> capabilityResults) {
+        if (capabilityResults == null || capabilityResults.isEmpty()) {
+            return "（本轮未预执行能力）";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (AgentCapabilityResult result : capabilityResults) {
+            builder.append("- capability=")
+                    .append(result.capabilityId())
+                    .append(", status=")
+                    .append(result.status())
+                    .append(", summary=")
+                    .append(result.summary())
+                    .append("\n")
+                    .append(result.payload())
+                    .append("\n");
+        }
+        return builder.toString().trim();
     }
 
     private String buildToolAuditFallback(AssembledContext assembled, String requestId, String reason) {

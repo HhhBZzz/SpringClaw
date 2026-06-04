@@ -121,6 +121,10 @@ public class ScriptSkillToolPack {
         return skillRuntimeService.executeBySkillId(skillName, goal, java.util.Set.of("script"));
     }
 
+    public String executeSkillByGoal(String skillName, String goal) {
+        return runScriptSkillByGoal(skillName, goal);
+    }
+
     @Tool(description = "查看某个脚本技能的完整说明和支持文件列表。参数：skillName（技能名）")
     public String inspectScriptSkill(String skillName) {
         if (!enabled) {

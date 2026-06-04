@@ -272,6 +272,11 @@ public class LocalSkillFallbackService {
             return renderLocalFileBoundary();
         }
 
+        Optional<LocalSkillResult> highConfidenceBuiltinSkill = builtinSkillExecutionService.tryExecuteHighConfidence(q);
+        if (highConfidenceBuiltinSkill.isPresent()) {
+            return highConfidenceBuiltinSkill;
+        }
+
         Optional<LocalSkillResult> builtinSkill = builtinSkillExecutionService.tryExecute(q);
         if (builtinSkill.isPresent()) {
             return builtinSkill;

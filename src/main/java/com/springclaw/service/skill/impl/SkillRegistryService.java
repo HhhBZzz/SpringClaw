@@ -86,10 +86,7 @@ public class SkillRegistryService {
                 .map(java.util.Map.Entry::getKey);
     }
 
-    /**
-     * 高置信度匹配：主要用于 builtin 类型中需要精确触发条件的场景。
-     * 当前仅 web-crawl 有高置信度条件（需要同时包含 URL 和抓取相关关键词）。
-     */
+    /** 高置信度匹配：由 SKILL.md metadata 描述，不在 Java 注册中心写死 skillId。 */
     public Optional<SkillDefinition> matchHighConfidenceDefinition(String question) {
         if (!StringUtils.hasText(question)) {
             return Optional.empty();
@@ -102,7 +99,7 @@ public class SkillRegistryService {
                 .findFirst();
     }
 
-    /** keyword 评分：触发词命中 +3，名称 token 命中 +1，特定硬编码评分额外的内置逻辑 */
+    /** keyword 评分：触发词命中 +3，名称 token 命中 +1。 */
     private int score(SkillDefinition definition, String normalizedQuestion) {
         int score = 0;
         // 触发词匹配
@@ -119,66 +116,30 @@ public class SkillRegistryService {
                 score += 1;
             }
         }
-        // 内置硬编码评分（保留 BuiltinSkillCatalogService 的特定匹配逻辑）
-        score += hardcodedScore(definition.skillId(), normalizedQuestion);
         return score;
     }
 
-    /** 特定 skill 的硬编码评分逻辑 */
-    private int hardcodedScore(String skillId, String normalizedQuestion) {
-        return switch (skillId) {
-            case "code-analysis" -> {
-                int s = 0;
-                if (containsAny(normalizedQuestion, "代码", "类", "方法", "接口", "实现", "文件", "项目")) s += 2;
-                if (containsAny(normalizedQuestion, "分析", "定位", "看看", "找", "梳理")) s += 1;
-                yield s;
-            }
-            case "workspace-review" -> {
-                int s = 0;
-                if (containsAny(normalizedQuestion, "项目", "源码", "代码", "架构", "模块", "文件")) s += 2;
-                if (containsAny(normalizedQuestion, "审查", "review", "检查", "评估", "优化", "冗余", "垃圾代码", "技术债", "风险")) s += 3;
-                yield s;
-            }
-            case "log-diagnostics" -> {
-                int s = 0;
-                if (containsAny(normalizedQuestion, "日志", "报错", "错误", "异常", "堆栈", "超时", "启动失败", "端口")) s += 2;
-                if (containsAny(normalizedQuestion, "分析", "诊断", "排查", "看看", "怎么回事")) s += 1;
-                yield s;
-            }
-            case "web-crawl" -> {
-                int s = 0;
-                if (containsAny(normalizedQuestion, "网页", "页面", "链接", "网址", "url", "正文")) s += 2;
-                if (containsAny(normalizedQuestion, "抓取", "爬取", "读取", "打开", "提取", "总结")) s += 1;
-                if (normalizedQuestion.contains("http://") || normalizedQuestion.contains("https://") || normalizedQuestion.contains("www.")) s += 3;
-                yield s;
-            }
-            default -> 0;
-        };
-    }
-
-    /** 高置信度条件：需要同时满足 URL + 抓取意图 */
+    /** 高置信度条件由 highConfidenceKeywords 和 highConfidenceRequiresUrl 共同决定。 */
     private boolean isHighConfidenceMatch(SkillDefinition definition, String normalizedQuestion) {
-        if ("code-analysis".equals(definition.skillId())) {
-            return containsAny(normalizedQuestion, "项目结构", "工程结构", "目录结构", "代码结构", "项目架构")
-                    || (containsAny(normalizedQuestion, "项目", "工程", "代码", "类", "方法", "接口", "实现", "文件", "模块", "目录")
-                    && containsAny(normalizedQuestion, "分析", "定位", "看看", "找", "梳理", "结构", "在哪", "怎样"));
+        List<String> keywords = definition.highConfidenceKeywords();
+        if (keywords == null || keywords.isEmpty()) {
+            return false;
         }
-        if ("workspace-review".equals(definition.skillId())) {
-            return containsAny(normalizedQuestion, "审查项目", "项目审查", "审查源码", "源码审查", "架构审查", "代码审查")
-                    || (containsAny(normalizedQuestion, "项目", "工程", "源码", "代码", "架构", "模块")
-                    && containsAny(normalizedQuestion, "审查", "review", "检查", "评估", "优化", "冗余", "垃圾代码", "技术债", "风险"));
+        if (definition.highConfidenceRequiresUrl() && !hasUrl(normalizedQuestion)) {
+            return false;
         }
-        if ("web-crawl".equals(definition.skillId())) {
-            return containsAny(normalizedQuestion, "http://", "https://", "www.")
-                    && containsAny(normalizedQuestion,
-                    "抓取", "爬取", "读取", "打开", "提取", "总结", "网页", "页面", "链接", "网址", "url", "正文");
-        }
-        return false;
+        return containsAnyKeyword(normalizedQuestion, keywords);
     }
 
-    private boolean containsAny(String text, String... keywords) {
+    private boolean hasUrl(String text) {
+        return text.contains("http://") || text.contains("https://") || text.contains("www.");
+    }
+
+    private boolean containsAnyKeyword(String text, List<String> keywords) {
         for (String keyword : keywords) {
-            if (text.contains(keyword)) return true;
+            if (StringUtils.hasText(keyword) && text.contains(keyword.trim().toLowerCase(Locale.ROOT))) {
+                return true;
+            }
         }
         return false;
     }

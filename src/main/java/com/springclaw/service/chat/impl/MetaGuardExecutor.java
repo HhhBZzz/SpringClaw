@@ -124,7 +124,7 @@ public class MetaGuardExecutor {
         return fallbackAnswer("模型输出了身份/阶段元话术，已降级输出。", context.assembled());
     }
 
-    /** 对回答进行规范化处理，处理空回答和拒答情况 */
+    /** 对回答进行规范化处理，处理空回答、拒答和 XML 幻觉情况 */
     public String normalize(ChatContext context, String answer) {
         if (!StringUtils.hasText(answer)) {
             LocalSkillFallbackService.LocalSkillResult localResult = tryLocalFallbackOrNull(context);
@@ -132,6 +132,20 @@ public class MetaGuardExecutor {
                 return oparLoopEngine.narrateLocalExecution(context.systemPrompt(), context.assembled(), localResult);
             }
             return fallbackAnswer("模型返回空回答。", context.assembled());
+        }
+        // 检测并清洗 XML 工具调用幻觉
+        if (chatResponsePolicyService.looksLikeHallucinatedXmlToolCall(answer)) {
+            log.warn("检测到模型回答中包含幻觉 XML 工具调用标签，执行清洗。sessionKey={}", context.assembled().sessionKey());
+            String cleaned = chatResponsePolicyService.stripHallucinatedXmlBlocks(answer);
+            if (StringUtils.hasText(cleaned)) {
+                return cleaned;
+            }
+            // 清洗后为空，降级到本地兜底
+            LocalSkillFallbackService.LocalSkillResult localResult = tryLocalFallbackOrNull(context);
+            if (localResult != null) {
+                return oparLoopEngine.narrateLocalExecution(context.systemPrompt(), context.assembled(), localResult);
+            }
+            return fallbackAnswer("模型输出格式异常，已降级输出。", context.assembled());
         }
         if (chatResponsePolicyService.looksLikeProjectAccessRefusal(answer)
                 || chatResponsePolicyService.looksLikeToolFailureRefusal(answer)) {

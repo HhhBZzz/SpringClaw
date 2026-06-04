@@ -1,4 +1,4 @@
-import type { AdminDashboard, ApiEnvelope, AuditLogPage, AuthProfileResponse, AuthTokenResponse, ChatHistoryResponse, ChatResponse, ChatResponseMode, ChatStreamMeta, ModelStatusResponse } from '../types';
+import type { AdminDashboard, AgentActionProposal, AgentActionProposalResult, AgentCapabilityEvent, AgentDecisionEvent, AgentTraceEvent, AgentVerificationEvent, ApiEnvelope, AuditLogPage, AuthProfileResponse, AuthTokenResponse, ChatHistoryResponse, ChatResponse, ChatResponseMode, ChatStreamMeta, ModelStatusResponse, RuntimeModelProviders, RuntimeOverview, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary } from '../types';
 
 const TOKEN_KEY = 'springclaw.frontend.token';
 let memoryToken = '';
@@ -101,8 +101,61 @@ export function getModelStatus() {
   return request<ModelStatusResponse>('/api/chat/model-status');
 }
 
+export function confirmActionProposal(proposalId: string, currentSessionKey: string) {
+  return request<AgentActionProposalResult>(`/api/chat/action-proposals/${encodeURIComponent(proposalId)}/confirm`, {
+    method: 'POST',
+    body: JSON.stringify({ currentSessionKey })
+  });
+}
+
+export function cancelActionProposal(proposalId: string) {
+  return request<AgentActionProposalResult>(`/api/chat/action-proposals/${encodeURIComponent(proposalId)}/cancel`, {
+    method: 'POST',
+    body: JSON.stringify({})
+  });
+}
+
 export function getAdminDashboard() {
   return request<AdminDashboard>('/api/admin/manage/dashboard');
+}
+
+export function getRuntimeOverview() {
+  return request<RuntimeOverview>('/api/runtime-console/overview');
+}
+
+export function getRuntimeSkills() {
+  return request<{ count?: number; scope?: string; sourceCounts?: Record<string, number>; definitions?: RuntimeSkill[] }>('/api/runtime-console/skills');
+}
+
+export function getRuntimeTools() {
+  return request<RuntimeTool[]>('/api/runtime-console/tools');
+}
+
+export function getRuntimeTasks(limit = 20) {
+  return request<{ total?: number; enabled?: number; disabled?: number; scope?: string; tasks?: RuntimeTask[] }>(`/api/runtime-console/tasks?limit=${encodeURIComponent(String(limit))}`);
+}
+
+export function getRuntimeUsage(recentLimit = 20) {
+  return request<RuntimeUsageSummary>(`/api/runtime-console/usage?recentLimit=${encodeURIComponent(String(recentLimit))}`);
+}
+
+export function getRuntimeModelProviders() {
+  return request<RuntimeModelProviders>('/api/runtime-console/model-providers');
+}
+
+export function switchRuntimeModelProvider(providerId: string, model?: string) {
+  return request<RuntimeModelProviders>('/api/runtime-console/model-providers/switch', {
+    method: 'POST',
+    body: JSON.stringify({ providerId, model })
+  });
+}
+
+export function getRuntimeRuns(limit = 20) {
+  return request<NonNullable<RuntimeOverview['agentRuns']>>(`/api/runtime-console/runs?limit=${encodeURIComponent(String(limit))}`);
+}
+
+export function getRunTrace(requestId: string, limit = 80) {
+  return request<AgentTraceEvent[]>(`/api/chat/runs/${encodeURIComponent(requestId)}/trace?limit=${encodeURIComponent(String(limit))}`);
 }
 
 export function getAuditLogs(input: { page?: number; size?: number } = {}) {
@@ -115,6 +168,12 @@ export interface ChatStreamHandlers {
   onToken?: (token: string) => void;
   onStatus?: (status: string) => void;
   onMeta?: (meta: ChatStreamMeta) => void;
+  onDecision?: (decision: AgentDecisionEvent) => void;
+  onTrace?: (event: AgentTraceEvent) => void;
+  onToolCall?: (event: AgentCapabilityEvent) => void;
+  onSkillCall?: (event: AgentCapabilityEvent) => void;
+  onVerification?: (event: AgentVerificationEvent) => void;
+  onActionRequired?: (proposal: AgentActionProposal) => void;
   onError?: (message: string) => void;
   onDone?: () => void;
 }
@@ -217,6 +276,42 @@ function dispatchSseEvent(raw: string, handlers: ChatStreamHandlers) {
       handlers.onMeta?.(JSON.parse(data) as ChatStreamMeta);
     } catch {
       handlers.onMeta?.({ routingReason: data });
+    }
+  } else if (eventName === 'trace') {
+    try {
+      handlers.onTrace?.(JSON.parse(data) as AgentTraceEvent);
+    } catch {
+      handlers.onTrace?.({ stepName: '执行流程', type: 'agent', status: 'success', detail: data });
+    }
+  } else if (eventName === 'decision') {
+    try {
+      handlers.onDecision?.(JSON.parse(data) as AgentDecisionEvent);
+    } catch {
+      handlers.onDecision?.({ intent: 'unknown', executionPath: 'ask_clarification', riskLevel: 'read', requiresConfirmation: false, reason: data });
+    }
+  } else if (eventName === 'tool_call') {
+    try {
+      handlers.onToolCall?.(JSON.parse(data) as AgentCapabilityEvent);
+    } catch {
+      handlers.onToolCall?.({ capabilityId: 'tool', toolset: 'tool', status: 'success', payload: data });
+    }
+  } else if (eventName === 'skill_call') {
+    try {
+      handlers.onSkillCall?.(JSON.parse(data) as AgentCapabilityEvent);
+    } catch {
+      handlers.onSkillCall?.({ capabilityId: 'skill', toolset: 'skills', status: 'success', payload: data });
+    }
+  } else if (eventName === 'verification') {
+    try {
+      handlers.onVerification?.(JSON.parse(data) as AgentVerificationEvent);
+    } catch {
+      handlers.onVerification?.({ status: 'success', sufficient: true, summary: data });
+    }
+  } else if (eventName === 'action_required') {
+    try {
+      handlers.onActionRequired?.(JSON.parse(data) as AgentActionProposal);
+    } catch {
+      handlers.onActionRequired?.({ proposalId: '', actionType: 'unknown', title: '需要确认', summary: data, riskLevel: 'side_effect', expiresAt: Date.now(), status: 'PENDING' });
     }
   } else if (eventName === 'error') {
     handlers.onError?.(data);

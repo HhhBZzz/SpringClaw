@@ -25,6 +25,14 @@ triggerKeywords:
   - 启动失败
   - 端口占用
   - 排查异常
+highConfidenceKeywords:
+  - 日志诊断
+  - 分析日志
+  - 分析报错
+  - 启动失败
+  - 端口占用
+  - 堆栈分析
+  - 排查异常
 triggerExamples:
   - 分析这个报错
   - 帮我看看这段日志怎么回事

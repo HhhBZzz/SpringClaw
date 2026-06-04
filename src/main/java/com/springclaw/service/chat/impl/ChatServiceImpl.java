@@ -465,8 +465,9 @@ public class ChatServiceImpl implements ChatService {
             String answer = resolveFinalAnswer(context, executionResult);
             sendAnswerChunks(emitter, answer);
             chatResultPersister.persist(context, answer, executionResult);
-            sendTrace(emitter, context, "完成", "final", "success",
-                    "Agent Runtime 已完成。", System.currentTimeMillis() - startedAt);
+            boolean sufficient = run.verification() == null || run.verification().sufficient();
+            sendTrace(emitter, context, "完成", "final", sufficient ? "success" : "failed",
+                    sufficient ? "Agent Runtime 已完成。" : "Agent Runtime 已返回证据不足结果。", System.currentTimeMillis() - startedAt);
         } catch (Exception ex) {
             log.warn("AgentRuntimeEngine 执行失败，sessionKey={}, reason={}", context.session().getSessionKey(), ex.getMessage());
             sendTrace(emitter, context, "执行 Agent Runtime", "agent", "failed",

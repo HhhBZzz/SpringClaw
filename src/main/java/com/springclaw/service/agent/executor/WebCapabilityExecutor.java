@@ -35,7 +35,7 @@ public class WebCapabilityExecutor extends AbstractCapabilityExecutor implements
 
     @Override
     public boolean supports(AgentDecision decision) {
-        return intent(decision, "web_research");
+        return intent(decision, "web_research") && shouldUseGenericWeb(decision);
     }
 
     @Override
@@ -59,5 +59,22 @@ public class WebCapabilityExecutor extends AbstractCapabilityExecutor implements
                 || lower.contains("爬取")
                 || lower.contains("读取")
                 || lower.contains("提取"));
+    }
+
+    private boolean shouldUseGenericWeb(AgentDecision decision) {
+        if (decision == null || decision.selectedCapabilities() == null || decision.selectedCapabilities().isEmpty()) {
+            return true;
+        }
+        boolean hasGenericWeb = decision.selectedCapabilities().stream()
+                .map(this::normalize)
+                .anyMatch("web"::equals);
+        boolean hasSpecializedRealtime = decision.selectedCapabilities().stream()
+                .map(this::normalize)
+                .anyMatch(value -> "weather".equals(value) || "news".equals(value) || "exchange".equals(value));
+        return hasGenericWeb && !hasSpecializedRealtime;
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replace('_', '-');
     }
 }

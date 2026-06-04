@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.ArrayList;
 import java.util.regex.Pattern;
 
 /**
@@ -56,7 +57,7 @@ public class AgentDecisionRouter {
                     "检测到项目/源码/架构分析意图，只暴露工作区和代码分析能力。");
         }
         if (looksLikeWeb(lower)) {
-            return new AgentDecision("web_research", "agent_tools", List.of("web", "weather", "news", "exchange"), risk, riskPolicyService.requiresConfirmation(risk),
+            return new AgentDecision("web_research", "agent_tools", webCapabilities(lower), risk, riskPolicyService.requiresConfirmation(risk),
                     "检测到网页/实时信息查询意图，只暴露外部查询类能力。");
         }
         Optional<SkillDefinition> matchedSkill = skillRegistryService.matchBestAgentVisibleDefinition(question, request == null ? Set.of() : request.allowedToolPacks());
@@ -100,6 +101,27 @@ public class AgentDecisionRouter {
     private boolean looksLikeWeb(String lower) {
         return URL_PATTERN.matcher(lower).find()
                 || containsAny(lower, "网页", "官网", "联网", "搜索", "新闻", "天气", "气温", "汇率", "爬取", "抓取", "http://", "https://");
+    }
+
+    private List<String> webCapabilities(String lower) {
+        List<String> capabilities = new ArrayList<>();
+        if (containsAny(lower, "天气", "气温", "温度", "weather")) {
+            capabilities.add("weather");
+        }
+        if (containsAny(lower, "新闻", "news")) {
+            capabilities.add("news");
+        }
+        if (containsAny(lower, "汇率", "exchange", "usd", "cny", "eur", "jpy", "美元", "人民币", "欧元", "日元")) {
+            capabilities.add("exchange");
+        }
+        if (capabilities.isEmpty()
+                || URL_PATTERN.matcher(lower).find()
+                || containsAny(lower, "网页", "官网", "联网", "搜索", "爬取", "抓取", "http://", "https://")) {
+            capabilities.add("web");
+        } else {
+            capabilities.add("web");
+        }
+        return List.copyOf(capabilities);
     }
 
     private boolean looksLikeSkill(String lower) {

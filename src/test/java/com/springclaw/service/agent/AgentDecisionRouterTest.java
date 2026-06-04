@@ -102,6 +102,15 @@ class AgentDecisionRouterTest {
         assertThat(decision.selectedCapabilities()).contains("system", "skill-library");
     }
 
+    @Test
+    void shouldRouteWeatherQuestionToWeatherPrimaryCapability() {
+        AgentDecision decision = router().routeByRules(request("哈尔滨天气怎样"));
+
+        assertThat(decision.intent()).isEqualTo("web_research");
+        assertThat(decision.executionPath()).isEqualTo("agent_tools");
+        assertThat(decision.selectedCapabilities()).containsExactly("weather", "web");
+    }
+
     private AgentDecisionRouter router() {
         SkillRegistryService skillRegistryService = mock(SkillRegistryService.class);
         when(skillRegistryService.matchBestAgentVisibleDefinition(any(), anySet())).thenReturn(Optional.empty());

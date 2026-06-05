@@ -30,6 +30,7 @@ public class AgentRuntimeEngine {
     private static final Logger log = LoggerFactory.getLogger(AgentRuntimeEngine.class);
     private static final int SUMMARY_CAPABILITY_PAYLOAD_LIMIT = 1800;
     private static final int MAX_REFLECTION_ATTEMPTS = 3;
+    private static final String STRUCTURED_REALTIME_DIRECT_REASON = "结构化实时能力结果已直接整理。";
 
     private final CapabilityExecutorRegistry capabilityExecutorRegistry;
     private final ModelCallExecutor modelCallExecutor;
@@ -38,6 +39,7 @@ public class AgentRuntimeEngine {
     private final ChatResponsePolicyService chatResponsePolicyService;
     private final ObjectMapper objectMapper;
     private final AgentQualityEvaluator qualityEvaluator = new AgentQualityEvaluator();
+    private final AgentAnswerFormatter answerFormatter = new AgentAnswerFormatter();
 
     public AgentRuntimeEngine(CapabilityExecutorRegistry capabilityExecutorRegistry,
                               ModelCallExecutor modelCallExecutor,
@@ -172,7 +174,7 @@ public class AgentRuntimeEngine {
                                              int attempt) {
         AiProviderService.ActiveChatClient activeClient = context.activeClient();
         ReflectionResult fallback = deterministicReflection(decision, allResults, originalQuestion, currentQuestion);
-        if (!fallback.sufficient() && !fallback.retryable()) {
+        if (fallback.sufficient() || !fallback.retryable()) {
             return fallback;
         }
         if (!modelTransportGuardService.isModelCallEnabled(activeClient)) {
@@ -606,6 +608,10 @@ public class AgentRuntimeEngine {
         String planText = renderPlanText(plan);
         String actionText = renderActionText(capabilityResults, verification);
         AiProviderService.ActiveChatClient activeClient = context.activeClient();
+        if (hasStructuredRealtimeEvidence(capabilityResults)) {
+            String answer = deterministicAnswer(context, capabilityResults, verification, STRUCTURED_REALTIME_DIRECT_REASON);
+            return new ChatExecutionResult(context.assembled().observePrompt(), planText, actionText, answer, false);
+        }
         if (!modelTransportGuardService.isModelCallEnabled(activeClient)) {
             String answer = deterministicAnswer(context, capabilityResults, verification, modelTransportGuardService.disabledModelReason(activeClient));
             return new ChatExecutionResult(context.assembled().observePrompt(), planText, actionText, answer, false);
@@ -639,6 +645,14 @@ public class AgentRuntimeEngine {
                     || chatResponsePolicyService.looksLikeToolFailureRefusal(answer)
                     || chatResponsePolicyService.looksLikeMetaRefusal(answer)) {
                 answer = deterministicAnswer(context, capabilityResults, verification, "模型总结不可用或输出了不合适的拒答。已直接整理工具结果。");
+            } else {
+                answer = answerFormatter.formatRuntimeAnswer(
+                        context.assembled().question(),
+                        capabilityResults,
+                        verification,
+                        answer,
+                        "模型总结已完成，并经过后端回答契约整理。"
+                );
             }
             return new ChatExecutionResult(context.assembled().observePrompt(), planText, actionText, answer, true);
         } catch (Exception ex) {
@@ -698,37 +712,125 @@ public class AgentRuntimeEngine {
                                        List<CapabilityResult> capabilityResults,
                                        VerificationResult verification,
                                        String reason) {
-        StringBuilder builder = new StringBuilder();
         boolean verificationFailed = verification != null && !verification.sufficient();
+        boolean structuredRealtimeDirect = STRUCTURED_REALTIME_DIRECT_REASON.equals(reason);
+        StringBuilder conclusion = new StringBuilder();
         if (verificationFailed) {
-            builder.append("结论：校验未通过，当前证据不足以可靠回答这次请求。");
+            conclusion.append("校验未通过，当前证据不足以可靠回答这次请求。");
             if (StringUtils.hasText(reason)) {
-                builder.append("\n原因：").append(reason);
+                conclusion.append("\n原因：").append(reason);
             }
-            builder.append("\n\n下面是后端真实拿到的结果。\n\n");
         } else {
-            builder.append("结论：我已经按 Agent 链路执行了这次请求");
-            if (StringUtils.hasText(reason)) {
-                builder.append("，但模型总结阶段不稳定：").append(reason);
+            String structuredConclusion = structuredRealtimeConclusion(capabilityResults);
+            conclusion.append(StringUtils.hasText(structuredConclusion)
+                    ? structuredConclusion
+                    : "已完成这次请求，并基于已获取的证据整理结果");
+            if (StringUtils.hasText(reason) && !structuredRealtimeDirect) {
+                appendSentenceBreak(conclusion);
+                conclusion.append("回答整理阶段使用确定性路径：").append(reason);
             }
-            builder.append("。下面是后端真实拿到的结果。\n\n");
         }
-        if (verification != null && StringUtils.hasText(verification.summary())) {
-            builder.append("校验：").append(verification.summary()).append("\n\n");
+        return answerFormatter.formatRuntimeAnswer(
+                context.assembled().question(),
+                capabilityResults,
+                verification,
+                conclusion.toString(),
+                structuredRealtimeDirect ? "结构化实时结果直出。" : "使用确定性整理。"
+        );
+    }
+
+    private boolean hasStructuredRealtimeEvidence(List<CapabilityResult> results) {
+        if (results == null || results.isEmpty()) {
+            return false;
         }
-        if (capabilityResults == null || capabilityResults.isEmpty()) {
-            builder.append("本轮没有拿到可用工具结果。请求：").append(safe(context.assembled().question())).append("\n");
-            return builder.toString();
+        return results.stream().anyMatch(result -> result.successful()
+                && (startsWithCapability(result, "weather.")
+                || startsWithCapability(result, "exchange.")
+                || startsWithCapability(result, "news.")));
+    }
+
+    private String structuredRealtimeConclusion(List<CapabilityResult> results) {
+        if (results == null || results.isEmpty()) {
+            return "";
         }
-        for (CapabilityResult result : capabilityResults) {
-            builder.append("能力：").append(result.capabilityId())
-                    .append("\n状态：").append(result.status())
-                    .append("\n说明：").append(result.summary())
-                    .append("\n结果：\n").append(truncate(result.payload(), 1600))
-                    .append("\n\n");
+        for (CapabilityResult result : results) {
+            if (!result.successful()) {
+                continue;
+            }
+            if (startsWithCapability(result, "weather.")) {
+                String city = payloadValue(result.payload(), "城市");
+                String weather = payloadValue(result.payload(), "天气");
+                String temperature = payloadValue(result.payload(), "温度");
+                String humidity = payloadValue(result.payload(), "湿度");
+                String observeTime = payloadValue(result.payload(), "观测时间");
+                StringBuilder builder = new StringBuilder();
+                builder.append(StringUtils.hasText(city) ? city : "目标城市").append("当前天气");
+                if (StringUtils.hasText(weather)) {
+                    builder.append("：").append(weather);
+                }
+                if (StringUtils.hasText(temperature)) {
+                    builder.append("，温度 ").append(temperature);
+                }
+                if (StringUtils.hasText(humidity)) {
+                    builder.append("，湿度 ").append(humidity);
+                }
+                if (StringUtils.hasText(observeTime)) {
+                    builder.append("，观测时间 ").append(observeTime);
+                }
+                builder.append("。");
+                return builder.toString();
+            }
+            if (startsWithCapability(result, "exchange.")) {
+                return firstPayloadLine(result.payload(), "已获取到汇率结果。");
+            }
+            if (startsWithCapability(result, "news.")) {
+                return firstPayloadLine(result.payload(), "已获取到新闻检索结果。");
+            }
         }
-        builder.append("下一步：如果你要更深入，我可以继续基于这些结果展开分析或执行下一轮工具。 ");
-        return builder.toString().trim();
+        return "";
+    }
+
+    private boolean startsWithCapability(CapabilityResult result, String prefix) {
+        return safe(result == null ? "" : result.capabilityId())
+                .toLowerCase(Locale.ROOT)
+                .startsWith(prefix);
+    }
+
+    private String payloadValue(String payload, String key) {
+        if (!StringUtils.hasText(payload) || !StringUtils.hasText(key)) {
+            return "";
+        }
+        String normalizedKey = key.trim();
+        for (String line : payload.replace("\r\n", "\n").split("\n")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith(normalizedKey + ":") || trimmed.startsWith(normalizedKey + "：")) {
+                return trimmed.substring(normalizedKey.length() + 1).trim();
+            }
+        }
+        return "";
+    }
+
+    private String firstPayloadLine(String payload, String fallback) {
+        if (!StringUtils.hasText(payload)) {
+            return fallback;
+        }
+        for (String line : payload.replace("\r\n", "\n").split("\n")) {
+            if (StringUtils.hasText(line)) {
+                return line.trim() + "。";
+            }
+        }
+        return fallback;
+    }
+
+    private void appendSentenceBreak(StringBuilder builder) {
+        if (builder == null || builder.isEmpty()) {
+            return;
+        }
+        String text = builder.toString().trim();
+        if (!text.endsWith("。") && !text.endsWith("！") && !text.endsWith("？")
+                && !text.endsWith(".") && !text.endsWith("!") && !text.endsWith("?")) {
+            builder.append("。");
+        }
     }
 
     private String renderCapabilityContext(List<CapabilityResult> capabilityResults) {

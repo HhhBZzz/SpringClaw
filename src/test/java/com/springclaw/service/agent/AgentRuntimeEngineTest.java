@@ -19,6 +19,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -59,8 +61,12 @@ class AgentRuntimeEngineTest {
 
         assertThat(run.capabilityResults()).hasSize(1);
         assertThat(run.verification().sufficient()).isTrue();
-        assertThat(run.executionResult().reflect()).contains("后端真实拿到的结果");
-        assertThat(run.executionResult().reflect()).contains("ChatServiceImpl.java");
+        assertThat(run.executionResult().reflect())
+                .startsWith("结论：")
+                .contains("依据：")
+                .contains("ChatServiceImpl.java")
+                .contains("执行状态：")
+                .contains("下一步：");
         verifyNoInteractions(modelCallExecutor);
     }
 
@@ -103,6 +109,137 @@ class AgentRuntimeEngineTest {
         assertThat(run.verification().quality().level()).isIn("strong", "acceptable");
         assertThat(run.steps()).extracting(AgentStep::stepName).contains("EVALUATE_RUN");
         verifyNoInteractions(modelCallExecutor);
+    }
+
+    @Test
+    void shouldSkipReflectionModelWhenDeterministicEvidenceIsSufficient() throws Exception {
+        CapabilityExecutorRegistry registry = mock(CapabilityExecutorRegistry.class);
+        ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
+        ConversationAdvisorSupport conversationAdvisorSupport = mock(ConversationAdvisorSupport.class);
+        ModelTransportGuardService modelTransportGuardService = mock(ModelTransportGuardService.class);
+        AgentRuntimeEngine engine = new AgentRuntimeEngine(
+                registry,
+                modelCallExecutor,
+                conversationAdvisorSupport,
+                modelTransportGuardService,
+                new ChatResponsePolicyService("")
+        );
+        AgentDecision decision = new AgentDecision("web_research", "agent_tools", List.of("weather"), "read", false, "天气查询");
+        CapabilityPlan plan = new CapabilityPlan("web_research", "agent_tools", List.of("weather"), List.of("weather"), "read", false, "天气查询");
+        List<CapabilityResult> results = List.of(new CapabilityResult(
+                "weather.current",
+                "weather",
+                "success",
+                "查询实时天气",
+                "城市: 北京\n来源: open-meteo\n温度: 18℃\n湿度: 75%",
+                42L,
+                "read"
+        ));
+        AiProviderService.ActiveChatClient activeClient = activeClient(true);
+        when(registry.plan(decision)).thenReturn(plan);
+        when(registry.execute(eq(decision), any(AssembledContext.class), eq("req-1"))).thenReturn(results);
+        when(modelTransportGuardService.isModelCallEnabled(activeClient)).thenReturn(true);
+        when(modelCallExecutor.executeChat(eq(activeClient), eq("agent-runtime-summary"), any(), eq(true), any()))
+                .thenReturn(new ModelCallExecutor.ModelCallResult<>(
+                        "北京今天 18℃，湿度 75%。",
+                        activeClient,
+                        List.of("deepseek:deepseek-v4-pro"),
+                        false
+                ));
+
+        AgentRun run = engine.run(context(decision, activeClient, "今天北京天气怎样"));
+
+        assertThat(run.verification().sufficient()).isTrue();
+        verify(modelCallExecutor, never())
+                .executeChat(eq(activeClient), eq("agent-runtime-reflection"), any(), eq(true), any());
+    }
+
+    @Test
+    void shouldAnswerStructuredRealtimeResultWithoutSummaryModel() {
+        CapabilityExecutorRegistry registry = mock(CapabilityExecutorRegistry.class);
+        ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
+        ConversationAdvisorSupport conversationAdvisorSupport = mock(ConversationAdvisorSupport.class);
+        ModelTransportGuardService modelTransportGuardService = mock(ModelTransportGuardService.class);
+        AgentRuntimeEngine engine = new AgentRuntimeEngine(
+                registry,
+                modelCallExecutor,
+                conversationAdvisorSupport,
+                modelTransportGuardService,
+                new ChatResponsePolicyService("")
+        );
+        AgentDecision decision = new AgentDecision("web_research", "agent_tools", List.of("weather"), "read", false, "天气查询");
+        CapabilityPlan plan = new CapabilityPlan("web_research", "agent_tools", List.of("weather"), List.of("weather"), "read", false, "天气查询");
+        List<CapabilityResult> results = List.of(new CapabilityResult(
+                "weather.current",
+                "weather",
+                "success",
+                "查询实时天气",
+                "城市: 北京\n来源: open-meteo\n观测时间: 2026-06-05T22:15\n天气: 阴\n温度: 23.3℃\n湿度: 41%",
+                42L,
+                "read"
+        ));
+        AiProviderService.ActiveChatClient activeClient = activeClient(true);
+        when(registry.plan(decision)).thenReturn(plan);
+        when(registry.execute(eq(decision), any(AssembledContext.class), eq("req-1"))).thenReturn(results);
+        when(modelTransportGuardService.isModelCallEnabled(activeClient)).thenReturn(true);
+
+        AgentRun run = engine.run(context(decision, activeClient, "今天北京天气怎样"));
+
+        assertThat(run.executionResult().modelEnabled()).isFalse();
+        assertThat(run.executionResult().reflect())
+                .startsWith("结论：")
+                .contains("北京当前天气：阴，温度 23.3℃，湿度 41%，观测时间 2026-06-05T22:15。")
+                .contains("weather.current")
+                .contains("质量评分：")
+                .doesNotContain("回答整理阶段使用确定性路径");
+        verifyNoInteractions(modelCallExecutor);
+    }
+
+    @Test
+    void shouldNormalizeModelSummaryIntoStableRuntimeAnswerContract() throws Exception {
+        CapabilityExecutorRegistry registry = mock(CapabilityExecutorRegistry.class);
+        ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
+        ConversationAdvisorSupport conversationAdvisorSupport = mock(ConversationAdvisorSupport.class);
+        ModelTransportGuardService modelTransportGuardService = mock(ModelTransportGuardService.class);
+        AgentRuntimeEngine engine = new AgentRuntimeEngine(
+                registry,
+                modelCallExecutor,
+                conversationAdvisorSupport,
+                modelTransportGuardService,
+                new ChatResponsePolicyService("")
+        );
+        AgentDecision decision = new AgentDecision("workspace_analysis", "agent_tools", List.of("workspace-review"), "read", false, "项目分析");
+        CapabilityPlan plan = new CapabilityPlan("workspace_analysis", "agent_tools", List.of("workspace-review"), List.of("workspace"), "read", false, "项目分析");
+        List<CapabilityResult> results = List.of(new CapabilityResult(
+                "workspace-review",
+                "workspace",
+                "success",
+                "审查当前工作区",
+                "src/main/java/com/springclaw/service/agent/AgentRuntimeEngine.java\nsrc/main/java/com/springclaw/service/chat/impl/ChatServiceImpl.java",
+                42L,
+                "read"
+        ));
+        AiProviderService.ActiveChatClient activeClient = activeClient(true);
+        when(registry.plan(decision)).thenReturn(plan);
+        when(registry.execute(eq(decision), any(AssembledContext.class), eq("req-1"))).thenReturn(results);
+        when(modelTransportGuardService.isModelCallEnabled(activeClient)).thenReturn(true);
+        when(modelCallExecutor.executeChat(eq(activeClient), eq("agent-runtime-summary"), any(), eq(true), any()))
+                .thenReturn(new ModelCallExecutor.ModelCallResult<>(
+                        "项目主链路已经收敛到 AgentRuntimeEngine。",
+                        activeClient,
+                        List.of("deepseek:deepseek-v4-pro"),
+                        false
+                ));
+
+        AgentRun run = engine.run(context(decision, activeClient, "分析当前项目 Agent 链路"));
+
+        assertThat(run.executionResult().reflect())
+                .startsWith("结论：")
+                .contains("项目主链路已经收敛到 AgentRuntimeEngine。")
+                .contains("依据：")
+                .contains("执行状态：")
+                .contains("质量评分：")
+                .contains("下一步：");
     }
 
     @Test
@@ -332,7 +469,13 @@ class AgentRuntimeEngineTest {
         assertThat(run.capabilityResults()).extracting(CapabilityResult::capabilityId)
                 .containsExactly("web.search", "weather.current");
         assertThat(run.verification().sufficient()).isTrue();
-        assertThat(run.executionResult().reflect()).isEqualTo("哈尔滨今天有明确天气结果。");
+        assertThat(run.executionResult().reflect())
+                .startsWith("结论：")
+                .contains("哈尔滨当前天气，温度 18℃。")
+                .contains("依据：")
+                .contains("weather.current")
+                .contains("执行状态：")
+                .contains("下一步：");
         assertThat(run.steps()).extracting(AgentStep::stepName).contains("REFLECT_EVIDENCE");
     }
 

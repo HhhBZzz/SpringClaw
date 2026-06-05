@@ -216,6 +216,14 @@ const currentRequestId = computed(() => {
   return streamMeta.value?.requestId || agentDecision.value?.requestId || latestTrace.value?.requestId || '-';
 });
 
+const resolvedQuestionLabel = computed(() => {
+  const original = (streamMeta.value?.originalQuestion || '').trim();
+  const effective = (streamMeta.value?.effectiveQuestion || '').trim();
+  if (!effective) return '-';
+  if (original && original !== effective) return `${original} -> ${effective}`;
+  return effective;
+});
+
 const compactSessionId = computed(() => {
   const key = sessionKey.value || '-';
   if (key.length <= 14) return key;
@@ -1769,6 +1777,7 @@ onUnmounted(() => {
               <section v-if="activeInspectorTab === 'trace'" class="inspector-panel run-timeline-card">
                 <div class="run-facts-card">
                   <div class="context-row"><span>Request ID</span><strong>{{ currentRequestId }}</strong></div>
+                  <div class="context-row"><span>Question</span><strong>{{ resolvedQuestionLabel }}</strong></div>
                   <div class="context-row"><span>Status</span><strong>{{ runStatus }}</strong></div>
                   <div class="context-row"><span>Start Time</span><strong>{{ taskCreatedLabel }}</strong></div>
                   <div class="context-row"><span>Duration</span><strong>{{ runDurationLabel }}</strong></div>

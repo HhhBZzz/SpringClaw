@@ -36,6 +36,7 @@ public class ChatContextFactory {
     private final ChatRoutingStateService chatRoutingStateService;
     private final ChatRoutingPolicyService chatRoutingPolicyService;
     private final AgentDecisionService agentDecisionService;
+    private final ContextualFollowUpQuestionResolver followUpQuestionResolver;
     private final String configuredAgentMode;
     private final boolean routingAutoUpgradeEnabled;
 
@@ -49,6 +50,7 @@ public class ChatContextFactory {
                               ChatRoutingStateService chatRoutingStateService,
                               ChatRoutingPolicyService chatRoutingPolicyService,
                               AgentDecisionService agentDecisionService,
+                              ContextualFollowUpQuestionResolver followUpQuestionResolver,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.agent-mode:simplified}") String configuredAgentMode,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.routing.auto-upgrade-enabled:true}") boolean routingAutoUpgradeEnabled) {
         this.aiProviderService = aiProviderService;
@@ -61,6 +63,7 @@ public class ChatContextFactory {
         this.chatRoutingStateService = chatRoutingStateService;
         this.chatRoutingPolicyService = chatRoutingPolicyService;
         this.agentDecisionService = agentDecisionService;
+        this.followUpQuestionResolver = followUpQuestionResolver;
         this.configuredAgentMode = configuredAgentMode;
         this.routingAutoUpgradeEnabled = routingAutoUpgradeEnabled;
     }
@@ -73,20 +76,21 @@ public class ChatContextFactory {
         String requestId = UUID.randomUUID().toString().replace("-", "");
         String roleCode = authService.resolveRoleByUserId(request.userId());
         var allowedToolPacks = skillService.resolveAllowedToolPacks(channel, request.userId());
+        String routingQuestion = followUpQuestionResolver.resolve(session.getSessionKey(), request.message());
         AgentDecision decision = agentDecisionService.decide(new AgentDecisionRequest(
                 session.getSessionKey(),
                 channel,
                 request.userId(),
                 roleCode,
                 requestId,
-                request.message(),
+                routingQuestion,
                 request.responseMode(),
                 allowedToolPacks
         ));
         String effectiveDefaultMode = chatRoutingStateService.resolveDefaultMode(configuredAgentMode);
         boolean effectiveAutoUpgrade = chatRoutingStateService.resolveAutoUpgrade(routingAutoUpgradeEnabled);
         ChatRoutingPolicyService.RoutingDecision routingDecision = chatRoutingPolicyService.decide(
-                request.message(),
+                routingQuestion,
                 roleCode,
                 effectiveDefaultMode,
                 effectiveAutoUpgrade,

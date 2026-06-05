@@ -32,6 +32,8 @@ export interface ChatStreamMeta {
   executionMode?: string;
   intent?: string;
   routingReason?: string;
+  originalQuestion?: string;
+  effectiveQuestion?: string;
 }
 
 export interface AgentTraceEvent {

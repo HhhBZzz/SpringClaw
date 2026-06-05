@@ -6097,9 +6097,11 @@ button.runtime-nav-item {
 .runtime-inspector .context-row strong {
   color: #f5f7fb;
   font-size: 13px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.runtime-inspector .context-row:nth-child(2) strong {
+.runtime-inspector .run-facts-card .context-row:nth-child(3) strong {
   color: #38d979;
 }
 

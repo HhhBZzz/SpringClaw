@@ -1015,13 +1015,15 @@ public class ChatServiceImpl implements ChatService {
             return;
         }
         String payload = """
-                {"requestId":"%s","responseMode":"%s","executionMode":"%s","intent":"%s","routingReason":"%s"}
+                {"requestId":"%s","responseMode":"%s","executionMode":"%s","intent":"%s","routingReason":"%s","originalQuestion":"%s","effectiveQuestion":"%s"}
                 """.formatted(
                 jsonEscape(context.requestId()),
                 jsonEscape(normalizeResponseMode(context.responseMode())),
                 jsonEscape(context.executionMode()),
                 jsonEscape(context.intent()),
-                jsonEscape(context.routingReason())
+                jsonEscape(context.routingReason()),
+                jsonEscape(context.userMessage()),
+                jsonEscape(context.effectiveUserMessage())
         ).trim();
         sendEvent(emitter, "meta", payload);
     }

@@ -267,7 +267,7 @@ public class ChatRoutingPolicyService {
                     case "workspace" -> "workspace-analysis";
                     case "web" -> "web-research";
                     case "script" -> "tool-skill";
-                    default -> intentFromCapabilityKeywords(matches.get(0));
+                    default -> "general";
                 };
             }
         }
@@ -297,10 +297,6 @@ public class ChatRoutingPolicyService {
                 && skillRegistryService.matchBestAgentVisibleDefinition(question, allowedToolPacks).isPresent()) {
             return "tool-skill";
         }
-        return "general";
-    }
-
-    private String intentFromCapabilityKeywords(CapabilityRegistry.CapabilityEntry entry) {
         return "general";
     }
 

@@ -11,15 +11,11 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.ArrayList;
 import java.util.Set;
-import java.util.regex.Pattern;
-
 /**
  * Fast deterministic router used before any optional model-based classification.
  */
 @Service
 public class AgentDecisionRouter {
-
-    private static final Pattern URL_PATTERN = Pattern.compile("https?://\\S+", Pattern.CASE_INSENSITIVE);
 
     private final SkillRegistryService skillRegistryService;
     private final ToolRiskPolicyService riskPolicyService;

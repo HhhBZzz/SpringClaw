@@ -37,6 +37,10 @@ public class ApiResponse<T> implements Serializable {
         return new ApiResponse<>(code, message, null);
     }
 
+    public static <T> ApiResponse<T> fail(int code, String message, T data) {
+        return new ApiResponse<>(code, message, data);
+    }
+
     public int getCode() {
         return code;
     }

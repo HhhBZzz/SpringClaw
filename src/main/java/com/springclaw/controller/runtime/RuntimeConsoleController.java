@@ -11,7 +11,6 @@ import com.springclaw.service.skill.SkillService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import com.springclaw.service.task.ScheduledTaskService;
 import com.springclaw.service.usage.LlmUsageRecordService;
-import com.springclaw.tool.runtime.AgentToolProvider;
 import com.springclaw.tool.runtime.CapabilityRegistry;
 import com.springclaw.web.auth.RequestUserContext;
 import com.springclaw.web.auth.RequestUserContextHolder;
@@ -41,7 +40,6 @@ public class RuntimeConsoleController {
     private final LlmUsageRecordService llmUsageRecordService;
     private final AgentRunTraceService agentRunTraceService;
     private final CapabilityRegistry capabilityRegistry;
-    private final List<AgentToolProvider> toolProviders;
 
     public RuntimeConsoleController(SkillRegistryService skillRegistryService,
                                     SkillService skillService,
@@ -49,8 +47,7 @@ public class RuntimeConsoleController {
                                     AiProviderService aiProviderService,
                                     LlmUsageRecordService llmUsageRecordService,
                                     AgentRunTraceService agentRunTraceService,
-                                    CapabilityRegistry capabilityRegistry,
-                                    List<AgentToolProvider> toolProviders) {
+                                    CapabilityRegistry capabilityRegistry) {
         this.skillRegistryService = skillRegistryService;
         this.skillService = skillService;
         this.scheduledTaskService = scheduledTaskService;
@@ -58,7 +55,6 @@ public class RuntimeConsoleController {
         this.llmUsageRecordService = llmUsageRecordService;
         this.agentRunTraceService = agentRunTraceService;
         this.capabilityRegistry = capabilityRegistry;
-        this.toolProviders = toolProviders == null ? List.of() : List.copyOf(toolProviders);
     }
 
     @GetMapping("/overview")
@@ -144,8 +140,8 @@ public class RuntimeConsoleController {
 
     private List<Map<String, Object>> buildTools(RequestUserContext context) {
         Set<String> allowedToolPacks = skillService.resolveAllowedToolPacks("api", context.username());
-        return toolProviders.stream()
-                .map(provider -> toToolView(provider, allowedToolPacks))
+        return capabilityRegistry.listAll().stream()
+                .map(entry -> toToolView(entry, allowedToolPacks))
                 .toList();
     }
 
@@ -213,30 +209,20 @@ public class RuntimeConsoleController {
         return payload;
     }
 
-    private Map<String, Object> toToolView(AgentToolProvider provider, Set<String> allowedToolPacks) {
+    private Map<String, Object> toToolView(CapabilityRegistry.CapabilityEntry entry, Set<String> allowedToolPacks) {
         Map<String, Object> item = new LinkedHashMap<>();
-        Set<String> requiredPacks = provider.requiredToolPacks() == null ? Set.of() : provider.requiredToolPacks();
-        String id = defaultText(provider.id(), provider.tool() == null ? "unknown" : provider.tool().getClass().getSimpleName());
+        Set<String> requiredPacks = StringUtils.hasText(entry.toolset()) ? Set.of(entry.toolset()) : Set.of();
+        String id = defaultText(entry.id(), entry.beanName());
         item.put("name", id);
-        item.put("toolset", requiredPacks.isEmpty() ? "core" : String.join(",", requiredPacks));
+        item.put("toolset", defaultText(entry.toolset(), "core"));
         item.put("requiredToolPacks", requiredPacks);
-        item.put("allow", provider.isAllowed(allowedToolPacks));
-        item.put("enabled", provider.includeForAgentMode());
-
-        // 从 CapabilityRegistry 读取真实的 riskLevel 和 description
-        CapabilityRegistry.CapabilityEntry entry = capabilityRegistry.findById(id);
-        if (entry != null) {
-            item.put("riskLevel", entry.riskLevel());
-            item.put("description", StringUtils.hasText(entry.description())
-                    ? entry.description()
-                    : entry.beanName());
-            item.put("triggerKeywords", List.of(entry.triggerKeywords()));
-            item.put("fallbackCandidate", entry.isFallbackCandidate());
-            item.put("preferredMode", entry.preferredMode());
-        } else {
-            item.put("riskLevel", inferRiskLevel(id, requiredPacks));
-            item.put("description", provider.tool() == null ? "unknown" : provider.tool().getClass().getSimpleName());
-        }
+        item.put("allow", isToolAllowed(entry, allowedToolPacks));
+        item.put("enabled", entry.includeForAgentMode());
+        item.put("riskLevel", entry.riskLevel());
+        item.put("description", StringUtils.hasText(entry.description()) ? entry.description() : entry.beanName());
+        item.put("triggerKeywords", List.of(entry.triggerKeywords()));
+        item.put("fallbackCandidate", entry.isFallbackCandidate());
+        item.put("preferredMode", entry.preferredMode());
         return item;
     }
 
@@ -250,20 +236,6 @@ public class RuntimeConsoleController {
                 .max(Map.Entry.comparingByValue())
                 .map(Map.Entry::getKey)
                 .orElse("");
-    }
-
-    private String inferRiskLevel(String id, Set<String> requiredPacks) {
-        String normalized = defaultText(id, "").toLowerCase();
-        if (normalized.contains("script") || requiredPacks.contains("script")) {
-            return "execution";
-        }
-        if (normalized.contains("file") || normalized.contains("workspace")) {
-            return "write";
-        }
-        if (normalized.contains("system")) {
-            return "runtime";
-        }
-        return "read";
     }
 
     private RequestUserContext requireContext() {
@@ -280,6 +252,13 @@ public class RuntimeConsoleController {
 
     private String defaultText(String value, String fallback) {
         return StringUtils.hasText(value) ? value.trim() : fallback;
+    }
+
+    private boolean isToolAllowed(CapabilityRegistry.CapabilityEntry entry, Set<String> allowedToolPacks) {
+        if (entry == null || allowedToolPacks == null || allowedToolPacks.isEmpty()) {
+            return false;
+        }
+        return allowedToolPacks.contains(entry.toolset()) || allowedToolPacks.contains(entry.id());
     }
 
     public record SwitchModelProviderRequest(String providerId, String model) {

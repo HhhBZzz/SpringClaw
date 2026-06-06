@@ -113,28 +113,13 @@ class ToolOrchestratorTest {
     @Test
     void shouldSupportPluggableProviderWithoutChangingConstructorShape() {
         Object customTool = new Object();
-        AgentToolProvider provider = new AgentToolProvider() {
-            @Override
-            public String id() {
-                return "custom";
-            }
-
-            @Override
-            public Set<String> requiredToolPacks() {
-                return Set.of("custom");
-            }
-
-            @Override
-            public Object tool() {
-                return customTool;
-            }
-
-            @Override
-            public boolean matches(String text) {
-                return text != null && text.contains("custom-trigger");
-            }
-        };
-        ToolOrchestrator orchestrator = new ToolOrchestrator(new CustomSkillService(), List.of(provider));
+        CapabilityRegistry registry = new CapabilityRegistry(List.of(entryFor(
+                "custom",
+                "custom",
+                new String[]{"custom-trigger"},
+                customTool
+        )));
+        ToolOrchestrator orchestrator = new ToolOrchestrator(new CustomSkillService(), registry);
 
         Object[] tools = orchestrator.selectTools("api", "u1", "please custom-trigger now", "");
 
@@ -190,30 +175,42 @@ class ToolOrchestratorTest {
         SkillLibraryToolPack skillLibraryToolPack = new SkillLibraryToolPack(false, new com.springclaw.service.skill.bundle.SkillCatalogService(false, tempDir.toString()));
         SkillService skillService = new StubSkillService();
 
-        ToolOrchestrator orchestrator = new ToolOrchestrator(
-                fileToolPack,
-                localFilesystemToolPack,
-                systemToolPack,
-                workspaceSearchToolPack,
-                workspaceReviewToolPack,
-                webSearchToolPack,
-                weatherToolPack,
-                exchangeRateToolPack,
-                newsToolPack,
-                scriptSkillToolPack,
-                skillLibraryToolPack,
-                skillService,
-                "文件,目录,path,read,write,list,保存,读取",
-                "本地文件,电脑文件,授权文件,授权目录,本机文件,桌面,下载,文档,Desktop,Downloads,Documents,简历,论文",
-                "找文件,搜代码,在哪个文件,关键词检索,不知道路径,search file,find file,grep",
-                "联网,搜索,查一下,网页,新闻,官网,web search,google,bing",
-                "天气,气温,温度,下雨,weather",
-                "汇率,美元,人民币,欧元,exchange,usd,cny,eur",
-                "新闻,热点,头条,资讯,news",
-                "脚本,skill,执行技能,python,run skill"
-        );
+        CapabilityRegistry registry = new CapabilityRegistry(List.of(
+                entryFor(fileToolPack),
+                entryFor(localFilesystemToolPack),
+                entryFor(systemToolPack),
+                entryFor(workspaceSearchToolPack),
+                entryFor(workspaceReviewToolPack),
+                entryFor(webSearchToolPack),
+                entryFor(weatherToolPack),
+                entryFor(exchangeRateToolPack),
+                entryFor(newsToolPack),
+                entryFor(scriptSkillToolPack),
+                entryFor(skillLibraryToolPack)
+        ));
+        ToolOrchestrator orchestrator = new ToolOrchestrator(skillService, registry);
 
         return new ToolFixture(orchestrator, fileToolPack, localFilesystemToolPack, workspaceSearchToolPack, workspaceReviewToolPack, skillLibraryToolPack);
+    }
+
+    private CapabilityRegistry.CapabilityEntry entryFor(Object toolPack) {
+        ToolPackDescriptor descriptor = toolPack.getClass().getAnnotation(ToolPackDescriptor.class);
+        return new CapabilityRegistry.CapabilityEntry(descriptor, toolPack, descriptor.id());
+    }
+
+    private CapabilityRegistry.CapabilityEntry entryFor(String id, String toolset, String[] triggerKeywords, Object toolPack) {
+        ToolPackDescriptor descriptor = new ToolPackDescriptor() {
+            @Override public String id() { return id; }
+            @Override public String toolset() { return toolset; }
+            @Override public String[] triggerKeywords() { return triggerKeywords; }
+            @Override public boolean fallbackCandidate() { return true; }
+            @Override public String riskLevel() { return "read"; }
+            @Override public String preferredMode() { return "simplified"; }
+            @Override public String description() { return id; }
+            @Override public boolean includeForAgentMode() { return true; }
+            @Override public Class<? extends java.lang.annotation.Annotation> annotationType() { return ToolPackDescriptor.class; }
+        };
+        return new CapabilityRegistry.CapabilityEntry(descriptor, toolPack, id);
     }
 
     private record ToolFixture(ToolOrchestrator orchestrator,

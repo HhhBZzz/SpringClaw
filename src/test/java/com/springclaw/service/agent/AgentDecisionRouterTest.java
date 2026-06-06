@@ -2,6 +2,7 @@ package com.springclaw.service.agent;
 
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import com.springclaw.service.skill.SkillDefinition;
+import com.springclaw.tool.runtime.CapabilityRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -45,6 +46,20 @@ class AgentDecisionRouterTest {
     }
 
     @Test
+    void shouldRouteHighConfidenceCodeAnalysisSkillToWorkspaceTools() {
+        SkillRegistryService skillRegistryService = mock(SkillRegistryService.class);
+        when(skillRegistryService.matchHighConfidenceDefinition(any())).thenReturn(Optional.of(codeAnalysisSkill()));
+        when(skillRegistryService.matchBestAgentVisibleDefinition(any(), anySet())).thenReturn(Optional.empty());
+
+        AgentDecision decision = new AgentDecisionRouter(skillRegistryService, new ToolRiskPolicyService(), null)
+                .routeByRules(request("分析 springclaw 项目架构"));
+
+        assertThat(decision.intent()).isEqualTo("workspace_analysis");
+        assertThat(decision.executionPath()).isEqualTo("agent_tools");
+        assertThat(decision.selectedCapabilities()).contains("workspace-search", "workspace-review", "file", "skill-library");
+    }
+
+    @Test
     void shouldRouteLocalFileQuestionToLocalFileTools() {
         AgentDecision decision = router().routeByRules(request("帮我读取桌面上的论文文件"));
 
@@ -66,7 +81,7 @@ class AgentDecisionRouterTest {
     void shouldTreatLocalFilesSkillMatchAsLocalFileIntentInsteadOfGenericSkillTask() {
         SkillRegistryService skillRegistryService = mock(SkillRegistryService.class);
         when(skillRegistryService.matchBestAgentVisibleDefinition(any(), anySet())).thenReturn(Optional.of(localFilesSkill()));
-        AgentDecision decision = new AgentDecisionRouter(skillRegistryService, new ToolRiskPolicyService())
+        AgentDecision decision = new AgentDecisionRouter(skillRegistryService, new ToolRiskPolicyService(), null)
                 .routeByRules(request("总结一下电脑里的简历文件"));
 
         assertThat(decision.intent()).isEqualTo("local_files");
@@ -123,7 +138,19 @@ class AgentDecisionRouterTest {
     private AgentDecisionRouter router() {
         SkillRegistryService skillRegistryService = mock(SkillRegistryService.class);
         when(skillRegistryService.matchBestAgentVisibleDefinition(any(), anySet())).thenReturn(Optional.empty());
-        return new AgentDecisionRouter(skillRegistryService, new ToolRiskPolicyService());
+        CapabilityRegistry registry = new CapabilityRegistry(List.of(
+                CapabilityRegistry.entryForTest("system", "system",
+                        new String[]{"检查后端", "数据库", "Redis", "运行状态", "模型配置", "provider", "当前模型"}, true, "read", "系统运行状态"),
+                CapabilityRegistry.entryForTest("workspace-search", "workspace",
+                        new String[]{"项目", "源码", "代码", "架构", "模块", "分析", "审查", "agent", "链路", "执行", "梳理"}, true, "read", "检索项目文件"),
+                CapabilityRegistry.entryForTest("local-files", "file",
+                        new String[]{"桌面", "论文", "本地文件", "简历", "docx", "pdf"}, true, "read", "读取授权本地文件"),
+                CapabilityRegistry.entryForTest("web", "web",
+                        new String[]{"搜索", "天气", "气温", "温度", "下雨", "weather", "新闻", "汇率", "exchange", "网页", "官网"}, true, "read", "联网搜索"),
+                CapabilityRegistry.entryForTest("script-skill", "script",
+                        new String[]{"skill", "脚本", "运行", "执行", "python"}, true, "execution", "执行脚本技能")
+        ));
+        return new AgentDecisionRouter(skillRegistryService, new ToolRiskPolicyService(), registry);
     }
 
     private AgentDecisionRequest request(String question) {
@@ -148,6 +175,29 @@ class AgentDecisionRouterTest {
                 true,
                 10,
                 true
+        );
+    }
+
+    private SkillDefinition codeAnalysisSkill() {
+        return new SkillDefinition(
+                "code-analysis",
+                "Code Analysis",
+                "分析项目结构、类、文件和实现位置",
+                "builtin",
+                "",
+                "",
+                List.of("代码分析", "分析代码", "分析项目", "项目结构"),
+                List.of(),
+                List.of("workspace", "file", "script"),
+                "opar",
+                "",
+                "builtin",
+                "code-analysis",
+                true,
+                10,
+                true,
+                false,
+                List.of("项目架构", "项目结构", "代码结构")
         );
     }
 }

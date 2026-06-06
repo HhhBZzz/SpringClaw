@@ -5,6 +5,7 @@ import com.springclaw.service.skill.bundle.SkillCatalogService;
 import com.springclaw.service.skill.bundle.SkillUsageRecord;
 import com.springclaw.service.skill.bundle.SkillUsageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.springclaw.tool.runtime.ToolPackDescriptor;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,6 +28,14 @@ import java.util.Optional;
  * 核心约束：先列摘要，再按需打开单个 skill 或附件文件，避免一次性把所有 skill 塞进 prompt。
  */
 @Component
+@ToolPackDescriptor(
+    id = "skill-library",
+    toolset = "script",
+    triggerKeywords = {"有哪些 skill", "skill 列表", "skills 列表", "技能列表", "查看技能", "skills_list", "skill_view", "skills_status"},
+    fallbackCandidate = false,
+    riskLevel = "read",
+    description = "浏览和管理已安装的 Skill 定义"
+)
 public class SkillLibraryToolPack {
 
     private static final int MAX_SKILL_MARKDOWN_CHARS = 8000;

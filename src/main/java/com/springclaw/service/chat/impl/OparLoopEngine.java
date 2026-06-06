@@ -2,6 +2,7 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
+import com.springclaw.service.agent.AgentEngine;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.tool.pack.FileToolPack;
@@ -24,7 +25,7 @@ import java.util.List;
  * 负责 OPAR 中 Observe/Plan/Act 三段的执行主循环。
  */
 @Service
-public class OparLoopEngine {
+public class OparLoopEngine implements AgentEngine {
 
     private static final Logger log = LoggerFactory.getLogger(OparLoopEngine.class);
 
@@ -68,6 +69,35 @@ public class OparLoopEngine {
         this.maxAgentSteps = Math.max(1, Math.min(maxAgentSteps, 6));
     }
 
+    @Override
+    public String name() {
+        return "opar-loop";
+    }
+
+    @Override
+    public int priority() {
+        return 3;
+    }
+
+    @Override
+    public boolean supports(ChatContext ctx) {
+        if (ctx == null) return false;
+        return "opar".equals(ctx.executionMode())
+                || (ctx.routingReason() != null && ctx.routingReason().contains("自动升级"));
+    }
+
+    @Override
+    public ChatExecutionResult execute(ChatContext ctx, FallbackResponder fallbackResponder) {
+        return runLoop(
+                ctx.activeClient(),
+                ctx.systemPrompt(),
+                ctx.assembled(),
+                ctx.requestId(),
+                fallbackResponder,
+                ctx.decision()
+        );
+    }
+
     public ChatExecutionResult runLoop(AiProviderService.ActiveChatClient activeClient,
                                        String systemPrompt,
                                        AssembledContext assembled,
@@ -83,6 +113,16 @@ public class OparLoopEngine {
                                        FallbackResponder fallbackResponder,
                                        AgentDecision decision) {
         AiProviderService.ActiveChatClient currentClient = activeClient;
+        LocalSkillFallbackService.LocalSkillResult decisionBoundResult = tryDecisionBoundLocalResult(assembled.question(), decision);
+        if (decisionBoundResult != null) {
+            return buildLocalExecutionResult(
+                    systemPrompt,
+                    assembled,
+                    decisionBoundResult,
+                    "命中已决策能力的本地执行路线，跳过模型自由规划阶段。",
+                    "已由 AgentDecision 约束的受控能力完成执行。"
+            );
+        }
         if (localFallbackFirst) {
             LocalSkillFallbackService.LocalSkillResult contextAwareResult = contextAwareSupport.tryContextAwareLocalResult(assembled);
             if (contextAwareResult != null) {
@@ -445,6 +485,26 @@ public class OparLoopEngine {
                 reflect,
                 false
         );
+    }
+
+    private LocalSkillFallbackService.LocalSkillResult tryDecisionBoundLocalResult(String question, AgentDecision decision) {
+        if (!shouldUseDecisionBoundLocalResult(decision)) {
+            return null;
+        }
+        LocalSkillFallbackService.LocalSkillResult priorityStructuredResult = tryPriorityStructuredLocalResult(question);
+        if (priorityStructuredResult != null) {
+            return priorityStructuredResult;
+        }
+        return tryLocalFallbackResult(question);
+    }
+
+    private boolean shouldUseDecisionBoundLocalResult(AgentDecision decision) {
+        if (decision == null || decision.isGeneral() || decision.requiresConfirmation() || decision.isDangerous()) {
+            return false;
+        }
+        String executionPath = decision.executionPath() == null ? "" : decision.executionPath().trim();
+        return "agent_tools".equalsIgnoreCase(executionPath)
+                || "skill_direct".equalsIgnoreCase(executionPath);
     }
 
     private static String safe(String text) {

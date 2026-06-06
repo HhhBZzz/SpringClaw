@@ -1,6 +1,7 @@
 package com.springclaw.tool.pack;
 
 import com.springclaw.common.exception.BusinessException;
+import com.springclaw.tool.runtime.ToolPackDescriptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.annotation.Tool;
@@ -25,6 +26,14 @@ import java.util.Locale;
  * 2. 网页正文抓取已迁移到 Python skill，避免 Java 主链路继续承担爬虫职责。
  */
 @Component
+@ToolPackDescriptor(
+    id = "web",
+    toolset = "web",
+    triggerKeywords = {"搜索", "联网", "网页", "官网", "web search", "google", "bing", "查一下"},
+    fallbackCandidate = true,
+    riskLevel = "read",
+    description = "联网搜索公开网页信息"
+)
 public class WebSearchToolPack {
 
     private static final Logger log = LoggerFactory.getLogger(WebSearchToolPack.class);

@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
  * Unified backend Agent loop for non-general requests.
  */
 @Service
-public class AgentRuntimeEngine {
+public class AgentRuntimeEngine implements AgentEngine {
 
     private static final Logger log = LoggerFactory.getLogger(AgentRuntimeEngine.class);
     private static final int SUMMARY_CAPABILITY_PAYLOAD_LIMIT = 1800;
@@ -67,6 +67,43 @@ public class AgentRuntimeEngine {
         this.modelTransportGuardService = modelTransportGuardService;
         this.chatResponsePolicyService = chatResponsePolicyService;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+    }
+
+    @Override
+    public String name() {
+        return "agent-runtime";
+    }
+
+    @Override
+    public int priority() {
+        return 2;
+    }
+
+    @Override
+    public boolean supports(ChatContext ctx) {
+        AgentDecision decision = ctx == null ? null : ctx.decision();
+        return decision != null
+                && !decision.isGeneral()
+                && !decision.requiresConfirmation()
+                && !decision.isDangerous()
+                && !isOparContext(ctx);
+    }
+
+    private boolean isOparContext(ChatContext ctx) {
+        if (ctx == null) {
+            return false;
+        }
+        return "opar".equalsIgnoreCase(ctx.executionMode())
+                || "deep".equalsIgnoreCase(ctx.responseMode())
+                || (ctx.routingReason() != null && ctx.routingReason().contains("自动升级"));
+    }
+
+    @Override
+    public com.springclaw.service.chat.impl.ChatExecutionResult execute(
+            ChatContext ctx,
+            com.springclaw.service.chat.impl.OparLoopEngine.FallbackResponder fallbackResponder) {
+        AgentRun run = run(ctx);
+        return run.executionResult();
     }
 
     public AgentRun run(ChatContext context) {

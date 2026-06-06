@@ -1,6 +1,7 @@
 package com.springclaw.tool.pack;
 
 import com.springclaw.common.exception.BusinessException;
+import com.springclaw.tool.runtime.ToolPackDescriptor;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,6 +24,14 @@ import java.util.concurrent.TimeUnit;
  * 系统工具包。
  */
 @Component
+@ToolPackDescriptor(
+    id = "system",
+    toolset = "system",
+    triggerKeywords = {"当前时间", "现在几点", "uuid", "jvm", "启动参数", "当前模型", "provider", "切换模型", "模型状态"},
+    fallbackCandidate = true,
+    riskLevel = "read",
+    description = "系统时间、UUID、JVM 信息和受控命令执行"
+)
 public class SystemToolPack {
 
     private final boolean commandEnabled;

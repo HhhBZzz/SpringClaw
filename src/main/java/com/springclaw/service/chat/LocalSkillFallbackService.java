@@ -15,6 +15,7 @@ import com.springclaw.tool.pack.SystemToolPack;
 import com.springclaw.tool.pack.WebSearchToolPack;
 import com.springclaw.tool.pack.WeatherToolPack;
 import com.springclaw.tool.pack.WorkspaceSearchToolPack;
+import com.springclaw.tool.runtime.CapabilityRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -48,6 +49,7 @@ public class LocalSkillFallbackService {
     private final LocalSkillModelControlSupport modelControlSupport;
     private final LocalSkillQuerySupport querySupport;
     private final LocalFilesystemService localFilesystemService;
+    private final CapabilityRegistry capabilityRegistry;
 
     LocalSkillFallbackService(boolean enabled,
                               SystemToolPack systemToolPack,
@@ -71,6 +73,7 @@ public class LocalSkillFallbackService {
                 createBuiltinSkillExecutionService(enabled, workspaceSearchToolPack, scriptSkillCatalogService, skillRegistryService),
                 new LocalSkillQuerySupport(createScriptSkillExecutorService(enabled, scriptSkillCatalogService), scriptSkillCatalogService),
                 aiProviderService,
+                null,
                 null);
     }
 
@@ -97,6 +100,7 @@ public class LocalSkillFallbackService {
                 builtinSkillExecutionService,
                 new LocalSkillQuerySupport(scriptSkillExecutorService, scriptSkillCatalogService),
                 aiProviderService,
+                null,
                 null);
     }
 
@@ -124,7 +128,8 @@ public class LocalSkillFallbackService {
                 builtinSkillExecutionService,
                 new LocalSkillQuerySupport(scriptSkillExecutorService, scriptSkillCatalogService),
                 aiProviderService,
-                localFilesystemService);
+                localFilesystemService,
+                null);
     }
 
     public LocalSkillFallbackService(boolean enabled,
@@ -150,6 +155,7 @@ public class LocalSkillFallbackService {
         this.modelControlSupport = new LocalSkillModelControlSupport(systemToolPack, aiProviderService);
         this.querySupport = new LocalSkillQuerySupport(skillRuntimeService, scriptSkillCatalogService);
         this.localFilesystemService = null;
+        this.capabilityRegistry = null;
     }
 
     private LocalSkillFallbackService(boolean enabled,
@@ -163,7 +169,8 @@ public class LocalSkillFallbackService {
                                       BuiltinSkillExecutionService builtinSkillExecutionService,
                                       LocalSkillQuerySupport querySupport,
                                       AiProviderService aiProviderService,
-                                      LocalFilesystemService localFilesystemService) {
+                                      LocalFilesystemService localFilesystemService,
+                                      CapabilityRegistry capabilityRegistry) {
         this.enabled = enabled;
         this.workspaceSearchToolPack = workspaceSearchToolPack;
         this.webSearchToolPack = webSearchToolPack;
@@ -175,6 +182,7 @@ public class LocalSkillFallbackService {
         this.modelControlSupport = new LocalSkillModelControlSupport(systemToolPack, aiProviderService);
         this.querySupport = querySupport;
         this.localFilesystemService = localFilesystemService;
+        this.capabilityRegistry = capabilityRegistry;
     }
 
     @Autowired
@@ -190,7 +198,8 @@ public class LocalSkillFallbackService {
                                      SkillRuntimeService skillRuntimeService,
                                      ScriptSkillCatalogService scriptSkillCatalogService,
                                      AiProviderService aiProviderService,
-                                     LocalFilesystemService localFilesystemService) {
+                                     LocalFilesystemService localFilesystemService,
+                                     CapabilityRegistry capabilityRegistry) {
         this.enabled = enabled;
         this.workspaceSearchToolPack = workspaceSearchToolPack;
         this.webSearchToolPack = webSearchToolPack;
@@ -202,6 +211,7 @@ public class LocalSkillFallbackService {
         this.modelControlSupport = new LocalSkillModelControlSupport(systemToolPack, aiProviderService);
         this.querySupport = new LocalSkillQuerySupport(skillRuntimeService, scriptSkillCatalogService);
         this.localFilesystemService = localFilesystemService;
+        this.capabilityRegistry = capabilityRegistry;
     }
 
     private static ScriptSkillExecutorService createScriptSkillExecutorService(boolean enabled,
@@ -287,11 +297,7 @@ public class LocalSkillFallbackService {
             return localResult("SYSTEM_DATE", answer, answer, false);
         }
 
-        if (containsAny(lower, "脚本技能列表", "有哪些脚本技能", "可用脚本技能", "script skill", "script skills")) {
-            String answer = scriptSkillToolPack.listScriptSkills();
-            return localResult("SCRIPT_SKILL_LIST", answer, answer, true);
-        }
-
+        // 运行时诊断（无对应 ToolPack，保留）
         if (containsAny(lower, "端口占用", "谁占用了", "启动失败", "服务没起来", "port", "端口被占用", "诊断运行")) {
             String answer = querySupport.runScriptSkillByCategory("runtime", q);
             if (StringUtils.hasText(answer)) {
@@ -301,6 +307,114 @@ public class LocalSkillFallbackService {
             return localResult("RUNTIME_DIAGNOSIS", fallback, fallback, false);
         }
 
+        // 使用 CapabilityRegistry 匹配最佳兜底候选（替代所有硬编码 containsAny）
+        if (capabilityRegistry != null) {
+            CapabilityRegistry.CapabilityEntry bestMatch = capabilityRegistry.findBestFallback(q);
+            if (bestMatch != null) {
+                return dispatchFallback(bestMatch.id(), q, lower);
+            }
+        } else {
+            // 向后兼容：CapabilityRegistry 不可用时的硬编码兜底
+            Optional<LocalSkillResult> legacyResult = tryLegacyFallback(q, lower);
+            if (legacyResult.isPresent()) {
+                return legacyResult;
+            }
+        }
+
+        // 网页抓取（需要特殊 URL 提取逻辑，无法仅靠 ToolPack）
+        if (querySupport.looksLikeExplicitWebFetchQuestion(q)) {
+            return handleWebFetch(q);
+        }
+
+        // 显式脚本技能请求
+        if (querySupport.looksLikeExplicitScriptSkillQuestion(lower)) {
+            return handleExplicitScriptSkill(q);
+        }
+
+        // 高置信度自动脚本技能
+        ScriptSkillDefinition autoSkill = querySupport.resolveHighConfidenceScriptSkill(q);
+        if (autoSkill != null) {
+            String answer = querySupport.runScriptSkillByName(autoSkill.skillName(), q);
+            if (StringUtils.hasText(answer) && !querySupport.looksLikeFailure(answer)) {
+                return localResult("SCRIPT_SKILL_AUTO", answer, answer, true);
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    /**
+     * 根据 CapabilityRegistry 匹配结果分发到对应的 ToolPack。
+     * 关键词匹配已由 CapabilityRegistry 完成，此处仅做方法调用分发。
+     */
+    private Optional<LocalSkillResult> dispatchFallback(String capabilityId, String q, String lower) {
+        return switch (capabilityId) {
+            case "weather" -> {
+                String city = querySupport.extractCity(q);
+                String answer = weatherToolPack.queryWeather(city);
+                if (querySupport.looksLikeFailure(answer)) {
+                    String skillAnswer = querySupport.runScriptSkillByCategory("weather", q);
+                    if (StringUtils.hasText(skillAnswer)) {
+                        yield localResult("WEATHER_QUERY", skillAnswer, skillAnswer, true);
+                    }
+                }
+                yield localResult("WEATHER_QUERY", answer, answer, true);
+            }
+            case "exchange" -> {
+                String[] currencies = querySupport.extractCurrencies(q);
+                String answer = exchangeRateToolPack.queryExchangeRate(currencies[0], currencies[1]);
+                yield localResult("EXCHANGE_RATE", answer, answer, true);
+            }
+            case "news" -> {
+                String keyword = querySupport.extractNewsKeyword(q);
+                String answer = newsToolPack.searchNews(keyword);
+                yield localResult("NEWS_SEARCH", answer, answer, true);
+            }
+            case "web" -> {
+                String keyword = querySupport.extractWebKeyword(q);
+                String answer = webSearchToolPack.webSearch(keyword);
+                yield localResult("WEB_SEARCH", answer, answer, true);
+            }
+            case "workspace-search" -> {
+                String answer = workspaceSearchToolPack.analyzeWorkspaceTask(q);
+                if (querySupport.looksLikeWeakWorkspaceAnswer(answer)) {
+                    String skillAnswer = querySupport.runScriptSkillByCategory("workspace", q);
+                    if (StringUtils.hasText(skillAnswer)) {
+                        yield localResult("WORKSPACE_ANALYSIS", skillAnswer, querySupport.renderWorkspaceAnswer(skillAnswer), true);
+                    }
+                }
+                yield localResult("WORKSPACE_ANALYSIS", answer, querySupport.renderWorkspaceAnswer(answer), true);
+            }
+            case "script-skill" -> {
+                String answer = scriptSkillToolPack.listScriptSkills();
+                yield localResult("SCRIPT_SKILL_LIST", answer, answer, true);
+            }
+            case "file" -> localResult("FILE_OPERATION",
+                    "文件操作需要通过 Agent 工具链路执行。",
+                    "文件操作需要通过 Agent 工具链路执行。", false);
+            case "local-files" -> tryHandleLocalFileBrowse(q).or(
+                    () -> localResult("LOCAL_FILES", "请在聊天中说明具体要读取的本地文件。", "请在聊天中说明具体要读取的本地文件。", false));
+            default -> Optional.empty();
+        };
+    }
+
+    private Optional<LocalSkillResult> handleWebFetch(String q) {
+        String answer = querySupport.runScriptSkillByCategory("web", q);
+        if (StringUtils.hasText(answer)) {
+            return localResult("WEB_CRAWL", answer, answer, true);
+        }
+        String target = querySupport.extractFirstUrl(q);
+        String fallback = StringUtils.hasText(target)
+                ? "未找到可用的网页抓取 Python skill，目标链接: " + target
+                : "未找到可用的网页抓取 Python skill。";
+        return localResult("WEB_CRAWL", fallback, fallback, false);
+    }
+
+    /**
+     * CapabilityRegistry 不可用时的向后兼容硬编码兜底。
+     * 当所有构造函数都传递了 CapabilityRegistry 后，此方法可删除。
+     */
+    private Optional<LocalSkillResult> tryLegacyFallback(String q, String lower) {
         if (containsAny(lower, "天气", "气温", "下雨", "weather")) {
             String city = querySupport.extractCity(q);
             String answer = weatherToolPack.queryWeather(city);
@@ -312,31 +426,16 @@ public class LocalSkillFallbackService {
             }
             return localResult("WEATHER_QUERY", answer, answer, true);
         }
-
         if (containsAny(lower, "汇率", "exchange", "美元", "人民币", "欧元", "日元")) {
             String[] currencies = querySupport.extractCurrencies(q);
             String answer = exchangeRateToolPack.queryExchangeRate(currencies[0], currencies[1]);
             return localResult("EXCHANGE_RATE", answer, answer, true);
         }
-
         if (containsAny(lower, "新闻", "热点", "资讯", "news")) {
             String keyword = querySupport.extractNewsKeyword(q);
             String answer = newsToolPack.searchNews(keyword);
             return localResult("NEWS_SEARCH", answer, answer, true);
         }
-
-        if (querySupport.looksLikeExplicitWebFetchQuestion(q)) {
-            String answer = querySupport.runScriptSkillByCategory("web", q);
-            if (StringUtils.hasText(answer)) {
-                return localResult("WEB_CRAWL", answer, answer, true);
-            }
-            String target = querySupport.extractFirstUrl(q);
-            String fallback = StringUtils.hasText(target)
-                    ? "未找到可用的网页抓取 Python skill，目标链接: " + target
-                    : "未找到可用的网页抓取 Python skill。";
-            return localResult("WEB_CRAWL", fallback, fallback, false);
-        }
-
         if (querySupport.looksLikeWorkspaceQuestion(lower)) {
             String answer = workspaceSearchToolPack.analyzeWorkspaceTask(q);
             if (querySupport.looksLikeWeakWorkspaceAnswer(answer)) {
@@ -347,32 +446,26 @@ public class LocalSkillFallbackService {
             }
             return localResult("WORKSPACE_ANALYSIS", answer, querySupport.renderWorkspaceAnswer(answer), true);
         }
-
         if (querySupport.looksLikeExplicitWebSearchQuestion(lower)) {
             String keyword = querySupport.extractWebKeyword(q);
             String answer = webSearchToolPack.webSearch(keyword);
             return localResult("WEB_SEARCH", answer, answer, true);
         }
-
-        if (querySupport.looksLikeExplicitScriptSkillQuestion(lower)) {
-            ScriptSkillDefinition skillDefinition = querySupport.resolveRequestedScriptSkill(q);
-            if (skillDefinition == null) {
-                String answer = scriptSkillToolPack.listScriptSkills();
-                return localResult("SCRIPT_SKILL_LIST", answer, answer, true);
-            }
-            String answer = querySupport.runScriptSkillByName(skillDefinition.skillName(), q);
-            return localResult("SCRIPT_SKILL_RUN", answer, answer, true);
+        if (containsAny(lower, "脚本技能列表", "有哪些脚本技能", "可用脚本技能", "script skill", "script skills")) {
+            String answer = scriptSkillToolPack.listScriptSkills();
+            return localResult("SCRIPT_SKILL_LIST", answer, answer, true);
         }
-
-        ScriptSkillDefinition autoSkill = querySupport.resolveHighConfidenceScriptSkill(q);
-        if (autoSkill != null) {
-            String answer = querySupport.runScriptSkillByName(autoSkill.skillName(), q);
-            if (StringUtils.hasText(answer) && !querySupport.looksLikeFailure(answer)) {
-                return localResult("SCRIPT_SKILL_AUTO", answer, answer, true);
-            }
-        }
-
         return Optional.empty();
+    }
+
+    private Optional<LocalSkillResult> handleExplicitScriptSkill(String q) {
+        ScriptSkillDefinition skillDefinition = querySupport.resolveRequestedScriptSkill(q);
+        if (skillDefinition == null) {
+            String answer = scriptSkillToolPack.listScriptSkills();
+            return localResult("SCRIPT_SKILL_LIST", answer, answer, true);
+        }
+        String answer = querySupport.runScriptSkillByName(skillDefinition.skillName(), q);
+        return localResult("SCRIPT_SKILL_RUN", answer, answer, true);
     }
 
     private Optional<LocalSkillResult> tryHandleLocalFileBrowse(String question) {

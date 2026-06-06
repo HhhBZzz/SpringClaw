@@ -1,6 +1,7 @@
 package com.springclaw.tool.pack;
 
 import com.springclaw.service.files.LocalFilesystemService;
+import com.springclaw.tool.runtime.ToolPackDescriptor;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.stereotype.Component;
 
@@ -10,6 +11,14 @@ import org.springframework.stereotype.Component;
  * 面向用户显式授权的电脑目录，不等同于全盘读取。
  */
 @Component
+@ToolPackDescriptor(
+    id = "local-files",
+    toolset = "file",
+    triggerKeywords = {"本地文件", "授权文件", "电脑文件", "桌面", "下载", "文档", "简历", "论文", "Desktop", "Downloads", "Documents"},
+    fallbackCandidate = true,
+    riskLevel = "read",
+    description = "读取授权本地目录中的文件"
+)
 public class LocalFilesystemToolPack {
 
     private final LocalFilesystemService localFilesystemService;

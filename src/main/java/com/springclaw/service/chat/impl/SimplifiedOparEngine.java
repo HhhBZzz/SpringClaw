@@ -4,6 +4,7 @@ import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentCapabilityExecutionService;
 import com.springclaw.service.agent.AgentCapabilityResult;
 import com.springclaw.service.agent.AgentDecision;
+import com.springclaw.service.agent.AgentEngine;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.event.MessageEventService;
@@ -22,7 +23,7 @@ import java.util.List;
  * 简化版 Agent 执行器：简单问题直答，需要时再让模型自行调用工具。
  */
 @Service
-public class SimplifiedOparEngine {
+public class SimplifiedOparEngine implements AgentEngine {
 
     private static final Logger log = LoggerFactory.getLogger(SimplifiedOparEngine.class);
 
@@ -88,6 +89,33 @@ public class SimplifiedOparEngine {
                 ? AgentCapabilityExecutionService.noop()
                 : capabilityExecutionService;
         this.chatResponsePolicyService = chatResponsePolicyService;
+    }
+
+    @Override
+    public String name() {
+        return "simplified";
+    }
+
+    @Override
+    public int priority() {
+        return 10;
+    }
+
+    @Override
+    public boolean supports(ChatContext ctx) {
+        return true; // 兜底引擎，总是可用
+    }
+
+    @Override
+    public ChatExecutionResult execute(ChatContext ctx, OparLoopEngine.FallbackResponder fallbackResponder) {
+        return run(
+                ctx.activeClient(),
+                ctx.systemPrompt(),
+                ctx.assembled(),
+                ctx.requestId(),
+                fallbackResponder,
+                ctx.decision()
+        );
     }
 
     public ChatExecutionResult run(AiProviderService.ActiveChatClient activeClient,

@@ -2,6 +2,7 @@ package com.springclaw.tool.pack;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.common.exception.BusinessException;
+import com.springclaw.tool.runtime.ToolPackDescriptor;
 import com.springclaw.service.skill.bundle.SkillScaffoldService;
 import com.springclaw.service.skill.bundle.SkillCatalogService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
@@ -32,6 +33,14 @@ import java.util.Map;
  * 2. 通过“目录沙箱 + 技能白名单 + 超时 + 输出截断”控制风险，避免命令注入。
  */
 @Component
+@ToolPackDescriptor(
+    id = "script-skill",
+    toolset = "script",
+    triggerKeywords = {"脚本", "skill", "执行技能", "python", "run skill", "脚本技能"},
+    fallbackCandidate = true,
+    riskLevel = "execution",
+    description = "执行受控 Python 脚本技能"
+)
 public class ScriptSkillToolPack {
 
     private static final int MAX_SKILL_MARKDOWN_CHARS = 6000;

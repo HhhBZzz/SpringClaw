@@ -2,6 +2,7 @@ package com.springclaw.tool.pack;
 
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.service.workspace.WorkspaceTaskService;
+import com.springclaw.tool.runtime.ToolPackDescriptor;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -26,6 +27,16 @@ import java.util.stream.Stream;
  * 2. 默认跳过 .git/target 等目录，避免无效扫描和噪音结果。
  */
 @Component
+@ToolPackDescriptor(
+    id = "workspace-search",
+    toolset = "workspace",
+    triggerKeywords = {"找文件", "搜代码", "在哪个文件", "关键词检索", "grep", "search file", "find file", "代码位置", "源码位置",
+            "项目结构", "项目架构", "工程结构", "代码结构", "源码", "实现在哪", "执行链路", "agent 链路"},
+    fallbackCandidate = true,
+    riskLevel = "read",
+    preferredMode = "opar",
+    description = "按文件名或内容检索项目文件"
+)
 public class WorkspaceSearchToolPack {
 
     private static final Set<String> TEXT_EXTENSIONS = Set.of(

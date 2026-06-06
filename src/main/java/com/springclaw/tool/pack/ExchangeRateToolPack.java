@@ -2,6 +2,7 @@ package com.springclaw.tool.pack;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.springclaw.tool.runtime.ToolPackDescriptor;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,6 +19,14 @@ import java.util.Map;
  * 汇率查询工具包（免 API Key 版本）。
  */
 @Component
+@ToolPackDescriptor(
+    id = "exchange",
+    toolset = "web",
+    triggerKeywords = {"汇率", "exchange", "美元", "人民币", "欧元", "日元", "usd", "cny", "eur", "jpy"},
+    fallbackCandidate = true,
+    riskLevel = "read",
+    description = "查询实时汇率（免 API Key）"
+)
 @SuppressWarnings("unchecked")
 public class ExchangeRateToolPack {
 

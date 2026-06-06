@@ -1,6 +1,8 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.service.skill.impl.SkillRegistryService;
+import com.springclaw.tool.runtime.CapabilityRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -28,9 +30,17 @@ public class ChatRoutingPolicyService {
     );
 
     private final SkillRegistryService skillRegistryService;
+    private final CapabilityRegistry capabilityRegistry;
 
     public ChatRoutingPolicyService(SkillRegistryService skillRegistryService) {
+        this(skillRegistryService, null);
+    }
+
+    @Autowired
+    public ChatRoutingPolicyService(SkillRegistryService skillRegistryService,
+                                     CapabilityRegistry capabilityRegistry) {
         this.skillRegistryService = skillRegistryService;
+        this.capabilityRegistry = capabilityRegistry;
     }
 
     public RoutingDecision decide(String question,
@@ -246,6 +256,23 @@ public class ChatRoutingPolicyService {
             return "general";
         }
         String normalized = question.trim().toLowerCase(Locale.ROOT);
+
+        // 优先使用 CapabilityRegistry 进行意图检测（数据驱动）
+        if (capabilityRegistry != null) {
+            List<CapabilityRegistry.CapabilityEntry> matches = capabilityRegistry.findByTriggerKeywords(question);
+            if (!matches.isEmpty()) {
+                return switch (matches.get(0).toolset()) {
+                    case "system" -> "control-plane";
+                    case "file" -> "local-files";
+                    case "workspace" -> "workspace-analysis";
+                    case "web" -> "web-research";
+                    case "script" -> "tool-skill";
+                    default -> intentFromCapabilityKeywords(matches.get(0));
+                };
+            }
+        }
+
+        // 向后兼容：CapabilityRegistry 不可用时使用硬编码关键词
         if (containsAny(normalized,
                 "当前模型", "目前模型", "现在用什么模型", "你是什么模型", "provider", "当前通道",
                 "当前时间", "现在几点", "今天几号", "今天星期", "jvm", "uuid", "执行命令", "shell 命令")) {
@@ -270,6 +297,10 @@ public class ChatRoutingPolicyService {
                 && skillRegistryService.matchBestAgentVisibleDefinition(question, allowedToolPacks).isPresent()) {
             return "tool-skill";
         }
+        return "general";
+    }
+
+    private String intentFromCapabilityKeywords(CapabilityRegistry.CapabilityEntry entry) {
         return "general";
     }
 

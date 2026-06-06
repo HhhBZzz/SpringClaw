@@ -10,8 +10,10 @@ import com.springclaw.service.agent.AgentQualityScore;
 import com.springclaw.service.agent.AgentRun;
 import com.springclaw.service.agent.AgentRunTraceEvent;
 import com.springclaw.service.agent.AgentRunTraceService;
+import com.springclaw.service.agent.AgentEngine;
 import com.springclaw.service.agent.AgentRuntimeEngine;
 import com.springclaw.service.agent.CapabilityResult;
+import com.springclaw.service.agent.EngineSelector;
 import com.springclaw.service.agent.VerificationResult;
 import com.springclaw.service.chat.ChatService;
 import com.springclaw.service.chat.LocalSkillFallbackService;
@@ -59,6 +61,7 @@ public class ChatServiceImpl implements ChatService {
     private final AgentActionProposalService actionProposalService;
     private final AgentRunTraceService agentRunTraceService;
     private final AgentRuntimeEngine agentRuntimeEngine;
+    private final EngineSelector engineSelector;
     private final boolean modelLedStreamingEnabled;
     private final boolean basicStreamingEnabled;
 
@@ -78,6 +81,7 @@ public class ChatServiceImpl implements ChatService {
                            AgentActionProposalService actionProposalService,
                            AgentRunTraceService agentRunTraceService,
                            AgentRuntimeEngine agentRuntimeEngine,
+                           EngineSelector engineSelector,
                            @Value("${springclaw.chat.model-led-streaming-enabled:false}") boolean modelLedStreamingEnabled,
                            @Value("${springclaw.chat.basic-streaming-enabled:true}") boolean basicStreamingEnabled) {
         this.aiProviderService = aiProviderService;
@@ -95,6 +99,7 @@ public class ChatServiceImpl implements ChatService {
         this.actionProposalService = actionProposalService;
         this.agentRunTraceService = agentRunTraceService;
         this.agentRuntimeEngine = agentRuntimeEngine;
+        this.engineSelector = engineSelector;
         this.modelLedStreamingEnabled = modelLedStreamingEnabled;
         this.basicStreamingEnabled = basicStreamingEnabled;
     }
@@ -130,6 +135,7 @@ public class ChatServiceImpl implements ChatService {
                 actionProposalService,
                 agentRunTraceService,
                 null,
+                null,
                 modelLedStreamingEnabled,
                 basicStreamingEnabled);
     }
@@ -161,6 +167,7 @@ public class ChatServiceImpl implements ChatService {
                 null,
                 null,
                 null,
+                null,
                 false,
                 true);
     }
@@ -187,6 +194,7 @@ public class ChatServiceImpl implements ChatService {
                 chatContextFactory,
                 chatResultPersister,
                 metaGuardExecutor,
+                null,
                 null,
                 null,
                 null,
@@ -705,12 +713,8 @@ public class ChatServiceImpl implements ChatService {
     }
 
     boolean shouldUseAgentRuntime(ChatContext context) {
-        AgentDecision decision = context == null ? null : context.decision();
         return agentRuntimeEngine != null
-                && decision != null
-                && !decision.isGeneral()
-                && !decision.requiresConfirmation()
-                && !decision.isDangerous();
+                && agentRuntimeEngine.supports(context);
     }
 
     boolean shouldUseBasicModelStreaming(ChatContext context) {
@@ -890,6 +894,17 @@ public class ChatServiceImpl implements ChatService {
     }
 
     private ChatExecutionResult runAgentExecution(ChatContext context) {
+        // 使用 EngineSelector 策略模式选择引擎（替代硬编码 if/else）
+        if (engineSelector != null) {
+            AgentEngine engine = engineSelector.select(context);
+            if (engine instanceof AgentRuntimeEngine runtimeEngine) {
+                AgentRun run = runtimeEngine.run(context);
+                persistAgentRunTrace(context, run);
+                return run.executionResult();
+            }
+            return engine.execute(context, metaGuardExecutor::fallbackAnswer);
+        }
+        // 向后兼容：EngineSelector 不可用时使用原有逻辑
         if (shouldUseAgentRuntime(context)) {
             AgentRun run = agentRuntimeEngine.run(context);
             persistAgentRunTrace(context, run);

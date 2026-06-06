@@ -2,6 +2,7 @@ package com.springclaw.tool.pack;
 
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.service.files.LocalFilesystemService;
+import com.springclaw.tool.runtime.ToolPackDescriptor;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +22,14 @@ import java.nio.file.Path;
  * 2. 通过 @Tool 暴露给模型，避免手写 Function Calling 协议。
  */
 @Component
+@ToolPackDescriptor(
+    id = "file",
+    toolset = "file",
+    triggerKeywords = {"文件", "目录", "path", "read", "write", "list", "保存", "读取"},
+    fallbackCandidate = true,
+    riskLevel = "write",
+    description = "受控目录的文件读写操作"
+)
 public class FileToolPack {
 
     private final LocalFilesystemService localFilesystemService;

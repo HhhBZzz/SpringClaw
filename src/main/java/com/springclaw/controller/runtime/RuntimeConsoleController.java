@@ -12,6 +12,7 @@ import com.springclaw.service.skill.impl.SkillRegistryService;
 import com.springclaw.service.task.ScheduledTaskService;
 import com.springclaw.service.usage.LlmUsageRecordService;
 import com.springclaw.tool.runtime.AgentToolProvider;
+import com.springclaw.tool.runtime.CapabilityRegistry;
 import com.springclaw.web.auth.RequestUserContext;
 import com.springclaw.web.auth.RequestUserContextHolder;
 import com.springclaw.web.auth.RequireRole;
@@ -39,6 +40,7 @@ public class RuntimeConsoleController {
     private final AiProviderService aiProviderService;
     private final LlmUsageRecordService llmUsageRecordService;
     private final AgentRunTraceService agentRunTraceService;
+    private final CapabilityRegistry capabilityRegistry;
     private final List<AgentToolProvider> toolProviders;
 
     public RuntimeConsoleController(SkillRegistryService skillRegistryService,
@@ -47,6 +49,7 @@ public class RuntimeConsoleController {
                                     AiProviderService aiProviderService,
                                     LlmUsageRecordService llmUsageRecordService,
                                     AgentRunTraceService agentRunTraceService,
+                                    CapabilityRegistry capabilityRegistry,
                                     List<AgentToolProvider> toolProviders) {
         this.skillRegistryService = skillRegistryService;
         this.skillService = skillService;
@@ -54,6 +57,7 @@ public class RuntimeConsoleController {
         this.aiProviderService = aiProviderService;
         this.llmUsageRecordService = llmUsageRecordService;
         this.agentRunTraceService = agentRunTraceService;
+        this.capabilityRegistry = capabilityRegistry;
         this.toolProviders = toolProviders == null ? List.of() : List.copyOf(toolProviders);
     }
 
@@ -212,15 +216,27 @@ public class RuntimeConsoleController {
     private Map<String, Object> toToolView(AgentToolProvider provider, Set<String> allowedToolPacks) {
         Map<String, Object> item = new LinkedHashMap<>();
         Set<String> requiredPacks = provider.requiredToolPacks() == null ? Set.of() : provider.requiredToolPacks();
-        String toolClass = provider.tool() == null ? "unknown" : provider.tool().getClass().getSimpleName();
-        String id = defaultText(provider.id(), toolClass);
+        String id = defaultText(provider.id(), provider.tool() == null ? "unknown" : provider.tool().getClass().getSimpleName());
         item.put("name", id);
         item.put("toolset", requiredPacks.isEmpty() ? "core" : String.join(",", requiredPacks));
         item.put("requiredToolPacks", requiredPacks);
         item.put("allow", provider.isAllowed(allowedToolPacks));
         item.put("enabled", provider.includeForAgentMode());
-        item.put("riskLevel", inferRiskLevel(id, requiredPacks));
-        item.put("description", toolClass);
+
+        // 从 CapabilityRegistry 读取真实的 riskLevel 和 description
+        CapabilityRegistry.CapabilityEntry entry = capabilityRegistry.findById(id);
+        if (entry != null) {
+            item.put("riskLevel", entry.riskLevel());
+            item.put("description", StringUtils.hasText(entry.description())
+                    ? entry.description()
+                    : entry.beanName());
+            item.put("triggerKeywords", List.of(entry.triggerKeywords()));
+            item.put("fallbackCandidate", entry.isFallbackCandidate());
+            item.put("preferredMode", entry.preferredMode());
+        } else {
+            item.put("riskLevel", inferRiskLevel(id, requiredPacks));
+            item.put("description", provider.tool() == null ? "unknown" : provider.tool().getClass().getSimpleName());
+        }
         return item;
     }
 

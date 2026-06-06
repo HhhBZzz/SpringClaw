@@ -1,5 +1,6 @@
 package com.springclaw.tool.pack;
 
+import com.springclaw.tool.runtime.ToolPackDescriptor;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.boot.actuate.health.HealthEndpoint;
 import org.springframework.stereotype.Component;
@@ -11,6 +12,14 @@ import java.util.Map;
  * Runtime health tool for backend, database, Redis and broker status.
  */
 @Component
+@ToolPackDescriptor(
+    id = "system-health",
+    toolset = "system",
+    triggerKeywords = {"检查后端", "后端状态", "运行状态", "健康状态", "数据库", "redis", "rabbitmq", "runtime health", "system health"},
+    fallbackCandidate = false,
+    riskLevel = "read",
+    description = "检查 Spring Boot、数据库、Redis 等组件健康状态"
+)
 public class SystemHealthToolPack {
 
     private final HealthEndpoint healthEndpoint;

@@ -188,6 +188,23 @@ class ChatServiceImplModeTest {
         verify(fixture.oparLoopEngine, never()).runLoop(any(), anyString(), any(), anyString(), any(), any());
     }
 
+    @Test
+    void shouldNotUseAgentRuntimeForExplicitOparStreamContext() {
+        Fixture fixture = new Fixture();
+        AgentDecision decision = new AgentDecision("workspace_analysis", "agent_tools", java.util.List.of("workspace-review"), "read", false, "项目分析");
+        ChatContext context = fixture.buildChatContext(
+                "分析当前项目结构",
+                "opar",
+                "用户显式选择深度模式，使用 OPAR 链路。",
+                "deep",
+                "workspace_analysis",
+                decision
+        );
+        ChatServiceImpl service = fixture.buildWithRuntime();
+
+        Assertions.assertFalse(service.shouldUseAgentRuntime(context));
+    }
+
     private static final class Fixture {
 
         private final AiProviderService aiProviderService = mock(AiProviderService.class);
@@ -293,6 +310,7 @@ class ChatServiceImplModeTest {
         }
 
         private ChatServiceImpl buildWithRuntime() {
+            when(agentRuntimeEngine.supports(any(ChatContext.class))).thenCallRealMethod();
             return new ChatServiceImpl(
                     aiProviderService,
                     chatGuardService,
@@ -309,6 +327,7 @@ class ChatServiceImplModeTest {
                     null,
                     null,
                     agentRuntimeEngine,
+                    null,
                     false,
                     true
             );

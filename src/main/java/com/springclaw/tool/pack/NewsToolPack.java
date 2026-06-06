@@ -2,6 +2,7 @@ package com.springclaw.tool.pack;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.springclaw.tool.runtime.ToolPackDescriptor;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,6 +22,14 @@ import java.util.Map;
  * 新闻检索工具包（免 API Key 版本）。
  */
 @Component
+@ToolPackDescriptor(
+    id = "news",
+    toolset = "web",
+    triggerKeywords = {"新闻", "热点", "资讯", "news", "头条"},
+    fallbackCandidate = true,
+    riskLevel = "read",
+    description = "按关键词检索新闻摘要（免 API Key）"
+)
 @SuppressWarnings("unchecked")
 public class NewsToolPack {
 

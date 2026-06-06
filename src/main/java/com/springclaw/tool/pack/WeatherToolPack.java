@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.springclaw.tool.runtime.ToolPackDescriptor;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,6 +28,14 @@ import java.util.Optional;
  * 天气查询工具包（免 API Key 版本）。
  */
 @Component
+@ToolPackDescriptor(
+    id = "weather",
+    toolset = "web",
+    triggerKeywords = {"天气", "气温", "温度", "下雨", "weather", "forecast"},
+    fallbackCandidate = true,
+    riskLevel = "read",
+    description = "查询城市天气（免 API Key）"
+)
 @SuppressWarnings("unchecked")
 public class WeatherToolPack {
 

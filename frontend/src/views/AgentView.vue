@@ -119,10 +119,9 @@ type InspectorTab = 'trace' | 'tools' | 'memory' | 'logs';
 type RunStepStatus = 'completed' | 'running' | 'pending' | 'failed';
 
 const responseModes: Array<{ value: ChatResponseMode; label: string; description: string }> = [
-  { value: 'agent', label: 'Agent', description: '默认，模型主导并可调用工具' },
-  { value: 'fast', label: '快速', description: '轻量回答，减少多轮规划' },
-  { value: 'deep', label: '深度', description: '强制 OPAR 深度链路' },
-  { value: 'tool', label: '工具优先', description: '适合明确执行 skill/tool' }
+  { value: 'agent', label: 'Auto', description: '自动选择聊天、工具或深度链路' },
+  { value: 'fast', label: 'Fast', description: '轻量回答，减少规划和工具开销' },
+  { value: 'deep', label: 'Deep', description: '强制深度 OPAR 链路' }
 ];
 const activeInspectorTab = ref<InspectorTab>('trace');
 
@@ -584,7 +583,7 @@ function makeSessionKey() {
 
 function readResponseMode(): ChatResponseMode {
   const raw = localStorage.getItem(RESPONSE_MODE_KEY);
-  return raw === 'fast' || raw === 'deep' || raw === 'tool' || raw === 'agent' ? raw : 'agent';
+  return raw === 'fast' || raw === 'deep' || raw === 'agent' ? raw : 'agent';
 }
 
 function readSidebarPinned() {
@@ -1237,6 +1236,11 @@ function formatMetric(value: number | string | undefined) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(numberValue);
 }
 
+function responseModeLabel(value?: string) {
+  const mode = responseModes.find((item) => item.value === value);
+  return mode?.label || 'Auto';
+}
+
 function formatRate(value: number | undefined) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '0%';
   return `${Math.round(value * 1000) / 10}%`;
@@ -1430,22 +1434,17 @@ onUnmounted(() => {
 
       <section class="runtime-stage" aria-label="SpringClaw Agent workspace">
         <header class="runtime-worktop" :class="'studio-nav'" aria-label="Agent Runtime status bar">
-          <div class="runtime-mode-switch" aria-label="Execution mode">
+          <div class="runtime-mode-switch" aria-label="Response mode">
             <button
+              v-for="mode in responseModes"
+              :key="mode.value"
               type="button"
-              :class="{ active: responseMode !== 'deep' }"
+              :class="{ active: responseMode === mode.value }"
               :disabled="busy"
-              @click="responseMode = 'agent'"
+              :title="mode.description"
+              @click="responseMode = mode.value"
             >
-              simplified
-            </button>
-            <button
-              type="button"
-              :class="{ active: responseMode === 'deep' }"
-              :disabled="busy"
-              @click="responseMode = 'deep'"
-            >
-              opar
+              {{ mode.label }}
             </button>
           </div>
 
@@ -1747,7 +1746,7 @@ onUnmounted(() => {
                 </div>
                 <p v-if="actionStatus" class="stream-status">{{ actionStatus }}</p>
                 <p v-if="streamMeta" class="stream-status">
-                  {{ streamMeta.responseMode || responseMode }} · {{ streamMeta.executionMode || 'routing' }} · {{ streamMeta.intent || 'general' }}
+                  {{ responseModeLabel(streamMeta.responseMode || responseMode) }} · {{ streamMeta.executionMode || 'routing' }} · {{ streamMeta.intent || 'general' }}
                 </p>
                 <div v-if="traceEvents.length" class="run-trace-strip" aria-label="Agent execution flow">
                   <span class="trace-live-dot" aria-hidden="true"></span>

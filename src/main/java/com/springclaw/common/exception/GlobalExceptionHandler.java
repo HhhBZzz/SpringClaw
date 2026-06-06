@@ -1,6 +1,8 @@
 package com.springclaw.common.exception;
 
 import com.springclaw.common.response.ApiResponse;
+import com.springclaw.service.agent.exception.AgentErrorPayload;
+import com.springclaw.service.agent.exception.AgentExecutionException;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,6 +26,13 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     public ApiResponse<Void> handleBusiness(BusinessException ex) {
         return ApiResponse.fail(ex.getCode(), ex.getMessage());
+    }
+
+    @ExceptionHandler(AgentExecutionException.class)
+    public ApiResponse<AgentErrorPayload> handleAgentExecution(AgentExecutionException ex) {
+        log.warn("Agent 执行异常: requestId={}, phase={}, code={}, message={}",
+                ex.requestId(), ex.phase(), ex.errorCode(), ex.userVisibleMessage(), ex);
+        return ApiResponse.fail(ex.responseCode(), ex.userVisibleMessage(), AgentErrorPayload.from(ex));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

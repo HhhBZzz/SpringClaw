@@ -6,6 +6,8 @@ import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentDecisionRequest;
 import com.springclaw.service.agent.AgentDecisionService;
+import com.springclaw.service.agent.lifecycle.TurnRequest;
+import com.springclaw.service.agent.pipeline.TurnPipeline;
 import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.context.ContextAssembler;
@@ -14,6 +16,7 @@ import com.springclaw.service.session.AgentSessionService;
 import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.SkillService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -37,8 +40,40 @@ public class ChatContextFactory {
     private final ChatRoutingPolicyService chatRoutingPolicyService;
     private final AgentDecisionService agentDecisionService;
     private final ContextualFollowUpQuestionResolver followUpQuestionResolver;
+    private final TurnPipeline turnPipeline;
     private final String configuredAgentMode;
     private final boolean routingAutoUpgradeEnabled;
+
+    @Autowired
+    public ChatContextFactory(AiProviderService aiProviderService,
+                              SoulPromptService soulPromptService,
+                              AgentSessionService agentSessionService,
+                              AuthService authService,
+                              SkillService skillService,
+                              SkillRegistryService skillRegistryService,
+                              ContextAssembler contextAssembler,
+                              ChatRoutingStateService chatRoutingStateService,
+                              ChatRoutingPolicyService chatRoutingPolicyService,
+                              AgentDecisionService agentDecisionService,
+                              ContextualFollowUpQuestionResolver followUpQuestionResolver,
+                              TurnPipeline turnPipeline,
+                              @org.springframework.beans.factory.annotation.Value("${springclaw.chat.agent-mode:simplified}") String configuredAgentMode,
+                              @org.springframework.beans.factory.annotation.Value("${springclaw.chat.routing.auto-upgrade-enabled:true}") boolean routingAutoUpgradeEnabled) {
+        this.aiProviderService = aiProviderService;
+        this.soulPromptService = soulPromptService;
+        this.agentSessionService = agentSessionService;
+        this.authService = authService;
+        this.skillService = skillService;
+        this.skillRegistryService = skillRegistryService;
+        this.contextAssembler = contextAssembler;
+        this.chatRoutingStateService = chatRoutingStateService;
+        this.chatRoutingPolicyService = chatRoutingPolicyService;
+        this.agentDecisionService = agentDecisionService;
+        this.followUpQuestionResolver = followUpQuestionResolver;
+        this.turnPipeline = turnPipeline;
+        this.configuredAgentMode = configuredAgentMode;
+        this.routingAutoUpgradeEnabled = routingAutoUpgradeEnabled;
+    }
 
     public ChatContextFactory(AiProviderService aiProviderService,
                               SoulPromptService soulPromptService,
@@ -53,19 +88,20 @@ public class ChatContextFactory {
                               ContextualFollowUpQuestionResolver followUpQuestionResolver,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.agent-mode:simplified}") String configuredAgentMode,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.routing.auto-upgrade-enabled:true}") boolean routingAutoUpgradeEnabled) {
-        this.aiProviderService = aiProviderService;
-        this.soulPromptService = soulPromptService;
-        this.agentSessionService = agentSessionService;
-        this.authService = authService;
-        this.skillService = skillService;
-        this.skillRegistryService = skillRegistryService;
-        this.contextAssembler = contextAssembler;
-        this.chatRoutingStateService = chatRoutingStateService;
-        this.chatRoutingPolicyService = chatRoutingPolicyService;
-        this.agentDecisionService = agentDecisionService;
-        this.followUpQuestionResolver = followUpQuestionResolver;
-        this.configuredAgentMode = configuredAgentMode;
-        this.routingAutoUpgradeEnabled = routingAutoUpgradeEnabled;
+        this(aiProviderService,
+                soulPromptService,
+                agentSessionService,
+                authService,
+                skillService,
+                skillRegistryService,
+                contextAssembler,
+                chatRoutingStateService,
+                chatRoutingPolicyService,
+                agentDecisionService,
+                followUpQuestionResolver,
+                null,
+                configuredAgentMode,
+                routingAutoUpgradeEnabled);
     }
 
     public ChatContext build(ChatRequest request, boolean persistSession) {
@@ -76,7 +112,7 @@ public class ChatContextFactory {
         String requestId = UUID.randomUUID().toString().replace("-", "");
         String roleCode = authService.resolveRoleByUserId(request.userId());
         var allowedToolPacks = skillService.resolveAllowedToolPacks(channel, request.userId());
-        String routingQuestion = followUpQuestionResolver.resolve(session.getSessionKey(), request.message());
+        String routingQuestion = resolveRoutingQuestion(session.getSessionKey(), channel, request.userId(), requestId, request.message(), request.responseMode());
         AgentDecision decision = agentDecisionService.decide(new AgentDecisionRequest(
                 session.getSessionKey(),
                 channel,
@@ -146,5 +182,24 @@ public class ChatContextFactory {
         session.setUserId(userId);
         session.setStatus("ACTIVE");
         return session;
+    }
+
+    private String resolveRoutingQuestion(String sessionKey,
+                                          String channel,
+                                          String userId,
+                                          String requestId,
+                                          String message,
+                                          String responseMode) {
+        if (turnPipeline == null) {
+            return followUpQuestionResolver.resolve(sessionKey, message);
+        }
+        return turnPipeline.prepare(new TurnRequest(
+                sessionKey,
+                channel,
+                userId,
+                requestId,
+                message,
+                responseMode
+        )).effectiveText();
     }
 }

@@ -39,7 +39,6 @@ public class ChatContextFactory {
     private final ChatRoutingStateService chatRoutingStateService;
     private final ChatRoutingPolicyService chatRoutingPolicyService;
     private final AgentDecisionService agentDecisionService;
-    private final ContextualFollowUpQuestionResolver followUpQuestionResolver;
     private final TurnPipeline turnPipeline;
     private final String configuredAgentMode;
     private final boolean routingAutoUpgradeEnabled;
@@ -55,7 +54,6 @@ public class ChatContextFactory {
                               ChatRoutingStateService chatRoutingStateService,
                               ChatRoutingPolicyService chatRoutingPolicyService,
                               AgentDecisionService agentDecisionService,
-                              ContextualFollowUpQuestionResolver followUpQuestionResolver,
                               TurnPipeline turnPipeline,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.agent-mode:simplified}") String configuredAgentMode,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.routing.auto-upgrade-enabled:true}") boolean routingAutoUpgradeEnabled) {
@@ -69,7 +67,6 @@ public class ChatContextFactory {
         this.chatRoutingStateService = chatRoutingStateService;
         this.chatRoutingPolicyService = chatRoutingPolicyService;
         this.agentDecisionService = agentDecisionService;
-        this.followUpQuestionResolver = followUpQuestionResolver;
         this.turnPipeline = turnPipeline;
         this.configuredAgentMode = configuredAgentMode;
         this.routingAutoUpgradeEnabled = routingAutoUpgradeEnabled;
@@ -85,7 +82,6 @@ public class ChatContextFactory {
                               ChatRoutingStateService chatRoutingStateService,
                               ChatRoutingPolicyService chatRoutingPolicyService,
                               AgentDecisionService agentDecisionService,
-                              ContextualFollowUpQuestionResolver followUpQuestionResolver,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.agent-mode:simplified}") String configuredAgentMode,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.routing.auto-upgrade-enabled:true}") boolean routingAutoUpgradeEnabled) {
         this(aiProviderService,
@@ -98,7 +94,6 @@ public class ChatContextFactory {
                 chatRoutingStateService,
                 chatRoutingPolicyService,
                 agentDecisionService,
-                followUpQuestionResolver,
                 null,
                 configuredAgentMode,
                 routingAutoUpgradeEnabled);
@@ -191,7 +186,7 @@ public class ChatContextFactory {
                                           String message,
                                           String responseMode) {
         if (turnPipeline == null) {
-            return followUpQuestionResolver.resolve(sessionKey, message);
+            return message == null ? "" : message.trim();
         }
         return turnPipeline.prepare(new TurnRequest(
                 sessionKey,

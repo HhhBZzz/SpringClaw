@@ -9,7 +9,6 @@ import org.springframework.util.StringUtils;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.ArrayList;
 import java.util.Set;
 /**
  * Fast deterministic router used before any optional model-based classification.
@@ -53,8 +52,7 @@ public class AgentDecisionRouter {
         if (capabilityRegistry != null) {
             List<CapabilityRegistry.CapabilityEntry> matchedCapabilities = capabilityRegistry.findByTriggerKeywords(question);
             if (!matchedCapabilities.isEmpty()) {
-                CapabilityRegistry.CapabilityEntry best = matchedCapabilities.get(0);
-                return buildDecisionFromCapability(best, question, risk, allowedToolPacks);
+                return buildDecisionFromCapabilities(matchedCapabilities, risk);
             }
         }
 
@@ -74,12 +72,12 @@ public class AgentDecisionRouter {
     }
 
     /** 从 CapabilityRegistry 匹配结果构建 AgentDecision */
-    private AgentDecision buildDecisionFromCapability(CapabilityRegistry.CapabilityEntry entry,
-                                                       String question, String risk, Set<String> allowedToolPacks) {
+    private AgentDecision buildDecisionFromCapabilities(List<CapabilityRegistry.CapabilityEntry> entries, String risk) {
+        CapabilityRegistry.CapabilityEntry entry = entries.get(0);
         String toolset = entry.toolset();
         String intent = intentForToolset(toolset);
         String executionPath = "agent_tools";
-        List<String> capabilities = capabilitiesForToolset(toolset, question);
+        List<String> capabilities = capabilitiesForToolset(toolset, entries);
 
         return new AgentDecision(intent, executionPath, capabilities,
                 entry.riskLevel(), riskPolicyService.requiresConfirmation(entry.riskLevel()),
@@ -114,12 +112,12 @@ public class AgentDecisionRouter {
         };
     }
 
-    private List<String> capabilitiesForToolset(String toolset, String question) {
+    private List<String> capabilitiesForToolset(String toolset, List<CapabilityRegistry.CapabilityEntry> entries) {
         return switch (toolset) {
             case "system" -> List.of("system", "skill-library");
             case "file" -> List.of("local-files", "file");
             case "workspace" -> List.of("workspace-search", "workspace-review", "file", "skill-library");
-            case "web" -> webCapabilities(question.toLowerCase(Locale.ROOT));
+            case "web" -> webCapabilities(entries);
             case "script" -> List.of("script-skill", "skill-library");
             default -> List.of();
         };
@@ -130,21 +128,16 @@ public class AgentDecisionRouter {
                 && containsAny(lower, "每天", "每周", "每月", "cron", "定时", "定期", "9 点", "9点", "提醒");
     }
 
-    private List<String> webCapabilities(String lower) {
-        List<String> capabilities = new ArrayList<>();
-        if (containsAny(lower, "天气", "气温", "温度", "下雨", "weather", "forecast")) {
-            capabilities.add("weather");
-        }
-        if (containsAny(lower, "新闻", "news")) {
-            capabilities.add("news");
-        }
-        if (containsAny(lower, "汇率", "exchange", "usd", "cny", "eur", "jpy", "美元", "人民币", "欧元", "日元")) {
-            capabilities.add("exchange");
-        }
-        if (capabilities.isEmpty()) {
-            capabilities.add("web");
-        }
-        return List.copyOf(capabilities);
+    private List<String> webCapabilities(List<CapabilityRegistry.CapabilityEntry> entries) {
+        List<String> capabilities = entries == null
+                ? List.of()
+                : entries.stream()
+                .filter(entry -> "web".equalsIgnoreCase(entry.toolset()))
+                .map(CapabilityRegistry.CapabilityEntry::id)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList();
+        return capabilities.isEmpty() ? List.of("web") : capabilities;
     }
 
     private boolean looksAmbiguousAction(String lower) {

@@ -8,6 +8,7 @@ import com.springclaw.service.chat.impl.ConversationAdvisorSupport;
 import com.springclaw.service.chat.impl.ModelCallExecutor;
 import com.springclaw.service.chat.impl.ModelTransportGuardService;
 import com.springclaw.service.context.AssembledContext;
+import com.springclaw.tool.runtime.CapabilityRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 
@@ -188,7 +189,9 @@ class AgentRuntimeEngineTest {
         assertThat(run.executionResult().modelEnabled()).isFalse();
         assertThat(run.executionResult().reflect())
                 .startsWith("结论：")
-                .contains("北京当前天气：阴，温度 23.3℃，湿度 41%，观测时间 2026-06-05T22:15。")
+                .contains("城市: 北京")
+                .contains("观测时间: 2026-06-05T22:15")
+                .contains("天气: 阴")
                 .contains("weather.current")
                 .contains("质量评分：")
                 .doesNotContain("回答整理阶段使用确定性路径");
@@ -277,7 +280,7 @@ class AgentRuntimeEngineTest {
         assertThat(run.verification().quality().overallScore()).isLessThan(60);
         assertThat(run.verification().quality().toolScore()).isLessThan(70);
         assertThat(run.verification().quality().evidenceScore()).isLessThan(60);
-        assertThat(run.verification().quality().reasons()).contains("weather 工具未成功执行");
+        assertThat(run.verification().quality().reasons()).contains("weather 能力未成功执行");
         verifyNoInteractions(modelCallExecutor);
     }
 
@@ -430,7 +433,12 @@ class AgentRuntimeEngineTest {
                 modelCallExecutor,
                 conversationAdvisorSupport,
                 modelTransportGuardService,
-                new ChatResponsePolicyService("")
+                new ChatResponsePolicyService(""),
+                new com.fasterxml.jackson.databind.ObjectMapper(),
+                new CapabilityRegistry(List.of(
+                        CapabilityRegistry.entryForTest("weather", "web",
+                                new String[]{"天气", "weather", "wttr.in"}, true, "read", "查询天气")
+                ))
         );
         AgentDecision decision = new AgentDecision("web_research", "agent_tools", List.of("web"), "read", false, "天气查询");
         AiProviderService.ActiveChatClient activeClient = activeClient(true);
@@ -471,7 +479,7 @@ class AgentRuntimeEngineTest {
         assertThat(run.verification().sufficient()).isTrue();
         assertThat(run.executionResult().reflect())
                 .startsWith("结论：")
-                .contains("哈尔滨当前天气，温度 18℃。")
+                .contains("哈尔滨今天有明确天气结果。")
                 .contains("依据：")
                 .contains("weather.current")
                 .contains("执行状态：")

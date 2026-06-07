@@ -4,11 +4,14 @@ import com.springclaw.common.exception.BusinessException;
 import com.springclaw.service.files.LocalFilesystemService;
 import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.SkillService;
+import com.springclaw.tool.runtime.CapabilityRegistry;
 import org.springframework.ai.chat.prompt.PromptTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -33,13 +36,22 @@ public class SoulPromptService implements ApplicationRunner {
     private final AtomicReference<String> soulCache = new AtomicReference<>(DEFAULT_SOUL);
     private final SkillService skillService;
     private final LocalFilesystemService localFilesystemService;
+    private final CapabilityRegistry capabilityRegistry;
 
     @Value("${springclaw.soul.path:${user.dir}/SOUL.md}")
     private String soulPath;
 
     public SoulPromptService(SkillService skillService, LocalFilesystemService localFilesystemService) {
+        this(skillService, localFilesystemService, null);
+    }
+
+    @Autowired
+    public SoulPromptService(SkillService skillService,
+                             LocalFilesystemService localFilesystemService,
+                             CapabilityRegistry capabilityRegistry) {
         this.skillService = skillService;
         this.localFilesystemService = localFilesystemService;
+        this.capabilityRegistry = capabilityRegistry;
     }
 
     @Override
@@ -65,6 +77,7 @@ public class SoulPromptService implements ApplicationRunner {
         String skillSummary = skillService.describeAvailableSkills(channel, userId);
         String matchedSkillSummary = describeMatchedSkills(matchedSkills);
         String localFileBoundary = describeLocalFileBoundary(allowedToolPacks);
+        String runtimeCapabilities = describeRuntimeCapabilities(allowedToolPacks);
         PromptTemplate template = new PromptTemplate("""
                 # 角色设定
                 {soul}
@@ -81,6 +94,9 @@ public class SoulPromptService implements ApplicationRunner {
 
                 # 当前可用技能
                 {skills}
+
+                # 当前后端能力目录
+                {runtimeCapabilities}
 
                 # 本地文件访问边界
                 {localFileBoundary}
@@ -101,6 +117,7 @@ public class SoulPromptService implements ApplicationRunner {
                 "coreSkills", coreSkillSummary,
                 "matchedSkills", matchedSkillSummary,
                 "skills", skillSummary,
+                "runtimeCapabilities", runtimeCapabilities,
                 "localFileBoundary", localFileBoundary
         ));
     }
@@ -159,6 +176,26 @@ public class SoulPromptService implements ApplicationRunner {
         } catch (Exception ex) {
             return "Local Files 已启用，但授权根目录读取失败；回答时应说明需要先检查本地文件配置。";
         }
+    }
+
+    private String describeRuntimeCapabilities(Set<String> allowedToolPacks) {
+        if (capabilityRegistry == null) {
+            return "（能力注册表不可用，按 SkillService 摘要工作）";
+        }
+        List<String> lines = capabilityRegistry.listAll().stream()
+                .filter(entry -> entry.includeForAgentMode())
+                .filter(entry -> allowedToolPacks == null || allowedToolPacks.isEmpty() || allowedToolPacks.contains(entry.toolset()))
+                .limit(12)
+                .map(entry -> "- %s [%s/%s]: %s".formatted(
+                        entry.id(),
+                        entry.toolset(),
+                        entry.riskLevel(),
+                        StringUtils.hasText(entry.description()) ? entry.description() : entry.beanName()
+                ))
+                .toList();
+        return lines.isEmpty()
+                ? "（当前用户没有开放可见后端能力）"
+                : String.join("\n", lines);
     }
 
     private String truncate(String text, int maxLen) {

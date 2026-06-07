@@ -8,6 +8,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.Set;
 
 class LocalFilesystemServiceTest {
 
@@ -140,5 +142,41 @@ class LocalFilesystemServiceTest {
                 () -> service.readTextFile("root1", "Library/Application Support/Google/Chrome/Profile 1/mac-cookies.txt"));
         Assertions.assertThrows(BusinessException.class,
                 () -> service.readTextFile("root1", ".config/google-chrome/Profile 1/linux-cookies.txt"));
+    }
+
+    @Test
+    void shouldContinueSearchWhenOneDirectoryCannotBeVisited() throws Exception {
+        Path documents = tempDir.resolve("Documents");
+        Path locked = documents.resolve("Photos Library.photoslibrary");
+        Files.createDirectories(locked);
+        Files.writeString(documents.resolve("毕业论文.txt"), "draft");
+        try {
+            Files.setPosixFilePermissions(locked, Set.of());
+        } catch (UnsupportedOperationException ex) {
+            Assumptions.abort("POSIX permissions are not available in this environment");
+        }
+
+        LocalFilesystemService service = new LocalFilesystemService(
+                documents.toString(),
+                ".ssh,.gnupg,.env",
+                12000,
+                8,
+                100,
+                20,
+                512
+        );
+
+        try {
+            String search = service.searchFiles("毕业论文");
+
+            Assertions.assertTrue(search.contains("root1:毕业论文.txt"));
+            Assertions.assertTrue(search.contains("跳过受限路径"));
+        } finally {
+            Files.setPosixFilePermissions(locked, Set.of(
+                    PosixFilePermission.OWNER_READ,
+                    PosixFilePermission.OWNER_WRITE,
+                    PosixFilePermission.OWNER_EXECUTE
+            ));
+        }
     }
 }

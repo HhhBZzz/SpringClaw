@@ -12,7 +12,7 @@ import com.springclaw.service.agent.pipeline.DefaultContextResolutionPolicy;
 import com.springclaw.service.agent.pipeline.DefaultTurnPipeline;
 import com.springclaw.service.agent.pipeline.DeterministicUtteranceClassifier;
 import com.springclaw.service.agent.pipeline.InputNormalizeStage;
-import com.springclaw.service.agent.pipeline.LegacyFollowUpContextualResolver;
+import com.springclaw.service.agent.pipeline.PassThroughContextualResolver;
 import com.springclaw.service.agent.pipeline.UtteranceClassifyStage;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.auth.AuthService;
@@ -32,14 +32,13 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ChatContextFactoryTest {
 
     @Test
-    void shouldResolveFollowUpQuestionBeforeAgentDecisionAndRouting() {
+    void shouldKeepFollowUpQuestionUnchangedWhenTurnPipelineIsNotProvided() {
         AiProviderService aiProviderService = mock(AiProviderService.class);
         SoulPromptService soulPromptService = mock(SoulPromptService.class);
         AgentSessionService agentSessionService = mock(AgentSessionService.class);
@@ -50,24 +49,23 @@ class ChatContextFactoryTest {
         ChatRoutingStateService chatRoutingStateService = mock(ChatRoutingStateService.class);
         ChatRoutingPolicyService chatRoutingPolicyService = mock(ChatRoutingPolicyService.class);
         AgentDecisionService agentDecisionService = mock(AgentDecisionService.class);
-        ContextualFollowUpQuestionResolver followUpQuestionResolver = mock(ContextualFollowUpQuestionResolver.class);
         AgentSession session = new AgentSession();
         session.setId(1L);
         session.setSessionKey("s1");
         Set<String> allowedToolPacks = Set.of("web");
-        AgentDecision weatherDecision = new AgentDecision(
-                "web_research",
-                "agent_tools",
-                List.of("weather"),
+        AgentDecision decision = new AgentDecision(
+                "general",
+                "basic_model",
+                List.of(),
                 "read",
                 false,
-                "检测到实时天气追问。"
+                "短追问保持原文，不在路由前继承业务槽位。"
         );
         AssembledContext assembled = new AssembledContext(
                 "s1",
                 "api",
                 "u1",
-                "北京现在温度",
+                "北京呢",
                 "events",
                 "memory",
                 "observe"
@@ -75,29 +73,28 @@ class ChatContextFactoryTest {
         when(agentSessionService.getOrCreate("s1", "api", "u1")).thenReturn(session);
         when(authService.resolveRoleByUserId("u1")).thenReturn("USER");
         when(skillService.resolveAllowedToolPacks("api", "u1")).thenReturn(allowedToolPacks);
-        when(followUpQuestionResolver.resolve("s1", "北京呢")).thenReturn("北京现在温度");
-        when(agentDecisionService.decide(org.mockito.ArgumentMatchers.any(AgentDecisionRequest.class))).thenReturn(weatherDecision);
+        when(agentDecisionService.decide(org.mockito.ArgumentMatchers.any(AgentDecisionRequest.class))).thenReturn(decision);
         when(chatRoutingStateService.resolveDefaultMode("simplified")).thenReturn("simplified");
         when(chatRoutingStateService.resolveAutoUpgrade(true)).thenReturn(true);
         when(chatRoutingPolicyService.decide(
-                eq("北京现在温度"),
+                eq("北京呢"),
                 eq("USER"),
                 eq("simplified"),
                 eq(true),
                 eq(allowedToolPacks),
                 eq("agent")
         )).thenReturn(new ChatRoutingPolicyService.RoutingDecision(
-                "北京现在温度",
+                "北京呢",
                 "simplified",
                 false,
                 false,
-                "使用追问消解后的问题路由。",
+                "短追问保持原文路由。",
                 "agent",
-                "weather"
+                "general"
         ));
-        when(skillRegistryService.matchAgentVisibleDefinitions("北京现在温度", allowedToolPacks, 2)).thenReturn(List.of());
+        when(skillRegistryService.matchAgentVisibleDefinitions("北京呢", allowedToolPacks, 2)).thenReturn(List.of());
         when(soulPromptService.buildSystemPrompt("api", "u1", List.of())).thenReturn("system");
-        when(contextAssembler.assemble("s1", "api", "u1", "北京现在温度")).thenReturn(assembled);
+        when(contextAssembler.assemble("s1", "api", "u1", "北京呢")).thenReturn(assembled);
         when(aiProviderService.activeClient()).thenReturn(new AiProviderService.ActiveChatClient(
                 "coding-plan",
                 "o3",
@@ -117,7 +114,6 @@ class ChatContextFactoryTest {
                 chatRoutingStateService,
                 chatRoutingPolicyService,
                 agentDecisionService,
-                followUpQuestionResolver,
                 "simplified",
                 true
         );
@@ -126,11 +122,11 @@ class ChatContextFactoryTest {
 
         ArgumentCaptor<AgentDecisionRequest> decisionRequestCaptor = ArgumentCaptor.forClass(AgentDecisionRequest.class);
         verify(agentDecisionService).decide(decisionRequestCaptor.capture());
-        assertThat(decisionRequestCaptor.getValue().question()).isEqualTo("北京现在温度");
-        verify(contextAssembler).assemble("s1", "api", "u1", "北京现在温度");
+        assertThat(decisionRequestCaptor.getValue().question()).isEqualTo("北京呢");
+        verify(contextAssembler).assemble("s1", "api", "u1", "北京呢");
         assertThat(context.userMessage()).isEqualTo("北京呢");
-        assertThat(context.effectiveUserMessage()).isEqualTo("北京现在温度");
-        assertThat(context.decision()).isEqualTo(weatherDecision);
+        assertThat(context.effectiveUserMessage()).isEqualTo("北京呢");
+        assertThat(context.decision()).isEqualTo(decision);
     }
 
     @Test
@@ -145,13 +141,12 @@ class ChatContextFactoryTest {
         ChatRoutingStateService chatRoutingStateService = mock(ChatRoutingStateService.class);
         ChatRoutingPolicyService chatRoutingPolicyService = mock(ChatRoutingPolicyService.class);
         AgentDecisionService agentDecisionService = mock(AgentDecisionService.class);
-        ContextualFollowUpQuestionResolver followUpQuestionResolver = mock(ContextualFollowUpQuestionResolver.class);
         ContextResolutionPolicy policy = new DefaultContextResolutionPolicy(0.72);
         DefaultTurnPipeline turnPipeline = new DefaultTurnPipeline(List.of(
                 new InputNormalizeStage(),
                 new UtteranceClassifyStage(new DeterministicUtteranceClassifier()),
                 new ControlBypassStage(policy),
-                new ContextResolveStage(new LegacyFollowUpContextualResolver(followUpQuestionResolver, policy), policy)
+                new ContextResolveStage(new PassThroughContextualResolver(), policy)
         ));
         AgentSession session = new AgentSession();
         session.setId(1L);
@@ -218,7 +213,6 @@ class ChatContextFactoryTest {
                 chatRoutingStateService,
                 chatRoutingPolicyService,
                 agentDecisionService,
-                followUpQuestionResolver,
                 turnPipeline,
                 "simplified",
                 true
@@ -229,7 +223,6 @@ class ChatContextFactoryTest {
         ArgumentCaptor<AgentDecisionRequest> decisionRequestCaptor = ArgumentCaptor.forClass(AgentDecisionRequest.class);
         verify(agentDecisionService).decide(decisionRequestCaptor.capture());
         assertThat(decisionRequestCaptor.getValue().question()).isEqualTo("今天日期是什么");
-        verifyNoInteractions(followUpQuestionResolver);
         assertThat(context.userMessage()).isEqualTo("今天日期是什么");
         assertThat(context.effectiveUserMessage()).isEqualTo("今天日期是什么");
     }

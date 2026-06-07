@@ -139,7 +139,7 @@ public class LocalFilesystemService {
     public String searchFiles(String keyword) {
         String key = normalizeKeyword(keyword);
         List<String> results = new ArrayList<>();
-        walkAuthorizedFiles(file -> {
+        WalkReport report = walkAuthorizedFiles(file -> {
             if (results.size() >= maxFileResults) {
                 return false;
             }
@@ -149,7 +149,8 @@ public class LocalFilesystemService {
             }
             return true;
         });
-        return results.isEmpty() ? "未找到匹配文件: " + key : String.join("\n", results);
+        String body = results.isEmpty() ? "未找到匹配文件: " + key : String.join("\n", results);
+        return appendSkipSummary(body, report);
     }
 
     public String searchFilesByGlob(String rootRef, String pattern) {
@@ -157,7 +158,7 @@ public class LocalFilesystemService {
         AuthorizedRoot root = resolveRoot(rootRef);
         PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:" + glob);
         List<String> results = new ArrayList<>();
-        walkFiles(root, file -> {
+        WalkReport report = walkFiles(root, file -> {
             if (results.size() >= maxFileResults) {
                 return false;
             }
@@ -167,7 +168,8 @@ public class LocalFilesystemService {
             }
             return true;
         });
-        return results.isEmpty() ? "未找到匹配文件: " + glob : String.join("\n", results);
+        String body = results.isEmpty() ? "未找到匹配文件: " + glob : String.join("\n", results);
+        return appendSkipSummary(body, report);
     }
 
     public String grepText(String keyword) {
@@ -180,7 +182,7 @@ public class LocalFilesystemService {
         String glob = StringUtils.hasText(filePattern) ? filePattern.trim() : "*";
         PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:" + glob);
         List<String> hits = new ArrayList<>();
-        walkAuthorizedFiles(file -> {
+        WalkReport report = walkAuthorizedFiles(file -> {
             if (hits.size() >= maxTextHits) {
                 return false;
             }
@@ -193,7 +195,8 @@ public class LocalFilesystemService {
             grepFile(root, file, lowerKey, hits);
             return hits.size() < maxTextHits;
         });
-        return hits.isEmpty() ? "未找到关键词命中: " + key : String.join("\n", hits);
+        String body = hits.isEmpty() ? "未找到关键词命中: " + key : String.join("\n", hits);
+        return appendSkipSummary(body, report);
     }
 
     private void grepFile(AuthorizedRoot root, Path file, String lowerKey, List<String> hits) {
@@ -211,18 +214,21 @@ public class LocalFilesystemService {
         }
     }
 
-    private void walkAuthorizedFiles(FileVisitor visitor) {
+    private WalkReport walkAuthorizedFiles(FileVisitor visitor) {
+        WalkReport total = WalkReport.empty();
         for (AuthorizedRoot root : roots) {
-            boolean keepGoing = walkFiles(root, visitor);
-            if (!keepGoing) {
-                return;
+            WalkReport report = walkFiles(root, visitor);
+            total = total.merge(report);
+            if (!report.keepGoing()) {
+                return total;
             }
         }
+        return total;
     }
 
-    private boolean walkFiles(AuthorizedRoot root, FileVisitor visitor) {
+    private WalkReport walkFiles(AuthorizedRoot root, FileVisitor visitor) {
         if (!Files.isDirectory(root.path())) {
-            return true;
+            return WalkReport.empty();
         }
         WalkState state = new WalkState();
         try {
@@ -251,10 +257,16 @@ public class LocalFilesystemService {
                     }
                     return FileVisitResult.CONTINUE;
                 }
+
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException exc) {
+                    state.skippedPaths.add(displayPath(root, file) + " - " + compactException(exc));
+                    return FileVisitResult.CONTINUE;
+                }
             });
-            return state.keepGoing;
+            return new WalkReport(state.keepGoing, List.copyOf(state.skippedPaths));
         } catch (IOException ex) {
-            throw new BusinessException(50093, "本地授权文件搜索失败: " + ex.getMessage());
+            return new WalkReport(true, List.of(root.alias() + ":. - " + compactException(ex)));
         }
     }
 
@@ -317,7 +329,12 @@ public class LocalFilesystemService {
         } catch (BusinessException ex) {
             return true;
         }
-        Path realPath = resolveExistingRealPath(path);
+        Path realPath;
+        try {
+            realPath = resolveExistingRealPath(path);
+        } catch (BusinessException ex) {
+            return true;
+        }
         if (realPath != null && !realPath.startsWith(root.path())) {
             return true;
         }
@@ -414,6 +431,10 @@ public class LocalFilesystemService {
 
     private String displayPath(Path path) {
         AuthorizedRoot root = findContainingRoot(path);
+        return displayPath(root, path);
+    }
+
+    private String displayPath(AuthorizedRoot root, Path path) {
         return root.alias() + ":" + toRelative(root, path);
     }
 
@@ -445,6 +466,27 @@ public class LocalFilesystemService {
             return compact;
         }
         return compact.substring(0, 180) + "...";
+    }
+
+    private String appendSkipSummary(String body, WalkReport report) {
+        if (report == null || report.skippedPaths().isEmpty()) {
+            return body;
+        }
+        StringBuilder builder = new StringBuilder(StringUtils.hasText(body) ? body : "（无匹配结果）");
+        builder.append("\n\n跳过受限路径: ").append(report.skippedPaths().size());
+        report.skippedPaths().stream().limit(8).forEach(path -> builder.append("\n- ").append(path));
+        if (report.skippedPaths().size() > 8) {
+            builder.append("\n- ...");
+        }
+        return builder.toString();
+    }
+
+    private String compactException(Exception ex) {
+        String message = ex == null ? "" : ex.getMessage();
+        if (!StringUtils.hasText(message)) {
+            return ex == null ? "不可访问" : ex.getClass().getSimpleName();
+        }
+        return message.replaceAll("\\s+", " ").trim();
     }
 
     private List<AuthorizedRoot> parseRoots(String rawRoots) {
@@ -503,5 +545,25 @@ public class LocalFilesystemService {
     private static final class WalkState {
         private long scannedFiles;
         private boolean keepGoing = true;
+        private final List<String> skippedPaths = new ArrayList<>();
+    }
+
+    private record WalkReport(boolean keepGoing, List<String> skippedPaths) {
+        private WalkReport {
+            skippedPaths = skippedPaths == null ? List.of() : List.copyOf(skippedPaths);
+        }
+
+        private static WalkReport empty() {
+            return new WalkReport(true, List.of());
+        }
+
+        private WalkReport merge(WalkReport other) {
+            if (other == null || other.skippedPaths().isEmpty()) {
+                return new WalkReport(keepGoing && (other == null || other.keepGoing()), skippedPaths);
+            }
+            List<String> merged = new ArrayList<>(skippedPaths);
+            merged.addAll(other.skippedPaths());
+            return new WalkReport(keepGoing && other.keepGoing(), merged);
+        }
     }
 }

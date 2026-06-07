@@ -272,26 +272,9 @@ public class ChatRoutingPolicyService {
             }
         }
 
-        // 向后兼容：CapabilityRegistry 不可用时使用硬编码关键词
-        if (containsAny(normalized,
-                "当前模型", "目前模型", "现在用什么模型", "你是什么模型", "provider", "当前通道",
-                "当前时间", "现在几点", "今天几号", "今天星期", "jvm", "uuid", "执行命令", "shell 命令")) {
-            return "control-plane";
-        }
-        if (containsAny(normalized, "skill", "工具", "执行", "运行", "run skill", "脚本")) {
-            return "tool-skill";
-        }
-        if (containsAny(normalized, "本地文件", "授权文件", "电脑文件", "桌面", "下载", "文档", "简历", "论文")) {
-            return "local-files";
-        }
-        if (containsAny(normalized, "项目", "源码", "代码", "架构", "模块", "文件", "类", "方法")) {
-            return "workspace-analysis";
-        }
-        if (containsAny(normalized, "http://", "https://", "网页", "官网", "抓取", "爬取", "搜索")) {
+        // Registry 不可用时只保留结构特征兜底，避免旧业务关键词绕过能力注册表。
+        if (containsAny(normalized, "http://", "https://")) {
             return "web-research";
-        }
-        if (containsAny(normalized, "天气", "气温", "温度")) {
-            return "weather";
         }
         if (allowedToolPacks != null && allowedToolPacks.contains("script")
                 && skillRegistryService.matchBestAgentVisibleDefinition(question, allowedToolPacks).isPresent()) {

@@ -40,4 +40,13 @@ class DeterministicUtteranceClassifierTest {
         assertThat(utterance.type()).isEqualTo(UtteranceType.FOLLOW_UP);
         assertThat(utterance.confidence()).isGreaterThanOrEqualTo(0.7);
     }
+
+    @Test
+    void shouldClassifyCompleteQuestionAsNewIntentWithoutDomainKeywords() {
+        TurnContext context = TurnContext.initial(new TurnRequest("s1", "api", "u1", "req-4", "哈尔滨怎样", "agent"));
+
+        var utterance = classifier.classify(context);
+
+        assertThat(utterance.type()).isEqualTo(UtteranceType.NEW_INTENT);
+    }
 }

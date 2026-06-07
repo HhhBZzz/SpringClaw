@@ -2,17 +2,25 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.service.skill.bundle.SkillCatalogService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
+import com.springclaw.tool.runtime.CapabilityRegistry;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Set;
 
 class ChatRoutingPolicyServiceTest {
 
     private final ChatRoutingPolicyService service = new ChatRoutingPolicyService(
-            new SkillRegistryService(
-                    new SkillCatalogService(true, "./skills")
-            )
+            new SkillRegistryService(new SkillCatalogService(true, "./skills")),
+            new CapabilityRegistry(List.of(
+                    CapabilityRegistry.entryForTest("system", "system",
+                            new String[]{"当前模型", "当前时间", "今天几号"}, true, "read", "系统状态查询"),
+                    CapabilityRegistry.entryForTest("workspace-search", "workspace",
+                            new String[]{"项目", "代码", "源码", "架构"}, true, "read", "工作区检索"),
+                    CapabilityRegistry.entryForTest("script-skill", "script",
+                            new String[]{"skill", "运行", "执行", "脚本"}, false, "execution", "脚本技能执行")
+            ))
     );
 
     @Test

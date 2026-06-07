@@ -76,7 +76,8 @@ public class DeterministicUtteranceClassifier implements UtteranceClassifier {
     private boolean looksLikeNewIntent(String lower) {
         return containsAny(lower,
                 "帮我", "请", "查询", "查一下", "搜索", "分析", "审查", "生成", "检查",
-                "总结", "写", "创建", "执行", "运行", "天气", "新闻", "汇率", "文件", "项目", "代码",
+                "总结", "写", "创建", "执行", "运行", "怎样", "怎么样", "如何", "多少",
+                "是什么", "有什么", "打开", "看看", "看一下", "文件", "项目", "代码",
                 "skill", "tool", "agent");
     }
 

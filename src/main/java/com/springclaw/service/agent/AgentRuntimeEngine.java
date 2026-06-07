@@ -10,6 +10,7 @@ import com.springclaw.service.chat.impl.ConversationAdvisorSupport;
 import com.springclaw.service.chat.impl.ModelCallExecutor;
 import com.springclaw.service.chat.impl.ModelTransportGuardService;
 import com.springclaw.service.context.AssembledContext;
+import com.springclaw.tool.runtime.CapabilityRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,7 +31,7 @@ public class AgentRuntimeEngine implements AgentEngine {
     private static final Logger log = LoggerFactory.getLogger(AgentRuntimeEngine.class);
     private static final int SUMMARY_CAPABILITY_PAYLOAD_LIMIT = 1800;
     private static final int MAX_REFLECTION_ATTEMPTS = 3;
-    private static final String STRUCTURED_REALTIME_DIRECT_REASON = "结构化实时能力结果已直接整理。";
+    private static final String DIRECT_CAPABILITY_RESULT_REASON = "能力结果已直接整理。";
 
     private final CapabilityExecutorRegistry capabilityExecutorRegistry;
     private final ModelCallExecutor modelCallExecutor;
@@ -38,6 +39,7 @@ public class AgentRuntimeEngine implements AgentEngine {
     private final ModelTransportGuardService modelTransportGuardService;
     private final ChatResponsePolicyService chatResponsePolicyService;
     private final ObjectMapper objectMapper;
+    private final CapabilityRegistry capabilityRegistry;
     private final AgentQualityEvaluator qualityEvaluator = new AgentQualityEvaluator();
     private final AgentAnswerFormatter answerFormatter = new AgentAnswerFormatter();
 
@@ -51,7 +53,23 @@ public class AgentRuntimeEngine implements AgentEngine {
                 conversationAdvisorSupport,
                 modelTransportGuardService,
                 chatResponsePolicyService,
-                new ObjectMapper());
+                new ObjectMapper(),
+                null);
+    }
+
+    public AgentRuntimeEngine(CapabilityExecutorRegistry capabilityExecutorRegistry,
+                              ModelCallExecutor modelCallExecutor,
+                              ConversationAdvisorSupport conversationAdvisorSupport,
+                              ModelTransportGuardService modelTransportGuardService,
+                              ChatResponsePolicyService chatResponsePolicyService,
+                              ObjectMapper objectMapper) {
+        this(capabilityExecutorRegistry,
+                modelCallExecutor,
+                conversationAdvisorSupport,
+                modelTransportGuardService,
+                chatResponsePolicyService,
+                objectMapper,
+                null);
     }
 
     @Autowired
@@ -60,13 +78,15 @@ public class AgentRuntimeEngine implements AgentEngine {
                               ConversationAdvisorSupport conversationAdvisorSupport,
                               ModelTransportGuardService modelTransportGuardService,
                               ChatResponsePolicyService chatResponsePolicyService,
-                              ObjectMapper objectMapper) {
+                              ObjectMapper objectMapper,
+                              CapabilityRegistry capabilityRegistry) {
         this.capabilityExecutorRegistry = capabilityExecutorRegistry;
         this.modelCallExecutor = modelCallExecutor;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
         this.modelTransportGuardService = modelTransportGuardService;
         this.chatResponsePolicyService = chatResponsePolicyService;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+        this.capabilityRegistry = capabilityRegistry;
     }
 
     @Override
@@ -263,7 +283,7 @@ public class AgentRuntimeEngine implements AgentEngine {
                 - retryable=true 只在换关键词、换意图或更精确查询可能改善结果时使用。
                 - nextQuery 必须是给下一轮工具执行的精确查询文本，不能复述空话。
                 - preferredIntent 表示下一轮更适合使用的能力倾向。
-                - 【注意】如果搜索结果（CapabilityResult）中包含大量类似 'All Images News' 或者国家列表（如 Argentina, Australia），说明遭遇了搜索引擎的反爬虫或验证码拦截，属于无效脏数据。此时你必须判定 sufficient=false, retryable=true，并在 nextQuery 中尝试提供更具体的检索词（例如加上时间或换用其他关键词）。
+                - 【注意】如果搜索结果（CapabilityResult）中包含大量类似 'All Images News' 或者国家列表（如 Argentina, Australia），说明遭遇了搜索引擎的反爬虫或验证码拦截，属于无效脏数据。此时你必须判定 sufficient=false, retryable=true，并在 nextQuery 中尝试提供更具体的检索词。
                 """;
     }
 
@@ -352,21 +372,19 @@ public class AgentRuntimeEngine implements AgentEngine {
             return ReflectionResult.degraded("本轮需要 Agent 能力，但没有拿到任何能力结果。", intentOf(decision));
         }
         long successCount = allResults.stream().filter(CapabilityResult::successful).count();
-        if (expectsCapability(decision, "weather") && !hasSuccessfulCapabilityPrefix(allResults, "weather.")) {
-            return ReflectionResult.degraded("天气请求没有拿到专用天气工具的结构化结果，不能仅凭搜索页摘要回答。", intentOf(decision));
-        }
-        if (expectsCapability(decision, "exchange") && !hasSuccessfulCapabilityPrefix(allResults, "exchange.")) {
-            return ReflectionResult.degraded("汇率请求没有拿到专用汇率工具的结构化结果，不能仅凭搜索页摘要回答。", intentOf(decision));
-        }
-        if (successCount > 0 && hasUsefulSuccessfulResult(allResults)) {
-            return ReflectionResult.sufficient("能力执行完成，已拿到非噪声证据。", intentOf(decision));
-        }
         if (looksLikeSearchEngineNoise(allResults)) {
             return ReflectionResult.retry(
                     "搜索结果疑似搜索引擎前端噪声或反爬拦截，不能回答原始问题。",
                     refineNoisySearchQuery(originalQuestion, currentQuestion),
                     "web_research"
             );
+        }
+        String missingCapability = missingSelectedCapability(decision, allResults);
+        if (StringUtils.hasText(missingCapability)) {
+            return ReflectionResult.degraded(missingCapability + " 能力没有返回可用结构化结果，不能仅凭其他能力结果回答。", intentOf(decision));
+        }
+        if (successCount > 0 && hasUsefulSuccessfulResult(allResults)) {
+            return ReflectionResult.sufficient("能力执行完成，已拿到非噪声证据。", intentOf(decision));
         }
         if (successCount == 0) {
             return ReflectionResult.degraded("能力已触发，但全部执行失败。", intentOf(decision));
@@ -505,7 +523,7 @@ public class AgentRuntimeEngine implements AgentEngine {
         String value = StringUtils.hasText(rawIntent) ? rawIntent.trim().toLowerCase(Locale.ROOT).replace('-', '_') : "";
         return switch (value) {
             case "general", "workspace_analysis", "local_files", "web_research", "skill_task", "model_control", "unknown" -> value;
-            case "weather", "news", "exchange", "web" -> "web_research";
+            case "web" -> "web_research";
             case "workspace", "workspace_search", "workspace_review" -> "workspace_analysis";
             case "local", "file", "files", "local_file" -> "local_files";
             case "skill", "script", "script_skill" -> "skill_task";
@@ -525,29 +543,10 @@ public class AgentRuntimeEngine implements AgentEngine {
                         && !looksLikeSearchEngineNoise(result));
     }
 
-    private boolean expectsCapability(AgentDecision decision, String capability) {
-        if (decision == null || decision.selectedCapabilities() == null) {
-            return false;
-        }
-        String expected = safe(capability).toLowerCase(Locale.ROOT).replace('_', '-');
-        return decision.selectedCapabilities().stream()
-                .map(value -> safe(value).toLowerCase(Locale.ROOT).replace('_', '-'))
-                .anyMatch(expected::equals);
-    }
-
-    private boolean hasSuccessfulCapabilityPrefix(List<CapabilityResult> results, String prefix) {
-        String normalizedPrefix = safe(prefix).toLowerCase(Locale.ROOT);
-        return results != null && results.stream()
-                .anyMatch(result -> result.successful()
-                        && safe(result.capabilityId()).toLowerCase(Locale.ROOT).startsWith(normalizedPrefix)
-                        && StringUtils.hasText(result.payload())
-                        && !looksLikeSearchEngineNoise(result));
-    }
-
     private List<String> webCapabilitiesForRetry(List<String> previousCapabilities,
                                                  String preferredIntent,
                                                  String nextQuery) {
-        List<String> inferred = realtimeCapabilities(preferredIntent + " " + nextQuery);
+        List<String> inferred = capabilitiesFromRegistry(preferredIntent + " " + nextQuery);
         if (!inferred.isEmpty()) {
             return inferred;
         }
@@ -562,19 +561,16 @@ public class AgentRuntimeEngine implements AgentEngine {
         return normalized.isEmpty() ? List.of("web") : normalized;
     }
 
-    private List<String> realtimeCapabilities(String text) {
-        String lower = safe(text).toLowerCase(Locale.ROOT);
-        List<String> capabilities = new ArrayList<>();
-        if (containsAny(lower, "天气", "气温", "温度", "下雨", "weather", "forecast")) {
-            capabilities.add("weather");
+    private List<String> capabilitiesFromRegistry(String text) {
+        if (capabilityRegistry == null || !StringUtils.hasText(text)) {
+            return List.of();
         }
-        if (containsAny(lower, "新闻", "news")) {
-            capabilities.add("news");
-        }
-        if (containsAny(lower, "汇率", "exchange", "usd", "cny", "eur", "jpy", "美元", "人民币", "欧元", "日元")) {
-            capabilities.add("exchange");
-        }
-        return List.copyOf(capabilities);
+        return capabilityRegistry.findByTriggerKeywords(text).stream()
+                .filter(entry -> "web".equalsIgnoreCase(entry.toolset()))
+                .map(CapabilityRegistry.CapabilityEntry::id)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList();
     }
 
     private boolean looksLikeSearchEngineNoise(List<CapabilityResult> results) {
@@ -606,22 +602,55 @@ public class AgentRuntimeEngine implements AgentEngine {
     private String refineNoisySearchQuery(String originalQuestion, String currentQuestion) {
         String base = firstText(originalQuestion, currentQuestion);
         if (!StringUtils.hasText(base)) {
-            return "天气 查询 今日";
+            return "精确查询 官方 来源";
         }
         String normalized = base.replaceAll("\\s+", " ").trim();
-        if (containsAny(normalized.toLowerCase(Locale.ROOT), "天气", "气温", "温度", "weather")) {
-            return normalized + " 今日 天气 实时 wttr.in weather.com.cn";
-        }
         return normalized + " 精确结果 官方 信息";
     }
 
-    private boolean containsAny(String text, String... keywords) {
-        for (String keyword : keywords) {
-            if (text.contains(keyword.toLowerCase(Locale.ROOT))) {
-                return true;
+    private String missingSelectedCapability(AgentDecision decision, List<CapabilityResult> results) {
+        if (decision == null || decision.selectedCapabilities() == null || decision.selectedCapabilities().isEmpty()) {
+            return "";
+        }
+        for (String selected : decision.selectedCapabilities()) {
+            String capability = normalizeCapability(selected);
+            if (!StringUtils.hasText(capability) || isSupportCapability(capability)) {
+                continue;
+            }
+            if (!hasSuccessfulCapability(results, capability)) {
+                return capability;
             }
         }
-        return false;
+        return "";
+    }
+
+    private boolean hasSuccessfulCapability(List<CapabilityResult> results, String capability) {
+        String expected = normalizeCapability(capability);
+        if (!StringUtils.hasText(expected)) {
+            return true;
+        }
+        return results != null && results.stream()
+                .anyMatch(result -> result.successful()
+                        && matchesCapability(result.capabilityId(), expected)
+                        && StringUtils.hasText(result.payload())
+                        && !looksLikeSearchEngineNoise(result));
+    }
+
+    private boolean matchesCapability(String capabilityId, String expected) {
+        String actual = normalizeCapability(capabilityId);
+        return actual.equals(expected)
+                || actual.startsWith(expected + ".")
+                || actual.startsWith(expected + "-");
+    }
+
+    private boolean isSupportCapability(String capability) {
+        return "file".equals(capability)
+                || "system".equals(capability)
+                || "skill-library".equals(capability);
+    }
+
+    private String normalizeCapability(String value) {
+        return safe(value).trim().toLowerCase(Locale.ROOT).replace('_', '-');
     }
 
     private String textValue(JsonNode node, String field, String fallback) {
@@ -645,8 +674,8 @@ public class AgentRuntimeEngine implements AgentEngine {
         String planText = renderPlanText(plan);
         String actionText = renderActionText(capabilityResults, verification);
         AiProviderService.ActiveChatClient activeClient = context.activeClient();
-        if (hasStructuredRealtimeEvidence(capabilityResults)) {
-            String answer = deterministicAnswer(context, capabilityResults, verification, STRUCTURED_REALTIME_DIRECT_REASON);
+        if (hasDirectCapabilityEvidence(capabilityResults)) {
+            String answer = deterministicAnswer(context, capabilityResults, verification, DIRECT_CAPABILITY_RESULT_REASON);
             return new ChatExecutionResult(context.assembled().observePrompt(), planText, actionText, answer, false);
         }
         if (!modelTransportGuardService.isModelCallEnabled(activeClient)) {
@@ -750,7 +779,7 @@ public class AgentRuntimeEngine implements AgentEngine {
                                        VerificationResult verification,
                                        String reason) {
         boolean verificationFailed = verification != null && !verification.sufficient();
-        boolean structuredRealtimeDirect = STRUCTURED_REALTIME_DIRECT_REASON.equals(reason);
+        boolean directCapabilityResult = DIRECT_CAPABILITY_RESULT_REASON.equals(reason);
         StringBuilder conclusion = new StringBuilder();
         if (verificationFailed) {
             conclusion.append("校验未通过，当前证据不足以可靠回答这次请求。");
@@ -758,11 +787,11 @@ public class AgentRuntimeEngine implements AgentEngine {
                 conclusion.append("\n原因：").append(reason);
             }
         } else {
-            String structuredConclusion = structuredRealtimeConclusion(capabilityResults);
-            conclusion.append(StringUtils.hasText(structuredConclusion)
-                    ? structuredConclusion
+            String directConclusion = directCapabilityConclusion(capabilityResults);
+            conclusion.append(StringUtils.hasText(directConclusion)
+                    ? directConclusion
                     : "已完成这次请求，并基于已获取的证据整理结果");
-            if (StringUtils.hasText(reason) && !structuredRealtimeDirect) {
+            if (StringUtils.hasText(reason) && !directCapabilityResult) {
                 appendSentenceBreak(conclusion);
                 conclusion.append("回答整理阶段使用确定性路径：").append(reason);
             }
@@ -772,21 +801,23 @@ public class AgentRuntimeEngine implements AgentEngine {
                 capabilityResults,
                 verification,
                 conclusion.toString(),
-                structuredRealtimeDirect ? "结构化实时结果直出。" : "使用确定性整理。"
+                directCapabilityResult ? "能力结果直出。" : "使用确定性整理。"
         );
     }
 
-    private boolean hasStructuredRealtimeEvidence(List<CapabilityResult> results) {
+    private boolean hasDirectCapabilityEvidence(List<CapabilityResult> results) {
         if (results == null || results.isEmpty()) {
             return false;
         }
-        return results.stream().anyMatch(result -> result.successful()
-                && (startsWithCapability(result, "weather.")
-                || startsWithCapability(result, "exchange.")
-                || startsWithCapability(result, "news.")));
+        List<CapabilityResult> successful = results.stream()
+                .filter(CapabilityResult::successful)
+                .filter(result -> StringUtils.hasText(result.payload()))
+                .toList();
+        return successful.size() == 1
+                && !"workspace".equalsIgnoreCase(successful.get(0).toolset());
     }
 
-    private String structuredRealtimeConclusion(List<CapabilityResult> results) {
+    private String directCapabilityConclusion(List<CapabilityResult> results) {
         if (results == null || results.isEmpty()) {
             return "";
         }
@@ -794,69 +825,32 @@ public class AgentRuntimeEngine implements AgentEngine {
             if (!result.successful()) {
                 continue;
             }
-            if (startsWithCapability(result, "weather.")) {
-                String city = payloadValue(result.payload(), "城市");
-                String weather = payloadValue(result.payload(), "天气");
-                String temperature = payloadValue(result.payload(), "温度");
-                String humidity = payloadValue(result.payload(), "湿度");
-                String observeTime = payloadValue(result.payload(), "观测时间");
-                StringBuilder builder = new StringBuilder();
-                builder.append(StringUtils.hasText(city) ? city : "目标城市").append("当前天气");
-                if (StringUtils.hasText(weather)) {
-                    builder.append("：").append(weather);
-                }
-                if (StringUtils.hasText(temperature)) {
-                    builder.append("，温度 ").append(temperature);
-                }
-                if (StringUtils.hasText(humidity)) {
-                    builder.append("，湿度 ").append(humidity);
-                }
-                if (StringUtils.hasText(observeTime)) {
-                    builder.append("，观测时间 ").append(observeTime);
-                }
-                builder.append("。");
-                return builder.toString();
-            }
-            if (startsWithCapability(result, "exchange.")) {
-                return firstPayloadLine(result.payload(), "已获取到汇率结果。");
-            }
-            if (startsWithCapability(result, "news.")) {
-                return firstPayloadLine(result.payload(), "已获取到新闻检索结果。");
-            }
+            return compactPayloadSummary(result.payload(), "已获取到能力结果。");
         }
         return "";
     }
 
-    private boolean startsWithCapability(CapabilityResult result, String prefix) {
-        return safe(result == null ? "" : result.capabilityId())
-                .toLowerCase(Locale.ROOT)
-                .startsWith(prefix);
-    }
-
-    private String payloadValue(String payload, String key) {
-        if (!StringUtils.hasText(payload) || !StringUtils.hasText(key)) {
-            return "";
-        }
-        String normalizedKey = key.trim();
-        for (String line : payload.replace("\r\n", "\n").split("\n")) {
-            String trimmed = line.trim();
-            if (trimmed.startsWith(normalizedKey + ":") || trimmed.startsWith(normalizedKey + "：")) {
-                return trimmed.substring(normalizedKey.length() + 1).trim();
-            }
-        }
-        return "";
-    }
-
-    private String firstPayloadLine(String payload, String fallback) {
+    private String compactPayloadSummary(String payload, String fallback) {
         if (!StringUtils.hasText(payload)) {
             return fallback;
         }
+        List<String> lines = new ArrayList<>();
         for (String line : payload.replace("\r\n", "\n").split("\n")) {
             if (StringUtils.hasText(line)) {
-                return line.trim() + "。";
+                lines.add(line.trim());
+            }
+            if (lines.size() >= 4) {
+                break;
             }
         }
-        return fallback;
+        if (lines.isEmpty()) {
+            return fallback;
+        }
+        String summary = String.join("，", lines);
+        if (summary.length() > 220) {
+            summary = summary.substring(0, 220).trim() + "...";
+        }
+        return summary.endsWith("。") ? summary : summary + "。";
     }
 
     private void appendSentenceBreak(StringBuilder builder) {

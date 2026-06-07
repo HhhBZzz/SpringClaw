@@ -5,11 +5,18 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Deterministic evaluator for the live Agent runtime. It grades evidence, not model confidence.
  */
 final class AgentQualityEvaluator {
+
+    private static final Set<String> SUPPORT_CAPABILITIES = Set.of(
+            "file",
+            "system",
+            "skill-library"
+    );
 
     AgentQualityScore evaluate(AgentDecision decision,
                                CapabilityPlan plan,
@@ -39,7 +46,8 @@ final class AgentQualityEvaluator {
         if (safeResults.isEmpty()) {
             overall = Math.min(overall, 35);
         }
-        if (expectsWeather(decision) && !hasSuccessfulCapability(safeResults, "weather.")) {
+        String missingCapability = missingSelectedCapability(decision, safeResults);
+        if (StringUtils.hasText(missingCapability)) {
             overall = Math.min(overall, 55);
         }
         if (safeResults.stream().noneMatch(CapabilityResult::successful) && !safeResults.isEmpty()) {
@@ -98,13 +106,12 @@ final class AgentQualityEvaluator {
             reasons.add("部分工具执行失败");
             score -= 15;
         }
-        if (expectsWeather(decision)) {
-            if (hasSuccessfulCapability(results, "weather.")) {
-                score = Math.max(score, 92);
-            } else {
-                reasons.add("weather 工具未成功执行");
-                score = Math.min(score, 55);
-            }
+        String missingCapability = missingSelectedCapability(decision, results);
+        if (StringUtils.hasText(missingCapability)) {
+            reasons.add(missingCapability + " 能力未成功执行");
+            score = Math.min(score, 55);
+        } else if (hasConcreteSelectedCapability(decision)) {
+            score = Math.max(score, 92);
         }
         return clamp(score);
     }
@@ -123,9 +130,10 @@ final class AgentQualityEvaluator {
                 .filter(result -> !looksNoisy(result.payload()))
                 .count();
         int score = usefulPayloads == 0 ? 30 : Math.min(95, 55 + (int) usefulPayloads * 25);
-        if (expectsWeather(decision) && !hasSuccessfulCapability(results, "weather.")) {
+        String missingCapability = missingSelectedCapability(decision, results);
+        if (StringUtils.hasText(missingCapability)) {
             score = Math.min(score, 45);
-            reasons.add("天气问题没有实时天气证据");
+            reasons.add(missingCapability + " 能力没有可用证据");
         }
         if (results.stream().map(CapabilityResult::payload).anyMatch(this::looksNoisy)) {
             reasons.add("证据包含搜索页噪声或截断");
@@ -192,18 +200,42 @@ final class AgentQualityEvaluator {
         return 100;
     }
 
-    private boolean expectsWeather(AgentDecision decision) {
+    private boolean hasConcreteSelectedCapability(AgentDecision decision) {
         if (decision == null) {
             return false;
         }
-        return "web_research".equalsIgnoreCase(decision.intent())
-                && decision.selectedCapabilities().stream().anyMatch(value -> "weather".equalsIgnoreCase(value));
+        return decision.selectedCapabilities().stream()
+                .map(this::normalizeCapability)
+                .anyMatch(value -> StringUtils.hasText(value) && !SUPPORT_CAPABILITIES.contains(value));
     }
 
-    private boolean hasSuccessfulCapability(List<CapabilityResult> results, String prefix) {
+    private String missingSelectedCapability(AgentDecision decision, List<CapabilityResult> results) {
+        if (decision == null || decision.selectedCapabilities() == null || decision.selectedCapabilities().isEmpty()) {
+            return "";
+        }
+        for (String selected : decision.selectedCapabilities()) {
+            String capability = normalizeCapability(selected);
+            if (!StringUtils.hasText(capability) || SUPPORT_CAPABILITIES.contains(capability)) {
+                continue;
+            }
+            if (!hasSuccessfulCapability(results, capability)) {
+                return capability;
+            }
+        }
+        return "";
+    }
+
+    private boolean hasSuccessfulCapability(List<CapabilityResult> results, String capability) {
+        String expected = normalizeCapability(capability);
+        if (!StringUtils.hasText(expected)) {
+            return true;
+        }
         return results.stream()
                 .filter(CapabilityResult::successful)
-                .anyMatch(result -> lower(result.capabilityId()).startsWith(prefix));
+                .map(result -> normalizeCapability(result.capabilityId()))
+                .anyMatch(actual -> actual.equals(expected)
+                        || actual.startsWith(expected + ".")
+                        || actual.startsWith(expected + "-"));
     }
 
     private boolean looksNoisy(String payload) {
@@ -221,5 +253,9 @@ final class AgentQualityEvaluator {
 
     private String lower(String value) {
         return value == null ? "" : value.toLowerCase(Locale.ROOT);
+    }
+
+    private String normalizeCapability(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replace('_', '-');
     }
 }

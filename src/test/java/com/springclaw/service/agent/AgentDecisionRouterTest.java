@@ -135,6 +135,22 @@ class AgentDecisionRouterTest {
         assertThat(router.routeByRules(request("Beijing weather")).selectedCapabilities()).containsExactly("weather");
     }
 
+    @Test
+    void shouldSelectMatchedCapabilityIdFromRegistryInsteadOfHardcodedWebList() {
+        SkillRegistryService skillRegistryService = mock(SkillRegistryService.class);
+        when(skillRegistryService.matchBestAgentVisibleDefinition(any(), anySet())).thenReturn(Optional.empty());
+        CapabilityRegistry registry = new CapabilityRegistry(List.of(
+                CapabilityRegistry.entryForTest("browser", "web",
+                        new String[]{"浏览器", "打开网页"}, true, "read", "本地浏览器操作")
+        ));
+
+        AgentDecision decision = new AgentDecisionRouter(skillRegistryService, new ToolRiskPolicyService(), registry)
+                .routeByRules(request("用浏览器打开网页看看"));
+
+        assertThat(decision.intent()).isEqualTo("web_research");
+        assertThat(decision.selectedCapabilities()).containsExactly("browser");
+    }
+
     private AgentDecisionRouter router() {
         SkillRegistryService skillRegistryService = mock(SkillRegistryService.class);
         when(skillRegistryService.matchBestAgentVisibleDefinition(any(), anySet())).thenReturn(Optional.empty());
@@ -146,7 +162,9 @@ class AgentDecisionRouterTest {
                 CapabilityRegistry.entryForTest("local-files", "file",
                         new String[]{"桌面", "论文", "本地文件", "简历", "docx", "pdf"}, true, "read", "读取授权本地文件"),
                 CapabilityRegistry.entryForTest("web", "web",
-                        new String[]{"搜索", "天气", "气温", "温度", "下雨", "weather", "新闻", "汇率", "exchange", "网页", "官网"}, true, "read", "联网搜索"),
+                        new String[]{"搜索", "网页", "官网"}, true, "read", "联网搜索"),
+                CapabilityRegistry.entryForTest("weather", "web",
+                        new String[]{"天气", "气温", "温度", "下雨", "weather"}, true, "read", "查询天气"),
                 CapabilityRegistry.entryForTest("script-skill", "script",
                         new String[]{"skill", "脚本", "运行", "执行", "python"}, true, "execution", "执行脚本技能")
         ));

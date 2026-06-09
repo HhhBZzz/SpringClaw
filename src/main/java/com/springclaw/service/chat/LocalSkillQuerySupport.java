@@ -1,5 +1,6 @@
 package com.springclaw.service.chat;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.skill.script.ScriptSkillCatalogService;
 import com.springclaw.service.skill.script.ScriptSkillExecutorService;
 import com.springclaw.service.skill.script.ScriptSkillDefinition;
@@ -50,28 +51,28 @@ final class LocalSkillQuerySupport {
     }
 
     boolean looksLikeWorkspaceQuestion(String text) {
-        boolean searchIntent = containsAny(text,
+        boolean searchIntent = TextUtils.containsAny(text,
                 "找文件", "在哪个文件", "哪个文件", "实现在哪", "搜代码", "关键词检索", "grep", "搜索项目",
                 "代码位置", "源码位置", "search file", "find file");
-        boolean existenceIntent = containsAny(text, "是否存在", "有没有", "存在吗");
-        boolean fileArtifact = containsAny(text,
+        boolean existenceIntent = TextUtils.containsAny(text, "是否存在", "有没有", "存在吗");
+        boolean fileArtifact = TextUtils.containsAny(text,
                 "文件", "配置文件",
                 "spring ai", "springai", "spring-ai",
                 "application.yml", "application.yaml",
                 ".java", ".yml", ".yaml", ".xml", ".properties");
-        boolean codeEntity = containsAny(text, "类", "方法", "接口", "包");
+        boolean codeEntity = TextUtils.containsAny(text, "类", "方法", "接口", "包");
         return (searchIntent && (fileArtifact || codeEntity))
                 || (existenceIntent && fileArtifact);
     }
 
     boolean looksLikeExplicitWebSearchQuestion(String text) {
-        return containsAny(text,
+        return TextUtils.containsAny(text,
                 "联网", "上网查", "官网", "网页搜索", "搜索网页", "web search", "google", "bing", "duckduckgo");
     }
 
     boolean looksLikeExplicitWebFetchQuestion(String text) {
         boolean hasUrl = URL_PATTERN.matcher(text).find();
-        boolean fetchIntent = containsAny(text,
+        boolean fetchIntent = TextUtils.containsAny(text,
                 "抓取网页", "抓网页", "爬取网页", "爬网页", "读取网页", "读取链接", "打开链接",
                 "打开这个网址", "读这个网址", "网页正文", "页面正文", "提取正文", "总结这个网页",
                 "看看这个网页", "看这个链接", "fetch url", "crawl", "read webpage", "read page");
@@ -79,8 +80,8 @@ final class LocalSkillQuerySupport {
     }
 
     boolean looksLikeExplicitScriptSkillQuestion(String text) {
-        return containsAny(text, "脚本技能", "run skill", "skill 列表", "skill列表")
-                || ((text.contains("脚本") || text.contains("skill")) && containsAny(text, "执行", "运行", "调用"));
+        return TextUtils.containsAny(text, "脚本技能", "run skill", "skill 列表", "skill列表")
+                || ((text.contains("脚本") || text.contains("skill")) && TextUtils.containsAny(text, "执行", "运行", "调用"));
     }
 
     String extractCity(String question) {
@@ -277,14 +278,6 @@ final class LocalSkillQuerySupport {
         return url;
     }
 
-    private boolean containsAny(String text, String... keys) {
-        for (String key : keys) {
-            if (text.contains(key)) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     private String normalizeCity(String raw) {
         if (!StringUtils.hasText(raw)) {

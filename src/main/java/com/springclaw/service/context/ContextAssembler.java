@@ -1,5 +1,6 @@
 package com.springclaw.service.context;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.common.support.ConversationScopeSupport;
 import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.service.chat.ConversationEventTextSupport;
@@ -66,9 +67,9 @@ public class ContextAssembler {
                 # 长期语义记忆（同会话优先）
                 %s
                 """.formatted(
-                safe(question),
-                safe(eventContext),
-                safe(semanticContext)
+                TextUtils.normalizeWS(question),
+                TextUtils.normalizeWS(eventContext),
+                TextUtils.normalizeWS(semanticContext)
         );
 
         return new AssembledContext(
@@ -131,7 +132,7 @@ public class ContextAssembler {
                 String.valueOf(doc.getMetadata().getOrDefault("role", "UNKNOWN")),
                 userId
         );
-        String text = truncate(safe(doc.getText()), recallMaxChars);
+        String text = TextUtils.truncate(TextUtils.normalizeWS(doc.getText()), recallMaxChars);
         if (!StringUtils.hasText(text)) {
             return "";
         }
@@ -145,39 +146,26 @@ public class ContextAssembler {
         String role = ConversationScopeSupport.renderSpeakerRole(
                 event.getChannel(),
                 event.getSessionKey(),
-                safe(event.getRole()),
+                TextUtils.normalizeWS(event.getRole()),
                 event.getUserId()
         );
-        String eventType = safe(event.getEventType()).toUpperCase();
+        String eventType = TextUtils.normalizeWS(event.getEventType()).toUpperCase();
         String content;
         if (role.startsWith("USER")) {
             content = "CHAT".equals(eventType)
                     ? ConversationEventTextSupport.extractUserQuestion(event.getContent())
-                    : safe(event.getContent());
+                    : TextUtils.normalizeWS(event.getContent());
         } else if ("ASSISTANT".equals(role)) {
             content = "CHAT".equals(eventType)
                     ? ConversationEventTextSupport.extractAssistantAnswer(event.getContent())
-                    : safe(event.getContent());
+                    : TextUtils.normalizeWS(event.getContent());
         } else {
-            content = safe(event.getContent());
+            content = TextUtils.normalizeWS(event.getContent());
         }
         if (!StringUtils.hasText(content)) {
             return "";
         }
-        return "- " + role + ": " + truncate(content, 220);
+        return "- " + role + ": " + TextUtils.truncate(content, 220);
     }
 
-    private String truncate(String text, int maxLen) {
-        if (text.length() <= maxLen) {
-            return text;
-        }
-        return text.substring(0, maxLen) + "...";
-    }
-
-    private String safe(String value) {
-        if (!StringUtils.hasText(value)) {
-            return "";
-        }
-        return value.replaceAll("\\s+", " ").trim();
-    }
 }

@@ -1,5 +1,6 @@
 package com.springclaw.service.task;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.common.exception.BusinessException;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Component;
@@ -38,7 +39,7 @@ public class TaskScheduleSupport {
 
     public String describe(String scheduleType, String scheduleExpression) {
         String normalizedType = normalizeScheduleType(scheduleType);
-        String safeExpression = safe(scheduleExpression);
+        String safeExpression = TextUtils.safe(scheduleExpression);
         return switch (normalizedType) {
             case "preset" -> describePreset(safeExpression);
             case "cron" -> "Cron(" + safeExpression + ")";
@@ -48,7 +49,7 @@ public class TaskScheduleSupport {
 
     public String toCronExpression(String scheduleType, String scheduleExpression) {
         String normalizedType = normalizeScheduleType(scheduleType);
-        String safeExpression = safe(scheduleExpression);
+        String safeExpression = TextUtils.safe(scheduleExpression);
         return switch (normalizedType) {
             case "preset" -> presetToCron(safeExpression);
             case "cron" -> {
@@ -114,7 +115,7 @@ public class TaskScheduleSupport {
     }
 
     private String normalizeScheduleType(String scheduleType) {
-        String normalized = safe(scheduleType).toLowerCase(Locale.ROOT);
+        String normalized = TextUtils.safe(scheduleType).toLowerCase(Locale.ROOT);
         if (!StringUtils.hasText(normalized)) {
             throw new BusinessException(40070, "scheduleType 不能为空");
         }
@@ -138,7 +139,7 @@ public class TaskScheduleSupport {
     }
 
     private String normalizeWeekDay(String rawDay) {
-        String day = safe(rawDay).toUpperCase(Locale.ROOT);
+        String day = TextUtils.safe(rawDay).toUpperCase(Locale.ROOT);
         return switch (day) {
             case "MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN" -> day;
             default -> throw new BusinessException(40071, "每周预设的星期非法: " + rawDay);
@@ -162,7 +163,4 @@ public class TaskScheduleSupport {
         return DateTimeFormatter.ofPattern("HH").format(LocalDateTime.of(2000, 1, 1, Integer.parseInt(raw), 0));
     }
 
-    private String safe(String value) {
-        return value == null ? "" : value.trim();
-    }
 }

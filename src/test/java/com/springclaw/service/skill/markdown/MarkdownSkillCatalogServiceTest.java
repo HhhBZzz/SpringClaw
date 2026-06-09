@@ -12,7 +12,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
-import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -72,9 +71,11 @@ class MarkdownSkillCatalogServiceTest {
         Assertions.assertTrue(result.skillPath().endsWith("SKILL.md"));
         Assertions.assertTrue(result.definition().instructions().contains("Key decisions"));
 
-        SkillDefinition definition = service.matchDefinition("总结群聊今天聊了什么", Set.of("workspace", "file"))
+        // 验证导入的 skill 可通过 listDefinitions 发现（matchDefinition 已统一至 SkillRegistryService）
+        SkillDefinition definition = service.listDefinitions().stream()
+                .filter(def -> "group-summary".equals(def.skillId()))
+                .findFirst()
                 .orElseThrow();
-        Assertions.assertEquals("group-summary", definition.skillId());
         Assertions.assertEquals("MARKDOWN", definition.sourceType());
         Assertions.assertEquals("group-shared", definition.contextPolicy());
     }

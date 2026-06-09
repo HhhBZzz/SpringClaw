@@ -1,5 +1,6 @@
 package com.springclaw.service.agent.executor;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.CapabilityExecutor;
 import com.springclaw.service.agent.CapabilityResult;
@@ -48,7 +49,7 @@ public class SkillCapabilityExecutor extends AbstractCapabilityExecutor implemen
         ToolExecutionContext context = new ToolExecutionContext(assembled.sessionKey(), assembled.channel(), assembled.userId(), requestId, "AGENT-RUNTIME");
         try (ToolExecutionContextHolder.Scope ignored = ToolExecutionContextHolder.open(context)) {
             String skillId = decision.selectedCapabilities().stream()
-                    .map(this::normalize)
+                    .map(TextUtils::normalize)
                     .filter(StringUtils::hasText)
                     .filter(value -> !PROVIDER_CAPABILITIES.contains(value))
                     .findFirst()
@@ -60,7 +61,4 @@ public class SkillCapabilityExecutor extends AbstractCapabilityExecutor implemen
         }
     }
 
-    private String normalize(String value) {
-        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replace('_', '-');
-    }
 }

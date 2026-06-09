@@ -1,8 +1,38 @@
-target
-.idea
-.run
-.DS_Store
-classpath.txt
-*.log
-.git
+# Build output
+target/
 
+# IDE / editor
+.idea/
+.run/
+*.iml
+.vscode/
+
+# macOS
+.DS_Store
+
+# Environment files (credentials must NOT enter Docker build context)
+.env
+.env.*
+!.env.example
+
+# Logs / temp
+*.log
+*.pid
+classpath.txt
+
+# Git
+.git/
+
+# Frontend workspace (backend image does not need it)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.npm-cache/
+
+# Documentation (SOUL.md is explicitly COPYed in Dockerfile)
+docs/
+README.md
+OPTIMIZATION_MEMO.md
+
+# Test artifacts
+.playwright-cli/

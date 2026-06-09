@@ -1,5 +1,6 @@
 package com.springclaw.service.chat.impl;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.memory.MemoryService;
 import com.springclaw.service.prompt.SoulPromptService;
@@ -53,7 +54,7 @@ public class ChatResultPersister {
                 context.channel(),
                 context.userId(),
                 context.effectiveUserMessage(),
-                "[REFLECT] " + truncate(normalizeAssistantForMemory(assistantMessage), 1600),
+                "[REFLECT] " + TextUtils.truncate(normalizeAssistantForMemory(assistantMessage), 1600),
                 "CHAT",
                 context.requestId()
         );
@@ -66,7 +67,7 @@ public class ChatResultPersister {
                 "ROUTING=mode=%s, role=%s, reason=%s".formatted(
                         context.executionMode(),
                         context.roleCode(),
-                        truncate(context.routingReason(), 300)
+                        TextUtils.truncate(context.routingReason(), 300)
                 ),
                 context.requestId()
         );
@@ -76,7 +77,7 @@ public class ChatResultPersister {
                 context.userId(),
                 "SYSTEM",
                 "OPAR",
-                "PLAN=" + truncate(executionResult.plan(), 1200),
+                "PLAN=" + TextUtils.truncate(executionResult.plan(), 1200),
                 context.requestId()
         );
         messageEventService.recordSingle(
@@ -85,7 +86,7 @@ public class ChatResultPersister {
                 context.userId(),
                 "SYSTEM",
                 "OPAR",
-                "ACT=" + truncate(executionResult.action(), 1200),
+                "ACT=" + TextUtils.truncate(executionResult.action(), 1200),
                 context.requestId()
         );
     }
@@ -100,13 +101,4 @@ public class ChatResultPersister {
         return answer;
     }
 
-    private String truncate(String text, int maxLen) {
-        if (!StringUtils.hasText(text)) {
-            return "";
-        }
-        if (text.length() <= maxLen) {
-            return text;
-        }
-        return text.substring(0, maxLen) + "...";
-    }
 }

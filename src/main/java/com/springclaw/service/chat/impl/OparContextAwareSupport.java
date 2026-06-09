@@ -1,5 +1,6 @@
 package com.springclaw.service.chat.impl;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
 import org.springframework.stereotype.Service;
@@ -23,7 +24,7 @@ class OparContextAwareSupport {
         if (assembled == null) {
             return null;
         }
-        String lower = safe(assembled.question()).toLowerCase();
+        String lower = TextUtils.safe(assembled.question()).toLowerCase();
         if (looksLikeFirstMessageTimeQuestion(lower)) {
             return conversationHistoryService.findFirstUserQuestionEntry(assembled.sessionKey())
                     .map(entry -> buildHistoryTimeResult(
@@ -187,7 +188,7 @@ class OparContextAwareSupport {
     }
 
     private boolean contextContainsRecentFailure(String eventContext) {
-        String lower = safe(eventContext).toLowerCase();
+        String lower = TextUtils.safe(eventContext).toLowerCase();
         return lower.contains("模型服务当前不可用")
                 || lower.contains("504")
                 || lower.contains("503")
@@ -199,7 +200,7 @@ class OparContextAwareSupport {
     }
 
     private boolean contextContainsDiagnosticMaterial(String eventContext) {
-        String lower = safe(eventContext).toLowerCase();
+        String lower = TextUtils.safe(eventContext).toLowerCase();
         return lower.contains("read timed out")
                 || lower.contains("sockettimeoutexception")
                 || lower.contains("unexpected end of file")
@@ -237,7 +238,7 @@ class OparContextAwareSupport {
     }
 
     private int countContextItems(String context, String emptyMarker) {
-        String safeText = safe(context);
+        String safeText = TextUtils.safe(context);
         if (!StringUtils.hasText(safeText) || safeText.contains(emptyMarker)) {
             return 0;
         }
@@ -248,7 +249,7 @@ class OparContextAwareSupport {
     }
 
     private String renderRecentFailureExplanation(String eventContext) {
-        String lower = safe(eventContext).toLowerCase();
+        String lower = TextUtils.safe(eventContext).toLowerCase();
         if (lower.contains("504") || lower.contains("请求超时") || lower.contains("read timed out")) {
             return "刚才是上游模型超时了。本地服务、飞书和数据库链路都正常，卡在远程模型响应。";
         }
@@ -265,7 +266,7 @@ class OparContextAwareSupport {
     }
 
     private String renderDiagnosticAnalysis(String eventContext) {
-        String lower = safe(eventContext).toLowerCase();
+        String lower = TextUtils.safe(eventContext).toLowerCase();
         boolean remoteTimeout = lower.contains("read timed out") || lower.contains("sockettimeoutexception");
         boolean toolSucceeded = lower.contains("tool=") && lower.contains("status=success");
         boolean toolContextMissing = lower.contains("tool-session") || lower.contains("tool-user");
@@ -288,10 +289,6 @@ class OparContextAwareSupport {
             return "从最近上下文看，这是一段异常/堆栈日志，真正根因要看最靠后的 Caused by 或第一个业务异常，而不是前面的框架调用栈。";
         }
         return "从最近上下文看，这是一次代码/日志诊断类追问。当前能确认是最近链路里出现了异常或工具执行记录，优先应先看最近失败原因和工具真实输出，再决定是否继续调用模型。";
-    }
-
-    private String safe(String text) {
-        return text == null ? "" : text;
     }
 
     private LocalSkillFallbackService.LocalSkillResult buildHistoryTimeResult(String route, String detail, String shortAnswer) {

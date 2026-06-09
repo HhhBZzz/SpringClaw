@@ -2,6 +2,7 @@ package com.springclaw.service.agent;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.chat.impl.ChatContext;
 import com.springclaw.service.chat.impl.ChatExecutionResult;
@@ -316,8 +317,8 @@ public class AgentRuntimeEngine implements AgentEngine {
                 # ACCUMULATED_CAPABILITY_RESULTS
                 %s
                 """.formatted(
-                safe(originalQuestion),
-                safe(currentQuestion),
+                TextUtils.safe(originalQuestion),
+                TextUtils.safe(currentQuestion),
                 attempt,
                 MAX_REFLECTION_ATTEMPTS,
                 decision == null ? "" : decision.intent(),
@@ -470,14 +471,14 @@ public class AgentRuntimeEngine implements AgentEngine {
     }
 
     private String normalizeNextQuery(String nextQuery, String currentQuestion) {
-        String value = safe(nextQuery).replaceAll("\\s+", " ").trim();
+        String value = TextUtils.safe(nextQuery).replaceAll("\\s+", " ").trim();
         if (!StringUtils.hasText(value)) {
             return "";
         }
         if (value.length() > 180) {
             value = value.substring(0, 180).trim();
         }
-        return value.equalsIgnoreCase(safe(currentQuestion).trim()) ? "" : value;
+        return value.equalsIgnoreCase(TextUtils.safe(currentQuestion).trim()) ? "" : value;
     }
 
     private AgentDecision rebuildDecisionForRetry(AgentDecision previous, ReflectionResult reflection) {
@@ -499,7 +500,7 @@ public class AgentRuntimeEngine implements AgentEngine {
                 capabilities,
                 previous == null ? "read" : previous.riskLevel(),
                 false,
-                "证据反思要求重试: " + safe(reflection == null ? "" : reflection.problem())
+                "证据反思要求重试: " + TextUtils.safe(reflection == null ? "" : reflection.problem())
         );
     }
 
@@ -554,7 +555,7 @@ public class AgentRuntimeEngine implements AgentEngine {
             return List.of("web");
         }
         List<String> normalized = previousCapabilities.stream()
-                .map(value -> safe(value).trim().toLowerCase(Locale.ROOT).replace('_', '-'))
+                .map(value -> TextUtils.safe(value).trim().toLowerCase(Locale.ROOT).replace('_', '-'))
                 .filter(StringUtils::hasText)
                 .distinct()
                 .toList();
@@ -586,7 +587,7 @@ public class AgentRuntimeEngine implements AgentEngine {
     }
 
     private boolean looksLikeSearchEngineNoise(CapabilityResult result) {
-        String payload = result == null ? "" : safe(result.payload()).toLowerCase(Locale.ROOT);
+        String payload = result == null ? "" : TextUtils.safe(result.payload()).toLowerCase(Locale.ROOT);
         if (!StringUtils.hasText(payload)) {
             return false;
         }
@@ -650,7 +651,7 @@ public class AgentRuntimeEngine implements AgentEngine {
     }
 
     private String normalizeCapability(String value) {
-        return safe(value).trim().toLowerCase(Locale.ROOT).replace('_', '-');
+        return TextUtils.safe(value).trim().toLowerCase(Locale.ROOT).replace('_', '-');
     }
 
     private String textValue(JsonNode node, String field, String fallback) {
@@ -763,7 +764,7 @@ public class AgentRuntimeEngine implements AgentEngine {
 
                 校验结果：%s
                 """.formatted(
-                safe(context.assembled().question()),
+                TextUtils.safe(context.assembled().question()),
                 plan.intent(),
                 plan.executionPath(),
                 String.join(",", plan.toolsets()),
@@ -875,7 +876,7 @@ public class AgentRuntimeEngine implements AgentEngine {
                         result.status(),
                         result.durationMs(),
                         result.summary(),
-                        truncate(result.payload(), SUMMARY_CAPABILITY_PAYLOAD_LIMIT)
+                        TextUtils.truncate(result.payload(), SUMMARY_CAPABILITY_PAYLOAD_LIMIT)
                 ))
                 .collect(Collectors.joining("\n"));
     }
@@ -919,7 +920,7 @@ public class AgentRuntimeEngine implements AgentEngine {
                         .append(" [").append(result.status()).append("] ")
                         .append(result.summary())
                         .append("\n")
-                        .append(truncate(result.payload(), 900));
+                        .append(TextUtils.truncate(result.payload(), 900));
             }
         }
         return builder.toString();
@@ -927,14 +928,5 @@ public class AgentRuntimeEngine implements AgentEngine {
 
     private long elapsed(long startedAt) {
         return Math.max(0L, System.currentTimeMillis() - startedAt);
-    }
-
-    private String truncate(String text, int limit) {
-        String value = text == null ? "" : text.trim();
-        return value.length() <= limit ? value : value.substring(0, limit) + "\n...<TRUNCATED>";
-    }
-
-    private String safe(String text) {
-        return text == null ? "" : text;
     }
 }

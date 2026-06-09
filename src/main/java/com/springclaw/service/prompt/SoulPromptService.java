@@ -1,5 +1,6 @@
 package com.springclaw.service.prompt;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.service.files.LocalFilesystemService;
 import com.springclaw.service.skill.SkillDefinition;
@@ -154,7 +155,7 @@ public class SoulPromptService implements ApplicationRunner {
                         definition.sourceType(),
                         definition.preferredMode(),
                         definition.description(),
-                        truncate(definition.instructions(), 800)
+                        TextUtils.truncate(definition.instructions(), 800)
                 ))
                 .reduce((left, right) -> left + "\n" + right)
                 .orElse("（未命中显式技能，按默认路由处理）");
@@ -198,10 +199,4 @@ public class SoulPromptService implements ApplicationRunner {
                 : String.join("\n", lines);
     }
 
-    private String truncate(String text, int maxLen) {
-        if (text == null || text.length() <= maxLen) {
-            return text == null ? "" : text;
-        }
-        return text.substring(0, maxLen) + "...";
-    }
 }

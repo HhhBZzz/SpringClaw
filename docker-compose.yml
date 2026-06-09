@@ -8,8 +8,8 @@ services:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: springclaw
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DB:-springclaw}
       TZ: Asia/Shanghai
     ports:
       - "3306:3306"
@@ -17,7 +17,7 @@ services:
       - springclaw-mysql-data:/var/lib/mysql
       - ./src/main/resources/sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -proot --silent"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p${MYSQL_ROOT_PASSWORD:-root} --silent"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -45,6 +45,9 @@ services:
     image: rabbitmq:3-management
     container_name: springclaw-rabbitmq
     restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -69,17 +72,18 @@ services:
         condition: service_healthy
     environment:
       SERVER_PORT: 18080
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
-      MYSQL_DB: springclaw
-      MYSQL_USER: root
-      MYSQL_PASSWORD: root
+      MYSQL_DB: ${MYSQL_DB:-springclaw}
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
-      RABBITMQ_USERNAME: guest
-      RABBITMQ_PASSWORD: guest
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
       SPRINGCLAW_PERSISTENCE_DB_ENABLED: "true"
       SPRINGCLAW_AUTH_REDIS_ENABLED: "true"
       SPRINGCLAW_GUARD_REDIS_ENABLED: "true"

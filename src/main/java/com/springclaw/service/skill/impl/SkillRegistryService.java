@@ -99,8 +99,8 @@ public class SkillRegistryService {
                 .findFirst();
     }
 
-    /** keyword 评分：触发词命中 +3，名称 token 命中 +1。 */
-    private int score(SkillDefinition definition, String normalizedQuestion) {
+    /** keyword 评分：触发词命中 +3，名称 token 命中 +1。公开供子类目录服务复用。 */
+    public int score(SkillDefinition definition, String normalizedQuestion) {
         int score = 0;
         // 触发词匹配
         if (definition.triggerKeywords() != null) {

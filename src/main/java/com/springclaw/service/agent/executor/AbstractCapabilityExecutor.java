@@ -1,5 +1,6 @@
 package com.springclaw.service.agent.executor;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.agent.CapabilityResult;
 
 import java.util.concurrent.Callable;
@@ -16,7 +17,7 @@ abstract class AbstractCapabilityExecutor {
         long startedAt = System.currentTimeMillis();
         try {
             String payload = action.call();
-            return new CapabilityResult(capabilityId, toolset, "success", summary, trim(payload), System.currentTimeMillis() - startedAt, riskLevel);
+            return new CapabilityResult(capabilityId, toolset, "success", summary, TextUtils.truncate(payload, MAX_PAYLOAD_CHARS), System.currentTimeMillis() - startedAt, riskLevel);
         } catch (Exception ex) {
             return new CapabilityResult(capabilityId, toolset, "failed", summary, ex.getClass().getSimpleName() + ": " + ex.getMessage(), System.currentTimeMillis() - startedAt, riskLevel);
         }
@@ -26,15 +27,4 @@ abstract class AbstractCapabilityExecutor {
         return decision != null && intent.equalsIgnoreCase(decision.intent());
     }
 
-    protected String safe(String value) {
-        return value == null ? "" : value;
-    }
-
-    private String trim(String value) {
-        String text = value == null ? "" : value.trim();
-        if (text.length() <= MAX_PAYLOAD_CHARS) {
-            return text;
-        }
-        return text.substring(0, MAX_PAYLOAD_CHARS) + "\n...<TRUNCATED>";
-    }
 }

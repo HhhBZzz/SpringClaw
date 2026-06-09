@@ -1,0 +1,52 @@
+# ==============================================================
+# SpringClaw Production Profile
+# ==============================================================
+# Activate with: --spring.profiles.active=prod
+# or: SPRING_PROFILES_ACTIVE=prod
+#
+# This profile overrides base defaults for production safety.
+# All credentials MUST be provided via environment variables;
+# no insecure fallback values are provided here.
+# ==============================================================
+
+server:
+  # In production, do not expose actuator details to callers
+  error:
+    include-message: never
+    include-stacktrace: never
+
+spring:
+  datasource:
+    # Fail fast if MySQL credentials are not provided
+    hikari:
+      connection-timeout: 5000
+
+management:
+  endpoint:
+    health:
+      # Only show health details to authenticated users
+      show-details: when-authorized
+  endpoints:
+    web:
+      exposure:
+        # Restrict to health only in production
+        include: health
+
+springclaw:
+  auth:
+    cookie:
+      # Production must use HTTPS
+      secure: true
+  chat:
+    # Disable local fallback in production (model should always be available)
+    local-fallback-enabled: ${SPRINGCLAW_CHAT_LOCAL_FALLBACK_ENABLED:false}
+  tools:
+    system:
+      # Disable shell command execution in production by default
+      command-enabled: ${SPRINGCLAW_SYSTEM_COMMAND_ENABLED:false}
+
+logging:
+  level:
+    com.springclaw: WARN
+    org.springframework.ai: WARN
+    org.springframework.web: WARN

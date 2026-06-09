@@ -1,5 +1,6 @@
 package com.springclaw.service.agent.executor;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.CapabilityExecutor;
 import com.springclaw.service.agent.CapabilityResult;
@@ -66,15 +67,12 @@ public class WebCapabilityExecutor extends AbstractCapabilityExecutor implements
             return true;
         }
         boolean hasGenericWeb = decision.selectedCapabilities().stream()
-                .map(this::normalize)
+                .map(TextUtils::normalize)
                 .anyMatch("web"::equals);
         boolean hasSpecializedRealtime = decision.selectedCapabilities().stream()
-                .map(this::normalize)
+                .map(TextUtils::normalize)
                 .anyMatch(value -> "weather".equals(value) || "news".equals(value) || "exchange".equals(value));
         return hasGenericWeb && !hasSpecializedRealtime;
     }
 
-    private String normalize(String value) {
-        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT).replace('_', '-');
-    }
 }

@@ -38,6 +38,7 @@ public class SimplifiedOparEngine implements AgentEngine {
     private final MessageEventService messageEventService;
     private final AgentCapabilityExecutionService capabilityExecutionService;
     private final ChatResponsePolicyService chatResponsePolicyService;
+    private final LocalExecutionSupport localExecutionSupport;
 
     public SimplifiedOparEngine(AiProviderService aiProviderService,
                                 ToolOrchestrator toolOrchestrator,
@@ -48,7 +49,8 @@ public class SimplifiedOparEngine implements AgentEngine {
                                 OparContextAwareSupport contextAwareSupport,
                                 ConversationAdvisorSupport conversationAdvisorSupport,
                                 MessageEventService messageEventService,
-                                ChatResponsePolicyService chatResponsePolicyService) {
+                                ChatResponsePolicyService chatResponsePolicyService,
+                                LocalExecutionSupport localExecutionSupport) {
         this(
                 aiProviderService,
                 toolOrchestrator,
@@ -60,7 +62,8 @@ public class SimplifiedOparEngine implements AgentEngine {
                 conversationAdvisorSupport,
                 messageEventService,
                 AgentCapabilityExecutionService.noop(),
-                chatResponsePolicyService
+                chatResponsePolicyService,
+                localExecutionSupport
         );
     }
 
@@ -75,7 +78,8 @@ public class SimplifiedOparEngine implements AgentEngine {
                                 ConversationAdvisorSupport conversationAdvisorSupport,
                                 MessageEventService messageEventService,
                                 AgentCapabilityExecutionService capabilityExecutionService,
-                                ChatResponsePolicyService chatResponsePolicyService) {
+                                ChatResponsePolicyService chatResponsePolicyService,
+                                LocalExecutionSupport localExecutionSupport) {
         this.aiProviderService = aiProviderService;
         this.toolOrchestrator = toolOrchestrator;
         this.localSkillFallbackService = localSkillFallbackService;
@@ -89,6 +93,7 @@ public class SimplifiedOparEngine implements AgentEngine {
                 ? AgentCapabilityExecutionService.noop()
                 : capabilityExecutionService;
         this.chatResponsePolicyService = chatResponsePolicyService;
+        this.localExecutionSupport = localExecutionSupport;
     }
 
     @Override
@@ -285,30 +290,15 @@ public class SimplifiedOparEngine implements AgentEngine {
     }
 
     private LocalSkillFallbackService.LocalSkillResult tryControlPlaneLocalResult(String question) {
-        try {
-            return localSkillFallbackService.tryHandleControlPlane(question).orElse(null);
-        } catch (Exception ex) {
-            log.warn("简化模式控制面本地执行失败，reason={}", ex.getMessage());
-            return null;
-        }
+        return localExecutionSupport.tryControlPlane(question, true);
     }
 
     private LocalSkillFallbackService.LocalSkillResult tryLocalFallbackResult(String question) {
-        try {
-            return localSkillFallbackService.tryHandleStructured(question).orElse(null);
-        } catch (Exception ex) {
-            log.warn("简化模式本地兜底失败，reason={}", ex.getMessage());
-            return null;
-        }
+        return localExecutionSupport.tryFallback(question, true);
     }
 
     private LocalSkillFallbackService.LocalSkillResult tryPriorityStructuredLocalResult(String question) {
-        try {
-            return localSkillFallbackService.tryHandlePriorityStructured(question).orElse(null);
-        } catch (Exception ex) {
-            log.warn("简化模式优先结构化技能执行失败，reason={}", ex.getMessage());
-            return null;
-        }
+        return localExecutionSupport.tryPriorityStructured(question, true);
     }
 
     private String renderUserPrompt(String question, List<AgentCapabilityResult> capabilityResults) {

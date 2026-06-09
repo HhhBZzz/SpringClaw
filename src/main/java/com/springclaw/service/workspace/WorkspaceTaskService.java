@@ -1,6 +1,7 @@
 package com.springclaw.service.workspace;
 
 import com.springclaw.common.exception.BusinessException;
+import com.springclaw.common.util.TextUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -102,7 +103,7 @@ public class WorkspaceTaskService {
             }
         }
 
-        return trim(builder.toString().trim());
+        return TextUtils.truncate(builder.toString().trim(), maxReadChars);
     }
 
     private String analyzeProjectStructure(String goal) {
@@ -139,7 +140,7 @@ public class WorkspaceTaskService {
                 .append("2. 再看 controller/service/tool/skill 相关目录，理解请求如何进入业务和工具执行。\n")
                 .append("3. 最后看 frontend Vue 工程，确认页面如何调用后端接口。");
 
-        return trim(builder.toString().trim());
+        return TextUtils.truncate(builder.toString().trim(), maxReadChars);
     }
 
     private List<String> detectProjectStack() {
@@ -335,10 +336,10 @@ public class WorkspaceTaskService {
 
     private boolean looksLikeProjectStructureQuestion(String goal) {
         String lower = goal.toLowerCase(Locale.ROOT);
-        boolean explicitStructure = containsAny(lower, "项目结构", "工程结构", "目录结构", "整体结构", "项目架构", "代码结构");
-        boolean structureIntent = containsAny(lower, "结构", "架构", "目录", "模块", "组成", "怎么组织", "怎样", "概览", "梳理");
-        boolean projectScope = containsAny(lower, "项目", "工程", "代码库", "仓库", "整体", "当前");
-        boolean preciseLocation = containsAny(lower, "在哪个文件", "实现在哪", "源码位置", "代码位置", "哪个类", "哪个方法");
+        boolean explicitStructure = TextUtils.containsAny(lower, "项目结构", "工程结构", "目录结构", "整体结构", "项目架构", "代码结构");
+        boolean structureIntent = TextUtils.containsAny(lower, "结构", "架构", "目录", "模块", "组成", "怎么组织", "怎样", "概览", "梳理");
+        boolean projectScope = TextUtils.containsAny(lower, "项目", "工程", "代码库", "仓库", "整体", "当前");
+        boolean preciseLocation = TextUtils.containsAny(lower, "在哪个文件", "实现在哪", "源码位置", "代码位置", "哪个类", "哪个方法");
         return explicitStructure || (projectScope && structureIntent && !preciseLocation);
     }
 
@@ -362,14 +363,6 @@ public class WorkspaceTaskService {
         return Files.isDirectory(rootPath.resolve(relativePath));
     }
 
-    private boolean containsAny(String text, String... keys) {
-        for (String key : keys) {
-            if (text.contains(key)) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     private boolean isIgnored(Path path) {
         String relative = toRelative(path).toLowerCase(Locale.ROOT);
@@ -395,16 +388,6 @@ public class WorkspaceTaskService {
             return value;
         }
         return value.substring(0, 160) + "...";
-    }
-
-    private String trim(String text) {
-        if (text == null) {
-            return "";
-        }
-        if (text.length() <= maxReadChars) {
-            return text;
-        }
-        return text.substring(0, maxReadChars) + "\n...<TRUNCATED>";
     }
 
     private String toRelative(Path path) {

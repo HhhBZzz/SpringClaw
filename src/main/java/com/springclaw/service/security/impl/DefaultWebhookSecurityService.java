@@ -1,5 +1,6 @@
 package com.springclaw.service.security.impl;
 
+import com.springclaw.common.util.TextUtils;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.springclaw.common.exception.BusinessException;
@@ -106,7 +107,8 @@ public class DefaultWebhookSecurityService implements WebhookSecurityService {
     }
 
     private void ensureNotReplayed(String channel, long ts, String nonce) {
-        String nonceKey = "springclaw:webhook:nonce:" + normalize(channel) + ":" + ts + ":" + nonce;
+        String ch = TextUtils.normalize(channel);
+        String nonceKey = "springclaw:webhook:nonce:" + (ch.isEmpty() ? "unknown" : ch) + ":" + ts + ":" + nonce;
 
         if (redisEnabled && redisTemplate != null) {
             try {
@@ -129,7 +131,8 @@ public class DefaultWebhookSecurityService implements WebhookSecurityService {
     }
 
     private String resolveSecret(String channel) {
-        String lower = normalize(channel);
+        String ch = TextUtils.normalize(channel);
+        String lower = ch.isEmpty() ? "unknown" : ch;
         if ("telegram".equals(lower) && StringUtils.hasText(telegramSecret)) {
             return telegramSecret;
         }
@@ -178,7 +181,4 @@ public class DefaultWebhookSecurityService implements WebhookSecurityService {
         }
     }
 
-    private String normalize(String channel) {
-        return channel == null ? "unknown" : channel.trim().toLowerCase();
-    }
 }

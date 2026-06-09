@@ -1,6 +1,7 @@
 package com.springclaw.service.chat;
 
 import com.springclaw.common.exception.BusinessException;
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.files.LocalFilesystemService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
@@ -130,32 +131,6 @@ public class LocalSkillFallbackService {
                 aiProviderService,
                 localFilesystemService,
                 null);
-    }
-
-    public LocalSkillFallbackService(boolean enabled,
-                                     SystemToolPack systemToolPack,
-                                     WorkspaceSearchToolPack workspaceSearchToolPack,
-                                     WebSearchToolPack webSearchToolPack,
-                                     WeatherToolPack weatherToolPack,
-                                     ExchangeRateToolPack exchangeRateToolPack,
-                                     NewsToolPack newsToolPack,
-                                     ScriptSkillToolPack scriptSkillToolPack,
-                                     BuiltinSkillExecutionService builtinSkillExecutionService,
-                                     SkillRuntimeService skillRuntimeService,
-                                     ScriptSkillCatalogService scriptSkillCatalogService,
-                                     AiProviderService aiProviderService) {
-        this.enabled = enabled;
-        this.workspaceSearchToolPack = workspaceSearchToolPack;
-        this.webSearchToolPack = webSearchToolPack;
-        this.weatherToolPack = weatherToolPack;
-        this.exchangeRateToolPack = exchangeRateToolPack;
-        this.newsToolPack = newsToolPack;
-        this.scriptSkillToolPack = scriptSkillToolPack;
-        this.builtinSkillExecutionService = builtinSkillExecutionService;
-        this.modelControlSupport = new LocalSkillModelControlSupport(systemToolPack, aiProviderService);
-        this.querySupport = new LocalSkillQuerySupport(skillRuntimeService, scriptSkillCatalogService);
-        this.localFilesystemService = null;
-        this.capabilityRegistry = null;
     }
 
     private LocalSkillFallbackService(boolean enabled,
@@ -298,7 +273,7 @@ public class LocalSkillFallbackService {
         }
 
         // 运行时诊断（无对应 ToolPack，保留）
-        if (containsAny(lower, "端口占用", "谁占用了", "启动失败", "服务没起来", "port", "端口被占用", "诊断运行")) {
+        if (TextUtils.containsAny(lower, "端口占用", "谁占用了", "启动失败", "服务没起来", "port", "端口被占用", "诊断运行")) {
             String answer = querySupport.runScriptSkillByCategory("runtime", q);
             if (StringUtils.hasText(answer)) {
                 return localResult("RUNTIME_DIAGNOSIS", answer, answer, true);
@@ -415,7 +390,7 @@ public class LocalSkillFallbackService {
      * 当所有构造函数都传递了 CapabilityRegistry 后，此方法可删除。
      */
     private Optional<LocalSkillResult> tryLegacyFallback(String q, String lower) {
-        if (containsAny(lower, "天气", "气温", "下雨", "weather")) {
+        if (TextUtils.containsAny(lower, "天气", "气温", "下雨", "weather")) {
             String city = querySupport.extractCity(q);
             String answer = weatherToolPack.queryWeather(city);
             if (querySupport.looksLikeFailure(answer)) {
@@ -426,12 +401,12 @@ public class LocalSkillFallbackService {
             }
             return localResult("WEATHER_QUERY", answer, answer, true);
         }
-        if (containsAny(lower, "汇率", "exchange", "美元", "人民币", "欧元", "日元")) {
+        if (TextUtils.containsAny(lower, "汇率", "exchange", "美元", "人民币", "欧元", "日元")) {
             String[] currencies = querySupport.extractCurrencies(q);
             String answer = exchangeRateToolPack.queryExchangeRate(currencies[0], currencies[1]);
             return localResult("EXCHANGE_RATE", answer, answer, true);
         }
-        if (containsAny(lower, "新闻", "热点", "资讯", "news")) {
+        if (TextUtils.containsAny(lower, "新闻", "热点", "资讯", "news")) {
             String keyword = querySupport.extractNewsKeyword(q);
             String answer = newsToolPack.searchNews(keyword);
             return localResult("NEWS_SEARCH", answer, answer, true);
@@ -451,7 +426,7 @@ public class LocalSkillFallbackService {
             String answer = webSearchToolPack.webSearch(keyword);
             return localResult("WEB_SEARCH", answer, answer, true);
         }
-        if (containsAny(lower, "脚本技能列表", "有哪些脚本技能", "可用脚本技能", "script skill", "script skills")) {
+        if (TextUtils.containsAny(lower, "脚本技能列表", "有哪些脚本技能", "可用脚本技能", "script skill", "script skills")) {
             String answer = scriptSkillToolPack.listScriptSkills();
             return localResult("SCRIPT_SKILL_LIST", answer, answer, true);
         }
@@ -484,7 +459,7 @@ public class LocalSkillFallbackService {
         if (!mentionsDesktop) {
             return false;
         }
-        return containsAny(lower,
+        return TextUtils.containsAny(lower,
                 "授权桌面", "桌面全部", "桌面所有", "桌面文件", "桌面目录",
                 "列出", "列表", "有哪些", "有什么", "查看", "看看", "全部", "所有", "文件清单");
     }
@@ -571,7 +546,7 @@ public class LocalSkillFallbackService {
     private List<DesktopEntry> parseDesktopEntries(String listing) {
         List<DesktopEntry> entries = new ArrayList<>();
         List<String> seenNames = new ArrayList<>();
-        for (String rawLine : safe(listing).split("\\R")) {
+        for (String rawLine : TextUtils.safe(listing).split("\\R")) {
             String line = rawLine.trim();
             if (!StringUtils.hasText(line)) {
                 continue;
@@ -596,7 +571,7 @@ public class LocalSkillFallbackService {
     }
 
     private String decodeFileName(String name) {
-        String text = safe(name);
+        String text = TextUtils.safe(name);
         if (!text.contains("%")) {
             return text;
         }
@@ -608,14 +583,14 @@ public class LocalSkillFallbackService {
     }
 
     private boolean isDesktopNoiseFile(String name) {
-        String text = safe(name).trim();
+        String text = TextUtils.safe(name).trim();
         return !StringUtils.hasText(text)
                 || text.startsWith(".")
                 || text.startsWith("~$");
     }
 
     private String extractFileName(String path) {
-        String text = safe(path).trim();
+        String text = TextUtils.safe(path).trim();
         int slash = text.lastIndexOf('/');
         if (slash >= 0 && slash < text.length() - 1) {
             return text.substring(slash + 1);
@@ -628,11 +603,11 @@ public class LocalSkillFallbackService {
     }
 
     private String escapeMarkdownCell(String text) {
-        return safe(text).replace("|", "\\|");
+        return TextUtils.safe(text).replace("|", "\\|");
     }
 
     private boolean looksLikeLocalFileBoundaryQuestion(String lower) {
-        return containsAny(lower,
+        return TextUtils.containsAny(lower,
                 "本地文件边界", "本地文件权限", "授权本地目录", "授权目录", "授权根目录",
                 "授权文件", "电脑文件", "本机文件", "能读取哪些本地", "读取边界",
                 "只能读取当前项目", "只能看当前项目", "当前项目目录");
@@ -670,18 +645,6 @@ public class LocalSkillFallbackService {
         return Optional.of(new LocalSkillResult(route, executionDetails, fallbackAnswer, detailed));
     }
 
-    private String safe(String text) {
-        return text == null ? "" : text;
-    }
-
-    private boolean containsAny(String text, String... keys) {
-        for (String key : keys) {
-            if (text.contains(key)) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     public record LocalSkillResult(String route,
                                    String executionDetails,

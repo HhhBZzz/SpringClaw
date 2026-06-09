@@ -1,5 +1,6 @@
 package com.springclaw.service.agent.executor;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.CapabilityExecutor;
 import com.springclaw.service.agent.CapabilityResult;
@@ -74,7 +75,7 @@ public class RealtimeCapabilityExecutor extends AbstractCapabilityExecutor imple
                                          Callable<String> action) {
         long startedAt = System.currentTimeMillis();
         try {
-            String payload = trim(action.call());
+            String payload = TextUtils.truncate(action.call(), MAX_PAYLOAD_CHARS);
             String status = looksLikeFailure(payload) ? "failed" : "success";
             return new CapabilityResult(capabilityId, toolset, status, summary, payload, System.currentTimeMillis() - startedAt, "read");
         } catch (Exception ex) {
@@ -95,14 +96,14 @@ public class RealtimeCapabilityExecutor extends AbstractCapabilityExecutor imple
         if (decision == null || decision.selectedCapabilities() == null) {
             return false;
         }
-        String expected = normalize(capabilityId);
+        String expected = TextUtils.normalize(capabilityId);
         return decision.selectedCapabilities().stream()
-                .map(this::normalize)
+                .map(TextUtils::normalize)
                 .anyMatch(expected::equals);
     }
 
     private String extractWeatherCity(String question) {
-        String text = safe(question).trim();
+        String text = TextUtils.safe(question).trim();
         String cleaned = text
                 .replaceAll("(?i)weather", "")
                 .replace("天气怎么样", "")
@@ -124,7 +125,7 @@ public class RealtimeCapabilityExecutor extends AbstractCapabilityExecutor imple
     }
 
     private String extractNewsKeyword(String question) {
-        String text = safe(question).trim();
+        String text = TextUtils.safe(question).trim();
         String cleaned = text
                 .replace("新闻", "")
                 .replace("最新", "")
@@ -137,7 +138,7 @@ public class RealtimeCapabilityExecutor extends AbstractCapabilityExecutor imple
     }
 
     private CurrencyPair extractCurrencyPair(String question) {
-        String text = safe(question);
+        String text = TextUtils.safe(question);
         String lower = text.toLowerCase(Locale.ROOT);
         if (lower.contains("美元") && (lower.contains("人民币") || lower.contains("cny"))) {
             return new CurrencyPair("USD", "CNY");
@@ -160,7 +161,7 @@ public class RealtimeCapabilityExecutor extends AbstractCapabilityExecutor imple
     }
 
     private boolean looksLikeFailure(String payload) {
-        String lower = safe(payload).toLowerCase(Locale.ROOT);
+        String lower = TextUtils.safe(payload).toLowerCase(Locale.ROOT);
         return !StringUtils.hasText(lower)
                 || lower.contains("查询失败")
                 || lower.contains("检索失败")
@@ -170,18 +171,6 @@ public class RealtimeCapabilityExecutor extends AbstractCapabilityExecutor imple
                 || lower.contains("请输入")
                 || lower.contains("不能为空")
                 || lower.contains("temporarily unavailable");
-    }
-
-    private String normalize(String value) {
-        return safe(value).trim().toLowerCase(Locale.ROOT).replace('_', '-');
-    }
-
-    private String trim(String value) {
-        String text = safe(value).trim();
-        if (text.length() <= MAX_PAYLOAD_CHARS) {
-            return text;
-        }
-        return text.substring(0, MAX_PAYLOAD_CHARS) + "\n...<TRUNCATED>";
     }
 
     private record CurrencyPair(String base, String target) {

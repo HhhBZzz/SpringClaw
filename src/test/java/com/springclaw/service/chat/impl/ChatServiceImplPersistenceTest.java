@@ -3,11 +3,17 @@ package com.springclaw.service.chat.impl;
 import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.agent.AgentEngine;
+import com.springclaw.service.agent.AgentRuntimeEngine;
+import com.springclaw.service.agent.EngineSelector;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
 import com.springclaw.service.usage.LlmUsageRecordService;
+import com.springclaw.tool.runtime.ToolOrchestrator;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -34,6 +40,10 @@ class ChatServiceImplPersistenceTest {
         ChatContextFactory chatContextFactory = mock(ChatContextFactory.class);
         ChatResultPersister chatResultPersister = mock(ChatResultPersister.class);
         MetaGuardExecutor metaGuardExecutor = mock(MetaGuardExecutor.class);
+        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
+        AgentRuntimeEngine agentRuntimeEngine = mock(AgentRuntimeEngine.class);
+        EngineSelector engineSelector = mock(EngineSelector.class);
+        SseEventBridge sseEventBridge = mock(SseEventBridge.class);
 
         AgentSession session = new AgentSession();
         session.setId(1L);
@@ -77,7 +87,8 @@ class ChatServiceImplPersistenceTest {
         when(chatGuardService.acquireSessionLock("s1")).thenReturn("lock");
         when(aiProviderService.activeClient()).thenReturn(activeClient);
         when(chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
-        when(oparLoopEngine.runLoop(eq(activeClient), eq("system"), eq(assembled), anyString(), any(), any()))
+        when(engineSelector.select(any(ChatContext.class))).thenReturn(oparLoopEngine);
+        when(oparLoopEngine.execute(any(), any()))
                 .thenReturn(new ChatExecutionResult(
                         assembled.observePrompt(),
                         "PLAN=[STEP 1] READY",
@@ -97,7 +108,17 @@ class ChatServiceImplPersistenceTest {
                 conversationAdvisorSupport,
                 chatContextFactory,
                 chatResultPersister,
-                metaGuardExecutor
+                metaGuardExecutor,
+                toolOrchestrator,
+                null,
+                agentRuntimeEngine,
+                engineSelector,
+                null,
+                null,
+                null,
+                sseEventBridge,
+                false,
+                true
         );
 
         service.chat(new ChatRequest("s1", "u1", "在么", "feishu"));
@@ -118,6 +139,10 @@ class ChatServiceImplPersistenceTest {
         ChatContextFactory chatContextFactory = mock(ChatContextFactory.class);
         ChatResultPersister chatResultPersister = mock(ChatResultPersister.class);
         MetaGuardExecutor metaGuardExecutor = mock(MetaGuardExecutor.class);
+        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
+        AgentRuntimeEngine agentRuntimeEngine = mock(AgentRuntimeEngine.class);
+        EngineSelector engineSelector = mock(EngineSelector.class);
+        SseEventBridge sseEventBridge = mock(SseEventBridge.class);
 
         AssembledContext assembled = new AssembledContext(
                 "task:shadow:t1",
@@ -162,7 +187,8 @@ class ChatServiceImplPersistenceTest {
         when(chatGuardService.acquireSessionLock("task:shadow:t1")).thenReturn("lock");
         when(aiProviderService.activeClient()).thenReturn(activeClient);
         when(chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
-        when(simplifiedOparEngine.run(eq(activeClient), eq("system"), eq(assembled), anyString(), any(), any()))
+        when(engineSelector.select(any(ChatContext.class))).thenReturn(simplifiedOparEngine);
+        when(simplifiedOparEngine.execute(any(), any()))
                 .thenReturn(new ChatExecutionResult(
                         assembled.observePrompt(),
                         "SIMPLIFIED",
@@ -182,7 +208,17 @@ class ChatServiceImplPersistenceTest {
                 conversationAdvisorSupport,
                 chatContextFactory,
                 chatResultPersister,
-                metaGuardExecutor
+                metaGuardExecutor,
+                toolOrchestrator,
+                null,
+                agentRuntimeEngine,
+                engineSelector,
+                null,
+                null,
+                null,
+                sseEventBridge,
+                false,
+                true
         );
 
         ChatServiceImpl.TaskChatExecutionResult result = service.executeTaskMessage(

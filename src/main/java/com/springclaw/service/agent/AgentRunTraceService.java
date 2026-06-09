@@ -1,5 +1,6 @@
 package com.springclaw.service.agent;
 
+import com.springclaw.common.util.TextUtils;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.service.event.MessageEventService;
@@ -66,11 +67,11 @@ public class AgentRunTraceService {
                                      long durationMs,
                                      AgentQualityScore quality) {
         AgentRunTraceEvent event = new AgentRunTraceEvent(
-                safe(requestId),
-                safe(stepName),
-                safe(type),
-                safe(status),
-                safe(detail),
+                TextUtils.safe(requestId),
+                TextUtils.safe(stepName),
+                TextUtils.safe(type),
+                TextUtils.safe(status),
+                TextUtils.safe(detail),
                 Math.max(0L, durationMs),
                 System.currentTimeMillis(),
                 quality == null ? null : quality.overallScore(),
@@ -238,8 +239,8 @@ public class AgentRunTraceService {
                 defaultText(event.type(), "tool"),
                 defaultText(event.status(), "success"),
                 event.durationMs(),
-                truncate(event.detail(), 1024),
-                "failed".equalsIgnoreCase(event.status()) ? truncate(event.detail(), 1024) : null,
+                TextUtils.truncate(event.detail(), 1024),
+                "failed".equalsIgnoreCase(event.status()) ? TextUtils.truncate(event.detail(), 1024) : null,
                 now,
                 now);
     }
@@ -263,21 +264,12 @@ public class AgentRunTraceService {
         return "failed".equalsIgnoreCase(event.status()) ? "FAILED" : "RUNNING";
     }
 
-    private String safe(String text) {
-        return text == null ? "" : text;
-    }
-
     private String defaultText(String value, String fallback) {
         return StringUtils.hasText(value) ? value.trim() : fallback;
     }
 
     private String emptyToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
-    }
-
-    private String truncate(String text, int maxLen) {
-        String value = safe(text);
-        return value.length() <= maxLen ? value : value.substring(0, maxLen);
     }
 
     private String serializeQuality(AgentQualityScore quality) {

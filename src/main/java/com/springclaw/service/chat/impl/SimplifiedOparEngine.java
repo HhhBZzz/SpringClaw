@@ -1,13 +1,10 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.service.ai.AiProviderService;
-import com.springclaw.service.agent.AgentCapabilityExecutionService;
-import com.springclaw.service.agent.AgentCapabilityResult;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
-import com.springclaw.service.event.MessageEventService;
 import com.springclaw.tool.runtime.ToolOrchestrator;
 import com.springclaw.tool.runtime.ToolExecutionContext;
 import com.springclaw.tool.runtime.ToolExecutionContextHolder;
@@ -15,9 +12,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-
-import java.util.Comparator;
-import java.util.List;
 
 /**
  * 简化版 Agent 执行器：简单问题直答，需要时再让模型自行调用工具。
@@ -35,37 +29,8 @@ public class SimplifiedOparEngine implements AgentEngine {
     private final ModelCallExecutor modelCallExecutor;
     private final OparContextAwareSupport contextAwareSupport;
     private final ConversationAdvisorSupport conversationAdvisorSupport;
-    private final MessageEventService messageEventService;
-    private final AgentCapabilityExecutionService capabilityExecutionService;
     private final ChatResponsePolicyService chatResponsePolicyService;
     private final LocalExecutionSupport localExecutionSupport;
-
-    public SimplifiedOparEngine(AiProviderService aiProviderService,
-                                ToolOrchestrator toolOrchestrator,
-                                LocalSkillFallbackService localSkillFallbackService,
-                                LocalExecutionNarrator localExecutionNarrator,
-                                ModelTransportGuardService modelTransportGuardService,
-                                ModelCallExecutor modelCallExecutor,
-                                OparContextAwareSupport contextAwareSupport,
-                                ConversationAdvisorSupport conversationAdvisorSupport,
-                                MessageEventService messageEventService,
-                                ChatResponsePolicyService chatResponsePolicyService,
-                                LocalExecutionSupport localExecutionSupport) {
-        this(
-                aiProviderService,
-                toolOrchestrator,
-                localSkillFallbackService,
-                localExecutionNarrator,
-                modelTransportGuardService,
-                modelCallExecutor,
-                contextAwareSupport,
-                conversationAdvisorSupport,
-                messageEventService,
-                AgentCapabilityExecutionService.noop(),
-                chatResponsePolicyService,
-                localExecutionSupport
-        );
-    }
 
     @org.springframework.beans.factory.annotation.Autowired
     public SimplifiedOparEngine(AiProviderService aiProviderService,
@@ -76,8 +41,6 @@ public class SimplifiedOparEngine implements AgentEngine {
                                 ModelCallExecutor modelCallExecutor,
                                 OparContextAwareSupport contextAwareSupport,
                                 ConversationAdvisorSupport conversationAdvisorSupport,
-                                MessageEventService messageEventService,
-                                AgentCapabilityExecutionService capabilityExecutionService,
                                 ChatResponsePolicyService chatResponsePolicyService,
                                 LocalExecutionSupport localExecutionSupport) {
         this.aiProviderService = aiProviderService;
@@ -88,10 +51,6 @@ public class SimplifiedOparEngine implements AgentEngine {
         this.modelCallExecutor = modelCallExecutor;
         this.contextAwareSupport = contextAwareSupport;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
-        this.messageEventService = messageEventService;
-        this.capabilityExecutionService = capabilityExecutionService == null
-                ? AgentCapabilityExecutionService.noop()
-                : capabilityExecutionService;
         this.chatResponsePolicyService = chatResponsePolicyService;
         this.localExecutionSupport = localExecutionSupport;
     }
@@ -112,7 +71,7 @@ public class SimplifiedOparEngine implements AgentEngine {
     }
 
     @Override
-    public ChatExecutionResult execute(ChatContext ctx, OparLoopEngine.FallbackResponder fallbackResponder) {
+    public ChatExecutionResult execute(ChatContext ctx, AgentEngine.FallbackResponder fallbackResponder) {
         return run(
                 ctx.activeClient(),
                 ctx.systemPrompt(),
@@ -127,7 +86,7 @@ public class SimplifiedOparEngine implements AgentEngine {
                                    String systemPrompt,
                                    AssembledContext assembled,
                                    String requestId,
-                                   OparLoopEngine.FallbackResponder fallbackResponder) {
+                                   AgentEngine.FallbackResponder fallbackResponder) {
         return run(activeClient, systemPrompt, assembled, requestId, fallbackResponder, null);
     }
 
@@ -135,7 +94,7 @@ public class SimplifiedOparEngine implements AgentEngine {
                                    String systemPrompt,
                                    AssembledContext assembled,
                                    String requestId,
-                                   OparLoopEngine.FallbackResponder fallbackResponder,
+                                   AgentEngine.FallbackResponder fallbackResponder,
                                    AgentDecision decision) {
         LocalSkillFallbackService.LocalSkillResult contextAware = contextAwareSupport.tryContextAwareLocalResult(assembled);
         if (contextAware != null) {
@@ -156,7 +115,6 @@ public class SimplifiedOparEngine implements AgentEngine {
             return buildDisabledResult(systemPrompt, activeClient, assembled, fallbackResponder);
         }
 
-        List<AgentCapabilityResult> capabilityResults = capabilityExecutionService.execute(decision, assembled, requestId);
         Object[] tools = toolOrchestrator.selectAgentTools(assembled.channel(), assembled.userId(), decision);
         ToolExecutionContext toolContext = new ToolExecutionContext(
                 assembled.sessionKey(),
@@ -179,7 +137,7 @@ public class SimplifiedOparEngine implements AgentEngine {
                     client -> {
                         var requestSpec = client.chatClient().prompt()
                                 .system(systemPrompt)
-                                .user(renderUserPrompt(assembled.question(), capabilityResults));
+                                .user(renderUserPrompt(assembled.question()));
                         if (DeepSeekChatCompatibility.supportsNativeToolCalling(client) && tools != null && tools.length > 0) {
                             requestSpec = requestSpec.tools(tools);
                         }
@@ -206,22 +164,12 @@ public class SimplifiedOparEngine implements AgentEngine {
                 if (localResult != null) {
                     return buildLocalResult(systemPrompt, assembled, localResult, "SIMPLIFIED:LOCAL_FALLBACK");
                 }
-                String auditFallback = buildToolAuditFallback(assembled, requestId, "模型未返回可用内容");
-                if (StringUtils.hasText(auditFallback)) {
-                    return new ChatExecutionResult(
-                            assembled.observePrompt(),
-                            "SIMPLIFIED: 工具已执行，但模型未返回可用内容，已改用工具结果兜底。",
-                            "行动已完成部分工具调用，使用工具审计结果直接组织答复。",
-                            auditFallback,
-                            false
-                    );
-                }
                 return buildDisabledResult(systemPrompt, result.client(), assembled, fallbackResponder);
             }
             return new ChatExecutionResult(
                     assembled.observePrompt(),
                     "SIMPLIFIED: 模型自行判断是否需要工具。",
-                    buildActionTrace(result, tools, capabilityResults),
+                    buildActionTrace(result, tools),
                     answer,
                     true
             );
@@ -230,16 +178,6 @@ public class SimplifiedOparEngine implements AgentEngine {
             LocalSkillFallbackService.LocalSkillResult localResult = tryLocalFallbackResult(assembled.question());
             if (localResult != null) {
                 return buildLocalResult(systemPrompt, assembled, localResult, "SIMPLIFIED:DEGRADED_LOCAL");
-            }
-            String auditFallback = buildToolAuditFallback(assembled, requestId, ex.getMessage());
-            if (StringUtils.hasText(auditFallback)) {
-                return new ChatExecutionResult(
-                        assembled.observePrompt(),
-                        "SIMPLIFIED: 工具已执行，但模型总结超时，已改用工具结果兜底。",
-                        "行动已完成部分工具调用，远程模型在整理答案时失败。reason=" + safe(ex.getMessage()),
-                        auditFallback,
-                        false
-                );
             }
             return new ChatExecutionResult(
                     assembled.observePrompt(),
@@ -275,7 +213,7 @@ public class SimplifiedOparEngine implements AgentEngine {
     private ChatExecutionResult buildDisabledResult(String systemPrompt,
                                                     AiProviderService.ActiveChatClient activeClient,
                                                     AssembledContext assembled,
-                                                    OparLoopEngine.FallbackResponder fallbackResponder) {
+                                                    AgentEngine.FallbackResponder fallbackResponder) {
         LocalSkillFallbackService.LocalSkillResult localResult = tryLocalFallbackResult(assembled.question());
         if (localResult != null) {
             return buildLocalResult(systemPrompt, assembled, localResult, "SIMPLIFIED:MODEL_DISABLED");
@@ -301,39 +239,20 @@ public class SimplifiedOparEngine implements AgentEngine {
         return localExecutionSupport.tryPriorityStructured(question, true);
     }
 
-    private String renderUserPrompt(String question, List<AgentCapabilityResult> capabilityResults) {
-        String capabilityContext = renderCapabilityContext(capabilityResults);
+    private String renderUserPrompt(String question) {
         return """
                 用户问题：%s
 
-                后端已主动执行的能力结果：
-                %s
-
                 直接回答用户问题。
-                如果上面已有能力结果，必须基于这些证据回答，不要声称无法访问本地项目或运行环境。
                 如果仍需要更多工具，你可以自行决定调用合适的工具；如果不需要工具，就直接给出最终答案。
                 不要输出阶段名、计划过程、内部系统说明。
-                """.formatted(safe(question), capabilityContext);
+                """.formatted(safe(question));
     }
 
     private String buildActionTrace(ModelCallExecutor.ModelCallResult<String> result,
-                                    Object[] tools,
-                                    List<AgentCapabilityResult> capabilityResults) {
+                                    Object[] tools) {
         StringBuilder builder = new StringBuilder();
         builder.append("SIMPLIFIED: 已完成一次模型回答");
-        if (capabilityResults != null && !capabilityResults.isEmpty()) {
-            builder.append("。主动执行能力数量=").append(capabilityResults.size());
-            for (AgentCapabilityResult capabilityResult : capabilityResults) {
-                builder.append("\n- ")
-                        .append(capabilityResult.capabilityId())
-                        .append(" [")
-                        .append(capabilityResult.status())
-                        .append("] ")
-                        .append(capabilityResult.summary())
-                        .append(": ")
-                        .append(truncateToolDetail(capabilityResult.payload(), 520));
-            }
-        }
         if (result.failedOver()) {
             builder.append("，并执行了同 provider 模型切换");
         }
@@ -346,148 +265,7 @@ public class SimplifiedOparEngine implements AgentEngine {
         return builder.toString();
     }
 
-    private String renderCapabilityContext(List<AgentCapabilityResult> capabilityResults) {
-        if (capabilityResults == null || capabilityResults.isEmpty()) {
-            return "（本轮未预执行能力）";
-        }
-        StringBuilder builder = new StringBuilder();
-        for (AgentCapabilityResult result : capabilityResults) {
-            builder.append("- capability=")
-                    .append(result.capabilityId())
-                    .append(", status=")
-                    .append(result.status())
-                    .append(", summary=")
-                    .append(result.summary())
-                    .append("\n")
-                    .append(result.payload())
-                    .append("\n");
-        }
-        return builder.toString().trim();
-    }
-
-    private String buildToolAuditFallback(AssembledContext assembled, String requestId, String reason) {
-        if (!StringUtils.hasText(requestId)) {
-            return "";
-        }
-        List<ToolAuditEntry> entries = messageEventService.listSessionEvents(
-                        assembled.sessionKey(),
-                        "SYSTEM",
-                        "TOOL",
-                        24,
-                        false
-                ).stream()
-                .filter(event -> requestId.equals(event.getRequestId()))
-                .map(event -> parseToolAuditEntry(event.getContent()))
-                .filter(entry -> entry != null)
-                .sorted(Comparator.comparing(ToolAuditEntry::toolName))
-                .toList();
-
-        List<ToolAuditEntry> successEntries = entries.stream()
-                .filter(entry -> "SUCCESS".equals(entry.status()))
-                .filter(entry -> StringUtils.hasText(entry.detail()))
-                .filter(entry -> !"invoke".equalsIgnoreCase(entry.detail()))
-                .toList();
-        if (successEntries.isEmpty()) {
-            return "";
-        }
-
-        StringBuilder builder = new StringBuilder();
-        builder.append("我已经拿到本地工具结果，先把确定信息整理如下：");
-        for (ToolAuditEntry entry : successEntries.stream().limit(6).toList()) {
-            builder.append("\n- ")
-                    .append(friendlyToolName(entry.toolName()))
-                    .append("：")
-                    .append(renderFriendlyToolDetail(entry.detail()));
-        }
-        if (successEntries.size() > 6) {
-            builder.append("\n- 还有 ").append(successEntries.size() - 6).append(" 条工具结果已收起。");
-        }
-        builder.append("\n如果你要继续深入，可以直接说“按后端模块展开”或“继续分析这些文件”。");
-        return builder.toString();
-    }
-
-    private String friendlyToolName(String toolName) {
-        String text = safe(toolName);
-        if (text.contains("FileToolPack.listFiles")) {
-            return "文件检索";
-        }
-        if (text.contains("FileToolPack.readFile")) {
-            return "文件读取";
-        }
-        if (text.contains("LocalFilesystemToolPack")) {
-            return "本地授权文件";
-        }
-        if (text.contains("WorkspaceSearchToolPack")) {
-            return "工作区检索";
-        }
-        if (text.contains("ScriptSkillToolPack")) {
-            return "脚本技能";
-        }
-        if (text.contains("WebSearchToolPack")) {
-            return "网页检索";
-        }
-        if (text.contains("WeatherToolPack")) {
-            return "天气查询";
-        }
-        return text.replace("ToolPack.", " ");
-    }
-
-    private String renderFriendlyToolDetail(String detail) {
-        String text = safe(detail)
-                .replace("[F]", "文件")
-                .replace("[D]", "目录")
-                .replaceAll("\\s+", " ")
-                .trim();
-        return truncateToolDetail(text, 320);
-    }
-
-    private ToolAuditEntry parseToolAuditEntry(String content) {
-        String text = safe(content);
-        if (!StringUtils.hasText(text) || !text.contains("tool=") || !text.contains("status=")) {
-            return null;
-        }
-        String tool = extractField(text, "tool=");
-        String status = extractField(text, "status=");
-        String detail = extractTrailingField(text, "detail=");
-        if (!StringUtils.hasText(tool) || !StringUtils.hasText(status)) {
-            return null;
-        }
-        return new ToolAuditEntry(tool, status.toUpperCase(), detail);
-    }
-
-    private String extractField(String text, String marker) {
-        int start = text.indexOf(marker);
-        if (start < 0) {
-            return "";
-        }
-        int valueStart = start + marker.length();
-        int end = text.indexOf(", ", valueStart);
-        if (end < 0) {
-            end = text.length();
-        }
-        return text.substring(valueStart, end).trim();
-    }
-
-    private String extractTrailingField(String text, String marker) {
-        int start = text.indexOf(marker);
-        if (start < 0) {
-            return "";
-        }
-        return text.substring(start + marker.length()).replaceAll("\\s+", " ").trim();
-    }
-
-    private String truncateToolDetail(String detail, int maxLen) {
-        String text = safe(detail).replace('\n', ' ').replace('\r', ' ').trim();
-        if (text.length() <= maxLen) {
-            return text;
-        }
-        return text.substring(0, maxLen) + "...";
-    }
-
     private static String safe(String text) {
         return text == null ? "" : text;
-    }
-
-    private record ToolAuditEntry(String toolName, String status, String detail) {
     }
 }

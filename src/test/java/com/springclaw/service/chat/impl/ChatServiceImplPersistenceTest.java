@@ -3,7 +3,6 @@ package com.springclaw.service.chat.impl;
 import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.service.ai.AiProviderService;
-import com.springclaw.service.agent.AgentEngine;
 import com.springclaw.service.agent.AgentRuntimeEngine;
 import com.springclaw.service.agent.EngineSelector;
 import com.springclaw.service.context.AssembledContext;
@@ -114,8 +113,6 @@ class ChatServiceImplPersistenceTest {
                 agentRuntimeEngine,
                 engineSelector,
                 null,
-                null,
-                null,
                 sseEventBridge,
                 false,
                 true
@@ -213,8 +210,6 @@ class ChatServiceImplPersistenceTest {
                 null,
                 agentRuntimeEngine,
                 engineSelector,
-                null,
-                null,
                 null,
                 sseEventBridge,
                 false,

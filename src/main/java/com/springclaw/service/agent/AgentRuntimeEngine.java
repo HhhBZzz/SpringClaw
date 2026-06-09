@@ -120,9 +120,7 @@ public class AgentRuntimeEngine implements AgentEngine {
     }
 
     @Override
-    public com.springclaw.service.chat.impl.ChatExecutionResult execute(
-            ChatContext ctx,
-            com.springclaw.service.chat.impl.OparLoopEngine.FallbackResponder fallbackResponder) {
+    public ChatExecutionResult execute(ChatContext ctx, AgentEngine.FallbackResponder fallbackResponder) {
         AgentRun run = run(ctx);
         return run.executionResult();
     }

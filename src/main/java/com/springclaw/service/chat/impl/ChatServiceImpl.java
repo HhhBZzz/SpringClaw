@@ -56,8 +56,6 @@ public class ChatServiceImpl implements ChatService {
     private final AgentRuntimeEngine agentRuntimeEngine;
     private final EngineSelector engineSelector;
     private final LocalExecutionSupport localExecutionSupport;
-    private final BasicStreamEngine basicStreamEngine;
-    private final ModelLedStreamEngine modelLedStreamEngine;
     private final SseEventBridge sseEventBridge;
     private final boolean modelLedStreamingEnabled;
     private final boolean basicStreamingEnabled;
@@ -79,8 +77,6 @@ public class ChatServiceImpl implements ChatService {
                            AgentRuntimeEngine agentRuntimeEngine,
                            EngineSelector engineSelector,
                            LocalExecutionSupport localExecutionSupport,
-                           BasicStreamEngine basicStreamEngine,
-                           ModelLedStreamEngine modelLedStreamEngine,
                            SseEventBridge sseEventBridge,
                            @Value("${springclaw.chat.model-led-streaming-enabled:false}") boolean modelLedStreamingEnabled,
                            @Value("${springclaw.chat.basic-streaming-enabled:true}") boolean basicStreamingEnabled) {
@@ -100,8 +96,6 @@ public class ChatServiceImpl implements ChatService {
         this.agentRuntimeEngine = agentRuntimeEngine;
         this.engineSelector = engineSelector;
         this.localExecutionSupport = localExecutionSupport;
-        this.basicStreamEngine = basicStreamEngine;
-        this.modelLedStreamEngine = modelLedStreamEngine;
         this.sseEventBridge = sseEventBridge;
         this.modelLedStreamingEnabled = modelLedStreamingEnabled;
         this.basicStreamingEnabled = basicStreamingEnabled;
@@ -124,7 +118,7 @@ public class ChatServiceImpl implements ChatService {
         this(aiProviderService, chatGuardService, oparLoopEngine, simplifiedOparEngine,
                 chatResponsePolicyService, modelTransportGuardService, llmUsageRecordService,
                 conversationAdvisorSupport, chatContextFactory, chatResultPersister,
-                metaGuardExecutor, null, null, null, null, null, null, null, null, false, true);
+                metaGuardExecutor, null, null, null, null, null, null, false, true);
     }
 
     @Override
@@ -186,21 +180,18 @@ public class ChatServiceImpl implements ChatService {
                 streamActionRequired(context, lockToken, lockReleased, emitter);
                 return;
             }
-            if (shouldUseBasicModelStreaming(context)) {
-                basicStreamEngine.stream(context, emitter, lockToken, lockReleased, disposableRef,
+            // 统一路由：通过 EngineSelector 选择引擎
+            AgentEngine engine = engineSelector.select(context);
+            if (engine instanceof AgentEngine.StreamableAgentEngine streamable) {
+                streamable.stream(context, emitter, lockToken, lockReleased, disposableRef,
                         (ctx, error, em, lt, lr) -> streamBlockingFallback(ctx, error, lt, lr, em));
                 return;
             }
-            if (shouldUseModelLedStreaming(context)) {
-                modelLedStreamEngine.stream(context, emitter, lockToken, lockReleased, disposableRef,
-                        (ctx, error, em, lt, lr) -> streamBlockingFallback(ctx, error, lt, lr, em),
-                        (ctx, partial, error, em, lt, lr) -> streamInterruptedPartialAnswer(ctx, partial, error, lt, lr, em));
-                return;
-            }
-            if (shouldUseAgentRuntime(context)) {
+            if (engine instanceof AgentRuntimeEngine runtimeEngine) {
                 streamAgentRuntimeAnswer(context, lockToken, lockReleased, emitter);
                 return;
             }
+            // 非 Streamable 引擎：execute + reflect
             sseEventBridge.sendTrace(emitter, context, "选择能力", "agent", "started", "进入 Agent 执行链路。", 0L);
             sseEventBridge.sendStatus(emitter, "正在执行 Agent");
             ChatExecutionResult executionResult = runAgentExecution(context);
@@ -309,33 +300,6 @@ public class ChatServiceImpl implements ChatService {
         sseEventBridge.completeEmitter(emitter);
     }
 
-    private boolean streamInterruptedPartialAnswer(ChatContext context,
-                                                  StringBuilder fullAnswer,
-                                                  Throwable streamFailure,
-                                                  String lockToken,
-                                                  AtomicBoolean lockReleased,
-                                                  SseEmitter emitter) {
-        String partial = fullAnswer == null ? "" : fullAnswer.toString().trim();
-        if (!StringUtils.hasText(partial)) {
-            return false;
-        }
-        String reason = chatResponsePolicyService.simplifyFailureReason(streamFailure == null ? "" : streamFailure.getMessage());
-        String notice = "\n\n生成中断：" + reason + " 已保留上面已经收到的内容；如果要完整回答，请点\u201C重试上一条\u201D。";
-        String answer = partial + notice;
-        sseEventBridge.sendStatus(emitter, "模型流式连接中断，已保留部分内容");
-        sseEventBridge.sendToken(emitter, notice);
-        chatResultPersister.persist(context, answer, new ChatExecutionResult(
-                context.assembled().observePrompt(),
-                "STREAM_AGENT_INTERRUPTED: 模型流式输出中途断开。",
-                "已保留部分模型输出，不再把失败兜底回答拼接到半截回答后。reason=" + TextUtils.safe(streamFailure == null ? "" : streamFailure.getMessage()),
-                answer,
-                false
-        ));
-        releaseSessionLockOnce(context.session().getSessionKey(), lockToken, lockReleased);
-        sseEventBridge.completeEmitter(emitter);
-        return true;
-    }
-
     private void streamBlockingFallback(ChatContext context,
                                         Throwable streamFailure,
                                         String lockToken,
@@ -365,51 +329,6 @@ public class ChatServiceImpl implements ChatService {
             sseEventBridge.sendTrace(emitter, context, "完成", "final", "success", "流式请求已结束。", 0L);
             sseEventBridge.completeEmitter(emitter);
         }
-    }
-
-    boolean shouldUseModelLedStreaming(ChatContext context) {
-        return context != null
-                && modelLedStreamingEnabled
-                && "agent".equals(normalizeResponseMode(context.responseMode()))
-                && !isGeneralDecision(context)
-                && !"control-plane".equalsIgnoreCase(TextUtils.safe(context.intent()))
-                && !"model_control".equalsIgnoreCase(TextUtils.safe(context.intent()))
-                && !"local-files".equalsIgnoreCase(TextUtils.safe(context.intent()))
-                && !"local_files".equalsIgnoreCase(TextUtils.safe(context.intent()))
-                && !requiresBackendCapabilityExecution(context)
-                && useSimplifiedMode(context.executionMode())
-                && modelTransportGuardService.isModelCallEnabled(context.activeClient());
-    }
-
-    boolean shouldUseAgentRuntime(ChatContext context) {
-        return agentRuntimeEngine != null
-                && agentRuntimeEngine.supports(context);
-    }
-
-    boolean shouldUseBasicModelStreaming(ChatContext context) {
-        String responseMode = normalizeResponseMode(context == null ? null : context.responseMode());
-        return context != null
-                && basicStreamingEnabled
-                && useSimplifiedMode(context.executionMode())
-                && ("agent".equals(responseMode) || "fast".equals(responseMode))
-                && "general".equalsIgnoreCase(TextUtils.safe(context.intent()))
-                && modelTransportGuardService.isModelCallEnabled(context.activeClient());
-    }
-
-    private boolean requiresBackendCapabilityExecution(ChatContext context) {
-        AgentDecision decision = context == null ? null : context.decision();
-        if (decision == null || decision.isGeneral()) {
-            return false;
-        }
-        String executionPath = TextUtils.safe(decision.executionPath());
-        return "agent_tools".equalsIgnoreCase(executionPath)
-                || "skill_direct".equalsIgnoreCase(executionPath)
-                || "task_draft".equalsIgnoreCase(executionPath);
-    }
-
-    private boolean isGeneralDecision(ChatContext context) {
-        AgentDecision decision = context == null ? null : context.decision();
-        return decision == null || decision.isGeneral();
     }
 
     private String summarizeExecution(ChatExecutionResult executionResult) {
@@ -594,16 +513,6 @@ public class ChatServiceImpl implements ChatService {
             return "opar";
         }
         return "simplified";
-    }
-
-    private String normalizeResponseMode(String rawResponseMode) {
-        if (!StringUtils.hasText(rawResponseMode)) {
-            return "agent";
-        }
-        return switch (rawResponseMode.trim().toLowerCase(Locale.ROOT)) {
-            case "fast", "deep", "tool" -> rawResponseMode.trim().toLowerCase(Locale.ROOT);
-            default -> "agent";
-        };
     }
 
     private void releaseSessionLockOnce(String sessionKey, String token, AtomicBoolean released) {

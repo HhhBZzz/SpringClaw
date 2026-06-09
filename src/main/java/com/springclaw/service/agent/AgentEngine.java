@@ -2,7 +2,12 @@ package com.springclaw.service.agent;
 
 import com.springclaw.service.chat.impl.ChatContext;
 import com.springclaw.service.chat.impl.ChatExecutionResult;
-import com.springclaw.service.chat.impl.OparLoopEngine;
+import com.springclaw.service.context.AssembledContext;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import reactor.core.Disposable;
+
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 统一 Agent 引擎接口。
@@ -24,7 +29,8 @@ public interface AgentEngine {
 
     /**
      * 判断此引擎是否适用于当前上下文。
-     * 每个引擎根据自己的条件声明适用范围。
+     * 每个引擎根据自己的条件声明适用范围，条件须包含完整路由逻辑
+     * （responseMode、executionMode、feature flag 等），确保 EngineSelector 是唯一路由决策点。
      */
     boolean supports(ChatContext ctx);
 
@@ -35,5 +41,55 @@ public interface AgentEngine {
      * @param fallbackResponder 模型不可用时的兜底回答生成器
      * @return 执行结果
      */
-    ChatExecutionResult execute(ChatContext ctx, OparLoopEngine.FallbackResponder fallbackResponder);
+    ChatExecutionResult execute(ChatContext ctx, FallbackResponder fallbackResponder);
+
+    /**
+     * 模型不可用时的兜底回答生成器。
+     * <p>
+     * 从 OparLoopEngine 提取到接口层，消除对具体引擎类的耦合。
+     * </p>
+     */
+    @FunctionalInterface
+    interface FallbackResponder {
+        String respond(String reason, AssembledContext context);
+    }
+
+    /**
+     * 支持流式 SSE 输出的引擎子接口。
+     * <p>
+     * 实现此接口的引擎可以被流式路由路径选中，
+     * 通过 {@link #stream} 方法自行管理 SSE 生命周期、锁释放和持久化。
+     * </p>
+     */
+    interface StreamableAgentEngine extends AgentEngine {
+
+        /**
+         * 流式执行：模型直接 SSE 输出，引擎自行管理完整生命周期。
+         * 成功时自行持久化并完成 SSE；完全失败时委托给 fallbackHandler 进行降级处理。
+         *
+         * @param context          聊天上下文
+         * @param emitter          SSE emitter
+         * @param lockToken        会话锁 token
+         * @param lockReleased     锁释放标记（CAS）
+         * @param disposableRef    流式 Disposable 引用
+         * @param fallbackHandler  完全失败时的降级回调
+         * @return 流式 Disposable
+         */
+        Disposable stream(ChatContext context,
+                          SseEmitter emitter,
+                          String lockToken,
+                          AtomicBoolean lockReleased,
+                          AtomicReference<Disposable> disposableRef,
+                          OnStreamFailure fallbackHandler);
+    }
+
+    /**
+     * 流式失败回调：当模型流式连接完全失败（无部分内容）时，
+     * 由 ChatServiceImpl 提供降级逻辑（streamBlockingFallback）。
+     */
+    @FunctionalInterface
+    interface OnStreamFailure {
+        void handle(ChatContext ctx, Throwable error, SseEmitter emitter,
+                    String lockToken, AtomicBoolean lockReleased);
+    }
 }

@@ -1,6 +1,8 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.common.util.TextUtils;
+import com.springclaw.service.agent.AgentDecision;
+import com.springclaw.service.agent.AgentEngine;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
@@ -11,20 +13,23 @@ import com.springclaw.tool.runtime.ToolOrchestrator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
 
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 模型主导流式引擎：模型自行调用工具（ToolContext 生命周期在此管理）。
  * 从 ChatServiceImpl.streamModelLedAnswer 提取。
+ * 实现 StreamableAgentEngine，可被 EngineSelector 统一路由。
  */
 @Service
-public class ModelLedStreamEngine {
+public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
 
     private static final Logger log = LoggerFactory.getLogger(ModelLedStreamEngine.class);
 
@@ -32,37 +37,141 @@ public class ModelLedStreamEngine {
     private final ModelTransportGuardService modelTransportGuardService;
     private final ChatResponsePolicyService chatResponsePolicyService;
     private final LlmUsageRecordService llmUsageRecordService;
+    private final ModelCallExecutor modelCallExecutor;
     private final ToolOrchestrator toolOrchestrator;
     private final SseEventBridge sseEventBridge;
     private final ChatResultPersister chatResultPersister;
     private final ChatGuardService chatGuardService;
-
-    /**
-     * 流式失败回调：当模型流式连接完全失败（无部分内容）时，
-     * 由 ChatServiceImpl 提供降级逻辑（streamBlockingFallback）。
-     */
-    @FunctionalInterface
-    public interface OnStreamFailure {
-        void handle(ChatContext ctx, Throwable error, SseEmitter emitter,
-                    String lockToken, AtomicBoolean lockReleased);
-    }
+    private final boolean modelLedStreamingEnabled;
 
     public ModelLedStreamEngine(ConversationAdvisorSupport conversationAdvisorSupport,
                                 ModelTransportGuardService modelTransportGuardService,
                                 ChatResponsePolicyService chatResponsePolicyService,
                                 LlmUsageRecordService llmUsageRecordService,
+                                ModelCallExecutor modelCallExecutor,
                                 ToolOrchestrator toolOrchestrator,
                                 SseEventBridge sseEventBridge,
                                 ChatResultPersister chatResultPersister,
-                                ChatGuardService chatGuardService) {
+                                ChatGuardService chatGuardService,
+                                @Value("${springclaw.chat.model-led-streaming-enabled:false}") boolean modelLedStreamingEnabled) {
         this.conversationAdvisorSupport = conversationAdvisorSupport;
         this.modelTransportGuardService = modelTransportGuardService;
         this.chatResponsePolicyService = chatResponsePolicyService;
         this.llmUsageRecordService = llmUsageRecordService;
+        this.modelCallExecutor = modelCallExecutor;
         this.toolOrchestrator = toolOrchestrator;
         this.sseEventBridge = sseEventBridge;
         this.chatResultPersister = chatResultPersister;
         this.chatGuardService = chatGuardService;
+        this.modelLedStreamingEnabled = modelLedStreamingEnabled;
+    }
+
+    @Override
+    public String name() {
+        return "model-led-stream";
+    }
+
+    @Override
+    public int priority() {
+        return 5;
+    }
+
+    @Override
+    public boolean supports(ChatContext ctx) {
+        if (ctx == null) return false;
+        AgentDecision decision = ctx.decision();
+        String responseMode = normalizeResponseMode(ctx.responseMode());
+        String intent = normalizeIntent(ctx.intent());
+        return modelLedStreamingEnabled
+                && "agent".equals(responseMode)
+                && (decision == null || !decision.isGeneral())
+                && !"control_plane".equals(intent)
+                && !"model_control".equals(intent)
+                && !"local_files".equals(intent)
+                && !requiresBackendCapabilityExecution(ctx)
+                && useSimplifiedMode(ctx.executionMode())
+                && modelTransportGuardService.isModelCallEnabled(ctx.activeClient());
+    }
+
+    @Override
+    public ChatExecutionResult execute(ChatContext ctx, AgentEngine.FallbackResponder fallbackResponder) {
+        // 非流式路径的阻塞执行：用 call() 代替 stream()
+        Object[] tools = toolOrchestrator == null
+                ? new Object[0]
+                : toolOrchestrator.selectAgentTools(ctx.channel(), ctx.userId(), ctx.decision());
+        ToolExecutionContext toolContext = new ToolExecutionContext(
+                ctx.session().getSessionKey(),
+                ctx.channel(),
+                ctx.userId(),
+                ctx.requestId(),
+                "ACT-BLOCKING"
+        );
+        try (ToolExecutionContextHolder.Scope ignored = ToolExecutionContextHolder.open(toolContext)) {
+            AiProviderService.ActiveChatClient client = ctx.activeClient();
+            if (!modelTransportGuardService.isModelCallEnabled(client)) {
+                return new ChatExecutionResult(
+                        ctx.assembled().observePrompt(),
+                        "MODEL_LED: 模型不可用。",
+                        modelTransportGuardService.disabledModelActionReason(client),
+                        fallbackResponder.respond(modelTransportGuardService.disabledModelReason(client), ctx.assembled()),
+                        false
+                );
+            }
+            ModelCallExecutor.ModelCallResult<String> result = modelCallExecutor.executeChat(
+                    client,
+                    "model-led-blocking",
+                    new ModelCallExecutor.ChatRequestContext(
+                            ctx.requestId(), ctx.assembled().sessionKey(),
+                            ctx.assembled().channel(), ctx.assembled().userId()),
+                    true,
+                    activeClient -> {
+                        var requestSpec = activeClient.chatClient().prompt()
+                                .system(ctx.systemPrompt())
+                                .user(renderModelLedPrompt(ctx.assembled()));
+                        if (DeepSeekChatCompatibility.supportsNativeToolCalling(activeClient) && tools != null && tools.length > 0) {
+                            requestSpec = requestSpec.tools(tools);
+                        }
+                        var response = conversationAdvisorSupport.apply(
+                                        requestSpec,
+                                        ctx.assembled().sessionKey(),
+                                        ctx.assembled().userId())
+                                .call()
+                                .chatResponse();
+                        return new ModelCallExecutor.ChatOperationResult<>(
+                                ModelCallExecutor.extractText(response),
+                                response
+                        );
+                    }
+            );
+            String answer = TextUtils.safe(result.value());
+            if (!StringUtils.hasText(answer)) {
+                return new ChatExecutionResult(
+                        ctx.assembled().observePrompt(),
+                        "MODEL_LED: 模型未返回可见内容。",
+                        "阻塞执行失败。",
+                        fallbackResponder.respond("模型未返回可见内容", ctx.assembled()),
+                        false
+                );
+            }
+            return new ChatExecutionResult(
+                    ctx.assembled().observePrompt(),
+                    "MODEL_LED: 模型主导阻塞执行。",
+                    "使用 call() 代替 stream()。",
+                    answer,
+                    true
+            );
+        } catch (Exception ex) {
+            log.warn("ModelLedStreamEngine 阻塞执行失败，sessionKey={}, reason={}",
+                    ctx.assembled().sessionKey(), ex.getMessage());
+            modelTransportGuardService.markFailure(ctx.activeClient().providerId(), ex);
+            return new ChatExecutionResult(
+                    ctx.assembled().observePrompt(),
+                    "MODEL_LED: 阻塞执行失败。",
+                    "reason=" + TextUtils.safe(ex.getMessage()),
+                    fallbackResponder.respond(modelTransportGuardService.disabledModelReason(ctx.activeClient()), ctx.assembled()),
+                    false
+            );
+        }
     }
 
     /**
@@ -70,13 +179,13 @@ public class ModelLedStreamEngine {
      * 成功时自行持久化并完成 SSE；部分内容中断时保留部分内容；
      * 完全失败时委托给 fallbackHandler 进行降级处理。
      */
+    @Override
     public Disposable stream(ChatContext context,
                              SseEmitter emitter,
                              String lockToken,
                              AtomicBoolean lockReleased,
                              AtomicReference<Disposable> disposableRef,
-                             OnStreamFailure fallbackHandler,
-                             StreamInterruptHandler interruptHandler) {
+                             AgentEngine.OnStreamFailure fallbackHandler) {
         long startedAt = System.currentTimeMillis();
         sseEventBridge.sendTrace(emitter, context, "选择能力", "agent", "success",
                 "模型主导流式链路，可按需调用工具。", 0L);
@@ -172,7 +281,7 @@ public class ModelLedStreamEngine {
                         sseEventBridge.sendTrace(emitter, context, "调用模型", "model", "failed",
                                 chatResponsePolicyService.simplifyFailureReason(ex.getMessage()),
                                 System.currentTimeMillis() - startedAt);
-                        if (interruptHandler.handlePartial(context, fullAnswer, ex, emitter, lockToken, lockReleased)) {
+                        if (handlePartialAnswer(context, fullAnswer, ex, emitter, lockToken, lockReleased)) {
                             return;
                         }
                         sseEventBridge.sendTrace(emitter, context, "降级处理", "fallback", "started",
@@ -190,7 +299,7 @@ public class ModelLedStreamEngine {
                 sseEventBridge.sendTrace(emitter, context, "调用模型", "model", "failed",
                         chatResponsePolicyService.simplifyFailureReason(ex.getMessage()),
                         System.currentTimeMillis() - startedAt);
-                if (interruptHandler.handlePartial(context, fullAnswer, ex, emitter, lockToken, lockReleased)) {
+                if (handlePartialAnswer(context, fullAnswer, ex, emitter, lockToken, lockReleased)) {
                     return null;
                 }
                 sseEventBridge.sendTrace(emitter, context, "降级处理", "fallback", "started",
@@ -202,12 +311,66 @@ public class ModelLedStreamEngine {
     }
 
     /**
-     * 部分内容处理回调：当模型流式输出中途断开时，尝试保留已有部分内容。
+     * 部分内容处理：当模型流式输出中途断开时，尝试保留已有部分内容。
      */
-    @FunctionalInterface
-    public interface StreamInterruptHandler {
-        boolean handlePartial(ChatContext context, StringBuilder fullAnswer, Throwable streamFailure,
-                              SseEmitter emitter, String lockToken, AtomicBoolean lockReleased);
+    private boolean handlePartialAnswer(ChatContext context,
+                                         StringBuilder fullAnswer,
+                                         Throwable streamFailure,
+                                         SseEmitter emitter,
+                                         String lockToken,
+                                         AtomicBoolean lockReleased) {
+        String partial = fullAnswer == null ? "" : fullAnswer.toString().trim();
+        if (!StringUtils.hasText(partial)) {
+            return false;
+        }
+        String reason = chatResponsePolicyService.simplifyFailureReason(
+                streamFailure == null ? "" : streamFailure.getMessage());
+        String notice = "\n\n生成中断：" + reason + " 已保留上面已经收到的内容；如果要完整回答，请点\u201C重试上一条\u201D。";
+        String answer = partial + notice;
+        sseEventBridge.sendStatus(emitter, "模型流式连接中断，已保留部分内容");
+        sseEventBridge.sendToken(emitter, notice);
+        chatResultPersister.persist(context, answer, new ChatExecutionResult(
+                context.assembled().observePrompt(),
+                "STREAM_AGENT_INTERRUPTED: 模型流式输出中途断开。",
+                "已保留部分模型输出。reason=" + TextUtils.safe(
+                        streamFailure == null ? "" : streamFailure.getMessage()),
+                answer,
+                false
+        ));
+        releaseLock(emitter, context, lockToken, lockReleased);
+        return true;
+    }
+
+    private boolean requiresBackendCapabilityExecution(ChatContext context) {
+        AgentDecision decision = context == null ? null : context.decision();
+        if (decision == null || decision.isGeneral()) {
+            return false;
+        }
+        String executionPath = TextUtils.safe(decision.executionPath());
+        return "agent_tools".equalsIgnoreCase(executionPath)
+                || "skill_direct".equalsIgnoreCase(executionPath)
+                || "task_draft".equalsIgnoreCase(executionPath);
+    }
+
+    private String normalizeResponseMode(String rawResponseMode) {
+        if (!StringUtils.hasText(rawResponseMode)) {
+            return "agent";
+        }
+        return switch (rawResponseMode.trim().toLowerCase(Locale.ROOT)) {
+            case "fast", "deep", "tool" -> rawResponseMode.trim().toLowerCase(Locale.ROOT);
+            default -> "agent";
+        };
+    }
+
+    private String normalizeIntent(String rawIntent) {
+        if (!StringUtils.hasText(rawIntent)) return "general";
+        String normalized = rawIntent.trim().toLowerCase(Locale.ROOT).replace('-', '_');
+        return normalized;
+    }
+
+    private boolean useSimplifiedMode(String executionMode) {
+        if (!StringUtils.hasText(executionMode)) return true;
+        return !"opar".equals(executionMode.trim().toLowerCase(Locale.ROOT));
     }
 
     private void closeToolScope(AtomicReference<ToolExecutionContextHolder.Scope> scopeRef) {

@@ -11,19 +11,22 @@ import com.springclaw.service.usage.LlmUsageRecordService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
 
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 最短路径引擎：处理普通聊天（general intent），不挂工具，直接调模型流式输出。
  * 从 ChatServiceImpl.streamBasicModelAnswer 提取，实现 AgentEngine 接口。
  */
 @Service
-public class BasicStreamEngine implements AgentEngine {
+public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
 
     private static final Logger log = LoggerFactory.getLogger(BasicStreamEngine.class);
 
@@ -36,16 +39,7 @@ public class BasicStreamEngine implements AgentEngine {
     private final SseEventBridge sseEventBridge;
     private final ChatResultPersister chatResultPersister;
     private final ChatGuardService chatGuardService;
-
-    /**
-     * 流式失败回调：当模型流式连接完全失败（无部分内容）时，
-     * 由 ChatServiceImpl 提供降级逻辑（streamBlockingFallback）。
-     */
-    @FunctionalInterface
-    public interface OnStreamFailure {
-        void handle(ChatContext ctx, Throwable error, SseEmitter emitter,
-                    String lockToken, AtomicBoolean lockReleased);
-    }
+    private final boolean basicStreamingEnabled;
 
     public BasicStreamEngine(ModelCallExecutor modelCallExecutor,
                              ConversationAdvisorSupport conversationAdvisorSupport,
@@ -55,7 +49,8 @@ public class BasicStreamEngine implements AgentEngine {
                              OparLoopEngine oparLoopEngine,
                              SseEventBridge sseEventBridge,
                              ChatResultPersister chatResultPersister,
-                             ChatGuardService chatGuardService) {
+                             ChatGuardService chatGuardService,
+                             @Value("${springclaw.chat.basic-streaming-enabled:true}") boolean basicStreamingEnabled) {
         this.modelCallExecutor = modelCallExecutor;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
         this.modelTransportGuardService = modelTransportGuardService;
@@ -65,6 +60,7 @@ public class BasicStreamEngine implements AgentEngine {
         this.sseEventBridge = sseEventBridge;
         this.chatResultPersister = chatResultPersister;
         this.chatGuardService = chatGuardService;
+        this.basicStreamingEnabled = basicStreamingEnabled;
     }
 
     @Override
@@ -80,9 +76,11 @@ public class BasicStreamEngine implements AgentEngine {
     @Override
     public boolean supports(ChatContext ctx) {
         if (ctx == null) return false;
-        AgentDecision decision = ctx.decision();
-        return decision != null
-                && decision.isGeneral()
+        String responseMode = normalizeResponseMode(ctx.responseMode());
+        return basicStreamingEnabled
+                && useSimplifiedMode(ctx.executionMode())
+                && ("agent".equals(responseMode) || "fast".equals(responseMode))
+                && isGeneralIntent(ctx)
                 && modelTransportGuardService.isModelCallEnabled(ctx.activeClient());
     }
 
@@ -91,12 +89,13 @@ public class BasicStreamEngine implements AgentEngine {
      * 成功时自行持久化并完成 SSE；部分内容中断时保留部分内容；
      * 完全失败时委托给 fallbackHandler 进行降级处理。
      */
+    @Override
     public Disposable stream(ChatContext context,
                              SseEmitter emitter,
                              String lockToken,
                              AtomicBoolean lockReleased,
-                             java.util.concurrent.atomic.AtomicReference<Disposable> disposableRef,
-                             OnStreamFailure fallbackHandler) {
+                             AtomicReference<Disposable> disposableRef,
+                             AgentEngine.OnStreamFailure fallbackHandler) {
         long startedAt = System.currentTimeMillis();
         sseEventBridge.sendTrace(emitter, context, "选择能力", "model", "success",
                 "普通聊天命中最短路径：不挂载工具，不进入多步规划。", 0L);
@@ -202,7 +201,7 @@ public class BasicStreamEngine implements AgentEngine {
     }
 
     @Override
-    public ChatExecutionResult execute(ChatContext ctx, OparLoopEngine.FallbackResponder fallbackResponder) {
+    public ChatExecutionResult execute(ChatContext ctx, AgentEngine.FallbackResponder fallbackResponder) {
         try {
             ModelCallExecutor.ModelCallResult<String> result = modelCallExecutor.executeChat(
                     ctx.activeClient(),
@@ -310,5 +309,37 @@ public class BasicStreamEngine implements AgentEngine {
                 这是普通聊天路径：不要调用工具，不要输出内部阶段名，不要提到路由、OPAR、兜底或实现细节。
                 如果问题本身需要外部文件、网页、项目源码或实时数据，简洁说明需要进入 Agent 工具链路。
                 """.formatted(TextUtils.safe(assembled == null ? null : assembled.question()));
+    }
+
+    private boolean isGeneralIntent(ChatContext ctx) {
+        String intent = normalizeIntent(ctx.intent());
+        if ("control_plane".equals(intent)
+                || "model_control".equals(intent)
+                || "local_files".equals(intent)) {
+            return false;
+        }
+        AgentDecision decision = ctx.decision();
+        if (decision != null && decision.isGeneral()) return true;
+        return "general".equals(intent);
+    }
+
+    private String normalizeIntent(String rawIntent) {
+        if (!StringUtils.hasText(rawIntent)) return "general";
+        return rawIntent.trim().toLowerCase(Locale.ROOT).replace('-', '_');
+    }
+
+    private boolean useSimplifiedMode(String executionMode) {
+        if (!StringUtils.hasText(executionMode)) return true;
+        return !"opar".equals(executionMode.trim().toLowerCase(Locale.ROOT));
+    }
+
+    private String normalizeResponseMode(String rawResponseMode) {
+        if (!StringUtils.hasText(rawResponseMode)) {
+            return "agent";
+        }
+        return switch (rawResponseMode.trim().toLowerCase(Locale.ROOT)) {
+            case "fast", "deep", "tool" -> rawResponseMode.trim().toLowerCase(Locale.ROOT);
+            default -> "agent";
+        };
     }
 }

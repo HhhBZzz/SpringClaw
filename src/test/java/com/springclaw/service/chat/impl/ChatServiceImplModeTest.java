@@ -103,53 +103,48 @@ class ChatServiceImplModeTest {
     }
 
     @Test
-    void shouldDisableModelLedStreamingByDefaultBecauseToolContextIsThreadLocal() {
+    void shouldNotSupportModelLedStreamingByDefault() {
         Fixture fixture = new Fixture();
         ChatContext context = fixture.buildChatContext("帮我分析当前项目结构", "simplified", "默认", "agent");
-        ChatServiceImpl service = fixture.build();
 
-        Assertions.assertFalse(service.shouldUseModelLedStreaming(context));
+        Assertions.assertFalse(fixture.modelLedStreamEngine(false).supports(context));
     }
 
     @Test
-    void shouldUseBasicStreamingForGeneralQuestionsByDefault() {
+    void shouldSupportBasicStreamingForGeneralQuestionsByDefault() {
         Fixture fixture = new Fixture();
         ChatContext context = fixture.buildChatContext("你好", "simplified", "默认", "agent", "general");
-        ChatServiceImpl service = fixture.build();
 
-        Assertions.assertTrue(service.shouldUseBasicModelStreaming(context));
+        Assertions.assertTrue(fixture.basicStreamEngine(true).supports(context));
     }
 
     @Test
-    void shouldNotUseModelLedStreamingForFastMode() {
+    void shouldNotSupportModelLedStreamingForFastMode() {
         Fixture fixture = new Fixture();
         ChatContext context = fixture.buildChatContext("帮我分析当前项目结构", "simplified", "默认", "fast");
-        ChatServiceImpl service = fixture.build();
 
-        Assertions.assertFalse(service.shouldUseModelLedStreaming(context));
+        Assertions.assertFalse(fixture.modelLedStreamEngine(true).supports(context));
     }
 
     @Test
-    void shouldNotUseModelLedStreamingForControlIntent() {
+    void shouldNotSupportModelLedStreamingForControlIntent() {
         Fixture fixture = new Fixture();
-        ChatContext context = fixture.buildChatContext("当前模型是什么", "simplified", "默认", "agent", "control-plane");
-        ChatServiceImpl service = fixture.build();
+        ChatContext context = fixture.buildChatContext("当前模型是什么", "simplified", "默认", "agent", "control_plane");
 
-        Assertions.assertFalse(service.shouldUseModelLedStreaming(context));
+        Assertions.assertFalse(fixture.modelLedStreamEngine(true).supports(context));
     }
 
     @Test
-    void shouldNotUseModelLedStreamingForLocalFileIntent() {
+    void shouldNotSupportModelLedStreamingForLocalFileIntent() {
         Fixture fixture = new Fixture();
-        ChatContext context = fixture.buildChatContext("授权桌面全部", "simplified", "默认", "agent", "local-files");
-        ChatServiceImpl service = fixture.build();
+        ChatContext context = fixture.buildChatContext("授权桌面全部", "simplified", "默认", "agent", "local_files");
 
-        Assertions.assertFalse(service.shouldUseModelLedStreaming(context));
-        Assertions.assertFalse(service.shouldUseBasicModelStreaming(context));
+        Assertions.assertFalse(fixture.modelLedStreamEngine(true).supports(context));
+        Assertions.assertFalse(fixture.basicStreamEngine(true).supports(context));
     }
 
     @Test
-    void shouldNotUseModelLedStreamingForAgentToolDecisionsEvenWhenEnabled() {
+    void shouldNotSupportModelLedStreamingForAgentToolDecisionsEvenWhenEnabled() {
         Fixture fixture = new Fixture();
         ChatContext context = fixture.buildChatContext(
                 "分析当前项目结构",
@@ -159,9 +154,8 @@ class ChatServiceImplModeTest {
                 "workspace_analysis",
                 new AgentDecision("workspace_analysis", "agent_tools", java.util.List.of("workspace-review"), "read", false, "项目分析")
         );
-        ChatServiceImpl service = fixture.build(true, true);
 
-        Assertions.assertFalse(service.shouldUseModelLedStreaming(context));
+        Assertions.assertFalse(fixture.modelLedStreamEngine(true).supports(context));
     }
 
     @Test
@@ -198,7 +192,7 @@ class ChatServiceImplModeTest {
     }
 
     @Test
-    void shouldNotUseAgentRuntimeForExplicitOparStreamContext() {
+    void shouldNotSelectAgentRuntimeForExplicitOparStreamContext() {
         Fixture fixture = new Fixture();
         AgentDecision decision = new AgentDecision("workspace_analysis", "agent_tools", java.util.List.of("workspace-review"), "read", false, "项目分析");
         ChatContext context = fixture.buildChatContext(
@@ -209,9 +203,9 @@ class ChatServiceImplModeTest {
                 "workspace_analysis",
                 decision
         );
-        ChatServiceImpl service = fixture.buildWithRuntime();
-
-        Assertions.assertFalse(service.shouldUseAgentRuntime(context));
+        // opar execution mode: neither basic-stream nor model-led-stream should support this
+        Assertions.assertFalse(fixture.basicStreamEngine(true).supports(context));
+        Assertions.assertFalse(fixture.modelLedStreamEngine(true).supports(context));
     }
 
     private static final class Fixture {
@@ -227,6 +221,7 @@ class ChatServiceImplModeTest {
         private final ChatContextFactory chatContextFactory = mock(ChatContextFactory.class);
         private final ChatResultPersister chatResultPersister = mock(ChatResultPersister.class);
         private final MetaGuardExecutor metaGuardExecutor = mock(MetaGuardExecutor.class);
+        private final ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
         private final ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
         private final AgentRuntimeEngine agentRuntimeEngine = mock(AgentRuntimeEngine.class);
         private final SseEventBridge sseEventBridge = mock(SseEventBridge.class);
@@ -256,6 +251,38 @@ class ChatServiceImplModeTest {
             when(chatGuardService.acquireSessionLock("s1")).thenReturn("lock");
             when(aiProviderService.activeClient()).thenReturn(activeClient);
             when(modelTransportGuardService.isModelCallEnabled(activeClient)).thenReturn(true);
+        }
+
+        /** Create a real BasicStreamEngine with given basicStreamingEnabled flag for supports() testing. */
+        private BasicStreamEngine basicStreamEngine(boolean basicStreamingEnabled) {
+            return new BasicStreamEngine(
+                    modelCallExecutor,
+                    conversationAdvisorSupport,
+                    modelTransportGuardService,
+                    chatResponsePolicyService,
+                    llmUsageRecordService,
+                    oparLoopEngine,
+                    sseEventBridge,
+                    chatResultPersister,
+                    chatGuardService,
+                    basicStreamingEnabled
+            );
+        }
+
+        /** Create a real ModelLedStreamEngine with given modelLedStreamingEnabled flag for supports() testing. */
+        private ModelLedStreamEngine modelLedStreamEngine(boolean modelLedStreamingEnabled) {
+            return new ModelLedStreamEngine(
+                    conversationAdvisorSupport,
+                    modelTransportGuardService,
+                    chatResponsePolicyService,
+                    llmUsageRecordService,
+                    modelCallExecutor,
+                    toolOrchestrator,
+                    sseEventBridge,
+                    chatResultPersister,
+                    chatGuardService,
+                    modelLedStreamingEnabled
+            );
         }
 
         private ChatContext buildChatContext(String message, String executionMode, String routingReason) {
@@ -301,10 +328,6 @@ class ChatServiceImplModeTest {
         }
 
         private ChatServiceImpl build() {
-            return build(false, true);
-        }
-
-        private ChatServiceImpl build(boolean modelLedStreamingEnabled, boolean basicStreamingEnabled) {
             return new ChatServiceImpl(
                     aiProviderService,
                     chatGuardService,
@@ -322,11 +345,9 @@ class ChatServiceImplModeTest {
                     null,
                     engineSelector,
                     null,
-                    null,
-                    null,
                     sseEventBridge,
-                    modelLedStreamingEnabled,
-                    basicStreamingEnabled
+                    false,
+                    true
             );
         }
 
@@ -348,8 +369,6 @@ class ChatServiceImplModeTest {
                     null,
                     agentRuntimeEngine,
                     engineSelector,
-                    null,
-                    null,
                     null,
                     sseEventBridge,
                     false,

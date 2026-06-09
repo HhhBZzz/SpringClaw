@@ -91,7 +91,7 @@ public class OparLoopEngine implements AgentEngine {
     }
 
     @Override
-    public ChatExecutionResult execute(ChatContext ctx, FallbackResponder fallbackResponder) {
+    public ChatExecutionResult execute(ChatContext ctx, AgentEngine.FallbackResponder fallbackResponder) {
         return runLoop(
                 ctx.activeClient(),
                 ctx.systemPrompt(),
@@ -106,7 +106,7 @@ public class OparLoopEngine implements AgentEngine {
                                        String systemPrompt,
                                        AssembledContext assembled,
                                        String requestId,
-                                       FallbackResponder fallbackResponder) {
+                                       AgentEngine.FallbackResponder fallbackResponder) {
         return runLoop(activeClient, systemPrompt, assembled, requestId, fallbackResponder, null);
     }
 
@@ -114,7 +114,7 @@ public class OparLoopEngine implements AgentEngine {
                                        String systemPrompt,
                                        AssembledContext assembled,
                                        String requestId,
-                                       FallbackResponder fallbackResponder,
+                                       AgentEngine.FallbackResponder fallbackResponder,
                                        AgentDecision decision) {
         AiProviderService.ActiveChatClient currentClient = activeClient;
         LocalSkillFallbackService.LocalSkillResult decisionBoundResult = tryDecisionBoundLocalResult(assembled.question(), decision);
@@ -431,7 +431,7 @@ public class OparLoopEngine implements AgentEngine {
                                                     AssembledContext assembled,
                                                     String plan,
                                                     String action,
-                                                    FallbackResponder fallbackResponder) {
+                                                    AgentEngine.FallbackResponder fallbackResponder) {
         LocalSkillFallbackService.LocalSkillResult localResult = tryLocalFallbackResult(assembled.question());
         String reflect = localResult != null
                 ? narrateLocalExecution(systemPrompt, assembled, localResult)
@@ -494,11 +494,6 @@ public class OparLoopEngine implements AgentEngine {
             }
         }
         return true;
-    }
-
-    @FunctionalInterface
-    public interface FallbackResponder {
-        String respond(String reason, AssembledContext context);
     }
 
     private record ActionResult(String output, boolean degraded) {

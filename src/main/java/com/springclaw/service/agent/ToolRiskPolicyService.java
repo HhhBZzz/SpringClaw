@@ -1,5 +1,6 @@
 package com.springclaw.service.agent;
 
+import com.springclaw.common.util.TextUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -12,20 +13,20 @@ import java.util.Locale;
 public class ToolRiskPolicyService {
 
     public String classifyRisk(String text) {
-        String lower = normalize(text);
+        String lower = TextUtils.normalize(text);
         if (!StringUtils.hasText(lower)) {
             return "read";
         }
-        if (containsAny(lower,
+        if (TextUtils.containsAny(lower,
                 "rm -rf", "格式化", "清空磁盘", "删除所有", "删库", "drop table", "shutdown", "kill -9",
                 "执行命令", "shell", "终端命令", "run command", "system.exit")) {
             return "dangerous";
         }
-        if (containsAny(lower,
+        if (TextUtils.containsAny(lower,
                 "发到飞书", "推送", "发送邮件", "发邮件", "外部发送", "创建定时", "定时任务", "每天", "每周", "每月", "cron")) {
             return "side_effect";
         }
-        if (containsAny(lower,
+        if (TextUtils.containsAny(lower,
                 "写入", "保存到", "修改", "覆盖", "新增文件", "创建文件", "删除文件", "移动文件", "重命名")) {
             return "write";
         }
@@ -43,16 +44,4 @@ public class ToolRiskPolicyService {
         return "ADMIN".equals(role) || "DEVELOPER".equals(role);
     }
 
-    private String normalize(String text) {
-        return text == null ? "" : text.trim().toLowerCase(Locale.ROOT);
-    }
-
-    private boolean containsAny(String text, String... keywords) {
-        for (String keyword : keywords) {
-            if (text.contains(keyword.toLowerCase(Locale.ROOT))) {
-                return true;
-            }
-        }
-        return false;
-    }
 }

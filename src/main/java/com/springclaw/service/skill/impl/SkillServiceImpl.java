@@ -1,5 +1,6 @@
 package com.springclaw.service.skill.impl;
 
+import com.springclaw.common.util.TextUtils;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.springclaw.domain.entity.SkillDescriptor;
@@ -67,8 +68,8 @@ public class SkillServiceImpl extends ServiceImpl<SkillDescriptorMapper, SkillDe
             return Collections.emptySet();
         }
 
-        String channelKey = normalize(channel);
-        String userKey = normalize(userId);
+        String channelKey = TextUtils.normalize(channel);
+        String userKey = TextUtils.normalize(userId);
         List<SkillDescriptor> descriptors = loadDescriptors();
         if (descriptors.isEmpty()) {
             return Collections.emptySet();
@@ -82,14 +83,14 @@ public class SkillServiceImpl extends ServiceImpl<SkillDescriptorMapper, SkillDe
 
         LinkedHashSet<String> allowedToolPacks = new LinkedHashSet<>();
         for (SkillDescriptor descriptor : descriptors) {
-            String skillId = safe(descriptor.getSkillId());
+            String skillId = TextUtils.safe(descriptor.getSkillId());
             if (!StringUtils.hasText(skillId)) {
                 continue;
             }
             boolean enabled = descriptor.getEnabled() == null || descriptor.getEnabled() == 1;
             boolean allowed = policyMap.getOrDefault(skillId, true);
             if (enabled && allowed) {
-                String toolPack = safe(descriptor.getToolPack()).toLowerCase();
+                String toolPack = TextUtils.safe(descriptor.getToolPack()).toLowerCase();
                 if (StringUtils.hasText(toolPack)) {
                     allowedToolPacks.add(toolPack);
                 }
@@ -271,15 +272,15 @@ public class SkillServiceImpl extends ServiceImpl<SkillDescriptorMapper, SkillDe
             Map<String, Integer> scoreMap = new LinkedHashMap<>();
             Map<String, Boolean> result = new LinkedHashMap<>();
             for (SkillPolicy policy : policies) {
-                String skillId = safe(policy.getSkillId());
+                String skillId = TextUtils.safe(policy.getSkillId());
                 if (!StringUtils.hasText(skillId)) {
                     continue;
                 }
                 int score = 0;
-                if (channel.equalsIgnoreCase(safe(policy.getChannel()))) {
+                if (channel.equalsIgnoreCase(TextUtils.safe(policy.getChannel()))) {
                     score += 2;
                 }
-                if (userId.equalsIgnoreCase(safe(policy.getUserId()))) {
+                if (userId.equalsIgnoreCase(TextUtils.safe(policy.getUserId()))) {
                     score += 1;
                 }
                 Integer oldScore = scoreMap.get(skillId);
@@ -356,14 +357,6 @@ public class SkillServiceImpl extends ServiceImpl<SkillDescriptorMapper, SkillDe
         dbRetryAt = System.currentTimeMillis() + DB_RETRY_INTERVAL_MS;
         String reason = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
         log.warn("Skill DB 不可用，{}ms 内走默认技能。reason={}", DB_RETRY_INTERVAL_MS, reason);
-    }
-
-    private String normalize(String value) {
-        return StringUtils.hasText(value) ? value.trim() : "*";
-    }
-
-    private String safe(String value) {
-        return value == null ? "" : value.trim();
     }
 
     private int priorityOrDefault(SkillDescriptor descriptor) {

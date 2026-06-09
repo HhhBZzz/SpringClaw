@@ -27,8 +27,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -93,22 +91,6 @@ public class MarkdownSkillCatalogService {
                 .sorted(Comparator.comparingInt(SkillDefinition::priority)
                         .thenComparing(definition -> definition.skillId().toLowerCase(Locale.ROOT)))
                 .toList();
-    }
-
-    public Optional<SkillDefinition> matchDefinition(String question, Set<String> allowedToolPacks) {
-        if (!StringUtils.hasText(question)) {
-            return Optional.empty();
-        }
-        String normalized = normalize(question);
-        return listDefinitions().stream()
-                .filter(SkillDefinition::enabled)
-                .filter(SkillDefinition::agentVisible)
-                .filter(definition -> definition.matchesAllowedToolPacks(allowedToolPacks))
-                .map(definition -> Map.entry(definition, score(definition, normalized)))
-                .filter(entry -> entry.getValue() > 0)
-                .sorted(Comparator.<Map.Entry<SkillDefinition, Integer>>comparingInt(Map.Entry::getValue).reversed())
-                .map(Map.Entry::getKey)
-                .findFirst();
     }
 
     public ImportedSkillImportResult importFromUrl(ImportMarkdownSkillRequest request) {
@@ -311,28 +293,6 @@ public class MarkdownSkillCatalogService {
                 .replace("\\u003E", ">")
                 .replace("\\u0026", "&")
                 .trim();
-    }
-
-    private int score(SkillDefinition definition, String normalizedQuestion) {
-        int score = 0;
-        if (definition.triggerKeywords() != null) {
-            for (String keyword : definition.triggerKeywords()) {
-                if (StringUtils.hasText(keyword) && normalizedQuestion.contains(keyword.trim().toLowerCase(Locale.ROOT))) {
-                    score += 3;
-                }
-            }
-        }
-        if (normalizedQuestion.contains(definition.skillId().toLowerCase(Locale.ROOT))) {
-            score += 1;
-        }
-        if (normalizedQuestion.contains(definition.name().toLowerCase(Locale.ROOT))) {
-            score += 1;
-        }
-        return score;
-    }
-
-    private String normalize(String question) {
-        return question == null ? "" : question.trim().toLowerCase(Locale.ROOT);
     }
 
     public record ImportMarkdownSkillRequest(String url,

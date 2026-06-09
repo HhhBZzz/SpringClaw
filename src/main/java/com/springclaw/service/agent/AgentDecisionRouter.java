@@ -1,5 +1,7 @@
 package com.springclaw.service.agent;
 
+import com.springclaw.common.util.TextUtils;
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import com.springclaw.tool.runtime.CapabilityRegistry;
@@ -29,7 +31,7 @@ public class AgentDecisionRouter {
     }
 
     public AgentDecision routeByRules(AgentDecisionRequest request) {
-        String question = request == null ? "" : safe(request.question()).trim();
+        String question = request == null ? "" : TextUtils.safe(request.question()).trim();
         if (!StringUtils.hasText(question)) {
             return AgentDecision.clarify("用户输入为空，需要补充目标。");
         }
@@ -124,8 +126,8 @@ public class AgentDecisionRouter {
     }
 
     private boolean looksLikeScheduledTask(String lower) {
-        return containsAny(lower, "定时", "任务", "每天", "每周", "每月", "cron", "提醒我", "定期")
-                && containsAny(lower, "每天", "每周", "每月", "cron", "定时", "定期", "9 点", "9点", "提醒");
+        return TextUtils.containsAny(lower, "定时", "任务", "每天", "每周", "每月", "cron", "提醒我", "定期")
+                && TextUtils.containsAny(lower, "每天", "每周", "每月", "cron", "定时", "定期", "9 点", "9点", "提醒");
     }
 
     private List<String> webCapabilities(List<CapabilityRegistry.CapabilityEntry> entries) {
@@ -141,22 +143,14 @@ public class AgentDecisionRouter {
     }
 
     private boolean looksAmbiguousAction(String lower) {
-        return containsAny(lower, "帮我处理", "弄一下", "搞一下", "操作一下", "自动帮我", "执行一下")
-                && !containsAny(lower, "是什么", "解释", "为什么", "区别");
+        return TextUtils.containsAny(lower, "帮我处理", "弄一下", "搞一下", "操作一下", "自动帮我", "执行一下")
+                && !TextUtils.containsAny(lower, "是什么", "解释", "为什么", "区别");
     }
 
-    private boolean containsAny(String text, String... keywords) {
-        for (String keyword : keywords) {
-            if (text.contains(keyword.toLowerCase(Locale.ROOT))) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     private boolean isLocalFilesSkill(String skillId) {
-        return "local-files".equalsIgnoreCase(safe(skillId))
-                || "local_files".equalsIgnoreCase(safe(skillId));
+        return "local-files".equalsIgnoreCase(TextUtils.safe(skillId))
+                || "local_files".equalsIgnoreCase(TextUtils.safe(skillId));
     }
 
     private boolean containsToolPack(SkillDefinition skill, String toolPack) {
@@ -170,7 +164,4 @@ public class AgentDecisionRouter {
                 .anyMatch(normalized::equals);
     }
 
-    private String safe(String text) {
-        return text == null ? "" : text;
-    }
 }

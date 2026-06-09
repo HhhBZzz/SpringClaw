@@ -58,6 +58,7 @@ class EngineSelectorTest {
                 mock(OparContextAwareSupport.class),
                 mock(OparPromptSupport.class),
                 mock(ConversationAdvisorSupport.class),
+                mock(LocalExecutionSupport.class),
                 true,
                 true,
                 3

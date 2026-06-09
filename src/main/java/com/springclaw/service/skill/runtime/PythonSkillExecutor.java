@@ -1,5 +1,6 @@
 package com.springclaw.service.skill.runtime;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.script.ScriptSkillExecutorService;
 import org.springframework.stereotype.Component;
@@ -21,13 +22,13 @@ public class PythonSkillExecutor implements SkillExecutor {
 
     @Override
     public boolean supports(SkillDefinition definition) {
-        String type = normalize(definition == null ? "" : definition.executorType());
+        String type = TextUtils.normalize(definition == null ? "" : definition.executorType());
         return "python".equals(type) || "script".equals(type);
     }
 
     @Override
     public String execute(SkillDefinition definition, String inputPayload) {
-        String payload = safe(inputPayload);
+        String payload = TextUtils.safe(inputPayload);
         if (!StringUtils.hasText(payload)) {
             return scriptSkillExecutorService.runScriptSkillByGoal(definition.skillId(), "请执行默认任务");
         }
@@ -41,11 +42,4 @@ public class PythonSkillExecutor implements SkillExecutor {
         return StringUtils.hasText(text) && text.trim().startsWith("{") && text.trim().endsWith("}");
     }
 
-    private String normalize(String value) {
-        return StringUtils.hasText(value) ? value.trim().toLowerCase(Locale.ROOT) : "";
-    }
-
-    private String safe(String value) {
-        return value == null ? "" : value.trim();
-    }
 }

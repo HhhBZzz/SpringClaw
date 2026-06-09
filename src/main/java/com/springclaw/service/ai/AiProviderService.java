@@ -1,5 +1,6 @@
 package com.springclaw.service.ai;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.config.ai.SpringClawAiProperties;
 import io.micrometer.observation.ObservationRegistry;
@@ -171,7 +172,7 @@ public class AiProviderService {
             if (isChatUnsupportedModelHint(normalizedProvider, modelHint)) {
                 throw new BusinessException(40043, unsupportedChatModelMessage(normalizedProvider, modelHint));
             }
-            throw new BusinessException(40042, "未识别模型或模型未启用: " + safe(modelHint));
+            throw new BusinessException(40042, "未识别模型或模型未启用: " + TextUtils.safe(modelHint));
         }
         ensureChatCompatibleModel(normalizedProvider, resolvedModel);
         runtime.setActiveModel(resolvedModel);
@@ -200,7 +201,7 @@ public class AiProviderService {
             if (isChatUnsupportedModelHint(normalizedProvider, modelHint)) {
                 throw new BusinessException(40043, unsupportedChatModelMessage(normalizedProvider, modelHint));
             }
-            throw new BusinessException(40042, "未识别模型或模型未启用: " + safe(modelHint));
+            throw new BusinessException(40042, "未识别模型或模型未启用: " + TextUtils.safe(modelHint));
         }
         ensureChatCompatibleModel(normalizedProvider, resolvedModel);
         runtime.setActiveModel(resolvedModel);
@@ -273,7 +274,7 @@ public class AiProviderService {
         String normalizedProvider = normalizeProviderId(providerId);
         String candidate = resolveModelCandidate(normalizedProvider, modelHint);
         if (!StringUtils.hasText(candidate)) {
-            candidate = safe(modelHint);
+            candidate = TextUtils.safe(modelHint);
         }
         return "当前主聊天链路暂不支持该 DeepSeek thinking 模型: " + candidate
                 + "。请使用 deepseek-v4-pro 的普通聊天模式；显式 thinking/reasoner 需要单独 reasoning 适配器。";
@@ -296,7 +297,7 @@ public class AiProviderService {
     private AiProviderRuntime requireAvailableProvider(String providerId) {
         AiProviderRuntime runtime = providers.get(providerId);
         if (runtime == null) {
-            throw new BusinessException(40441, "模型提供方不存在: " + safe(providerId));
+            throw new BusinessException(40441, "模型提供方不存在: " + TextUtils.safe(providerId));
         }
         if (!runtime.available()) {
             throw new BusinessException(40041, "模型提供方当前不可用: " + runtime.availableReason());
@@ -306,7 +307,7 @@ public class AiProviderService {
 
     private String resolveStartupProvider(String configuredProvider) {
         String configured = normalizeProviderId(configuredProvider);
-        String explicit = safe(envLookup.apply("SPRINGCLAW_AI_ACTIVE_PROVIDER")).trim();
+        String explicit = TextUtils.safe(envLookup.apply("SPRINGCLAW_AI_ACTIVE_PROVIDER")).trim();
         if (StringUtils.hasText(explicit)) {
             return normalizeProviderId(explicit);
         }
@@ -315,7 +316,7 @@ public class AiProviderService {
 
     private StartupModelChoice resolveStartupModel(AiProviderRuntime runtime) {
         String configuredDefault = runtime.defaultModel();
-        String explicit = safe(envLookup.apply(modelEnvName(runtime.providerId()))).trim();
+        String explicit = TextUtils.safe(envLookup.apply(modelEnvName(runtime.providerId()))).trim();
         if (StringUtils.hasText(explicit)) {
             return toStartupCompatibleModel(runtime, explicit);
         }
@@ -471,10 +472,10 @@ public class AiProviderService {
     private String resolveModelCandidate(String providerId, String modelHint) {
         AiProviderRuntime runtime = providers.get(normalizeProviderId(providerId));
         if (runtime == null) {
-            return safe(modelHint);
+            return TextUtils.safe(modelHint);
         }
         String resolved = runtime.resolveModel(modelHint);
-        return StringUtils.hasText(resolved) ? resolved : safe(modelHint);
+        return StringUtils.hasText(resolved) ? resolved : TextUtils.safe(modelHint);
     }
 
     private boolean isUnsupportedChatModel(String providerId, String model) {
@@ -487,10 +488,6 @@ public class AiProviderService {
                 .replace(".", "")
                 .replace(" ", "");
         return normalized.contains("reasoner");
-    }
-
-    private String safe(String text) {
-        return text == null ? "" : text;
     }
 
     public record ActiveChatClient(String providerId,

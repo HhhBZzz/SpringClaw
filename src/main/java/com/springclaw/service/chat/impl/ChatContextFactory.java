@@ -6,8 +6,6 @@ import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentDecisionRequest;
 import com.springclaw.service.agent.AgentDecisionService;
-import com.springclaw.service.agent.lifecycle.TurnRequest;
-import com.springclaw.service.agent.pipeline.TurnPipeline;
 import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.context.ContextAssembler;
@@ -39,7 +37,6 @@ public class ChatContextFactory {
     private final ChatRoutingStateService chatRoutingStateService;
     private final ChatRoutingPolicyService chatRoutingPolicyService;
     private final AgentDecisionService agentDecisionService;
-    private final TurnPipeline turnPipeline;
     private final String configuredAgentMode;
     private final boolean routingAutoUpgradeEnabled;
 
@@ -54,7 +51,6 @@ public class ChatContextFactory {
                               ChatRoutingStateService chatRoutingStateService,
                               ChatRoutingPolicyService chatRoutingPolicyService,
                               AgentDecisionService agentDecisionService,
-                              TurnPipeline turnPipeline,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.agent-mode:simplified}") String configuredAgentMode,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.routing.auto-upgrade-enabled:true}") boolean routingAutoUpgradeEnabled) {
         this.aiProviderService = aiProviderService;
@@ -67,36 +63,8 @@ public class ChatContextFactory {
         this.chatRoutingStateService = chatRoutingStateService;
         this.chatRoutingPolicyService = chatRoutingPolicyService;
         this.agentDecisionService = agentDecisionService;
-        this.turnPipeline = turnPipeline;
         this.configuredAgentMode = configuredAgentMode;
         this.routingAutoUpgradeEnabled = routingAutoUpgradeEnabled;
-    }
-
-    public ChatContextFactory(AiProviderService aiProviderService,
-                              SoulPromptService soulPromptService,
-                              AgentSessionService agentSessionService,
-                              AuthService authService,
-                              SkillService skillService,
-                              SkillRegistryService skillRegistryService,
-                              ContextAssembler contextAssembler,
-                              ChatRoutingStateService chatRoutingStateService,
-                              ChatRoutingPolicyService chatRoutingPolicyService,
-                              AgentDecisionService agentDecisionService,
-                              @org.springframework.beans.factory.annotation.Value("${springclaw.chat.agent-mode:simplified}") String configuredAgentMode,
-                              @org.springframework.beans.factory.annotation.Value("${springclaw.chat.routing.auto-upgrade-enabled:true}") boolean routingAutoUpgradeEnabled) {
-        this(aiProviderService,
-                soulPromptService,
-                agentSessionService,
-                authService,
-                skillService,
-                skillRegistryService,
-                contextAssembler,
-                chatRoutingStateService,
-                chatRoutingPolicyService,
-                agentDecisionService,
-                null,
-                configuredAgentMode,
-                routingAutoUpgradeEnabled);
     }
 
     public ChatContext build(ChatRequest request, boolean persistSession) {
@@ -185,16 +153,6 @@ public class ChatContextFactory {
                                           String requestId,
                                           String message,
                                           String responseMode) {
-        if (turnPipeline == null) {
-            return message == null ? "" : message.trim();
-        }
-        return turnPipeline.prepare(new TurnRequest(
-                sessionKey,
-                channel,
-                userId,
-                requestId,
-                message,
-                responseMode
-        )).effectiveText();
+        return message == null ? "" : message.trim();
     }
 }

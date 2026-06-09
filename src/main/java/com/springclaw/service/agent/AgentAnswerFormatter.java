@@ -1,5 +1,6 @@
 package com.springclaw.service.agent;
 
+import com.springclaw.common.util.TextUtils;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
@@ -35,11 +36,11 @@ final class AgentAnswerFormatter {
         } else {
             for (CapabilityResult result : results) {
                 builder.append("- ")
-                        .append(safe(result.capabilityId(), "unknown"))
+                        .append(TextUtils.safe(result.capabilityId(), "unknown"))
                         .append(" [")
-                        .append(safe(result.status(), "unknown"))
+                        .append(TextUtils.safe(result.status(), "unknown"))
                         .append("] ")
-                        .append(safe(result.summary(), "已执行能力"))
+                        .append(TextUtils.safe(result.summary(), "已执行能力"))
                         .append("\n  结果：")
                         .append(renderPayload(result.payload()))
                         .append("\n");
@@ -92,7 +93,7 @@ final class AgentAnswerFormatter {
     }
 
     private String renderPayload(String payload) {
-        String value = truncate(payload, RESULT_PAYLOAD_LIMIT);
+        String value = TextUtils.truncate(payload, RESULT_PAYLOAD_LIMIT);
         if (!StringUtils.hasText(value)) {
             return "（无详情）";
         }
@@ -106,18 +107,4 @@ final class AgentAnswerFormatter {
         return "如果需要，我可以继续展开某个证据、追加工具执行，或把结果转成更适合交付的报告格式。";
     }
 
-    private String truncate(String text, int maxLength) {
-        if (!StringUtils.hasText(text)) {
-            return "";
-        }
-        String value = text.trim();
-        if (value.length() <= maxLength) {
-            return value;
-        }
-        return value.substring(0, maxLength) + "...<TRUNCATED>";
-    }
-
-    private String safe(String text, String fallback) {
-        return StringUtils.hasText(text) ? text.trim() : fallback;
-    }
 }

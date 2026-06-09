@@ -1,6 +1,7 @@
 package com.springclaw.service.chat;
 
 import com.springclaw.common.exception.BusinessException;
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.tool.pack.SystemToolPack;
 import org.springframework.util.StringUtils;
@@ -45,12 +46,12 @@ final class LocalSkillModelControlSupport {
             String fallback = simplifyModelSwitchAnswer(detail);
             return localResult("MODEL_PROVIDER_SWITCH", detail, fallback, false);
         }
-        if (containsAny(lower, "现在几点", "当前时间", "几点了", "现在时间", "现在是什么时候", "现在几点了", "time now", "what time")) {
+        if (TextUtils.containsAny(lower, "现在几点", "当前时间", "几点了", "现在时间", "现在是什么时候", "现在几点了", "time now", "what time")) {
             String answer = systemToolPack.now();
             return localResult("SYSTEM_TIME", answer, answer, false);
         }
         if (looksLikeJvmStatusQuestion(lower)) {
-            boolean preferArgs = containsAny(lower, "参数", "启动", "input", "jps -v", "jinfo", "-x", "-d");
+            boolean preferArgs = TextUtils.containsAny(lower, "参数", "启动", "input", "jps -v", "jinfo", "-x", "-d");
             if (preferArgs) {
                 String info = systemToolPack.jvmInputArguments();
                 return localResult("SYSTEM_JVM_ARGS", info, info, true);
@@ -60,7 +61,7 @@ final class LocalSkillModelControlSupport {
             String detail = jvmInfo + "\n\nJVM 启动参数：\n" + args;
             return localResult("SYSTEM_JVM_INFO", detail, detail, true);
         }
-        if (containsAny(lower, "uuid", "唯一id")) {
+        if (TextUtils.containsAny(lower, "uuid", "唯一id")) {
             String answer = systemToolPack.uuid();
             return localResult("SYSTEM_UUID", answer, answer, false);
         }
@@ -73,7 +74,7 @@ final class LocalSkillModelControlSupport {
     }
 
     boolean looksLikeDateQuestion(String text) {
-        return containsAny(text,
+        return TextUtils.containsAny(text,
                 "今天是什么日子", "今天几号", "今天几月几号", "今天星期几", "今天周几", "今天是周几",
                 "今天日期", "今天几号了", "今天多少号", "今天礼拜几",
                 "现在几号", "现在日期", "现在几月几号", "现在星期几", "现在周几");
@@ -96,17 +97,9 @@ final class LocalSkillModelControlSupport {
         return Optional.of(new LocalSkillFallbackService.LocalSkillResult(route, executionDetails, fallbackAnswer, detailed));
     }
 
-    private boolean containsAny(String text, String... keys) {
-        for (String key : keys) {
-            if (text.contains(key)) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     private boolean looksLikeModelProviderQuestion(String text) {
-        return containsAny(text,
+        return TextUtils.containsAny(text,
                 "当前模型", "目前模型", "目前是什么模型", "目前用什么模型", "目前是哪个模型",
                 "现在用什么模型", "现在是什么模型", "用的什么模型", "用的哪个模型",
                 "你是什么模型", "你现在是什么模型", "你现在用什么模型", "你目前是什么模型",
@@ -117,20 +110,20 @@ final class LocalSkillModelControlSupport {
     }
 
     private boolean looksLikeDetailedModelProviderQuestion(String text) {
-        return containsAny(text,
+        return TextUtils.containsAny(text,
                 "模型列表", "可用模型", "列出模型", "所有模型", "全部模型",
                 "provider 列表", "providers", "详细模型", "详细状态",
                 "base-url", "base url", "当前provider", "当前 provider", "active provider", "当前通道");
     }
 
     private boolean looksLikeModelAvailabilityQuestion(String text) {
-        return containsAny(text,
+        return TextUtils.containsAny(text,
                 "可以换什么模型", "可以更换什么模型", "可以更换为什么模型", "能换什么模型",
                 "能切换什么模型", "支持什么模型", "有哪些模型可以换", "可用模型")
-                || (containsAny(text, "有没有", "有没", "没有", "支持", "可用", "能用")
+                || (TextUtils.containsAny(text, "有没有", "有没", "没有", "支持", "可用", "能用")
                 && (text.contains("模型") || text.contains("千问") || text.contains("qwen")
                 || text.contains("claude") || text.contains("deepseek") || text.contains("深度求索")))
-                || containsAny(text, "千问3.5plus", "千问3.5 plus", "qwen3.5-plus", "qwen3.5 plus");
+                || TextUtils.containsAny(text, "千问3.5plus", "千问3.5 plus", "qwen3.5-plus", "qwen3.5 plus");
     }
 
     private boolean looksLikeModelSwitchQuestion(String text) {
@@ -139,21 +132,21 @@ final class LocalSkillModelControlSupport {
     }
 
     private boolean looksLikeJvmStatusQuestion(String text) {
-        boolean jvmDomain = containsAny(text,
+        boolean jvmDomain = TextUtils.containsAny(text,
                 "jvm", "java 虚拟机", "jvm参数", "jvm 参数", "jvm信息", "jvm 信息",
                 "启动参数", "java 参数", "input arguments", "jps -v", "jinfo", "jstat", "jmap", "gc", "堆内存");
         if (!jvmDomain) {
             return false;
         }
-        boolean explanationIntent = containsAny(text, "是什么", "什么意思", "原理", "介绍", "解释");
-        boolean runtimeIntent = containsAny(text,
+        boolean explanationIntent = TextUtils.containsAny(text, "是什么", "什么意思", "原理", "介绍", "解释");
+        boolean runtimeIntent = TextUtils.containsAny(text,
                 "当前", "现在", "查看", "看一下", "看看", "本机", "运行", "参数", "启动", "进程", "堆", "gc",
                 "input", "jps", "jinfo", "jstat", "jmap");
         return !explanationIntent && runtimeIntent;
     }
 
     private boolean looksLikeExplicitCommandIntent(String text) {
-        return containsAny(text,
+        return TextUtils.containsAny(text,
                 "执行命令", "运行命令", "run command", "执行 shell", "运行 shell", "执行终端命令");
     }
 
@@ -227,7 +220,7 @@ final class LocalSkillModelControlSupport {
         }
 
         String lower = question.toLowerCase(Locale.ROOT);
-        if (containsAny(lower,
+        if (TextUtils.containsAny(lower,
                 "可以换什么模型", "可以更换什么模型", "可以更换为什么模型", "能换什么模型",
                 "能切换什么模型", "支持什么模型", "有哪些模型可以换", "模型列表", "可用模型")) {
             return renderSwitchableModelSummary();
@@ -311,7 +304,7 @@ final class LocalSkillModelControlSupport {
     private ModelSwitchTarget resolveModelSwitchTarget(String question) {
         String explicitProviderId = resolveProviderAlias(question);
         String preferredProviderId = explicitProviderId;
-        if (!StringUtils.hasText(preferredProviderId) && containsAny(question.toLowerCase(Locale.ROOT), "千问")) {
+        if (!StringUtils.hasText(preferredProviderId) && TextUtils.containsAny(question.toLowerCase(Locale.ROOT), "千问")) {
             preferredProviderId = preferredQwenProvider();
         }
         String modelHint = extractModelHint(question);
@@ -361,7 +354,7 @@ final class LocalSkillModelControlSupport {
     }
 
     private boolean containsModelSwitchVerb(String text) {
-        return containsAny(text, "切换", "切到", "改用", "换成", "切回", "switch", "use ", "换回");
+        return TextUtils.containsAny(text, "切换", "切到", "改用", "换成", "切回", "switch", "use ", "换回");
     }
 
     private boolean hasKnownModelHint(String text) {

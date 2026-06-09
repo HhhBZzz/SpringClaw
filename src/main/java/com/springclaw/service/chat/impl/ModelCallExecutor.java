@@ -1,5 +1,6 @@
 package com.springclaw.service.chat.impl;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.usage.LlmUsageRecordService;
 import org.slf4j.Logger;
@@ -229,15 +230,11 @@ public class ModelCallExecutor {
     }
 
     private String clientKey(String providerId, String model) {
-        return safe(providerId).trim().toLowerCase() + "::" + safe(model).trim().toLowerCase();
+        return TextUtils.safe(providerId).trim().toLowerCase() + "::" + TextUtils.safe(model).trim().toLowerCase();
     }
 
     private String displayModel(AiProviderService.ActiveChatClient client) {
         return client == null ? "" : client.providerId() + ":" + client.model();
-    }
-
-    private String safe(String text) {
-        return text == null ? "" : text;
     }
 
     @FunctionalInterface

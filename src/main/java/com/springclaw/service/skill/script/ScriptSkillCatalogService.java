@@ -1,9 +1,11 @@
 package com.springclaw.service.skill.script;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.bundle.SkillBundleDefinition;
 import com.springclaw.service.skill.bundle.SkillCatalogService;
 import com.springclaw.service.skill.bundle.SkillBundleSupport;
+import com.springclaw.service.skill.impl.SkillRegistryService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -30,6 +32,7 @@ public class ScriptSkillCatalogService {
     private final boolean enabled;
     private final SkillCatalogService skillCatalogService;
     private final Set<String> allowedSkills;
+    private final SkillRegistryService skillRegistryService;
 
     public ScriptSkillCatalogService(boolean enabled,
                                      String root,
@@ -38,15 +41,18 @@ public class ScriptSkillCatalogService {
         this.enabled = enabled;
         this.skillCatalogService = new SkillCatalogService(enabled, root);
         this.allowedSkills = parseAllowedSkills(allowedSkills);
+        this.skillRegistryService = null;
     }
 
     @Autowired
     public ScriptSkillCatalogService(@Value("${springclaw.skills.enabled:true}") boolean enabled,
                                      @Value("${springclaw.skills.allowed:*}") String allowedSkills,
-                                     SkillCatalogService skillCatalogService) {
+                                     SkillCatalogService skillCatalogService,
+                                     SkillRegistryService skillRegistryService) {
         this.enabled = enabled;
         this.skillCatalogService = skillCatalogService;
         this.allowedSkills = parseAllowedSkills(allowedSkills);
+        this.skillRegistryService = skillRegistryService;
     }
 
     public boolean enabled() {
@@ -96,8 +102,24 @@ public class ScriptSkillCatalogService {
         if (!StringUtils.hasText(normalizedGoal)) {
             return Optional.empty();
         }
+        if (skillRegistryService != null) {
+            // 统一打分：委托 SkillRegistryService 评分，再映射回 ScriptSkillDefinition
+            List<ScriptSkillDefinition> scriptDefs = listPublicDefinitions();
+            Set<String> scriptIds = scriptDefs.stream()
+                    .map(ScriptSkillDefinition::skillName)
+                    .collect(Collectors.toSet());
+            return skillRegistryService.listAllDefinitions().stream()
+                    .filter(SkillDefinition::enabled)
+                    .filter(def -> "python".equalsIgnoreCase(def.executorType()) || "script".equalsIgnoreCase(def.executorType()))
+                    .filter(def -> scriptIds.contains(def.skillId()))
+                    .map(def -> Map.entry(def, skillRegistryService.score(def, normalizedGoal)))
+                    .filter(entry -> entry.getValue() >= minScore)
+                    .max(Map.Entry.comparingByValue())
+                    .flatMap(entry -> findDefinition(entry.getKey().skillId()));
+        }
+        // 无 registry 时退回本地打分（测试兼容）
         return listPublicDefinitions().stream()
-                .map(definition -> Map.entry(definition, scoreDefinition(definition, normalizedGoal)))
+                .map(definition -> Map.entry(definition, scoreDefinitionLocal(definition, normalizedGoal)))
                 .filter(entry -> entry.getValue() >= minScore)
                 .max(Map.Entry.comparingByValue())
                 .map(Map.Entry::getKey);
@@ -236,7 +258,7 @@ public class ScriptSkillCatalogService {
         return allowedSkills.stream().map(this::normalizeText).anyMatch(normalized::equals);
     }
 
-    private int scoreDefinition(ScriptSkillDefinition definition, String normalizedGoal) {
+    private int scoreDefinitionLocal(ScriptSkillDefinition definition, String normalizedGoal) {
         int score = 0;
         for (String keyword : definition.keywords()) {
             String normalizedKeyword = normalizeText(keyword);

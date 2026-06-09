@@ -1,5 +1,6 @@
 package com.springclaw.service.task.impl;
 
+import com.springclaw.common.util.TextUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.springclaw.common.exception.BusinessException;
@@ -111,7 +112,7 @@ public class ScheduledTaskServiceImpl extends ServiceImpl<ScheduledTaskMapper, S
 
     @Override
     public Optional<ScheduledTask> findByTaskId(String taskId) {
-        String safeTaskId = safe(taskId);
+        String safeTaskId = TextUtils.safe(taskId);
         if (!StringUtils.hasText(safeTaskId)) {
             return Optional.empty();
         }
@@ -260,9 +261,9 @@ public class ScheduledTaskServiceImpl extends ServiceImpl<ScheduledTaskMapper, S
         boolean enabled = boolValue(command == null ? null : command.enabled(), existing == null || isEnabled(existing));
         String sessionKeyTemplate = pick(command == null ? null : command.sessionKeyTemplate(), existing == null ? null : existing.getSessionKeyTemplate());
         LocalDateTime nextRunAt = enabled ? taskScheduleSupport.nextRunAt(scheduleType, scheduleExpression, now) : existing == null ? null : existing.getNextRunAt();
-        String lastStatus = enabled ? (existing == null ? "READY" : safe(existing.getLastStatus(), "READY")) : "DISABLED";
+        String lastStatus = enabled ? (existing == null ? "READY" : TextUtils.safe(existing.getLastStatus(), "READY")) : "DISABLED";
         return new TaskState(name.trim(), enabled, scheduleType, scheduleExpression.trim(), targetType, targetRef.trim(),
-                safe(inputPayload), channel, deliveryMode, safe(deliveryTarget), persistToSession, safe(sessionKeyTemplate), nextRunAt, lastStatus);
+                TextUtils.safe(inputPayload), channel, deliveryMode, TextUtils.safe(deliveryTarget), persistToSession, TextUtils.safe(sessionKeyTemplate), nextRunAt, lastStatus);
     }
 
     private void applyState(ScheduledTask task, TaskState state) {
@@ -308,7 +309,7 @@ public class ScheduledTaskServiceImpl extends ServiceImpl<ScheduledTaskMapper, S
     }
 
     private String normalizeScheduleType(String scheduleType) {
-        String value = safe(scheduleType).toLowerCase(Locale.ROOT);
+        String value = TextUtils.safe(scheduleType).toLowerCase(Locale.ROOT);
         if (!"preset".equals(value) && !"cron".equals(value)) {
             throw new BusinessException(40070, "scheduleType 仅支持 preset 或 cron");
         }
@@ -316,7 +317,7 @@ public class ScheduledTaskServiceImpl extends ServiceImpl<ScheduledTaskMapper, S
     }
 
     private String normalizeTargetType(String targetType) {
-        String value = safe(targetType).toLowerCase(Locale.ROOT);
+        String value = TextUtils.safe(targetType).toLowerCase(Locale.ROOT);
         if (!"skill".equals(value) && !"agent".equals(value)) {
             throw new BusinessException(40065, "targetType 仅支持 skill 或 agent");
         }
@@ -336,7 +337,7 @@ public class ScheduledTaskServiceImpl extends ServiceImpl<ScheduledTaskMapper, S
     }
 
     private boolean isAdmin(String roleCode) {
-        return "ADMIN".equalsIgnoreCase(safe(roleCode));
+        return "ADMIN".equalsIgnoreCase(TextUtils.safe(roleCode));
     }
 
     private boolean boolValue(Boolean override, boolean defaultValue) {
@@ -377,14 +378,6 @@ public class ScheduledTaskServiceImpl extends ServiceImpl<ScheduledTaskMapper, S
 
     private String pick(String preferred, String fallback) {
         return StringUtils.hasText(preferred) ? preferred : fallback;
-    }
-
-    private String safe(String value) {
-        return value == null ? "" : value.trim();
-    }
-
-    private String safe(String value, String fallback) {
-        return StringUtils.hasText(value) ? value.trim() : fallback;
     }
 
     private record TaskState(String name,

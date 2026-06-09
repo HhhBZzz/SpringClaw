@@ -1,5 +1,6 @@
 package com.springclaw.service.chat.impl;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import com.springclaw.tool.runtime.CapabilityRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -181,13 +182,13 @@ public class ChatRoutingPolicyService {
         }
         String normalized = question.trim().toLowerCase(Locale.ROOT);
         int score = 0;
-        if (containsAny(normalized, "分析", "排查", "定位", "修复", "对比", "比较", "梳理", "拆解", "设计", "审查")) {
+        if (TextUtils.containsAny(normalized, "分析", "排查", "定位", "修复", "对比", "比较", "梳理", "拆解", "设计", "审查")) {
             score++;
         }
-        if (containsAny(normalized, "日志", "报错", "异常", "堆栈", "代码", "项目", "配置", "启动", "调用链", "接口", "类", "文件", "sql", "redis", "rabbitmq")) {
+        if (TextUtils.containsAny(normalized, "日志", "报错", "异常", "堆栈", "代码", "项目", "配置", "启动", "调用链", "接口", "类", "文件", "sql", "redis", "rabbitmq")) {
             score++;
         }
-        if (containsAny(normalized, "先", "再", "然后", "同时", "并且", "分别", "逐步", "一步一步", "最后")) {
+        if (TextUtils.containsAny(normalized, "先", "再", "然后", "同时", "并且", "分别", "逐步", "一步一步", "最后")) {
             score++;
         }
         if (normalized.length() >= 28) {
@@ -225,14 +226,6 @@ public class ChatRoutingPolicyService {
         return "ADMIN".equals(roleCode) || "DEVELOPER".equals(roleCode);
     }
 
-    private boolean containsAny(String text, String... keywords) {
-        for (String keyword : keywords) {
-            if (text.contains(keyword)) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     private String normalizeMode(String mode) {
         if (!StringUtils.hasText(mode)) {
@@ -273,7 +266,7 @@ public class ChatRoutingPolicyService {
         }
 
         // Registry 不可用时只保留结构特征兜底，避免旧业务关键词绕过能力注册表。
-        if (containsAny(normalized, "http://", "https://")) {
+        if (TextUtils.containsAny(normalized, "http://", "https://")) {
             return "web-research";
         }
         if (allowedToolPacks != null && allowedToolPacks.contains("script")

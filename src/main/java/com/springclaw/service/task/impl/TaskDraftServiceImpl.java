@@ -1,6 +1,7 @@
 package com.springclaw.service.task.impl;
 
 import com.springclaw.common.exception.BusinessException;
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import com.springclaw.service.skill.impl.SkillServiceImpl;
 import com.springclaw.service.skill.script.ScriptSkillCatalogService;
@@ -102,16 +103,16 @@ public class TaskDraftServiceImpl implements TaskDraftService {
             return new TargetDraft("skill", explicitSkill, question);
         }
         Matcher urlMatcher = URL_PATTERN.matcher(question);
-        if (urlMatcher.find() && containsAny(lower, "抓", "爬", "读取", "网页", "链接", "crawl", "fetch")) {
+        if (urlMatcher.find() && TextUtils.containsAny(lower, "抓", "爬", "读取", "网页", "链接", "crawl", "fetch")) {
             return new TargetDraft("skill", "web_crawler", question);
         }
-        if (containsAny(lower, "boss", "直聘", "岗位", "职位")) {
+        if (TextUtils.containsAny(lower, "boss", "直聘", "岗位", "职位")) {
             return new TargetDraft("skill", "boss_authorized_collector", question);
         }
-        if (containsAny(lower, "代码分析", "分析代码", "分析项目")) {
+        if (TextUtils.containsAny(lower, "代码分析", "分析代码", "分析项目")) {
             return new TargetDraft("skill", "code-analysis", question);
         }
-        if (containsAny(lower, "日志", "报错", "堆栈", "异常")) {
+        if (TextUtils.containsAny(lower, "日志", "报错", "堆栈", "异常")) {
             return new TargetDraft("skill", "log-diagnostics", question);
         }
         return new TargetDraft("agent", "prompt", stripScheduleWords(question));
@@ -153,14 +154,6 @@ public class TaskDraftServiceImpl implements TaskDraftService {
         return targetName + " - " + schedule.label();
     }
 
-    private boolean containsAny(String text, String... keywords) {
-        for (String keyword : keywords) {
-            if (text.contains(keyword)) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     private int parseHour(String rawHour, String question) {
         int hour = Integer.parseInt(rawHour);

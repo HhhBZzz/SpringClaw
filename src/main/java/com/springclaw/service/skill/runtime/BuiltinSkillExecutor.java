@@ -1,5 +1,6 @@
 package com.springclaw.service.skill.runtime;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.service.chat.BuiltinSkillExecutionService;
 import com.springclaw.service.chat.LocalSkillFallbackService;
@@ -23,7 +24,7 @@ public class BuiltinSkillExecutor implements SkillExecutor {
 
     @Override
     public boolean supports(SkillDefinition definition) {
-        return "builtin".equals(normalize(definition == null ? "" : definition.executorType()));
+        return "builtin".equals(TextUtils.normalize(definition == null ? "" : definition.executorType()));
     }
 
     @Override
@@ -33,7 +34,4 @@ public class BuiltinSkillExecutor implements SkillExecutor {
                 .orElseThrow(() -> new BusinessException(50096, "builtin skill 未返回结果: " + definition.skillId()));
     }
 
-    private String normalize(String value) {
-        return StringUtils.hasText(value) ? value.trim().toLowerCase(Locale.ROOT) : "";
-    }
 }

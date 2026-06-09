@@ -50,7 +50,8 @@ class SimplifiedOparEngineTest {
                 conversationAdvisorSupport,
                 messageEventService,
                 capabilityExecutionService,
-                mock(ChatResponsePolicyService.class)
+                mock(ChatResponsePolicyService.class),
+                mock(LocalExecutionSupport.class)
         );
 
         AiProviderService.ActiveChatClient activeClient = new AiProviderService.ActiveChatClient(
@@ -130,6 +131,8 @@ class SimplifiedOparEngineTest {
         ConversationAdvisorSupport conversationAdvisorSupport = mock(ConversationAdvisorSupport.class);
         MessageEventService messageEventService = mock(MessageEventService.class);
 
+        LocalExecutionSupport localExecutionSupport = mock(LocalExecutionSupport.class);
+
         SimplifiedOparEngine engine = new SimplifiedOparEngine(
                 aiProviderService,
                 toolOrchestrator,
@@ -140,7 +143,8 @@ class SimplifiedOparEngineTest {
                 contextAwareSupport,
                 conversationAdvisorSupport,
                 messageEventService,
-                mock(ChatResponsePolicyService.class)
+                mock(ChatResponsePolicyService.class),
+                localExecutionSupport
         );
 
         AiProviderService.ActiveChatClient activeClient = new AiProviderService.ActiveChatClient(
@@ -169,8 +173,8 @@ class SimplifiedOparEngineTest {
                 );
 
         when(contextAwareSupport.tryContextAwareLocalResult(assembled)).thenReturn(null);
-        when(localSkillFallbackService.tryHandleControlPlane(anyString())).thenReturn(Optional.empty());
-        when(localSkillFallbackService.tryHandlePriorityStructured(anyString())).thenReturn(Optional.of(localResult));
+        when(localExecutionSupport.tryControlPlane(anyString(), eq(true))).thenReturn(null);
+        when(localExecutionSupport.tryPriorityStructured(anyString(), eq(true))).thenReturn(localResult);
         when(aiProviderService.activeClient()).thenReturn(activeClient);
         when(modelTransportGuardService.isModelCallEnabled(activeClient)).thenReturn(true);
         when(localExecutionNarrator.narrate(eq("system"), eq(assembled), eq(localResult), eq(activeClient), eq(true)))
@@ -213,7 +217,8 @@ class SimplifiedOparEngineTest {
                 contextAwareSupport,
                 conversationAdvisorSupport,
                 messageEventService,
-                mock(ChatResponsePolicyService.class)
+                mock(ChatResponsePolicyService.class),
+                mock(LocalExecutionSupport.class)
         );
 
         AiProviderService.ActiveChatClient activeClient = new AiProviderService.ActiveChatClient(

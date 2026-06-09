@@ -1,5 +1,6 @@
 package com.springclaw.tool.pack;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.skill.bundle.SkillBundleDefinition;
 import com.springclaw.service.skill.bundle.SkillCatalogService;
 import com.springclaw.service.skill.bundle.SkillUsageRecord;
@@ -93,7 +94,7 @@ public class SkillLibraryToolPack {
         }
         Optional<SkillBundleDefinition> optional = findBundle(name);
         if (optional.isEmpty()) {
-            return "skill 不存在或未安装: " + safe(name);
+            return "skill 不存在或未安装: " + TextUtils.safe(name);
         }
         SkillBundleDefinition bundle = optional.get();
         skillUsageService.recordView(bundle.skillId());
@@ -125,12 +126,12 @@ public class SkillLibraryToolPack {
         }
         Optional<SkillBundleDefinition> optional = findBundle(name);
         if (optional.isEmpty()) {
-            return "skill 不存在或未安装: " + safe(name);
+            return "skill 不存在或未安装: " + TextUtils.safe(name);
         }
         SkillBundleDefinition bundle = optional.get();
         String normalizedPath = normalizeRelativePath(filePath);
         if (!StringUtils.hasText(normalizedPath) || !isAllowedSupportingPath(normalizedPath)) {
-            return "不允许读取该 skill 文件: " + safe(filePath);
+            return "不允许读取该 skill 文件: " + TextUtils.safe(filePath);
         }
         Path target = bundle.bundlePath().resolve(normalizedPath).toAbsolutePath().normalize();
         if (!target.startsWith(bundle.bundlePath()) || !Files.isRegularFile(target)) {
@@ -167,14 +168,14 @@ public class SkillLibraryToolPack {
     }
 
     private Optional<SkillBundleDefinition> findBundle(String name) {
-        String normalized = normalize(name);
+        String normalized = TextUtils.normalize(name);
         if (!StringUtils.hasText(normalized)) {
             return Optional.empty();
         }
         return skillCatalogService.listBundles().stream()
-                .filter(bundle -> normalize(bundle.skillId()).equals(normalized)
-                        || normalize(bundle.slug()).equals(normalized)
-                        || normalize(bundle.name()).equals(normalized))
+                .filter(bundle -> TextUtils.normalize(bundle.skillId()).equals(normalized)
+                        || TextUtils.normalize(bundle.slug()).equals(normalized)
+                        || TextUtils.normalize(bundle.name()).equals(normalized))
                 .findFirst();
     }
 
@@ -241,14 +242,6 @@ public class SkillLibraryToolPack {
             return normalizedPath.toString();
         }
         return normalizedRoot.relativize(normalizedPath).toString().replace('\\', '/');
-    }
-
-    private String normalize(String value) {
-        return StringUtils.hasText(value) ? value.trim().toLowerCase(Locale.ROOT) : "";
-    }
-
-    private String safe(String value) {
-        return value == null ? "" : value;
     }
 
     private String blank(String value) {

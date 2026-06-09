@@ -1,5 +1,6 @@
 package com.springclaw.service.skill.runtime;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.service.chat.BuiltinSkillExecutionService;
 import com.springclaw.service.skill.SkillDefinition;
@@ -65,11 +66,7 @@ public class SkillRuntimeService {
                 .filter(executor -> executor.supports(definition))
                 .findFirst()
                 .orElseThrow(() -> new BusinessException(40080, "该 skill 当前不可直接执行: " + definition.skillId()))
-                .execute(definition, safe(inputPayload));
-    }
-
-    private String safe(String value) {
-        return value == null ? "" : value.trim();
+                .execute(definition, TextUtils.safe(inputPayload));
     }
 
     private static List<SkillExecutor> defaultExecutors(ScriptSkillExecutorService scriptSkillExecutorService,

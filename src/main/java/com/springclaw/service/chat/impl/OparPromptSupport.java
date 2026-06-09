@@ -1,5 +1,6 @@
 package com.springclaw.service.chat.impl;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.context.AssembledContext;
 import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.stereotype.Service;
@@ -29,9 +30,9 @@ class OparPromptSupport {
                 {action}
                 """);
         return template.render(Map.of(
-                "question", safe(context == null ? null : context.question()),
-                "plan", safe(plan),
-                "action", safe(action)
+                "question", TextUtils.safe(context == null ? null : context.question()),
+                "plan", TextUtils.safe(plan),
+                "action", TextUtils.safe(action)
         ));
     }
 
@@ -56,10 +57,10 @@ class OparPromptSupport {
                 {badAnswer}
                 """);
         return template.render(Map.of(
-                "question", safe(context == null ? null : context.question()),
-                "plan", safe(plan),
-                "action", safe(action),
-                "badAnswer", truncate(safe(badAnswer), 500)
+                "question", TextUtils.safe(context == null ? null : context.question()),
+                "plan", TextUtils.safe(plan),
+                "action", TextUtils.safe(action),
+                "badAnswer", TextUtils.truncate(TextUtils.safe(badAnswer), 500)
         ));
     }
 
@@ -90,10 +91,10 @@ class OparPromptSupport {
                 """);
         return template.render(Map.of(
                 "stepNo", stepNo,
-                "history", safe(history),
-                "question", safe(context == null ? null : context.question()),
-                "observe", safe(context == null ? null : context.observePrompt()),
-                "format", safe(structuredFormat)
+                "history", TextUtils.safe(history),
+                "question", TextUtils.safe(context == null ? null : context.question()),
+                "observe", TextUtils.safe(context == null ? null : context.observePrompt()),
+                "format", TextUtils.safe(structuredFormat)
         ));
     }
 
@@ -123,24 +124,11 @@ class OparPromptSupport {
                 """);
         return template.render(Map.of(
                 "stepNo", stepNo,
-                "plan", safe(plan),
-                "history", safe(history),
-                "question", safe(context == null ? null : context.question()),
-                "observe", safe(context == null ? null : context.observePrompt())
+                "plan", TextUtils.safe(plan),
+                "history", TextUtils.safe(history),
+                "question", TextUtils.safe(context == null ? null : context.question()),
+                "observe", TextUtils.safe(context == null ? null : context.observePrompt())
         ));
     }
 
-    private String safe(String text) {
-        return text == null ? "" : text;
-    }
-
-    private String truncate(String text, int maxLen) {
-        if (text == null) {
-            return "";
-        }
-        if (text.length() <= maxLen) {
-            return text;
-        }
-        return text.substring(0, maxLen) + "...";
-    }
 }

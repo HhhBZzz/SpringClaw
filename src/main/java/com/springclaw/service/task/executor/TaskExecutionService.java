@@ -1,5 +1,6 @@
 package com.springclaw.service.task.executor;
 
+import com.springclaw.common.util.TextUtils;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.common.exception.BusinessException;
@@ -84,13 +85,13 @@ public class TaskExecutionService {
 
     public TaskExecutionOutcome runTask(ScheduledTask task, String triggerSource) {
         LocalDateTime startedAt = LocalDateTime.now();
-        if (!"CRON".equalsIgnoreCase(safe(triggerSource))) {
+        if (!"CRON".equalsIgnoreCase(TextUtils.safe(triggerSource))) {
             scheduledTaskService.markRunning(task, startedAt, task.getNextRunAt());
         }
         String requestId = UUID.randomUUID().toString().replace("-", "");
         ScheduledTaskExecution execution = scheduledTaskExecutionService.start(task.getTaskId(), triggerSource, requestId);
         try {
-            TaskExecutionOutcome outcome = switch (normalize(task.getTargetType())) {
+            TaskExecutionOutcome outcome = switch (TextUtils.normalize(task.getTargetType())) {
                 case "skill" -> executeSkillTask(task, requestId);
                 case "agent" -> executeAgentTask(task);
                 default -> throw new BusinessException(40079, "不支持的任务目标类型: " + task.getTargetType());
@@ -102,8 +103,8 @@ public class TaskExecutionService {
             scheduledTaskExecutionService.complete(
                     execution.getExecutionId(),
                     "SUCCESS",
-                    truncate(outcome.summary(), 300),
-                    truncate(outcome.resultPayload(), 5000),
+                    TextUtils.truncate(outcome.summary(), 300),
+                    TextUtils.truncate(outcome.resultPayload(), 5000),
                     "",
                     outcome.requestId(),
                     outcome.sessionKey(),
@@ -116,9 +117,9 @@ public class TaskExecutionService {
             scheduledTaskExecutionService.complete(
                     execution.getExecutionId(),
                     "FAILED",
-                    truncate(error, 300),
+                    TextUtils.truncate(error, 300),
                     "",
-                    truncate(error, 1000),
+                    TextUtils.truncate(error, 1000),
                     requestId,
                     resolveTaskSessionKey(task),
                     LocalDateTime.now()
@@ -146,7 +147,7 @@ public class TaskExecutionService {
     }
 
     private TaskExecutionOutcome executeSkillTask(ScheduledTask task, String requestId) {
-        String skillId = safe(task.getTargetRef());
+        String skillId = TextUtils.safe(task.getTargetRef());
         Set<String> allowedToolPacks = skillService.resolveAllowedToolPacks(task.getChannel(), task.getOwnerUserId());
         String answer = skillRuntimeService.executeBySkillId(skillId, task.getInputPayload(), allowedToolPacks);
         return new TaskExecutionOutcome(buildSummary(task, answer), answer, requestId, resolveTaskSessionKey(task));
@@ -181,7 +182,7 @@ public class TaskExecutionService {
         if (!feishuDeliveryEnabled) {
             return;
         }
-        if (!"FEISHU".equalsIgnoreCase(safe(task.getDeliveryMode()))) {
+        if (!"FEISHU".equalsIgnoreCase(TextUtils.safe(task.getDeliveryMode()))) {
             return;
         }
         String targetSessionKey = resolveDeliveryTarget(task);
@@ -189,12 +190,12 @@ public class TaskExecutionService {
             return;
         }
         UnifiedInboundMessage inboundMessage = new UnifiedInboundMessage(
-                safe(task.getChannel(), "feishu"),
+                TextUtils.safe(task.getChannel(), "feishu"),
                 targetSessionKey,
                 task.getOwnerUserId(),
                 ""
         );
-        channelOutboundDispatcher.dispatch(safe(task.getChannel(), "feishu"), inboundMessage, Map.of(), truncate(answer, 1800));
+        channelOutboundDispatcher.dispatch(TextUtils.safe(task.getChannel(), "feishu"), inboundMessage, Map.of(), TextUtils.truncate(answer, 1800));
     }
 
     private String resolveDeliveryTarget(ScheduledTask task) {
@@ -210,7 +211,7 @@ public class TaskExecutionService {
     }
 
     private String resolveAgentPrompt(String rawInputPayload) {
-        String payload = safe(rawInputPayload);
+        String payload = TextUtils.safe(rawInputPayload);
         if (!looksLikeJson(payload)) {
             return payload;
         }
@@ -238,15 +239,15 @@ public class TaskExecutionService {
     }
 
     private String renderTaskPrompt(ScheduledTask task) {
-        return switch (normalize(task.getTargetType())) {
+        return switch (TextUtils.normalize(task.getTargetType())) {
             case "agent" -> resolveAgentPrompt(task.getInputPayload());
-            case "skill" -> safe(task.getInputPayload(), "执行 skill: " + task.getTargetRef());
-            default -> safe(task.getInputPayload());
+            case "skill" -> TextUtils.safe(task.getInputPayload(), "执行 skill: " + task.getTargetRef());
+            default -> TextUtils.safe(task.getInputPayload());
         };
     }
 
     private String resolveTaskSessionKey(ScheduledTask task) {
-        String template = safe(task.getSessionKeyTemplate());
+        String template = TextUtils.safe(task.getSessionKeyTemplate());
         if (!StringUtils.hasText(template)) {
             return shouldPersistToSession(task)
                     ? "task:" + task.getTaskId()
@@ -256,33 +257,15 @@ public class TaskExecutionService {
                 .replace("{taskId}", task.getTaskId())
                 .replace("{ownerUserId}", task.getOwnerUserId())
                 .replace("{date}", LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE))
-                .replace("{channel}", safe(task.getChannel(), "api"));
+                .replace("{channel}", TextUtils.safe(task.getChannel(), "api"));
     }
 
     private String buildSummary(ScheduledTask task, String answer) {
-        return "%s 执行完成：%s".formatted(task.getName(), truncate(answer, 120));
+        return "%s 执行完成：%s".formatted(task.getName(), TextUtils.truncate(answer, 120));
     }
 
     private boolean looksLikeJson(String text) {
         return StringUtils.hasText(text) && text.trim().startsWith("{") && text.trim().endsWith("}");
     }
 
-    private String truncate(String text, int maxLen) {
-        if (!StringUtils.hasText(text)) {
-            return "";
-        }
-        return text.length() <= maxLen ? text : text.substring(0, maxLen) + "...";
-    }
-
-    private String normalize(String value) {
-        return StringUtils.hasText(value) ? value.trim().toLowerCase(Locale.ROOT) : "";
-    }
-
-    private String safe(String value) {
-        return value == null ? "" : value.trim();
-    }
-
-    private String safe(String value, String fallback) {
-        return StringUtils.hasText(value) ? value.trim() : fallback;
-    }
 }

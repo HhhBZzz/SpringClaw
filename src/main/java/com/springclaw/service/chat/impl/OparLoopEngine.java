@@ -1,5 +1,6 @@
 package com.springclaw.service.chat.impl;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
@@ -38,6 +39,7 @@ public class OparLoopEngine implements AgentEngine {
     private final OparContextAwareSupport contextAwareSupport;
     private final OparPromptSupport promptSupport;
     private final ConversationAdvisorSupport conversationAdvisorSupport;
+    private final LocalExecutionSupport localExecutionSupport;
     private final BeanOutputConverter<PlanResult> planOutputConverter = new BeanOutputConverter<>(PlanResult.class);
     private final boolean localFallbackEnabled;
     private final boolean localFallbackFirst;
@@ -52,6 +54,7 @@ public class OparLoopEngine implements AgentEngine {
                           OparContextAwareSupport contextAwareSupport,
                           OparPromptSupport promptSupport,
                           ConversationAdvisorSupport conversationAdvisorSupport,
+                          LocalExecutionSupport localExecutionSupport,
                           @Value("${springclaw.chat.local-fallback-enabled:true}") boolean localFallbackEnabled,
                           @Value("${springclaw.chat.local-fallback-first:true}") boolean localFallbackFirst,
                           @Value("${springclaw.chat.max-steps:3}") int maxAgentSteps) {
@@ -64,6 +67,7 @@ public class OparLoopEngine implements AgentEngine {
         this.contextAwareSupport = contextAwareSupport;
         this.promptSupport = promptSupport;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
+        this.localExecutionSupport = localExecutionSupport;
         this.localFallbackEnabled = localFallbackEnabled;
         this.localFallbackFirst = localFallbackFirst;
         this.maxAgentSteps = Math.max(1, Math.min(maxAgentSteps, 6));
@@ -232,50 +236,19 @@ public class OparLoopEngine implements AgentEngine {
     public String narrateLocalExecution(String systemPrompt,
                                         AssembledContext assembled,
                                         LocalSkillFallbackService.LocalSkillResult localResult) {
-        AiProviderService.ActiveChatClient narrationClient = aiProviderService.activeClient();
-        return localExecutionNarrator.narrate(
-                systemPrompt,
-                assembled,
-                localResult,
-                narrationClient,
-                modelTransportGuardService.isModelCallEnabled(narrationClient)
-        );
+        return localExecutionSupport.narrate(systemPrompt, assembled, localResult);
     }
 
     public LocalSkillFallbackService.LocalSkillResult tryLocalFallbackResult(String question) {
-        if (!localFallbackEnabled) {
-            return null;
-        }
-        try {
-            return localSkillFallbackService.tryHandleStructured(question).orElse(null);
-        } catch (Exception ex) {
-            log.warn("本地技能兜底失败，reason={}", ex.getMessage());
-            return null;
-        }
+        return localExecutionSupport.tryFallback(question, localFallbackEnabled);
     }
 
     private LocalSkillFallbackService.LocalSkillResult tryControlPlaneLocalResult(String question) {
-        if (!localFallbackEnabled) {
-            return null;
-        }
-        try {
-            return localSkillFallbackService.tryHandleControlPlane(question).orElse(null);
-        } catch (Exception ex) {
-            log.warn("控制面本地执行失败，reason={}", ex.getMessage());
-            return null;
-        }
+        return localExecutionSupport.tryControlPlane(question, localFallbackEnabled);
     }
 
     private LocalSkillFallbackService.LocalSkillResult tryPriorityStructuredLocalResult(String question) {
-        if (!localFallbackEnabled) {
-            return null;
-        }
-        try {
-            return localSkillFallbackService.tryHandlePriorityStructured(question).orElse(null);
-        } catch (Exception ex) {
-            log.warn("高置信度结构化技能执行失败，reason={}", ex.getMessage());
-            return null;
-        }
+        return localExecutionSupport.tryPriorityStructured(question, localFallbackEnabled);
     }
 
     private PlanCallResult runPlan(AiProviderService.ActiveChatClient activeClient,
@@ -415,8 +388,8 @@ public class OparLoopEngine implements AgentEngine {
         StringBuilder builder = new StringBuilder();
         for (AgentStep step : history) {
             builder.append("Step ").append(step.stepNo()).append('\n')
-                    .append("PLAN: ").append(truncate(step.plan().planText(), 220)).append('\n')
-                    .append("ACTION: ").append(truncate(step.action().output(), 260)).append('\n');
+                    .append("PLAN: ").append(TextUtils.truncate(step.plan().planText(), 220)).append('\n')
+                    .append("ACTION: ").append(TextUtils.truncate(step.action().output(), 260)).append('\n');
         }
         return builder.toString().trim();
     }
@@ -521,16 +494,6 @@ public class OparLoopEngine implements AgentEngine {
             }
         }
         return true;
-    }
-
-    private String truncate(String text, int maxLen) {
-        if (text == null) {
-            return "";
-        }
-        if (text.length() <= maxLen) {
-            return text;
-        }
-        return text.substring(0, maxLen) + "...";
     }
 
     @FunctionalInterface

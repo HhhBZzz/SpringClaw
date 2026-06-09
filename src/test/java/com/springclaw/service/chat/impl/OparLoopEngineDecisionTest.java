@@ -23,6 +23,7 @@ class OparLoopEngineDecisionTest {
         LocalSkillFallbackService localSkillFallbackService = mock(LocalSkillFallbackService.class);
         ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
         ModelTransportGuardService modelTransportGuardService = mock(ModelTransportGuardService.class);
+        LocalExecutionSupport localExecutionSupport = mock(LocalExecutionSupport.class);
         OparLoopEngine engine = new OparLoopEngine(
                 mock(AiProviderService.class),
                 mock(ToolOrchestrator.class),
@@ -33,6 +34,7 @@ class OparLoopEngineDecisionTest {
                 mock(OparContextAwareSupport.class),
                 new OparPromptSupport(),
                 mock(ConversationAdvisorSupport.class),
+                localExecutionSupport,
                 true,
                 false,
                 3
@@ -60,8 +62,8 @@ class OparLoopEngineDecisionTest {
                 "项目结构概览\n- src/main/java",
                 true
         );
-        when(localSkillFallbackService.tryHandlePriorityStructured("分析 springclaw 项目架构"))
-                .thenReturn(Optional.of(localResult));
+        when(localExecutionSupport.tryPriorityStructured("分析 springclaw 项目架构", true))
+                .thenReturn(localResult);
         AiProviderService.ActiveChatClient activeClient = new AiProviderService.ActiveChatClient(
                 "deepseek",
                 "deepseek-v4-pro",

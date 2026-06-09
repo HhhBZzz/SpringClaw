@@ -1,5 +1,6 @@
 package com.springclaw.service.usage.impl;
 
+import com.springclaw.common.util.TextUtils;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.springclaw.domain.entity.LlmUsageRecord;
 import com.springclaw.mapper.LlmUsageRecordMapper;
@@ -64,8 +65,8 @@ public class LlmUsageRecordServiceImpl extends ServiceImpl<LlmUsageRecordMapper,
                 && (promptTokens != null || completionTokens != null || totalTokens != null);
 
         LlmUsageRecord record = new LlmUsageRecord();
-        record.setRequestId(safe(context.requestId()));
-        record.setSessionKey(safe(context.sessionKey()));
+        record.setRequestId(TextUtils.safe(context.requestId()));
+        record.setSessionKey(TextUtils.safe(context.sessionKey()));
         record.setChannel(defaultValue(context.channel(), "unknown"));
         record.setUserId(defaultValue(context.userId(), "anonymous"));
         record.setProviderId(defaultValue(context.providerId(), "unknown"));
@@ -282,10 +283,6 @@ public class LlmUsageRecordServiceImpl extends ServiceImpl<LlmUsageRecordMapper,
 
     private String defaultValue(String value, String defaultValue) {
         return StringUtils.hasText(value) ? value.trim() : defaultValue;
-    }
-
-    private String safe(String text) {
-        return text == null ? "" : text;
     }
 
     private String safeTime(LocalDateTime value) {

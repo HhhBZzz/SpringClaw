@@ -1,5 +1,6 @@
 package com.springclaw.service.agent.executor;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.CapabilityExecutor;
 import com.springclaw.service.agent.CapabilityResult;
@@ -73,26 +74,18 @@ public class LocalFilesCapabilityExecutor extends AbstractCapabilityExecutor imp
 
     private DirectoryTarget detectDirectoryTarget(String question) {
         String text = question == null ? "" : question.toLowerCase(Locale.ROOT);
-        if (containsAny(text, "桌面", "desktop")) {
+        if (TextUtils.containsAny(text, "桌面", "desktop")) {
             return new DirectoryTarget("desktop", "桌面", "Desktop");
         }
-        if (containsAny(text, "下载", "downloads", "download")) {
+        if (TextUtils.containsAny(text, "下载", "downloads", "download")) {
             return new DirectoryTarget("downloads", "下载", "Downloads");
         }
-        if (containsAny(text, "文档", "documents")) {
+        if (TextUtils.containsAny(text, "文档", "documents")) {
             return new DirectoryTarget("documents", "文档", "Documents");
         }
         return null;
     }
 
-    private boolean containsAny(String text, String... keywords) {
-        for (String keyword : keywords) {
-            if (text.contains(keyword.toLowerCase(Locale.ROOT))) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     private record DirectoryTarget(String id, String label, String relativeDir) {
     }

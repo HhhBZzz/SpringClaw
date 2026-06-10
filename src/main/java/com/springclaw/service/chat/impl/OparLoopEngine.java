@@ -127,27 +127,29 @@ public class OparLoopEngine implements AgentEngine {
                     "已由 AgentDecision 约束的受控能力完成执行。"
             );
         }
+        // control-plane 确定性查询始终优先于模型调用，不受 localFallbackFirst 影响
+        LocalSkillFallbackService.LocalSkillResult controlPlaneResult = tryControlPlaneLocalResult(assembled.question());
+        if (controlPlaneResult != null) {
+            return buildLocalExecutionResult(
+                    systemPrompt,
+                    assembled,
+                    controlPlaneResult,
+                    "命中控制面确定性查询，始终优先于模型调用。",
+                    controlPlaneResult.fallbackAnswer()
+            );
+        }
+        // 上下文感知本地能力（确认词承接、历史时间查询等）始终优先于模型调用
+        LocalSkillFallbackService.LocalSkillResult contextAwareResult = contextAwareSupport.tryContextAwareLocalResult(assembled);
+        if (contextAwareResult != null) {
+            return buildLocalExecutionResult(
+                    systemPrompt,
+                    assembled,
+                    contextAwareResult,
+                    "命中上下文感知本地执行路线，始终优先于模型调用。",
+                    "已基于当前会话真实状态生成答复。"
+            );
+        }
         if (localFallbackFirst) {
-            LocalSkillFallbackService.LocalSkillResult contextAwareResult = contextAwareSupport.tryContextAwareLocalResult(assembled);
-            if (contextAwareResult != null) {
-                return buildLocalExecutionResult(
-                        systemPrompt,
-                        assembled,
-                        contextAwareResult,
-                        "命中上下文感知本地执行路线，跳过模型计划阶段。",
-                        "已基于当前会话真实状态生成答复。"
-                );
-            }
-            LocalSkillFallbackService.LocalSkillResult localResult = tryControlPlaneLocalResult(assembled.question());
-            if (localResult != null) {
-                return buildLocalExecutionResult(
-                        systemPrompt,
-                        assembled,
-                        localResult,
-                        "命中本地执行路线，跳过模型计划阶段。",
-                        "本地执行完成，已整理真实结果。"
-                );
-            }
             LocalSkillFallbackService.LocalSkillResult priorityStructuredResult = tryPriorityStructuredLocalResult(assembled.question());
             if (priorityStructuredResult != null) {
                 return buildLocalExecutionResult(

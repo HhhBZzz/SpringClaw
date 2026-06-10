@@ -211,6 +211,7 @@ springclaw:
     local-fallback-enabled: true
     local-fallback-first: false
     max-steps: 3
+    max-autonomous-steps: ${SPRINGCLAW_CHAT_MAX_AUTONOMOUS_STEPS:5}
     model-transport-cooldown-seconds: ${SPRINGCLAW_MODEL_TRANSPORT_COOLDOWN_SECONDS:30}
     provider-failure-cooldown-threshold: ${SPRINGCLAW_PROVIDER_FAILURE_COOLDOWN_THRESHOLD:2}
     basic-streaming-enabled: ${SPRINGCLAW_CHAT_BASIC_STREAMING_ENABLED:true}

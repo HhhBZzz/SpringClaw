@@ -216,7 +216,7 @@ public class CapabilityRegistry {
         public boolean includeForAgentMode() { return descriptor.includeForAgentMode(); }
         public String[] triggerKeywords() { return descriptor.triggerKeywords(); }
 
-        boolean matchesKeywords(String lowerText) {
+        public boolean matchesKeywords(String lowerText) {
             for (String keyword : descriptor.triggerKeywords()) {
                 if (StringUtils.hasText(keyword) && lowerText.contains(keyword.toLowerCase(Locale.ROOT))) {
                     return true;
@@ -225,7 +225,7 @@ public class CapabilityRegistry {
             return false;
         }
 
-        int countKeywordMatches(String lowerText) {
+        public int countKeywordMatches(String lowerText) {
             int count = 0;
             for (String keyword : descriptor.triggerKeywords()) {
                 if (StringUtils.hasText(keyword) && lowerText.contains(keyword.toLowerCase(Locale.ROOT))) {

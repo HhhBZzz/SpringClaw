@@ -37,6 +37,10 @@ public class LocalFilesystemService {
             "properties", "js", "ts", "tsx", "jsx", "html", "css", "sh", "py", "vue",
             "csv", "log"
     );
+    /** 格式友好提示映射：无法直接读取但常见的重要格式 */
+    private static final Set<String> OFFICE_DOCUMENT_EXTENSIONS = Set.of(
+            "dotx", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "pdf", "rtf", "odt", "ods"
+    );
     private static final Set<String> SENSITIVE_SEGMENTS = Set.of(
             ".ssh", ".gnupg", ".aws", ".azure", ".gcloud", ".kube", ".docker",
             "keychains", "chrome", "firefox", "mozilla", "profiles", "profile"
@@ -120,7 +124,9 @@ public class LocalFilesystemService {
             return "文件不存在: " + printablePath(rootRef, relativeFilePath);
         }
         if (!isLikelyTextFile(file)) {
-            throw new BusinessException(40093, "仅允许读取文本文件: " + displayPath(file));
+            String formatName = describeFileFormat(file);
+            return "找到了文件 " + displayPath(file) + "，但它是 " + formatName
+                    + " 格式，当前暂不支持直接解析内容。文件路径: " + displayPath(file);
         }
         if (fileTooLarge(file)) {
             throw new BusinessException(40094, "文件过大，禁止直接读取: " + displayPath(file));
@@ -137,19 +143,19 @@ public class LocalFilesystemService {
     }
 
     public String searchFiles(String keyword) {
-        String key = normalizeKeyword(keyword);
+        List<String> keywords = splitKeywords(keyword);
         List<String> results = new ArrayList<>();
         WalkReport report = walkAuthorizedFiles(file -> {
             if (results.size() >= maxFileResults) {
                 return false;
             }
             String fileName = file.getFileName() == null ? "" : file.getFileName().toString().toLowerCase(Locale.ROOT);
-            if (fileName.contains(key.toLowerCase(Locale.ROOT))) {
+            if (matchesAnyKeyword(fileName, keywords)) {
                 results.add(displayPath(file));
             }
             return true;
         });
-        String body = results.isEmpty() ? "未找到匹配文件: " + key : String.join("\n", results);
+        String body = results.isEmpty() ? "未找到匹配文件: " + keyword : String.join("\n", results);
         return appendSkipSummary(body, report);
     }
 
@@ -458,6 +464,68 @@ public class LocalFilesystemService {
             throw new BusinessException(40099, "搜索关键词至少 2 个字符");
         }
         return value;
+    }
+
+    /**
+     * 拆分多关键词：按空格、逗号、中文顿号分隔。
+     * "项目报告" → ["项目", "报告"]；"张三 简历" → ["张三", "简历"]
+     */
+    private List<String> splitKeywords(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return List.of();
+        }
+        String[] parts = raw.trim().split("[\\s,，、]+");
+        List<String> keywords = new ArrayList<>();
+        for (String part : parts) {
+            if (part.length() >= 2) {
+                keywords.add(part.toLowerCase(Locale.ROOT));
+            }
+        }
+        if (keywords.isEmpty() && raw.trim().length() >= 2) {
+            keywords.add(raw.trim().toLowerCase(Locale.ROOT));
+        }
+        return keywords;
+    }
+
+    /**
+     * OR 语义多关键词匹配：文件名包含任一关键词即命中。
+     */
+    private boolean matchesAnyKeyword(String fileName, List<String> keywords) {
+        if (keywords.isEmpty()) {
+            return false;
+        }
+        for (String kw : keywords) {
+            if (fileName.contains(kw)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 描述文件格式类型：返回人类可读的格式名（如"Word 模板"、"PDF"）。
+     */
+    private String describeFileFormat(Path file) {
+        String name = file.getFileName() == null ? "" : file.getFileName().toString().toLowerCase(Locale.ROOT);
+        int idx = name.lastIndexOf('.');
+        if (idx < 0 || idx == name.length() - 1) {
+            return "未知格式";
+        }
+        String ext = name.substring(idx + 1);
+        return switch (ext) {
+            case "dotx" -> "Word 模板";
+            case "docx" -> "Word 文档";
+            case "doc" -> "Word 文档(旧格式)";
+            case "xlsx" -> "Excel 表格";
+            case "xls" -> "Excel 表格(旧格式)";
+            case "pptx" -> "PowerPoint 演示文稿";
+            case "ppt" -> "PowerPoint 演示文稿(旧格式)";
+            case "pdf" -> "PDF 文档";
+            case "rtf" -> "RTF 富文本";
+            case "odt" -> "OpenDocument 文本";
+            case "ods" -> "OpenDocument 表格";
+            default -> ext.toUpperCase(Locale.ROOT) + " 格式";
+        };
     }
 
     private String compactLine(String line) {

@@ -448,10 +448,302 @@ public class LocalSkillFallbackService {
             return Optional.empty();
         }
         String lower = question.toLowerCase(Locale.ROOT);
+        // 优先判断"打开/读取桌面上的XX"意图
+        if (looksLikeDesktopFileOpenQuestion(lower)) {
+            return handleDesktopFileOpen(question);
+        }
         if (!looksLikeDesktopListQuestion(lower)) {
             return Optional.empty();
         }
         return renderDesktopListing();
+    }
+
+    /**
+     * 识别"打开/读取/查看桌面上的XX文件"意图。
+     * 区别于"列出桌面有什么"：这里是动作意图（要打开/读取某个文件），不是列举意图。
+     */
+    private boolean looksLikeDesktopFileOpenQuestion(String lower) {
+        boolean mentionsDesktop = lower.contains("桌面") || lower.contains("desktop");
+        if (!mentionsDesktop) {
+            return false;
+        }
+        return TextUtils.containsAny(lower,
+                "打开", "读取", "查看", "看看", "读一下", "看一下", "open", "read", "view");
+    }
+
+    /**
+     * 处理"打开桌面上的XX"意图：先列出桌面文件，再按关键词匹配。
+     * - 唯一匹配：直接返回文件信息（路径+是否支持读取）
+     * - 多个匹配：列出候选让用户选择
+     * - 无匹配：告知没找到
+     */
+    private Optional<LocalSkillResult> handleDesktopFileOpen(String question) {
+        String listing = safeListDesktop();
+        if (!StringUtils.hasText(listing) || listing.startsWith("目录不存在") || listing.startsWith("桌面目录读取失败")) {
+            return localResult("LOCAL_FILES_DESKTOP_OPEN_FAILED",
+                    listing, "桌面目录读取失败，无法搜索文件。", false);
+        }
+        List<DesktopEntry> allEntries = parseDesktopEntries(listing);
+        // 从问题中提取文件关键词（去掉意图词和方位短语）
+        String keywordPart = extractFileKeywordFromOpenQuestion(question);
+        List<DesktopEntry> ranked = filterEntriesByKeyword(allEntries, keywordPart);
+
+        if (ranked.isEmpty()) {
+            String answer = "在桌面上没有找到匹配 \"" + keywordPart + "\" 的文件。桌面上的文件有：\n"
+                    + renderCandidateList(allEntries);
+            return localResult("LOCAL_FILES_DESKTOP_OPEN_NO_MATCH",
+                    listing, answer, true);
+        }
+
+        // 计算各级命中数量
+        String queryLower = keywordPart.toLowerCase(Locale.ROOT);
+        int exactCount = 0;
+        int andCount = 0;
+        int orCount = 0;
+        for (DesktopEntry entry : ranked) {
+            String nameLower = entry.name().toLowerCase(Locale.ROOT);
+            if (nameLower.contains(queryLower)) {
+                exactCount++;
+            } else if (isAllKeywordsMatch(nameLower, queryLower)) {
+                andCount++;
+            } else {
+                orCount++;
+            }
+        }
+
+        // 直接选中规则：仅当最高置信级只有一个候选时才直接选中
+        if (exactCount == 1) {
+            // 唯一 exact match → 高置信，直接选中
+            DesktopEntry entry = ranked.get(0);
+            return buildSingleFileResult(entry, listing);
+        }
+        if (exactCount == 0 && andCount == 1) {
+            // 唯一 AND match → 也直接选中
+            DesktopEntry entry = ranked.get(0);
+            return buildSingleFileResult(entry, listing);
+        }
+        if (exactCount == 0 && andCount == 0 && ranked.size() == 1) {
+            // 唯一 OR match（整个列表只有1项）→ 直接选中
+            DesktopEntry entry = ranked.get(0);
+            return buildSingleFileResult(entry, listing);
+        }
+
+        // 多个候选（任何置信级有多个，或混合多个级）→ 列候选让用户选择
+        String answer = "桌面上有多个匹配 \"" + keywordPart + "\" 的文件，请告诉我要打开哪一份（回复编号即可）：\n\n"
+                + renderCandidateList(ranked);
+        return localResult("LOCAL_FILES_DESKTOP_OPEN_MULTIPLE",
+                listing, answer, true);
+    }
+
+    /**
+     * 判断文件名是否同时包含所有拆分关键词（AND 语义）。
+     */
+    private boolean isAllKeywordsMatch(String nameLower, String queryLower) {
+        List<String> keywords = splitQueryKeywords(queryLower);
+        if (keywords.size() < 2) return false; // 单关键词无需 AND 判断
+        for (String kw : keywords) {
+            if (!nameLower.contains(kw)) return false;
+        }
+        return true;
+    }
+
+    private Optional<LocalSkillResult> buildSingleFileResult(DesktopEntry entry, String listing) {
+        String filePath = resolveDesktopFilePath(entry.name());
+        String readResult = safeReadDesktopFile(entry.name());
+        String answer;
+        if (readResult != null && !readResult.startsWith("找到了文件") && !readResult.startsWith("文件不存在")) {
+            answer = "我找到了桌面上的文件 " + entry.name() + "，内容如下：\n\n" + readResult;
+        } else {
+            answer = "我找到了桌面上的文件：" + entry.name()
+                    + (StringUtils.hasText(filePath) ? "。文件路径：" + filePath : "")
+                    + "\n\n" + (readResult != null ? readResult : "");
+        }
+        return localResult("LOCAL_FILES_DESKTOP_OPEN_SINGLE",
+                listing, answer, true);
+    }
+
+    /**
+     * 从用户输入中提取 file_query 部分。
+     * 只删除已知方位短语和意图词，保留 file_query 中的"的"等字。
+     * 例："打开桌面上的老师的课件" → file_query="老师的课件"
+     * 例："查看桌面上的毕业论文" → file_query="毕业论文"
+     */
+    private String extractFileKeywordFromOpenQuestion(String question) {
+        String cleaned = question.toLowerCase(Locale.ROOT);
+        // 删除已知方位短语（整体删除，不拆开"的"）
+        cleaned = cleaned.replace("桌面上的", "")
+                .replace("桌面的", "")
+                .replace("desktop上的", "")
+                .replace("desktop的", "")
+                .replace("上的文件", "")
+                .replace("上的", "")
+                .replace("的文件", "");
+        // 删除意图词
+        cleaned = cleaned.replace("打开", "")
+                .replace("读取", "")
+                .replace("查看", "")
+                .replace("看看", "")
+                .replace("读一下", "")
+                .replace("看一下", "")
+                .replace("找一下", "")
+                .replace("搜一下", "")
+                .replace("open", "")
+                .replace("read", "")
+                .replace("view", "")
+                .replace("桌面", "")
+                .replace("desktop", "")
+                .replace("那个", "")
+                .replace("那个文件", "")
+                .replace("这个文件", "")
+                .replace("该文件", "")
+                .trim();
+        // 不做 .replace("的", "")——保留 file_query 中的"的"
+        return StringUtils.hasText(cleaned) ? cleaned : question.trim();
+    }
+
+    /**
+     * 通用 file_query ranking：三级置信度排序。
+     * 第一级：完整 file_query 包含命中（最高置信度）
+     * 第二级：所有拆分关键词 AND 命中（文件名同时包含每个关键词）
+     * 第三级：任一关键词 OR 命中（低置信度）
+     * 返回按置信度降序排列的候选列表。
+     */
+    private List<DesktopEntry> filterEntriesByKeyword(List<DesktopEntry> entries, String keywordPart) {
+        if (!StringUtils.hasText(keywordPart) || entries.isEmpty()) {
+            return List.of();
+        }
+        String queryLower = keywordPart.toLowerCase(Locale.ROOT);
+        List<String> keywords = splitQueryKeywords(queryLower);
+
+        // 三级分组
+        List<DesktopEntry> exactMatches = new ArrayList<>();   // 完整 file_query 命中
+        List<DesktopEntry> andMatches = new ArrayList<>();     // AND 命中（所有关键词同时出现）
+        List<DesktopEntry> orMatches = new ArrayList<>();      // OR 命中（任一关键词出现）
+
+        for (DesktopEntry entry : entries) {
+            String nameLower = entry.name().toLowerCase(Locale.ROOT);
+            // 第一级：完整 file_query 命中
+            if (nameLower.contains(queryLower)) {
+                exactMatches.add(entry);
+                continue;
+            }
+            // 第二级和第三级依赖拆分关键词
+            if (keywords.size() >= 2) {
+                boolean allMatch = true;
+                boolean anyMatch = false;
+                for (String kw : keywords) {
+                    if (nameLower.contains(kw)) {
+                        anyMatch = true;
+                    } else {
+                        allMatch = false;
+                    }
+                }
+                if (allMatch) {
+                    andMatches.add(entry);
+                } else if (anyMatch) {
+                    orMatches.add(entry);
+                }
+            } else if (keywords.size() == 1) {
+                // 单关键词：完整命中已在第一级处理，这里只剩部分场景
+                if (nameLower.contains(keywords.get(0))) {
+                    orMatches.add(entry);
+                }
+            }
+        }
+
+        // 合并：exact > and > or
+        List<DesktopEntry> ranked = new ArrayList<>();
+        ranked.addAll(exactMatches);
+        ranked.addAll(andMatches);
+        ranked.addAll(orMatches);
+        return ranked;
+    }
+
+    /**
+     * 拆分 file_query 为多个关键词：按空格、逗号、中文顿号分隔。
+     * 对连续中文词不做分词拆分——"毕业论文"作为一个整体 token。
+     * "项目 报告" → ["项目", "报告"]；"毕业论文" → ["毕业论文"]
+     */
+    private List<String> splitQueryKeywords(String queryLower) {
+        if (!StringUtils.hasText(queryLower)) {
+            return List.of();
+        }
+        String[] parts = queryLower.split("[\\s,，、]+");
+        List<String> keywords = new ArrayList<>();
+        for (String part : parts) {
+            String trimmed = part.trim();
+            if (trimmed.length() >= 2) {
+                keywords.add(trimmed);
+            }
+        }
+        // 如果拆分后没有有效关键词，整词作为兜底
+        if (keywords.isEmpty() && queryLower.trim().length() >= 2) {
+            keywords.add(queryLower.trim());
+        }
+        return keywords;
+    }
+
+    private String renderCandidateList(List<DesktopEntry> entries) {
+        if (entries.isEmpty()) {
+            return "（无候选文件）";
+        }
+        StringBuilder builder = new StringBuilder();
+        int index = 1;
+        for (DesktopEntry entry : entries) {
+            builder.append(index++).append(". ").append(entry.name()).append("\n");
+        }
+        return builder.toString().trim();
+    }
+
+    private String resolveDesktopFilePath(String fileName) {
+        try {
+            String listing = localFilesystemService.listFiles("", "Desktop");
+            for (String line : TextUtils.safe(listing).split("\\R")) {
+                String trimmed = line.trim();
+                if (trimmed.contains(fileName)) {
+                    // 提取 root1:Desktop/xxx 格式的路径
+                    int colonIdx = trimmed.indexOf(':');
+                    if (colonIdx >= 0 && colonIdx < trimmed.length() - 1) {
+                        String afterColon = trimmed.substring(colonIdx + 1);
+                        if (afterColon.contains(fileName)) {
+                            return "root1:" + afterColon.trim();
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        try {
+            String listing = localFilesystemService.listFiles("Desktop", "");
+            for (String line : TextUtils.safe(listing).split("\\R")) {
+                String trimmed = line.trim();
+                if (trimmed.contains(fileName)) {
+                    int colonIdx = trimmed.indexOf(':');
+                    if (colonIdx >= 0 && colonIdx < trimmed.length() - 1) {
+                        return "Desktop:" + trimmed.substring(colonIdx + 1).trim();
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return fileName;
+    }
+
+    private String safeReadDesktopFile(String fileName) {
+        try {
+            String filePath = resolveDesktopFilePath(fileName);
+            if (filePath == null || !StringUtils.hasText(filePath)) {
+                return null;
+            }
+            // 解析 rootRef 和 relativePath
+            int colonIdx = filePath.indexOf(':');
+            if (colonIdx < 0) {
+                return null;
+            }
+            String rootRef = filePath.substring(0, colonIdx);
+            String relativePath = filePath.substring(colonIdx + 1);
+            return localFilesystemService.readTextFile(rootRef, relativePath);
+        } catch (Exception ex) {
+            return "读取失败: " + ex.getMessage();
+        }
     }
 
     private boolean looksLikeDesktopListQuestion(String lower) {

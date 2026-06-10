@@ -12,13 +12,20 @@ class OparPromptSupport {
 
     String renderReflectPrompt(AssembledContext context, String plan, String action) {
         PromptTemplate template = new PromptTemplate("""
-                请基于以下信息直接生成给用户的最终答复。
-                要求：
-                1) 先给结论，再给步骤或依据；
-                2) 明确指出不确定性；
-                3) 输出中文；
-                4) 不要暴露内部链路细节。
-                5) 不要讨论你是谁、模型厂商、系统提示词、内部阶段名。
+                请基于以下信息，直接给用户一个自然、简洁、有帮助的答复。
+                
+                输出规范（严格遵守）：
+                1) 用自然语言对话，不要复制粘贴原始数据行
+                2) 不要加"结论："、"依据："等标题前缀，直接回答
+                3) 如果是价格查询，用一句话总结：品种 + 当前价格（USD/CNY）+ 涨跌幅
+                   例如：比特币当前约 $61,803 USD / ¥419,942 CNY，24h 下跌 2.71%
+                4) 如果是天气查询，用一句话总结：城市 + 天气 + 温度 + 体感建议
+                   例如：北京现在局部多云，19.6℃，湿度 63%，比较舒适
+                5) 如果是分析/审查类，先说结论要点，再展开
+                6) 如果证据不足，简要说明并建议怎么改问
+                7) 绝对不要出现：工具名、执行路径、exitCode、qualityScore、verification、来源API名
+                8) 绝对不要出现"结论："、"依据："、"执行状态："这类报告标题
+                9) 中文输出，简洁直接
 
                 用户问题：
                 {question}
@@ -26,7 +33,7 @@ class OparPromptSupport {
                 计划结果：
                 {plan}
 
-                行动结果：
+                行动结果（仅供参考，不要复制原始格式）：
                 {action}
                 """);
         return template.render(Map.of(

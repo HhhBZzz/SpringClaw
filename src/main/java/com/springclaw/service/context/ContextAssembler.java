@@ -165,7 +165,92 @@ public class ContextAssembler {
         if (!StringUtils.hasText(content)) {
             return "";
         }
-        return "- " + role + ": " + TextUtils.truncate(content, 220);
+        String baseLine = "- " + role + ": " + TextUtils.truncate(content, 220);
+        // 对 ASSISTANT 的文件列表回答，提取文件名候选并附加（限制：最多20个文件名，单个名过长截断）
+        if ("ASSISTANT".equals(role) && looksLikeFileListing(content)) {
+            String fileSummary = extractFileNamesFromListing(content);
+            if (StringUtils.hasText(fileSummary)) {
+                baseLine += "\n  文件候选: " + fileSummary;
+            }
+        }
+        return baseLine;
     }
 
+    /**
+     * 判断 assistant 回答是否包含文件列表（表格或编号列表格式）。
+     */
+    private boolean looksLikeFileListing(String content) {
+        if (!StringUtils.hasText(content)) {
+            return false;
+        }
+        return content.contains("| 序号 |") || content.contains("| 文件名 |")
+                || content.contains("[F] ") || content.matches("(?s).*\\d+\\.\\s+\\S.{2,}.*");
+    }
+
+    /**
+     * 从文件列表回答中提取文件名摘要，最多20个，单个文件名过长截断。
+     */
+    private String extractFileNamesFromListing(String content) {
+        List<String> names = new ArrayList<>();
+        // 匹配 [F] xxx 格式
+        java.util.regex.Matcher fileMarkerMatcher = java.util.regex.Pattern.compile("\\[F\\]\\s*(.+?)(?:\\n|$)")
+                .matcher(content);
+        while (fileMarkerMatcher.find() && names.size() < 20) {
+            String name = extractFileNameFromPath(fileMarkerMatcher.group(1).trim());
+            if (StringUtils.hasText(name) && name.length() >= 3) {
+                names.add(truncateFileName(name));
+            }
+        }
+        // 匹配表格第三列 | 文件名 |
+        if (names.isEmpty()) {
+            java.util.regex.Matcher tableMatcher = java.util.regex.Pattern.compile(
+                    "\\|\\s*\\d+\\s*\\|\\s*\\S+?\\s*\\|\\s*(.+?)\\s*\\|")
+                    .matcher(content);
+            while (tableMatcher.find() && names.size() < 20) {
+                String name = tableMatcher.group(1).trim();
+                if (StringUtils.hasText(name) && name.length() >= 3
+                        && !"文件".equals(name) && !"文件夹".equals(name)) {
+                    names.add(truncateFileName(name));
+                }
+            }
+        }
+        // 匹配编号列表 1. xxx
+        if (names.isEmpty()) {
+            java.util.regex.Matcher listMatcher = java.util.regex.Pattern.compile(
+                    "\\d+\\.\\s+(.+?)(?:\\n|$)")
+                    .matcher(content);
+            while (listMatcher.find() && names.size() < 20) {
+                String name = listMatcher.group(1).trim();
+                if (StringUtils.hasText(name) && name.length() >= 3) {
+                    names.add(truncateFileName(name));
+                }
+            }
+        }
+        if (names.isEmpty()) {
+            return "";
+        }
+        return String.join(", ", names);
+    }
+
+    private String extractFileNameFromPath(String path) {
+        int slash = path.lastIndexOf('/');
+        if (slash >= 0 && slash < path.length() - 1) {
+            return path.substring(slash + 1);
+        }
+        int colon = path.indexOf(':');
+        if (colon >= 0 && colon < path.length() - 1) {
+            String afterColon = path.substring(colon + 1);
+            int slashAfter = afterColon.lastIndexOf('/');
+            if (slashAfter >= 0 && slashAfter < afterColon.length() - 1) {
+                return afterColon.substring(slashAfter + 1);
+            }
+            return afterColon;
+        }
+        return path;
+    }
+
+    private String truncateFileName(String name) {
+        if (name == null) return "";
+        return name.length() > 60 ? name.substring(0, 60) + "..." : name;
+    }
 }

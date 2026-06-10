@@ -46,6 +46,7 @@ public class SpringClawAiProperties {
         private final Provider qwen = new Provider();
         private final Provider codingPlan = new Provider();
         private final Provider deepSeek = new Provider();
+        private final Provider volcengineCodingPlan = new Provider();
 
         public Provider getPrimary() {
             return primary;
@@ -61,6 +62,10 @@ public class SpringClawAiProperties {
 
         public Provider getDeepSeek() {
             return deepSeek;
+        }
+
+        public Provider getVolcengineCodingPlan() {
+            return volcengineCodingPlan;
         }
     }
 

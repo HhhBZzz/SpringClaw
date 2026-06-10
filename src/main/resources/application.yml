@@ -132,6 +132,24 @@ springclaw:
         models:
           - deepseek-v4-pro
         temperature: ${SPRINGCLAW_DEEPSEEK_TEMPERATURE:0.2}
+      volcengine-coding-plan:
+        enabled: ${SPRINGCLAW_VOLCENGINE_CODING_PLAN_ENABLED:true}
+        api-key: ${SPRINGCLAW_VOLCENGINE_CODING_PLAN_API_KEY:}
+        base-url: ${SPRINGCLAW_VOLCENGINE_CODING_PLAN_BASE_URL:https://ark.cn-beijing.volces.com/api/coding/v3}
+        model: ${SPRINGCLAW_VOLCENGINE_CODING_PLAN_MODEL:doubao-seed-code}
+        models:
+          - doubao-seed-code
+          - doubao-seed-2.0-code
+          - doubao-seed-2.0-pro
+          - doubao-seed-2.0-lite
+          - minimax-m2.7
+          - glm-5.1
+          - kimi-k2.6
+          - deepseek-v4-pro
+          - deepseek-v4-flash
+          - minimax-m3
+          - ark-code-latest
+        temperature: ${SPRINGCLAW_VOLCENGINE_CODING_PLAN_TEMPERATURE:0.2}
   agent:
     decision:
       model-router-enabled: ${SPRINGCLAW_AGENT_DECISION_MODEL_ROUTER_ENABLED:true}

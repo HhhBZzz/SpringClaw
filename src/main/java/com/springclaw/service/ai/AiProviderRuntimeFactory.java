@@ -103,7 +103,11 @@ final class AiProviderRuntimeFactory {
 
     static AiProviderPaths resolveApiPaths(String baseUrl) {
         String sanitized = sanitizeBaseUrl(baseUrl).toLowerCase(Locale.ROOT);
-        if (sanitized.endsWith("/v1")) {
+        // 火山引擎 Coding Plan: https://ark.cn-beijing.volces.com/api/coding/v3
+        // 标准 OpenAI 兼容: https://api.xxx.com/v1
+        // 任何以版本前缀（/v1, /v3, /v4 等）结尾的 URL 都只需要追加 /chat/completions
+        if (sanitized.endsWith("/v1") || sanitized.endsWith("/v3") || sanitized.endsWith("/v4")
+                || sanitized.matches(".*/v\\d+(/)?$")) {
             return new AiProviderPaths("/chat/completions", "/embeddings");
         }
         return new AiProviderPaths("/v1/chat/completions", "/v1/embeddings");

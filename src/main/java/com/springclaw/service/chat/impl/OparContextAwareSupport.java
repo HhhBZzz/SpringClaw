@@ -1,23 +1,52 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.common.util.TextUtils;
+import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.service.chat.LocalSkillFallbackService;
+import com.springclaw.service.event.MessageEventService;
+import com.springclaw.service.files.LocalFilesystemService;
 import com.springclaw.service.context.AssembledContext;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 class OparContextAwareSupport {
 
     private static final DateTimeFormatter HISTORY_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm:ss");
+    /** 确认性词语：用户回复"好/是的/可以"等表示同意上一轮提议 */
+    private static final List<String> CONFIRMATION_WORDS = List.of(
+            "好", "好的", "是的", "可以", "对", "没错", "确认", "同意",
+            "ok", "yes", "就这个", "这个", "打开它", "打开吧", "就它", "选这个", "第一份", "第一个"
+    );
+    /** 从 assistant 回答中提取文件名的正则：匹配表格行或纯文本中的文件名。
+     *  编号列表和 [F] 标记分组用 [^\n。，；|]+ 而非 [^\n]+，
+     *  防止贪婪捕获文件名后的附加文本（如"。文件路径：..."或"，格式：..."）。
+     *  文件名不会包含句号、逗号、分号或管道符。
+     */
+    private static final Pattern FILE_NAME_PATTERN = Pattern.compile(
+            "(?:\\|\\s*\\d+\\s*\\|\\s*\\S+\\s*\\|\\s*)([^|\\n]+?)(?:\\s*\\|)" // 表格第三列
+            + "|(?:\\d+\\.\\s*)([^\\n。，；|]+)"  // 编号列表（到句号/逗号/分号/管道截止）
+            + "|(?:\\[F\\]\\s*)([^\\n。，；|]+)"   // [F] 文件标记（同上）
+    );
 
     private final ConversationHistoryService conversationHistoryService;
+    private final MessageEventService messageEventService;
+    private final LocalFilesystemService localFilesystemService;
 
-    OparContextAwareSupport(ConversationHistoryService conversationHistoryService) {
+    OparContextAwareSupport(ConversationHistoryService conversationHistoryService,
+                            MessageEventService messageEventService,
+                            LocalFilesystemService localFilesystemService) {
         this.conversationHistoryService = conversationHistoryService;
+        this.messageEventService = messageEventService;
+        this.localFilesystemService = localFilesystemService;
     }
 
     LocalSkillFallbackService.LocalSkillResult tryContextAwareLocalResult(AssembledContext assembled) {
@@ -25,6 +54,11 @@ class OparContextAwareSupport {
             return null;
         }
         String lower = TextUtils.safe(assembled.question()).toLowerCase();
+        // === 确认词承接：用户回复"好/是的"时，尝试承接上一轮文件候选 ===
+        LocalSkillFallbackService.LocalSkillResult confirmationResult = tryFileConfirmationFollowUp(assembled, lower);
+        if (confirmationResult != null) {
+            return confirmationResult;
+        }
         if (looksLikeFirstMessageTimeQuestion(lower)) {
             return conversationHistoryService.findFirstUserQuestionEntry(assembled.sessionKey())
                     .map(entry -> buildHistoryTimeResult(
@@ -301,4 +335,226 @@ class OparContextAwareSupport {
         }
         return HISTORY_TIME_FORMATTER.format(time);
     }
+
+    // === 确认词承接逻辑 ===
+
+    /**
+     * 对话级 pending intent 承接：当用户回复确认性词语（好/是的/可以等），
+     * 尝试从上一轮 assistant 回答中提取文件候选，并承接打开/读取操作。
+     *
+     * 这不是系统级 action proposal，而是普通多轮槽位确认。
+     * 限制：只看最近 1 条 assistant 回答，最多提取 20 个文件名。
+     */
+    private LocalSkillFallbackService.LocalSkillResult tryFileConfirmationFollowUp(
+            AssembledContext assembled, String lowerQuestion) {
+        if (!looksLikeConfirmation(lowerQuestion)) {
+            return null;
+        }
+        // 从最近 1 条 assistant 回答中提取文件候选
+        List<String> fileCandidates = extractFileCandidatesFromRecentAssistant(assembled.sessionKey());
+        if (fileCandidates.isEmpty()) {
+            return null; // 上一轮没有文件候选，不是文件确认场景
+        }
+        // 检查确认词是否指向特定编号（如"第一份/第一个/第二个/2号"）
+        String specificHint = extractSpecificHint(lowerQuestion);
+        if (StringUtils.hasText(specificHint) && fileCandidates.size() > 1) {
+            int index = parseCandidateIndex(specificHint, fileCandidates.size());
+            if (index >= 0 && index < fileCandidates.size()) {
+                return openSingleCandidate(fileCandidates.get(index));
+            }
+        }
+        // 如果只有一个候选 → 直接打开
+        if (fileCandidates.size() == 1) {
+            return openSingleCandidate(fileCandidates.get(0));
+        }
+        // 多个候选 → 让用户选择编号
+        String answer = "上一轮提到了多个文件，请告诉我要打开哪一份（回复编号即可）：\n\n";
+        for (int i = 0; i < Math.min(fileCandidates.size(), 20); i++) {
+            answer += (i + 1) + ". " + truncateFileName(fileCandidates.get(i)) + "\n";
+        }
+        return new LocalSkillFallbackService.LocalSkillResult(
+                "FILE_CONFIRMATION_MULTIPLE", answer, answer, false);
+    }
+
+    /**
+     * 确认词判断：只在短句匹配时命中。
+     * 排除长句误判："这个文件在哪里"、"可以打开哪个文件"等不应被当作确认词。
+     * 策略：trimmed 长度不超过确认词长度 + 2 个语气后缀字符时才命中。
+     */
+    private boolean looksLikeConfirmation(String lower) {
+        String trimmed = lower.trim();
+        for (String word : CONFIRMATION_WORDS) {
+            if (trimmed.equals(word)) {
+                return true;
+            }
+            // 允许确认词后带1-2个语气字符（如"好的呀"、"是的呢"）
+            if (trimmed.startsWith(word) && trimmed.length() <= word.length() + 2) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 从最近 1 条 ASSISTANT message_event 中提取文件名候选。
+     * 只提取最近1次，最多20个文件名，单个文件名过长截断。
+     *
+     * 关键：直接读取 event.getContent() 原始内容，手动剥离 [REFLECT] 前缀，
+     * 不调用 ConversationEventTextSupport.extractAssistantAnswer()（其中 normalize()
+     * 会把换行折叠为空格，导致编号列表正则 [^\n]+ 把多个候选粘成一个脏文件名）。
+     */
+    private List<String> extractFileCandidatesFromRecentAssistant(String sessionKey) {
+        List<MessageEvent> recentEvents = messageEventService.listSessionEvents(
+                sessionKey, null, "CHAT", 4, false);
+        // 从最近的开始找第一条 ASSISTANT 事件
+        for (int i = recentEvents.size() - 1; i >= 0; i--) {
+            MessageEvent event = recentEvents.get(i);
+            if ("ASSISTANT".equalsIgnoreCase(event.getRole())) {
+                String raw = event.getContent();
+                if (raw == null || raw.isBlank()) {
+                    continue;
+                }
+                // 手动剥离 [REFLECT] 前缀，保留原始换行结构
+                String content = raw;
+                if (content.startsWith("[REFLECT]")) {
+                    content = content.substring("[REFLECT]".length()).trim();
+                }
+                if (!StringUtils.hasText(content)) {
+                    continue;
+                }
+                List<String> candidates = parseFileNamesFromAnswer(content);
+                if (!candidates.isEmpty()) {
+                    return candidates.stream().limit(20).toList();
+                }
+            }
+        }
+        return List.of();
+    }
+
+    /**
+     * 从 assistant 回答文本中提取文件名。
+     * 支持表格格式（| 序号 | 类型 | 文件名 |）和编号列表（1. xxx）。
+     */
+    private List<String> parseFileNamesFromAnswer(String answer) {
+        List<String> names = new ArrayList<>();
+        Matcher matcher = FILE_NAME_PATTERN.matcher(answer);
+        while (matcher.find() && names.size() < 20) {
+            // 三个分组分别对应表格列、编号列表、[F]标记
+            for (int g = 1; g <= 3; g++) {
+                String value = matcher.group(g);
+                if (StringUtils.hasText(value)) {
+                    String cleaned = value.trim();
+                    // 过滤掉太短或明显是类型词的（"文件"、"文件夹"）
+                    if (cleaned.length() >= 3 && !"文件".equals(cleaned) && !"文件夹".equals(cleaned)) {
+                        names.add(cleaned);
+                    }
+                }
+            }
+        }
+        return names;
+    }
+
+    /**
+     * 从确认词中提取编号提示："第一份"→"第一"，"2号"→"2"，"第二个"→"第二"。
+     */
+    private String extractSpecificHint(String lower) {
+        if (lower.contains("第一") || lower.contains("1号") || lower.contains("1.") || lower.equals("1")) {
+            return "1";
+        }
+        if (lower.contains("第二") || lower.contains("2号") || lower.equals("2")) {
+            return "2";
+        }
+        if (lower.contains("第三") || lower.contains("3号") || lower.equals("3")) {
+            return "3";
+        }
+        // 纯数字确认
+        String trimmed = lower.trim();
+        if (trimmed.matches("\\d+")) {
+            return trimmed;
+        }
+        return null;
+    }
+
+    private int parseCandidateIndex(String hint, int total) {
+        try {
+            int num = Integer.parseInt(hint);
+            if (num >= 1 && num <= total) {
+                return num - 1; // 转为 0-based index
+            }
+        } catch (NumberFormatException ignored) {}
+        // 中文数字
+        if (hint.contains("第一")) return 0;
+        if (hint.contains("第二")) return 1;
+        if (hint.contains("第三")) return 2;
+        return -1;
+    }
+
+    private LocalSkillFallbackService.LocalSkillResult openSingleCandidate(String fileName) {
+        try {
+            // 尝试从桌面读取文件
+            DesktopFilePath filePath = resolveDesktopPathFromFileName(fileName);
+            if (filePath != null) {
+                String readResult = localFilesystemService.readTextFile(filePath.rootRef(), filePath.relativePath());
+                String answer;
+                if (readResult != null && !readResult.startsWith("找到了文件") && !readResult.startsWith("文件不存在")) {
+                    answer = "我找到了文件：" + fileName + "，内容如下：\n\n" + readResult;
+                } else if (readResult != null && readResult.startsWith("找到了文件")) {
+                    answer = readResult; // 非文本格式的友好提示
+                } else {
+                    answer = "找到了文件 " + fileName + "，但无法读取内容。";
+                }
+                return new LocalSkillFallbackService.LocalSkillResult(
+                        "FILE_CONFIRMATION_OPEN", answer, answer, true);
+            }
+        } catch (Exception ex) {
+            return new LocalSkillFallbackService.LocalSkillResult(
+                    "FILE_CONFIRMATION_OPEN_FAILED",
+                    "打开文件失败: " + ex.getMessage(),
+                    "打开文件失败: " + ex.getMessage(), false);
+        }
+        // 无法定位文件路径时，提供文件名信息
+        String answer = "确认打开文件：" + truncateFileName(fileName)
+                + "。但目前无法自动定位到文件路径，请提供完整路径或重新描述。";
+        return new LocalSkillFallbackService.LocalSkillResult(
+                "FILE_CONFIRMATION_NO_PATH", answer, answer, false);
+    }
+
+    /**
+     * 从文件名尝试解析桌面路径。
+     */
+    private DesktopFilePath resolveDesktopPathFromFileName(String fileName) {
+        try {
+            String listing = localFilesystemService.listFiles("", "Desktop");
+            DesktopFilePath path = findPathInListing(listing, fileName);
+            if (path != null) return path;
+        } catch (Exception ignored) {}
+        try {
+            String listing = localFilesystemService.listFiles("Desktop", "");
+            DesktopFilePath path = findPathInListing(listing, fileName);
+            if (path != null) return path;
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private DesktopFilePath findPathInListing(String listing, String fileName) {
+        for (String line : TextUtils.safe(listing).split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.contains(fileName)) {
+                int colonIdx = trimmed.indexOf(':');
+                if (colonIdx >= 0 && colonIdx < trimmed.length() - 1) {
+                    String rootRef = trimmed.substring(0, colonIdx).replace("[F] ", "").replace("[D] ", "").trim();
+                    String relativePath = trimmed.substring(colonIdx + 1).trim();
+                    return new DesktopFilePath(rootRef, relativePath);
+                }
+            }
+        }
+        return null;
+    }
+
+    private String truncateFileName(String name) {
+        if (name == null) return "";
+        return name.length() > 80 ? name.substring(0, 80) + "..." : name;
+    }
+
+    private record DesktopFilePath(String rootRef, String relativePath) {}
 }

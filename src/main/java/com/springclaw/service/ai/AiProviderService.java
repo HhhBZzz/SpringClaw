@@ -82,6 +82,7 @@ public class AiProviderService {
         registerProvider("qwen", aiProperties.getProviders().getQwen());
         registerProvider("coding-plan", aiProperties.getProviders().getCodingPlan());
         registerProvider("deepseek", aiProperties.getProviders().getDeepSeek());
+        registerProvider("volcengine-coding-plan", aiProperties.getProviders().getVolcengineCodingPlan());
 
         Map<String, Boolean> repairedStartupModels = new LinkedHashMap<>();
         for (AiProviderRuntime runtime : providers.values()) {
@@ -332,6 +333,7 @@ public class AiProviderService {
             case "qwen" -> "SPRINGCLAW_QWEN_MODEL";
             case "coding-plan" -> "SPRINGCLAW_CODING_PLAN_MODEL";
             case "deepseek" -> "SPRINGCLAW_DEEPSEEK_MODEL";
+            case "volcengine-coding-plan" -> "SPRINGCLAW_VOLCENGINE_CODING_PLAN_MODEL";
             default -> "";
         };
     }

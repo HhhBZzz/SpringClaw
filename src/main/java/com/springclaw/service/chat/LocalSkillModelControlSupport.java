@@ -103,6 +103,7 @@ final class LocalSkillModelControlSupport {
                 "当前模型", "目前模型", "目前是什么模型", "目前用什么模型", "目前是哪个模型",
                 "现在用什么模型", "现在是什么模型", "用的什么模型", "用的哪个模型",
                 "你是什么模型", "你现在是什么模型", "你现在用什么模型", "你目前是什么模型",
+                "内置模型", "内置是什么模型", "你的内置模型", "底层模型", "你底层是什么模型",
                 "当前是什么模型", "当前用的是什么模型", "当前使用的是什么模型", "当前用的什么模型",
                 "当前在用哪个模型", "在用哪个模型", "当前使用哪个模型",
                 "当前provider", "当前 provider", "active provider", "当前通道",
@@ -155,10 +156,33 @@ final class LocalSkillModelControlSupport {
             return "未注入模型提供方服务。";
         }
         AiProviderService.ActiveChatClient active = aiProviderService.activeClient();
-        return """
-                我当前使用的是 %s 的 %s。
-                如需查看可切换模型和详细状态，可以直接说“列出所有模型”。
-                """.formatted(active.providerId(), active.model()).trim();
+        String providerName = friendlyProviderName(active.providerId());
+        String modelName = friendlyModelName(active.model());
+        return "我是 SpringClaw，当前使用 " + providerName + " 的 " + modelName + " 模型。"
+                + " 如需查看可切换模型和详细状态，可以直接说“列出所有模型”。";
+    }
+
+    private String friendlyProviderName(String providerId) {
+        if (providerId == null) return "未知";
+        if (providerId.contains("volcengine") || providerId.contains("coding-plan")) return "火山引擎 Coding Plan";
+        if (providerId.equals("deepseek")) return "DeepSeek";
+        if (providerId.equals("primary")) return "Claude";
+        if (providerId.equals("qwen")) return "阿里千问";
+        return providerId;
+    }
+
+    private String friendlyModelName(String model) {
+        if (model == null) return "未知";
+        // 隐藏 doubao-seed-xxx 等内部模型名
+        if (model.startsWith("doubao-seed")) return "豆包";
+        if (model.startsWith("doubao")) return "豆包";
+        if (model.contains("qwen3.5-plus") || model.contains("qwen35plus")) return "千问 3.5 Plus";
+        if (model.contains("qwen3-coder-plus") || model.contains("qwen3coderplus")) return "千问 3 Coder Plus";
+        if (model.contains("qwen-max") || model.contains("qwenmax")) return "千问 Max";
+        if (model.contains("deepseek-chat") || model.contains("deepseekchat")) return "DeepSeek Chat";
+        if (model.contains("deepseek-reasoner") || model.contains("deepseekreasoner")) return "DeepSeek Reasoner";
+        if (model.contains("claude")) return "Claude";
+        return model;
     }
 
     private String renderActiveProviderSummary() {

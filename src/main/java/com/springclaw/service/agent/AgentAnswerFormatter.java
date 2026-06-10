@@ -6,11 +6,18 @@ import org.springframework.util.StringUtils;
 import java.util.List;
 
 /**
- * Deterministic final-answer contract for Agent Runtime responses.
+ * Product-facing answer formatter for Agent Runtime responses.
+ * Converts internal capability results into natural, user-friendly language.
+ *
+ * Design principles:
+ * 1. Lead with the answer, not the process
+ * 2. Surface only the data the user cares about
+ * 3. Never expose internal IDs, scores, or execution metrics
+ * 4. On failure, be honest and helpful without being verbose
  */
 final class AgentAnswerFormatter {
 
-    private static final int RESULT_PAYLOAD_LIMIT = 900;
+    private static final int PAYLINE_LIMIT = 600;
 
     String formatRuntimeAnswer(String question,
                                List<CapabilityResult> capabilityResults,
@@ -18,93 +25,180 @@ final class AgentAnswerFormatter {
                                String conclusion,
                                String organizerStatus) {
         List<CapabilityResult> results = capabilityResults == null ? List.of() : capabilityResults;
+        boolean success = verification != null && verification.sufficient();
+        boolean allFailed = !results.isEmpty() && results.stream().noneMatch(CapabilityResult::successful);
+
         StringBuilder builder = new StringBuilder();
-        builder.append("结论：\n")
-                .append(normalizeConclusion(conclusion, verification))
-                .append("\n\n");
 
-        builder.append("依据：\n");
-        if (verification != null && StringUtils.hasText(verification.summary())) {
-            builder.append("- 校验：").append(verification.summary()).append("\n");
-        }
-        if (results.isEmpty()) {
-            builder.append("- 本轮没有取得可用能力结果。");
-            if (StringUtils.hasText(question)) {
-                builder.append("用户请求：").append(question.trim());
-            }
-            builder.append("\n");
+        // --- Main answer ---
+        if (success) {
+            appendAnswerFromResults(builder, question, results);
+        } else if (allFailed) {
+            appendFailureAnswer(builder, question, results);
         } else {
-            for (CapabilityResult result : results) {
-                builder.append("- ")
-                        .append(TextUtils.safe(result.capabilityId(), "unknown"))
-                        .append(" [")
-                        .append(TextUtils.safe(result.status(), "unknown"))
-                        .append("] ")
-                        .append(TextUtils.safe(result.summary(), "已执行能力"))
-                        .append("\n  结果：")
-                        .append(renderPayload(result.payload()))
-                        .append("\n");
-            }
+            appendPartialAnswer(builder, question, results, verification);
         }
 
-        builder.append("\n执行状态：\n")
-                .append("- 能力执行：")
-                .append(results.size())
-                .append(" 个，成功 ")
-                .append(results.stream().filter(CapabilityResult::successful).count())
-                .append(" 个。\n");
-        if (verification != null && verification.quality() != null) {
-            AgentQualityScore quality = verification.quality();
-            builder.append("- 质量评分：")
-                    .append(quality.overallScore())
-                    .append("/100（")
-                    .append(quality.level())
-                    .append("）");
-            if (StringUtils.hasText(quality.reason())) {
-                builder.append("，").append(quality.reason());
-            }
-            builder.append("\n");
-        }
-        if (StringUtils.hasText(organizerStatus)) {
-            builder.append("- 回答整理：").append(organizerStatus.trim()).append("\n");
-        }
-
-        builder.append("\n下一步：\n")
-                .append(nextStep(verification));
         return builder.toString().trim();
     }
 
-    private String normalizeConclusion(String conclusion, VerificationResult verification) {
-        if (StringUtils.hasText(conclusion)) {
-            return stripRepeatedContractHeading(conclusion.trim());
+    /**
+     * Successful path: extract useful data and present naturally.
+     */
+    private void appendAnswerFromResults(StringBuilder builder, String question, List<CapabilityResult> results) {
+        // Build a natural summary from successful results
+        boolean hasContent = false;
+        for (CapabilityResult result : results) {
+            if (!result.successful() || !StringUtils.hasText(result.payload())) {
+                continue;
+            }
+            String summary = result.summary();
+            String payload = result.payload();
+
+            // For price/data-type results, extract the useful lines
+            String useful = extractUsefulLines(payload);
+            if (StringUtils.hasText(useful)) {
+                if (!hasContent) {
+                    builder.append("\n\n");
+                }
+                hasContent = true;
+                builder.append(useful).append("\n");
+            }
         }
-        if (verification != null && !verification.sufficient()) {
-            return "当前证据不足以可靠回答这次请求。";
+        if (!hasContent && StringUtils.hasText(question)) {
+            builder.append("已处理你的请求。");
         }
-        return "已完成这次请求，并基于已获取的证据整理结果。";
     }
 
-    private String stripRepeatedContractHeading(String text) {
-        String value = text;
-        if (value.startsWith("结论：")) {
-            value = value.substring("结论：".length()).trim();
+    /**
+     * All-failed path: acknowledge and suggest next steps.
+     */
+    private void appendFailureAnswer(StringBuilder builder, String question, List<CapabilityResult> results) {
+        builder.append("抱歉，这个请求暂时无法完成。");
+        // Try to extract a human-readable reason from results
+        for (CapabilityResult result : results) {
+            String reason = extractFailureReason(result.payload());
+            if (StringUtils.hasText(reason)) {
+                builder.append("\n").append(reason);
+                break;
+            }
         }
-        return StringUtils.hasText(value) ? value : "已完成这次请求，并基于已获取的证据整理结果。";
+        builder.append("\n\n你可以换个方式描述你的需求，我再来帮你。");
     }
 
-    private String renderPayload(String payload) {
-        String value = TextUtils.truncate(payload, RESULT_PAYLOAD_LIMIT);
-        if (!StringUtils.hasText(value)) {
-            return "（无详情）";
+    /**
+     * Insufficient/partial path: show what we have, acknowledge what's missing.
+     */
+    private void appendPartialAnswer(StringBuilder builder, String question,
+                                     List<CapabilityResult> results,
+                                     VerificationResult verification) {
+        // Show any useful data we did get
+        boolean hasContent = false;
+        for (CapabilityResult result : results) {
+            if (!result.successful() || !StringUtils.hasText(result.payload())) {
+                continue;
+            }
+            String useful = extractUsefulLines(result.payload());
+            if (StringUtils.hasText(useful)) {
+                if (!hasContent) {
+                    builder.append("\n");
+                }
+                hasContent = true;
+                builder.append(useful).append("\n");
+            }
         }
-        return value.replace("\r\n", "\n").replace("\n", "\n  ");
+        if (!hasContent) {
+            builder.append("目前获取的信息还不够完整。");
+            builder.append("\n\n");
+            builder.append("你可以：\n");
+            builder.append("- 换一种方式提问，比如直接告诉我币种名称（如 BTC、ETH）\n");
+            builder.append("- 稍后再试一次\n");
+        }
     }
 
-    private String nextStep(VerificationResult verification) {
-        if (verification != null && !verification.sufficient()) {
-            return "需要补齐缺失能力结果后再继续；当前回答只保留已验证的证据，不扩写未证实内容。";
+    /**
+     * Extract the useful data lines from a capability payload,
+     * stripping internal metadata (skill=, exitCode=, dryRun=, symbols=, unsupported=).
+     */
+    private String extractUsefulLines(String payload) {
+        if (!StringUtils.hasText(payload)) {
+            return "";
         }
-        return "如果需要，我可以继续展开某个证据、追加工具执行，或把结果转成更适合交付的报告格式。";
+        String truncated = TextUtils.truncate(payload, PAYLINE_LIMIT);
+        StringBuilder out = new StringBuilder();
+        for (String line : truncated.split("\n")) {
+            String trimmed = line.trim();
+            // Skip internal metadata lines
+            if (isInternalMetadata(trimmed)) {
+                continue;
+            }
+            // Skip raw execution trace lines
+            if (trimmed.startsWith("skill=") || trimmed.startsWith("exitCode=")
+                    || trimmed.startsWith("dryRun=") || trimmed.startsWith("symbols=")
+                    || trimmed.startsWith("unsupported=") || trimmed.startsWith("status=")
+                    || trimmed.startsWith("error=")) {
+                continue;
+            }
+            if (StringUtils.hasText(trimmed)) {
+                // Convert "- BTC: usd=61280.4, cny=416389.78, 24h=-3.99%" → natural format
+                String formatted = formatDataLine(trimmed);
+                out.append(formatted).append("\n");
+            }
+        }
+        return out.toString().trim();
+    }
+
+    private boolean isInternalMetadata(String line) {
+        return line.startsWith("LOCAL_WORKSPACE") || line.startsWith("[REFLECT]")
+                || line.startsWith("ROUTING=") || line.startsWith("PLAN=")
+                || line.startsWith("ACT=") || line.startsWith("VERIFICATION:");
+    }
+
+    /**
+     * Convert raw data lines into more readable format.
+     */
+    private String formatDataLine(String line) {
+        String result = line;
+        // Format crypto price lines: "- BTC: usd=61280.4, cny=416389.78, 24h=-3.99%"
+        if (result.matches("^- \\w+: usd=.*")) {
+            result = result.replace("usd=", "USD ").replace(", cny=", " / CNY ")
+                    .replace(", 24h=", " (24h ").replace("%", "%)");
+        }
+        // Format weather-like lines
+        if (result.contains("城市:") && result.contains("天气:")) {
+            // Already readable, pass through
+        }
+        return result;
+    }
+
+    /**
+     * Extract a human-readable failure reason from payload.
+     */
+    private String extractFailureReason(String payload) {
+        if (!StringUtils.hasText(payload)) {
+            return "";
+        }
+        if (payload.contains("no supported symbols")) {
+            return "我没能识别出你要查询的具体品种，请直接告诉我名称，比如 BTC 或 比特币。";
+        }
+        if (payload.contains("unreachable") || payload.contains("timed out") || payload.contains("SSL")) {
+            return "当前无法连接到数据服务，请稍后再试。";
+        }
+        if (payload.contains("failed") && payload.contains("error=")) {
+            String error = extractField(payload, "error=");
+            if (StringUtils.hasText(error)) {
+                return "出错原因：" + error;
+            }
+        }
+        return "";
+    }
+
+    private String extractField(String text, String key) {
+        int idx = text.indexOf(key);
+        if (idx < 0) return "";
+        String rest = text.substring(idx + key.length());
+        int end = rest.indexOf("\n");
+        return end > 0 ? rest.substring(0, end).trim() : rest.trim();
     }
 
 }

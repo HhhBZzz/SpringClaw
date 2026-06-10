@@ -292,41 +292,42 @@ public class AgentRuntimeEngine implements AgentEngine {
                                           String originalQuestion,
                                           String currentQuestion,
                                           int attempt) {
-        return """
+        // Use .replace() to avoid IllegalFormatConversionException from '%' in payloads
+        String template = """
                 # ORIGINAL_QUESTION
-                %s
+                {{ORIG_Q}}
 
                 # CURRENT_QUERY
-                %s
+                {{CUR_Q}}
 
                 # ATTEMPT
-                %d / %d
+                {{ATTEMPT}} / {{MAX_ATTEMPTS}}
 
                 # CURRENT_DECISION
-                intent=%s
-                path=%s
-                selectedCapabilities=%s
-                risk=%s
-                reason=%s
+                intent={{INTENT}}
+                path={{PATH}}
+                selectedCapabilities={{CAPS}}
+                risk={{RISK}}
+                reason={{REASON}}
 
                 # CURRENT_PLAN
-                %s
+                {{PLAN}}
 
                 # ACCUMULATED_CAPABILITY_RESULTS
-                %s
-                """.formatted(
-                TextUtils.safe(originalQuestion),
-                TextUtils.safe(currentQuestion),
-                attempt,
-                MAX_REFLECTION_ATTEMPTS,
-                decision == null ? "" : decision.intent(),
-                decision == null ? "" : decision.executionPath(),
-                decision == null ? "" : String.join(",", decision.selectedCapabilities()),
-                decision == null ? "" : decision.riskLevel(),
-                decision == null ? "" : decision.reason(),
-                renderPlanText(plan),
-                renderCapabilityContext(allResults)
-        );
+                {{RESULTS}}
+                """;
+        return template
+                .replace("{{ORIG_Q}}", TextUtils.safe(originalQuestion))
+                .replace("{{CUR_Q}}", TextUtils.safe(currentQuestion))
+                .replace("{{ATTEMPT}}", String.valueOf(attempt))
+                .replace("{{MAX_ATTEMPTS}}", String.valueOf(MAX_REFLECTION_ATTEMPTS))
+                .replace("{{INTENT}}", decision == null ? "" : decision.intent())
+                .replace("{{PATH}}", decision == null ? "" : decision.executionPath())
+                .replace("{{CAPS}}", decision == null ? "" : String.join(",", decision.selectedCapabilities()))
+                .replace("{{RISK}}", decision == null ? "" : decision.riskLevel())
+                .replace("{{REASON}}", decision == null ? "" : decision.reason())
+                .replace("{{PLAN}}", renderPlanText(plan))
+                .replace("{{RESULTS}}", renderCapabilityContext(allResults));
     }
 
     private ReflectionResult parseReflectionResult(String raw, ReflectionResult fallback) {
@@ -637,15 +638,26 @@ public class AgentRuntimeEngine implements AgentEngine {
 
     private boolean matchesCapability(String capabilityId, String expected) {
         String actual = normalizeCapability(capabilityId);
+        // Strip common prefixes: "skill.", "tool.", "agent."
+        String stripped = actual;
+        for (String prefix : List.of("skill.", "tool.", "agent.")) {
+            if (stripped.startsWith(prefix)) {
+                stripped = stripped.substring(prefix.length());
+            }
+        }
         return actual.equals(expected)
+                || stripped.equals(expected)
                 || actual.startsWith(expected + ".")
-                || actual.startsWith(expected + "-");
+                || actual.startsWith(expected + "-")
+                || stripped.startsWith(expected + ".")
+                || stripped.startsWith(expected + "-");
     }
 
     private boolean isSupportCapability(String capability) {
         return "file".equals(capability)
                 || "system".equals(capability)
-                || "skill-library".equals(capability);
+                || "skill-library".equals(capability)
+                || "script-skill".equals(capability);
     }
 
     private String normalizeCapability(String value) {
@@ -673,10 +685,6 @@ public class AgentRuntimeEngine implements AgentEngine {
         String planText = renderPlanText(plan);
         String actionText = renderActionText(capabilityResults, verification);
         AiProviderService.ActiveChatClient activeClient = context.activeClient();
-        if (hasDirectCapabilityEvidence(capabilityResults)) {
-            String answer = deterministicAnswer(context, capabilityResults, verification, DIRECT_CAPABILITY_RESULT_REASON);
-            return new ChatExecutionResult(context.assembled().observePrompt(), planText, actionText, answer, false);
-        }
         if (!modelTransportGuardService.isModelCallEnabled(activeClient)) {
             String answer = deterministicAnswer(context, capabilityResults, verification, modelTransportGuardService.disabledModelReason(activeClient));
             return new ChatExecutionResult(context.assembled().observePrompt(), planText, actionText, answer, false);
@@ -710,15 +718,9 @@ public class AgentRuntimeEngine implements AgentEngine {
                     || chatResponsePolicyService.looksLikeToolFailureRefusal(answer)
                     || chatResponsePolicyService.looksLikeMetaRefusal(answer)) {
                 answer = deterministicAnswer(context, capabilityResults, verification, "模型总结不可用或输出了不合适的拒答。已直接整理工具结果。");
-            } else {
-                answer = answerFormatter.formatRuntimeAnswer(
-                        context.assembled().question(),
-                        capabilityResults,
-                        verification,
-                        answer,
-                        "模型总结已完成，并经过后端回答契约整理。"
-                );
             }
+            // Model already received product-facing formatting guidance in renderSummaryPrompt.
+            // Use its natural language output directly — no further formatter post-processing.
             return new ChatExecutionResult(context.assembled().observePrompt(), planText, actionText, answer, true);
         } catch (Exception ex) {
             modelTransportGuardService.markFailure(activeClient.providerId(), ex);
@@ -733,44 +735,48 @@ public class AgentRuntimeEngine implements AgentEngine {
                                        CapabilityPlan plan,
                                        List<CapabilityResult> capabilityResults,
                                        VerificationResult verification) {
-        return """
-                # SpringClaw Agent Runtime Finalizer
-                你是 SpringClaw Agent Runtime 的最终回答整理器。后端已经完成意图判断、能力选择、工具/skill 执行和证据校验。
+        // Use .replace() instead of .formatted() to avoid IllegalFormatConversionException
+        // when capability payloads contain literal '%' characters (e.g., "24h=-2.91%").
+        String template = """
+                # SpringClaw Agent 最终回答整理
 
-                # RESPONSE_CONTRACT
-                - 必须基于 DYNAMIC_REQUEST 中的真实执行结果回答。
-                - 不要声称无法访问本地项目、授权文件或运行环境；如果能力结果已提供，就直接基于结果整理。
-                - 如果某个能力失败，要说明失败阶段、可恢复建议和已拿到的部分证据。
-                - 不要输出内部类名、SSE、OPAR、fallback、toolset registry 等实现词。
-                - 用清晰中文回答，先给结论，再给依据和下一步。
-                - 不要编造能力结果之外的文件、数据、日志或网络响应。
-                - 如果能力结果是文件/日志/列表，不要逐项复写超过 30 项的文件列表；应先总结数量、类型和最相关的 10-20 项，需要更多时提示用户继续展开。
+                后端已完成意图判断、能力选择、工具执行和证据校验。请基于执行结果，给用户一个自然、简洁、有帮助的答复。
 
-                # DYNAMIC_REQUEST
-                用户目标：
-                %s
+                # 输出规范（严格遵守）
+                1) 用自然语言对话，不要复制粘贴原始数据行
+                2) 不要加"结论："、"依据："、"执行结果："等标题前缀，直接回答
+                3) 如果是价格查询，用一句话总结：品种 + 当前价格（USD/CNY）+ 涨跌幅
+                   例如：比特币当前约 $61,803 USD / ¥419,942 CNY，24h 下跌 2.71%
+                4) 如果是天气查询，用一句话总结：城市 + 天气 + 温度 + 体感建议
+                   例如：北京现在局部多云，19.6℃，湿度 63%，比较舒适
+                5) 如果是分析/审查类，先说结论要点，再展开
+                6) 如果证据不足，简要说明并建议怎么改问
+                7) 绝对不要出现：工具名、执行路径、exitCode、qualityScore、verification、来源API名
+                8) 绝对不要出现"结论："、"依据："、"执行状态："这类报告标题
+                9) 不要声称无法访问数据或运行环境，能力结果已经拿到了，直接整理即可
+                10) 不要编造能力结果之外的数据
+                11) 中文输出，简洁直接，2-3句话为宜
 
-                Agent 决策：
-                intent=%s
-                path=%s
-                toolsets=%s
-                risk=%s
-                reason=%s
+                # 用户问题
+                {{QUESTION}}
 
-                后端已经真实执行的能力结果：
-                %s
+                # Agent 决策
+                intent={{INTENT}}, path={{PATH}}, toolsets={{TOOLSETS}}, risk={{RISK}}
 
-                校验结果：%s
-                """.formatted(
-                TextUtils.safe(context.assembled().question()),
-                plan.intent(),
-                plan.executionPath(),
-                String.join(",", plan.toolsets()),
-                plan.riskLevel(),
-                plan.reason(),
-                renderCapabilityContext(capabilityResults),
-                verification.summary()
-        );
+                # 后端已执行的能力结果
+                {{RESULTS}}
+
+                # 校验结果
+                {{VERIFICATION}}
+                """;
+        return template
+                .replace("{{QUESTION}}", TextUtils.safe(context.assembled().question()))
+                .replace("{{INTENT}}", plan.intent())
+                .replace("{{PATH}}", plan.executionPath())
+                .replace("{{TOOLSETS}}", String.join(",", plan.toolsets()))
+                .replace("{{RISK}}", plan.riskLevel())
+                .replace("{{RESULTS}}", renderCapabilityContext(capabilityResults))
+                .replace("{{VERIFICATION}}", verification.summary());
     }
 
     private String deterministicAnswer(ChatContext context,

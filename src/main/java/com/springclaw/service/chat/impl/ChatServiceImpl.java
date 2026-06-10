@@ -137,7 +137,7 @@ public class ChatServiceImpl implements ChatService {
         chatGuardService.checkRateLimit(request.sessionKey());
         String lockToken = chatGuardService.acquireSessionLock(request.sessionKey());
         AtomicBoolean lockReleased = new AtomicBoolean(false);
-        SseEmitter emitter = new SseEmitter(120_000L);
+        SseEmitter emitter = new SseEmitter(1_800_000L); // 30 分钟超时，容纳自主循环等长时间执行
         AtomicReference<Disposable> disposableRef = new AtomicReference<>();
 
         emitter.onCompletion(() -> {
@@ -176,12 +176,14 @@ public class ChatServiceImpl implements ChatService {
             sseEventBridge.sendTrace(emitter, context, "判断意图", "route", "success",
                     "intent=" + TextUtils.safe(context.intent()) + "，path=" + TextUtils.safe(decisionPath) + "，原因=" + TextUtils.safe(decisionReason),
                     System.currentTimeMillis() - requestStartedAt);
-            if (shouldRequestActionConfirmation(context)) {
+            // 统一路由：通过 EngineSelector 选择引擎
+            AgentEngine engine = engineSelector.select(context);
+            // StreamableAgentEngine 自行管理 SSE 生命周期和确认逻辑，不需要外部拦截
+            if (!(engine instanceof AgentEngine.StreamableAgentEngine)
+                    && shouldRequestActionConfirmation(context)) {
                 streamActionRequired(context, lockToken, lockReleased, emitter);
                 return;
             }
-            // 统一路由：通过 EngineSelector 选择引擎
-            AgentEngine engine = engineSelector.select(context);
             if (engine instanceof AgentEngine.StreamableAgentEngine streamable) {
                 streamable.stream(context, emitter, lockToken, lockReleased, disposableRef,
                         (ctx, error, em, lt, lr) -> streamBlockingFallback(ctx, error, lt, lr, em));

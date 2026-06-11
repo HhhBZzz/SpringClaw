@@ -371,7 +371,7 @@ class LocalSkillFallbackServiceTest {
         Assertions.assertEquals("MODEL_PROVIDER_SWITCH", switchResult.route());
         Assertions.assertTrue(switchResult.executionDetails().contains("provider: qwen"));
         Assertions.assertTrue(switchResult.fallbackAnswer().contains("已切换到 qwen"));
-        Assertions.assertTrue(currentAnswer.contains("我当前使用的是 qwen 的 qwen3.5-plus"));
+        Assertions.assertTrue(currentAnswer.contains("我是 SpringClaw，当前使用 阿里千问 的 千问 3.5 Plus"));
     }
 
     @Test
@@ -416,7 +416,7 @@ class LocalSkillFallbackServiceTest {
         Assertions.assertTrue(switchResult.executionDetails().contains("provider: coding-plan"));
         Assertions.assertTrue(switchResult.executionDetails().contains("model: qwen3-coder-plus"));
         Assertions.assertTrue(switchResult.fallbackAnswer().contains("已切换到 coding-plan"));
-        Assertions.assertTrue(currentAnswer.contains("我当前使用的是 coding-plan 的 qwen3-coder-plus"));
+        Assertions.assertTrue(currentAnswer.contains("我是 SpringClaw，当前使用 火山引擎 Coding Plan 的 千问 3 Coder Plus"));
         Assertions.assertTrue(detailAnswer.contains("当前模型状态"));
         Assertions.assertTrue(detailAnswer.contains("当前活动 provider: coding-plan"));
         Assertions.assertTrue(detailAnswer.contains("当前模型: qwen3-coder-plus"));
@@ -624,7 +624,7 @@ class LocalSkillFallbackServiceTest {
         LocalSkillFallbackService.LocalSkillResult result = service.tryHandleControlPlane("目前是什么模型").orElseThrow();
 
         Assertions.assertEquals("MODEL_PROVIDER_QUERY", result.route());
-        Assertions.assertTrue(result.fallbackAnswer().contains("我当前使用的是"));
+        Assertions.assertTrue(result.fallbackAnswer().contains("我是 SpringClaw，当前使用"));
     }
 
     @Test

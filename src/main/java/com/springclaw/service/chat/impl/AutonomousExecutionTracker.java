@@ -12,8 +12,9 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * 这个追踪器解决"假完成"问题：模型可能用纯文本声称 TASK_COMPLETE，
  * 但实际上没有调用任何写工具，也没有创建或修改任何文件。
  *
- * 线程安全设计：使用 CopyOnWriteArrayList 和 ConcurrentHashMap，
- * 因为工具在 ForkJoinPool 线程中执行，需要在并发环境下安全更新。
+ * 防御性设计：使用 CopyOnWriteArrayList 和 ConcurrentHashMap，
+ * 虽然当前 Spring AI 工具调用是同步单线程的（ChatClient.call() → ToolCallback.call() 同一线程），
+ * 但线程安全集合作为防御性选择不会引入额外开销，也为未来异步执行保留兼容性。
  */
 public class AutonomousExecutionTracker {
 

@@ -203,7 +203,7 @@ springclaw:
     password-pepper: ${SPRINGCLAW_PASSWORD_PEPPER:}
     tool-permission-enabled: true
     default-deny: false
-    user-deny-tools: SystemToolPack.runCommand,FileToolPack.writeTextFile,ScriptSkillToolPack.*
+    user-deny-tools: SystemToolPack.runCommand,FileToolPack.writeTextFile,ScriptSkillToolPack.*,WorkspaceEditToolPack.*
     guest-allow-tools: SystemToolPack.now,SystemToolPack.uuid,WeatherToolPack.*,ExchangeRateToolPack.*,NewsToolPack.*,WebSearchToolPack.webSearch
   chat:
     agent-mode: ${SPRINGCLAW_CHAT_AGENT_MODE:simplified}

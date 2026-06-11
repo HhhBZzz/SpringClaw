@@ -9,7 +9,7 @@ const router = createRouter({
   routes: [
     { path: '/', name: 'home', component: HomeView },
     { path: '/agent', name: 'agent', component: AgentView },
-    { path: '/admin', name: 'admin', component: AdminView, meta: { requiresAuth: true, requiresAdmin: true } },
+    { path: '/admin', name: 'admin', component: AdminView },
     { path: '/console', redirect: '/agent' },
     { path: '/:pathMatch(.*)*', redirect: '/' }
   ],

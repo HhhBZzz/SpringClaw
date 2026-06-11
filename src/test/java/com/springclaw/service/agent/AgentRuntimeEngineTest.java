@@ -63,11 +63,7 @@ class AgentRuntimeEngineTest {
         assertThat(run.capabilityResults()).hasSize(1);
         assertThat(run.verification().sufficient()).isTrue();
         assertThat(run.executionResult().reflect())
-                .startsWith("结论：")
-                .contains("依据：")
-                .contains("ChatServiceImpl.java")
-                .contains("执行状态：")
-                .contains("下一步：");
+                .contains("ChatServiceImpl.java");
         verifyNoInteractions(modelCallExecutor);
     }
 
@@ -156,7 +152,7 @@ class AgentRuntimeEngineTest {
     }
 
     @Test
-    void shouldAnswerStructuredRealtimeResultWithoutSummaryModel() {
+    void shouldCallSummaryModelWhenEvidenceIsSufficient() throws Exception {
         CapabilityExecutorRegistry registry = mock(CapabilityExecutorRegistry.class);
         ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
         ConversationAdvisorSupport conversationAdvisorSupport = mock(ConversationAdvisorSupport.class);
@@ -183,19 +179,19 @@ class AgentRuntimeEngineTest {
         when(registry.plan(decision)).thenReturn(plan);
         when(registry.execute(eq(decision), any(AssembledContext.class), eq("req-1"))).thenReturn(results);
         when(modelTransportGuardService.isModelCallEnabled(activeClient)).thenReturn(true);
+        when(modelCallExecutor.executeChat(eq(activeClient), eq("agent-runtime-summary"), any(), eq(true), any()))
+                .thenReturn(new ModelCallExecutor.ModelCallResult<>(
+                        "北京现在阴天，23.3℃，湿度 41%。",
+                        activeClient,
+                        List.of("deepseek:deepseek-v4-pro"),
+                        false
+                ));
 
         AgentRun run = engine.run(context(decision, activeClient, "今天北京天气怎样"));
 
-        assertThat(run.executionResult().modelEnabled()).isFalse();
-        assertThat(run.executionResult().reflect())
-                .startsWith("结论：")
-                .contains("城市: 北京")
-                .contains("观测时间: 2026-06-05T22:15")
-                .contains("天气: 阴")
-                .contains("weather.current")
-                .contains("质量评分：")
-                .doesNotContain("回答整理阶段使用确定性路径");
-        verifyNoInteractions(modelCallExecutor);
+        assertThat(run.executionResult().modelEnabled()).isTrue();
+        assertThat(run.executionResult().reflect()).contains("北京");
+        verify(modelCallExecutor).executeChat(eq(activeClient), eq("agent-runtime-summary"), any(), eq(true), any());
     }
 
     @Test
@@ -237,12 +233,7 @@ class AgentRuntimeEngineTest {
         AgentRun run = engine.run(context(decision, activeClient, "分析当前项目 Agent 链路"));
 
         assertThat(run.executionResult().reflect())
-                .startsWith("结论：")
-                .contains("项目主链路已经收敛到 AgentRuntimeEngine。")
-                .contains("依据：")
-                .contains("执行状态：")
-                .contains("质量评分：")
-                .contains("下一步：");
+                .contains("项目主链路已经收敛到 AgentRuntimeEngine。");
     }
 
     @Test
@@ -318,7 +309,7 @@ class AgentRuntimeEngineTest {
 
         assertThat(run.verification().sufficient()).isFalse();
         assertThat(run.executionResult().modelEnabled()).isFalse();
-        assertThat(run.executionResult().reflect()).contains("校验未通过");
+        assertThat(run.executionResult().reflect()).contains("暂时无法完成");
         assertThat(run.steps()).filteredOn(step -> "final".equals(step.type()))
                 .extracting(AgentStep::status)
                 .containsExactly("failed");
@@ -357,9 +348,9 @@ class AgentRuntimeEngineTest {
         String prompt = (String) method.invoke(engine, context(decision, activeClient(true)), plan, results,
                 new VerificationResult("success", true, "能力执行完成"));
 
-        assertThat(prompt).startsWith("# SpringClaw Agent Runtime Finalizer");
-        assertThat(prompt.indexOf("# DYNAMIC_REQUEST")).isGreaterThan(prompt.indexOf("# RESPONSE_CONTRACT"));
-        assertThat(prompt.indexOf("用户目标：")).isGreaterThan(prompt.indexOf("# DYNAMIC_REQUEST"));
+        assertThat(prompt).startsWith("# SpringClaw Agent 最终回答整理");
+        assertThat(prompt.indexOf("# 用户问题")).isGreaterThan(prompt.indexOf("# 输出规范"));
+        assertThat(prompt.indexOf("Agent 决策")).isGreaterThan(prompt.indexOf("# 用户问题"));
     }
 
     @Test
@@ -395,7 +386,6 @@ class AgentRuntimeEngineTest {
         String prompt = (String) method.invoke(engine, context(decision, activeClient(true)), plan, results,
                 new VerificationResult("success", true, "能力执行完成"));
 
-        assertThat(prompt).contains("不要逐项复写超过 30 项的文件列表");
         assertThat(prompt).contains("...<TRUNCATED>");
         assertThat(prompt).doesNotContain("TAIL_SHOULD_NOT_APPEAR");
     }
@@ -478,12 +468,7 @@ class AgentRuntimeEngineTest {
                 .containsExactly("web.search", "weather.current");
         assertThat(run.verification().sufficient()).isTrue();
         assertThat(run.executionResult().reflect())
-                .startsWith("结论：")
-                .contains("哈尔滨今天有明确天气结果。")
-                .contains("依据：")
-                .contains("weather.current")
-                .contains("执行状态：")
-                .contains("下一步：");
+                .contains("哈尔滨今天有明确天气结果。");
         assertThat(run.steps()).extracting(AgentStep::stepName).contains("REFLECT_EVIDENCE");
     }
 

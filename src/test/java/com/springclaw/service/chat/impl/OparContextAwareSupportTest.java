@@ -2,6 +2,8 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
+import com.springclaw.service.event.MessageEventService;
+import com.springclaw.service.files.LocalFilesystemService;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
@@ -13,7 +15,9 @@ import static org.mockito.Mockito.when;
 class OparContextAwareSupportTest {
 
     private final ConversationHistoryService conversationHistoryService = mock(ConversationHistoryService.class);
-    private final OparContextAwareSupport support = new OparContextAwareSupport(conversationHistoryService);
+    private final MessageEventService messageEventService = mock(MessageEventService.class);
+    private final LocalFilesystemService localFilesystemService = mock(LocalFilesystemService.class);
+    private final OparContextAwareSupport support = new OparContextAwareSupport(conversationHistoryService, messageEventService, localFilesystemService);
 
     @Test
     void shouldAnswerFirstMessageQuestionFromHistoryService() {

@@ -96,4 +96,17 @@ class VueOnlyFrontendPolicyTest {
                 .contains("RuntimeUsageSummary")
                 .contains("RuntimeModelProviders");
     }
+
+    @Test
+    void adminRouteShouldRemainReachableForUnauthenticatedLogin() throws IOException {
+        String router = Files.readString(projectRoot.resolve("frontend/src/router/index.ts"));
+        String adminView = Files.readString(projectRoot.resolve("frontend/src/views/AdminView.vue"));
+
+        assertThat(router)
+                .contains("{ path: '/admin', name: 'admin', component: AdminView }")
+                .doesNotContain("{ path: '/admin', name: 'admin', component: AdminView, meta: { requiresAuth: true, requiresAdmin: true } }");
+        assertThat(adminView)
+                .contains("<LoginPanel />")
+                .contains("需要 ADMIN 角色才能查看后台数据");
+    }
 }

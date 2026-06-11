@@ -400,4 +400,52 @@ public class AgentRunTraceService {
             return "";
         }
     }
+
+    /**
+     * 重放一次 turn 的完整 timeline。
+     *
+     * <p>给定一个 requestId，从三张结构化表（agent_run / agent_run_step /
+     * tool_invocation）拼出完整的执行 timeline，供 admin 调试和合规审计使用。
+     *
+     * <p>区别于 {@link #listTrace(String, String, int)}：那个方法从非结构化的
+     * message_event 表读 SYSTEM/TRACE 事件并做用户隔离；这个方法直接读结构化
+     * 表，返回 admin 视角下的完整数据（不做用户过滤，由调用端用 @RequireRole(ADMIN)
+     * 控制访问）。
+     *
+     * @return agent_run 主记录 + steps（按 sequence_no 升序）+ toolInvocations
+     *         （按 create_time 升序）；agent_run 不存在时返回空 Map。
+     */
+    public Map<String, Object> replayRun(String requestId) {
+        if (jdbcTemplate == null || !StringUtils.hasText(requestId)) {
+            return Map.of();
+        }
+        List<Map<String, Object>> runRows = jdbcTemplate.queryForList(
+                "SELECT request_id, session_key, channel, user_id, response_mode, " +
+                        "execution_mode, intent, status, started_at, finished_at, duration_ms, " +
+                        "total_tokens, quality_score, quality_level, evaluation_json, error_message " +
+                        "FROM agent_run WHERE request_id = ? AND deleted = 0",
+                requestId
+        );
+        if (runRows.isEmpty()) {
+            return Map.of();
+        }
+        List<Map<String, Object>> steps = jdbcTemplate.queryForList(
+                "SELECT sequence_no, step_name, step_type, status, detail_json, " +
+                        "started_at, finished_at, duration_ms, quality_score, quality_level " +
+                        "FROM agent_run_step WHERE request_id = ? AND deleted = 0 " +
+                        "ORDER BY sequence_no ASC",
+                requestId
+        );
+        List<Map<String, Object>> toolInvocations = jdbcTemplate.queryForList(
+                "SELECT id, tool_name, skill_id, toolset, risk_level, status, " +
+                        "duration_ms, input_summary, output_summary, error_message, create_time " +
+                        "FROM tool_invocation WHERE request_id = ? AND deleted = 0 " +
+                        "ORDER BY create_time ASC",
+                requestId
+        );
+        Map<String, Object> result = new LinkedHashMap<>(runRows.get(0));
+        result.put("steps", steps);
+        result.put("toolInvocations", toolInvocations);
+        return result;
+    }
 }

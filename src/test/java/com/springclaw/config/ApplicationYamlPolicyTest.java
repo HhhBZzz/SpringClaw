@@ -21,5 +21,6 @@ class ApplicationYamlPolicyTest {
         Assertions.assertFalse(denyTools.contains("FileToolPack.*"));
         Assertions.assertTrue(denyTools.contains("SystemToolPack.runCommand"));
         Assertions.assertTrue(denyTools.contains("FileToolPack.writeTextFile"));
+        Assertions.assertTrue(denyTools.contains("WorkspaceEditToolPack.*"));
     }
 }

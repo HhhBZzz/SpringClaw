@@ -22,6 +22,7 @@ import reactor.core.Disposable;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -502,29 +503,70 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
     }
 
     private boolean isTaskComplete(String output) {
+        return isMarkerPresent(output, TASK_COMPLETE_MARKER);
+    }
+
+    private boolean isTaskFailed(String output) {
+        return isMarkerPresent(output, TASK_FAILED_MARKER);
+    }
+
+    /**
+     * 通用完成/失败标记识别 — 对模型输出做归一化后检测。
+     *
+     * 归一化规则：
+     * 1. 按行扫描，只检查行首（避免正文中间误匹配）
+     * 2. trim + 大小写不敏感
+     * 3. 去掉反引号
+     * 4. 去掉粗体/斜体符号 (* 和 **)
+     * 5. 去掉开头 Markdown heading (# ## ###)
+     * 6. 去掉开头列表符号 (- * +)
+     * 7. 去掉开头数字列表 (1. 2) 等)
+     * 8. 容忍开头 emoji/Unicode 符号
+     * 9. 容忍结尾标点 (. 。 ! ！ : ：)
+     * 10. 完整 token 匹配 — 标记后必须紧跟空白/行尾/标点，避免 TASK_COMPLETED 误匹配
+     */
+    static boolean isMarkerPresent(String output, String marker) {
         if (!StringUtils.hasText(output)) return false;
-        String trimmed = output.trim();
-        if (trimmed.startsWith(TASK_COMPLETE_MARKER)) return true;
-        for (String line : trimmed.split("\n")) {
-            String stripped = line.strip();
-            if (stripped.startsWith(TASK_COMPLETE_MARKER)) return true;
-            String cleaned = stripped.replace("**", "").replace("*", "").strip();
-            if (cleaned.startsWith(TASK_COMPLETE_MARKER)) return true;
+        String markerLower = marker.toLowerCase(Locale.ROOT);
+        for (String line : output.split("\n")) {
+            String normalized = normalizeMarkerLine(line);
+            if (normalized.startsWith(markerLower)) {
+                // 完整 token 匹配：标记后必须是行尾、空白或标点，不是字母/数字/下划线
+                int end = markerLower.length();
+                if (end == normalized.length()) return true; // 行尾
+                char next = normalized.charAt(end);
+                if (Character.isLetterOrDigit(next) || next == '_' || next == '-') continue; // e.g. TASK_COMPLETED
+                return true;
+            }
         }
         return false;
     }
 
-    private boolean isTaskFailed(String output) {
-        if (!StringUtils.hasText(output)) return false;
-        String trimmed = output.trim();
-        if (trimmed.startsWith(TASK_FAILED_MARKER)) return true;
-        for (String line : trimmed.split("\n")) {
-            String stripped = line.strip();
-            if (stripped.startsWith(TASK_FAILED_MARKER)) return true;
-            String cleaned = stripped.replace("**", "").replace("*", "").strip();
-            if (cleaned.startsWith(TASK_FAILED_MARKER)) return true;
-        }
-        return false;
+    static String normalizeMarkerLine(String line) {
+        String s = line.strip();
+        // 去掉反引号
+        s = s.replace("`", "");
+        // 去掉成对的粗体/斜体标记（**text** → text, *text* → text, __text__ → text）
+        // 不用全局删除 _ 和 *，因为 TASK_COMPLETE 本身含下划线
+        s = s.replaceAll("\\*\\*(.+?)\\*\\*", "$1");  // **bold**
+        s = s.replaceAll("\\*(.+?)\\*", "$1");        // *italic*
+        s = s.replaceAll("__(.+?)__", "$1");           // __bold__
+        s = s.strip();
+        // 去掉 Markdown heading (## ### ...)
+        s = s.replaceAll("^#{1,6}\\s*", "");
+        // 去掉列表符号 (- * + 后跟空格)
+        s = s.replaceAll("^[-*+]\\s+", "");
+        // 去掉数字列表 (1. 2) 等)
+        s = s.replaceAll("^\\d+[.)]\\s+", "");
+        // 去掉开头 emoji/符号
+        // 只针对常见 emoji 范围：Miscellaneous Symbols (2600-26FF)、Dingbats (2700-27BF)、
+        // Emoji (1F300-1F9FF)、Variation Selectors 等
+        // 不能用 \\p{So} 因为 Java 17 中匹配范围过宽会吃掉 ASCII 字符
+        s = s.replaceAll("^[☀-➿︀-️‍⃣🌀-🛿🤀-🧿]+\\s*", "");
+        // 去掉结尾标点
+        s = s.replaceAll("[.。!！:：]$", "");
+        s = s.strip().toLowerCase(Locale.ROOT);
+        return s;
     }
 
     /**

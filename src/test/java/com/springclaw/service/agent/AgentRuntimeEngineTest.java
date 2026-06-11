@@ -152,7 +152,7 @@ class AgentRuntimeEngineTest {
     }
 
     @Test
-    void shouldCallSummaryModelWhenEvidenceIsSufficient() throws Exception {
+    void shouldAnswerStructuredRealtimeResultWithoutSummaryModel() {
         CapabilityExecutorRegistry registry = mock(CapabilityExecutorRegistry.class);
         ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
         ConversationAdvisorSupport conversationAdvisorSupport = mock(ConversationAdvisorSupport.class);
@@ -179,19 +179,12 @@ class AgentRuntimeEngineTest {
         when(registry.plan(decision)).thenReturn(plan);
         when(registry.execute(eq(decision), any(AssembledContext.class), eq("req-1"))).thenReturn(results);
         when(modelTransportGuardService.isModelCallEnabled(activeClient)).thenReturn(true);
-        when(modelCallExecutor.executeChat(eq(activeClient), eq("agent-runtime-summary"), any(), eq(true), any()))
-                .thenReturn(new ModelCallExecutor.ModelCallResult<>(
-                        "北京现在阴天，23.3℃，湿度 41%。",
-                        activeClient,
-                        List.of("deepseek:deepseek-v4-pro"),
-                        false
-                ));
 
         AgentRun run = engine.run(context(decision, activeClient, "今天北京天气怎样"));
 
-        assertThat(run.executionResult().modelEnabled()).isTrue();
+        assertThat(run.executionResult().modelEnabled()).isFalse();
         assertThat(run.executionResult().reflect()).contains("北京");
-        verify(modelCallExecutor).executeChat(eq(activeClient), eq("agent-runtime-summary"), any(), eq(true), any());
+        verifyNoInteractions(modelCallExecutor);
     }
 
     @Test

@@ -107,7 +107,7 @@ public class SystemToolPack {
         return joined;
     }
 
-    @Tool(description = "执行受控系统命令（仅白名单命令，适用于查看时间、路径、系统信息等只读操作）")
+    @Tool(name = "systemRunCommand", description = "执行受控系统命令（仅白名单命令，适用于查看时间、路径、系统信息等只读操作）")
     public String runCommand(String commandLine) {
         if (!commandEnabled) {
             return "命令执行能力未开启（springclaw.tools.system.command-enabled=false）";

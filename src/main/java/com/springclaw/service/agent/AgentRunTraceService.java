@@ -1,6 +1,7 @@
 package com.springclaw.service.agent;
 
 import com.springclaw.common.util.TextUtils;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.service.event.MessageEventService;
@@ -22,6 +23,7 @@ import java.util.Map;
 public class AgentRunTraceService {
 
     private static final Logger log = LoggerFactory.getLogger(AgentRunTraceService.class);
+    private static final String TOOL_AUDIT_SCHEMA = "springclaw.tool-audit.v1";
 
     private final MessageEventService messageEventService;
     private final ObjectMapper objectMapper;
@@ -99,6 +101,47 @@ public class AgentRunTraceService {
                 .map(this::parseTrace)
                 .filter(event -> event != null)
                 .toList();
+    }
+
+    public void recordRunMetadata(String sessionKey,
+                                  String channel,
+                                  String userId,
+                                  String requestId,
+                                  String responseMode,
+                                  String executionMode,
+                                  String intent) {
+        if (jdbcTemplate == null || !StringUtils.hasText(requestId)) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        try {
+            jdbcTemplate.update("""
+                            INSERT INTO agent_run
+                            (id, request_id, session_key, channel, user_id, response_mode, execution_mode, intent, status, started_at, create_time, update_time, deleted)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'RUNNING', ?, ?, ?, 0)
+                            ON DUPLICATE KEY UPDATE
+                              session_key = COALESCE(NULLIF(VALUES(session_key), ''), session_key),
+                              channel = COALESCE(NULLIF(VALUES(channel), ''), channel),
+                              user_id = COALESCE(NULLIF(VALUES(user_id), ''), user_id),
+                              response_mode = COALESCE(NULLIF(VALUES(response_mode), ''), response_mode),
+                              execution_mode = COALESCE(NULLIF(VALUES(execution_mode), ''), execution_mode),
+                              intent = COALESCE(NULLIF(VALUES(intent), ''), intent),
+                              update_time = VALUES(update_time)
+                            """,
+                    IdWorker.getId(),
+                    requestId.trim(),
+                    emptyToNull(sessionKey),
+                    defaultText(channel, "api"),
+                    defaultText(userId, "unknown"),
+                    emptyToNull(responseMode),
+                    emptyToNull(executionMode),
+                    emptyToNull(intent),
+                    now,
+                    now,
+                    now);
+        } catch (Exception ex) {
+            log.warn("Agent run 元数据写入失败，requestId={}, reason={}", requestId, ex.getMessage());
+        }
     }
 
     public List<Map<String, Object>> recentRuns(String userId, int limit) {
@@ -226,23 +269,98 @@ public class AgentRunTraceService {
                                       String requestId,
                                       AgentRunTraceEvent event) {
         LocalDateTime now = LocalDateTime.now();
+        ToolAuditDetail auditDetail = parseToolAuditDetail(event.detail());
+        String status = auditDetail == null ? defaultText(event.status(), "success") : defaultText(auditDetail.normalizedStatus(), event.status());
+        String inputSummary = inputSummary(auditDetail, status);
+        String outputSummary = outputSummary(auditDetail, event.detail(), status);
+        String errorMessage = errorSummary(auditDetail, event.detail(), status);
         jdbcTemplate.update("""
                         INSERT INTO tool_invocation
                         (id, request_id, session_key, user_id, tool_name, skill_id, toolset, risk_level, status, duration_ms, input_summary, output_summary, error_message, create_time, update_time, deleted)
-                        VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, NULL, ?, ?, ?, ?, 0)
+                        VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 0)
                         """,
                 IdWorker.getId(),
                 requestId,
                 emptyToNull(sessionKey),
                 defaultText(userId, "unknown"),
-                defaultText(event.stepName(), "unknown"),
-                defaultText(event.type(), "tool"),
-                defaultText(event.status(), "success"),
+                defaultText(auditDetail == null ? null : auditDetail.toolName(), event.stepName()),
+                defaultText(auditDetail == null ? null : auditDetail.toolset(), event.type()),
+                status,
                 event.durationMs(),
-                TextUtils.truncate(event.detail(), 1024),
-                "failed".equalsIgnoreCase(event.status()) ? TextUtils.truncate(event.detail(), 1024) : null,
+                truncateOrNull(inputSummary, 512),
+                truncateOrNull(outputSummary, 1024),
+                truncateOrNull(errorMessage, 1024),
                 now,
                 now);
+    }
+
+    private ToolAuditDetail parseToolAuditDetail(String detail) {
+        if (!StringUtils.hasText(detail) || !detail.trim().startsWith("{")) {
+            return null;
+        }
+        try {
+            Map<String, Object> payload = objectMapper.readValue(detail, new TypeReference<>() {
+            });
+            if (!TOOL_AUDIT_SCHEMA.equals(text(payload, "schema"))) {
+                return null;
+            }
+            return new ToolAuditDetail(
+                    text(payload, "toolName"),
+                    text(payload, "toolset"),
+                    text(payload, "status"),
+                    text(payload, "normalizedStatus"),
+                    text(payload, "phase"),
+                    text(payload, "detail"),
+                    text(payload, "summary")
+            );
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private String inputSummary(ToolAuditDetail detail, String status) {
+        if (detail == null || !"started".equalsIgnoreCase(status)) {
+            return null;
+        }
+        return defaultText(detail.detail(), detail.summary());
+    }
+
+    private String outputSummary(ToolAuditDetail detail, String fallback, String status) {
+        if ("failed".equalsIgnoreCase(status) || "started".equalsIgnoreCase(status)) {
+            return null;
+        }
+        if (detail == null) {
+            return fallback;
+        }
+        return defaultText(detail.detail(), detail.summary());
+    }
+
+    private String errorSummary(ToolAuditDetail detail, String fallback, String status) {
+        if (!"failed".equalsIgnoreCase(status)) {
+            return null;
+        }
+        if (detail == null) {
+            return fallback;
+        }
+        return defaultText(detail.detail(), detail.summary());
+    }
+
+    private String text(Map<String, Object> payload, String key) {
+        Object value = payload.get(key);
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private String truncateOrNull(String value, int limit) {
+        return StringUtils.hasText(value) ? TextUtils.truncate(value, limit) : null;
+    }
+
+    private record ToolAuditDetail(String toolName,
+                                   String toolset,
+                                   String status,
+                                   String normalizedStatus,
+                                   String phase,
+                                   String detail,
+                                   String summary) {
     }
 
     private int nextSequenceNo(String requestId) {

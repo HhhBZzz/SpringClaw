@@ -3,6 +3,7 @@ package com.springclaw.tool.runtime.impl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.service.agent.AgentRunTraceService;
 import com.springclaw.service.event.MessageEventService;
+import com.springclaw.tool.runtime.CapabilityRegistry;
 import com.springclaw.tool.runtime.ToolAuditService;
 import com.springclaw.tool.runtime.ToolExecutionContext;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,20 +23,30 @@ public class MessageEventToolAuditService implements ToolAuditService {
 
     private final MessageEventService messageEventService;
     private final AgentRunTraceService agentRunTraceService;
+    private final CapabilityRegistry capabilityRegistry;
     private final ObjectMapper objectMapper;
 
     @Autowired
     public MessageEventToolAuditService(MessageEventService messageEventService,
                                         @Autowired(required = false) AgentRunTraceService agentRunTraceService,
+                                        @Autowired(required = false) CapabilityRegistry capabilityRegistry,
                                         ObjectMapper objectMapper) {
         this.messageEventService = messageEventService;
         this.agentRunTraceService = agentRunTraceService;
+        this.capabilityRegistry = capabilityRegistry;
         this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
     }
 
     MessageEventToolAuditService(MessageEventService messageEventService,
                                  AgentRunTraceService agentRunTraceService) {
-        this(messageEventService, agentRunTraceService, new ObjectMapper());
+        this(messageEventService, agentRunTraceService, null, new ObjectMapper());
+    }
+
+    // Package-private constructor for tests that want to inject a CapabilityRegistry directly.
+    MessageEventToolAuditService(MessageEventService messageEventService,
+                                 AgentRunTraceService agentRunTraceService,
+                                 CapabilityRegistry capabilityRegistry) {
+        this(messageEventService, agentRunTraceService, capabilityRegistry, new ObjectMapper());
     }
 
     @Override
@@ -116,14 +127,21 @@ public class MessageEventToolAuditService implements ToolAuditService {
         }
         String normalized = toolName.trim();
         int dot = normalized.indexOf('.');
-        if (dot > 0) {
-            return normalized.substring(0, dot);
-        }
-        int bracket = normalized.indexOf('[');
+        String classNamePart = dot > 0 ? normalized.substring(0, dot) : normalized;
+        int bracket = classNamePart.indexOf('[');
         if (bracket > 0) {
-            return normalized.substring(0, bracket);
+            classNamePart = classNamePart.substring(0, bracket);
         }
-        return normalized;
+        // 优先用 CapabilityRegistry 反查 descriptor.toolset()，
+        // 这样 audit JSON 里的 toolset 是 "system" / "web" 而不是 "SystemToolPack" 这种类名。
+        if (capabilityRegistry != null) {
+            String resolved = capabilityRegistry.findToolsetByClassName(classNamePart);
+            if (StringUtils.hasText(resolved)) {
+                return resolved;
+            }
+        }
+        // 回退：找不到时使用类名前缀（向后兼容；现有调用方仍能拿到一个非空 toolset）
+        return classNamePart;
     }
 
     private String safe(String value) {

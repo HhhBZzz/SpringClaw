@@ -145,6 +145,32 @@ public class CapabilityRegistry {
     }
 
     /**
+     * 通过 tool pack 类的 simpleName 反查 descriptor.toolset()。
+     * 用于把 ToolRuntimeAspect 拿到的 "SystemToolPack.now" 翻译成 audit JSON 里的 "system"，
+     * 而不是 "SystemToolPack" 这种类名字符串。
+     *
+     * @return 找到返回 descriptor.toolset()，找不到返回 null
+     */
+    public String findToolsetByClassName(String simpleClassName) {
+        if (!StringUtils.hasText(simpleClassName)) {
+            return null;
+        }
+        return entries.stream()
+                .filter(entry -> entry.toolPackBean() != null)
+                .filter(entry -> {
+                    Class<?> target = AopUtils.getTargetClass(entry.toolPackBean());
+                    if (target == null) {
+                        target = ClassUtils.getUserClass(entry.toolPackBean());
+                    }
+                    return target != null && simpleClassName.equals(target.getSimpleName());
+                })
+                .map(CapabilityEntry::toolset)
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
      * 按触发关键词匹配能力，返回匹配列表（按匹配关键词数量降序）。
      *
      * @param text 用户输入文本

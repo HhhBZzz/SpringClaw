@@ -24,6 +24,7 @@ import com.springclaw.web.auth.RequireRole;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -142,6 +143,20 @@ public class AdminManageController {
     @GetMapping("/active-sessions")
     public ApiResponse<List<AuthService.ActiveSession>> activeSessions() {
         return ApiResponse.success(authService.listActiveSessions(100));
+    }
+
+    /**
+     * 回放一次 turn 的完整 timeline，供 admin 调试和合规审计。
+     * 返回 agent_run 主记录 + 按 sequence_no 升序的所有 steps + 按 create_time 升序的 tool invocations。
+     * 见 docs/TURN_CONTRACT.md §2.1-§2.2。
+     */
+    @GetMapping("/runs/{requestId}/replay")
+    public ApiResponse<Map<String, Object>> replayRun(@PathVariable("requestId") String requestId) {
+        Map<String, Object> data = agentRunTraceService.replayRun(requestId);
+        if (data.isEmpty()) {
+            return ApiResponse.fail(40404, "Run not found: " + requestId);
+        }
+        return ApiResponse.success(data);
     }
 
     @GetMapping("/users")

@@ -29,7 +29,7 @@ import java.util.Locale;
 @ToolPackDescriptor(
     id = "web",
     toolset = "web",
-    triggerKeywords = {"搜索", "联网", "网页", "官网", "web search", "google", "bing", "查一下"},
+    triggerKeywords = {"搜索", "联网", "网页", "官网", "web search", "google", "bing"},
     fallbackCandidate = true,
     riskLevel = "read",
     description = "联网搜索公开网页信息"

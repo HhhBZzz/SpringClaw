@@ -129,19 +129,39 @@ public class WorkspaceReviewService {
             return;
         }
 
+        String ext = extensionOf(file);
+        long totalLines = 0;
+        long blankLines = 0;
+
         try (BufferedReader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
             String line;
             int lineNo = 0;
             while ((line = reader.readLine()) != null) {
                 lineNo++;
+                totalLines++;
+                if (line.trim().isEmpty()) {
+                    blankLines++;
+                }
                 inspectLine(relative, lineNo, line, state);
                 if (state.findings.size() >= maxFindings) {
-                    return;
+                    // Still count remaining lines for statistics
+                    while (reader.readLine() != null) {
+                        lineNo++;
+                        totalLines++;
+                    }
+                    break;
                 }
             }
         } catch (Exception ignore) {
             addFinding(state, "不可读文件", relative + ": 文件读取失败，已跳过。");
         }
+
+        // Accumulate line statistics by extension
+        long codeLines = totalLines - blankLines;
+        long[] counts = state.linesByExtension.computeIfAbsent(ext, k -> new long[3]);
+        counts[0] += totalLines;
+        counts[1] += codeLines;
+        counts[2] += blankLines;
     }
 
     private void detectStackFromPath(String relative, ReviewState state) {
@@ -196,6 +216,26 @@ public class WorkspaceReviewService {
                     .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
                     .limit(6)
                     .map(entry -> entry.getKey() + "=" + entry.getValue())
+                    .reduce((left, right) -> left + ", " + right)
+                    .orElse("-"));
+            builder.append('\n');
+        }
+        // Code line statistics
+        if (!state.linesByExtension.isEmpty()) {
+            long totalAll = 0, codeAll = 0, blankAll = 0;
+            for (long[] counts : state.linesByExtension.values()) {
+                totalAll += counts[0];
+                codeAll += counts[1];
+                blankAll += counts[2];
+            }
+            builder.append("- 代码总行数: ").append(totalAll)
+                    .append("（代码行 ").append(codeAll).append("，空行 ").append(blankAll).append("）\n");
+            // Top languages by code lines
+            builder.append("- 按语言分布: ");
+            builder.append(state.linesByExtension.entrySet().stream()
+                    .sorted((a, b) -> Long.compare(b.getValue()[1], a.getValue()[1]))
+                    .limit(5)
+                    .map(entry -> entry.getKey() + " " + entry.getValue()[1] + "行")
                     .reduce((left, right) -> left + ", " + right)
                     .orElse("-"));
             builder.append('\n');
@@ -346,6 +386,7 @@ public class WorkspaceReviewService {
         private final Set<String> directories = new LinkedHashSet<>();
         private final Set<String> stack = new LinkedHashSet<>();
         private final Map<String, Integer> extensionCounts = new LinkedHashMap<>();
+        private final Map<String, long[]> linesByExtension = new LinkedHashMap<>(); // ext -> [total, code, blank]
         private final List<ReviewFinding> findings = new ArrayList<>();
         private boolean skippedGenerated;
         private boolean hasTests;

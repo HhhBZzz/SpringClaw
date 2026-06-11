@@ -140,8 +140,8 @@ public class RuntimeConsoleController {
 
     private List<Map<String, Object>> buildTools(RequestUserContext context) {
         Set<String> allowedToolPacks = skillService.resolveAllowedToolPacks("api", context.username());
-        return capabilityRegistry.listAll().stream()
-                .map(entry -> toToolView(entry, allowedToolPacks))
+        return capabilityRegistry.listToolViews().stream()
+                .map(tool -> withToolAllowance(tool, allowedToolPacks))
                 .toList();
     }
 
@@ -209,20 +209,12 @@ public class RuntimeConsoleController {
         return payload;
     }
 
-    private Map<String, Object> toToolView(CapabilityRegistry.CapabilityEntry entry, Set<String> allowedToolPacks) {
-        Map<String, Object> item = new LinkedHashMap<>();
-        Set<String> requiredPacks = StringUtils.hasText(entry.toolset()) ? Set.of(entry.toolset()) : Set.of();
-        String id = defaultText(entry.id(), entry.beanName());
-        item.put("name", id);
-        item.put("toolset", defaultText(entry.toolset(), "core"));
-        item.put("requiredToolPacks", requiredPacks);
-        item.put("allow", isToolAllowed(entry, allowedToolPacks));
-        item.put("enabled", entry.includeForAgentMode());
-        item.put("riskLevel", entry.riskLevel());
-        item.put("description", StringUtils.hasText(entry.description()) ? entry.description() : entry.beanName());
-        item.put("triggerKeywords", List.of(entry.triggerKeywords()));
-        item.put("fallbackCandidate", entry.isFallbackCandidate());
-        item.put("preferredMode", entry.preferredMode());
+    private Map<String, Object> withToolAllowance(Map<String, Object> tool, Set<String> allowedToolPacks) {
+        Map<String, Object> item = new LinkedHashMap<>(tool);
+        item.put("allow", isToolAllowed(
+                String.valueOf(item.getOrDefault("toolset", "")),
+                String.valueOf(item.getOrDefault("packId", item.getOrDefault("name", ""))),
+                allowedToolPacks));
         return item;
     }
 
@@ -254,11 +246,11 @@ public class RuntimeConsoleController {
         return StringUtils.hasText(value) ? value.trim() : fallback;
     }
 
-    private boolean isToolAllowed(CapabilityRegistry.CapabilityEntry entry, Set<String> allowedToolPacks) {
-        if (entry == null || allowedToolPacks == null || allowedToolPacks.isEmpty()) {
+    private boolean isToolAllowed(String toolset, String packId, Set<String> allowedToolPacks) {
+        if (allowedToolPacks == null || allowedToolPacks.isEmpty()) {
             return false;
         }
-        return allowedToolPacks.contains(entry.toolset()) || allowedToolPacks.contains(entry.id());
+        return allowedToolPacks.contains(toolset) || allowedToolPacks.contains(packId);
     }
 
     public record SwitchModelProviderRequest(String providerId, String model) {

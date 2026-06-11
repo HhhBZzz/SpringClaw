@@ -244,12 +244,21 @@ export interface RuntimeSkill {
 export interface RuntimeTool {
   name: string;
   toolset: string;
+  packId?: string;
+  methodName?: string;
+  runtimeToolName?: string;
   requiredToolPacks?: string[];
   allow?: boolean;
   enabled?: boolean;
   riskLevel?: string;
+  requiresConfirmation?: boolean;
   priority?: number;
   description?: string;
+  packDescription?: string;
+  triggerKeywords?: string[];
+  fallbackCandidate?: boolean;
+  preferredMode?: string;
+  parameters?: Array<{ name?: string; type?: string }>;
   roleCode?: string;
 }
 

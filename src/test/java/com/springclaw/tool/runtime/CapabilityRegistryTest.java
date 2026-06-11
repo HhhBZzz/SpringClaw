@@ -30,6 +30,29 @@ class CapabilityRegistryTest {
         }
     }
 
+    @Test
+    void shouldExposeMethodLevelToolCatalog() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.register(AopConfig.class, ToolMethodAspect.class, ProxiedToolPack.class);
+            context.refresh();
+
+            CapabilityRegistry registry = new CapabilityRegistry(context);
+
+            assertThat(registry.listToolViews())
+                    .singleElement()
+                    .satisfies(tool -> {
+                        assertThat(tool.get("name")).isEqualTo("proxy_weather");
+                        assertThat(tool.get("methodName")).isEqualTo("weather");
+                        assertThat(tool.get("runtimeToolName")).isEqualTo("ProxiedToolPack.weather");
+                        assertThat(tool.get("packId")).isEqualTo("proxy-weather");
+                        assertThat(tool.get("toolset")).isEqualTo("web");
+                        assertThat(tool.get("riskLevel")).isEqualTo("read");
+                        assertThat(tool.get("requiresConfirmation")).isEqualTo(false);
+                        assertThat(tool.get("description")).isEqualTo("查询代理天气");
+                    });
+        }
+    }
+
     @Configuration
     @EnableAspectJAutoProxy(proxyTargetClass = true)
     static class AopConfig {
@@ -53,7 +76,7 @@ class CapabilityRegistryTest {
             description = "代理后的天气能力"
     )
     static class ProxiedToolPack {
-        @Tool(name = "proxy_weather")
+        @Tool(name = "proxy_weather", description = "查询代理天气")
         public String weather() {
             return "ok";
         }

@@ -2,6 +2,7 @@ package com.springclaw.tool.runtime;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.aop.support.AopUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
@@ -10,6 +11,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.ClassUtils;
 import org.springframework.util.StringUtils;
 
+import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
@@ -134,6 +137,13 @@ public class CapabilityRegistry {
                 .toList();
     }
 
+    /** 列出具体 @Tool 方法级目录，供前端展示工具能力、风险和确认边界。 */
+    public List<Map<String, Object>> listToolViews() {
+        return entries.stream()
+                .flatMap(entry -> entry.toToolViews().stream())
+                .toList();
+    }
+
     /**
      * 按触发关键词匹配能力，返回匹配列表（按匹配关键词数量降序）。
      *
@@ -248,6 +258,76 @@ public class CapabilityRegistry {
                     : beanName);
             view.put("beanName", beanName);
             return view;
+        }
+
+        List<Map<String, Object>> toToolViews() {
+            if (toolPackBean == null) {
+                return List.of(toPackToolView());
+            }
+            Class<?> targetClass = AopUtils.getTargetClass(toolPackBean);
+            if (targetClass == null) {
+                targetClass = ClassUtils.getUserClass(toolPackBean);
+            }
+            List<Map<String, Object>> tools = new ArrayList<>();
+            for (Method method : targetClass.getDeclaredMethods()) {
+                Tool tool = AnnotatedElementUtils.findMergedAnnotation(method, Tool.class);
+                if (tool == null) {
+                    continue;
+                }
+                tools.add(toMethodToolView(targetClass, method, tool));
+            }
+            tools.sort(Comparator.comparing(view -> String.valueOf(view.get("name"))));
+            return tools.isEmpty() ? List.of(toPackToolView()) : tools;
+        }
+
+        private Map<String, Object> toPackToolView() {
+            Map<String, Object> view = toView();
+            view.put("packId", descriptor.id());
+            view.put("requiredToolPacks", StringUtils.hasText(descriptor.toolset()) ? Set.of(descriptor.toolset()) : Set.of());
+            view.put("requiresConfirmation", requiresConfirmation(descriptor.riskLevel()));
+            return view;
+        }
+
+        private Map<String, Object> toMethodToolView(Class<?> targetClass, Method method, Tool tool) {
+            Map<String, Object> view = new LinkedHashMap<>();
+            String methodName = method.getName();
+            String toolName = StringUtils.hasText(tool.name()) ? tool.name().trim() : methodName;
+            view.put("name", toolName);
+            view.put("methodName", methodName);
+            view.put("runtimeToolName", targetClass.getSimpleName() + "." + methodName);
+            view.put("packId", descriptor.id());
+            view.put("toolset", descriptor.toolset());
+            view.put("requiredToolPacks", StringUtils.hasText(descriptor.toolset()) ? Set.of(descriptor.toolset()) : Set.of());
+            view.put("triggerKeywords", List.of(descriptor.triggerKeywords()));
+            view.put("riskLevel", descriptor.riskLevel());
+            view.put("requiresConfirmation", requiresConfirmation(descriptor.riskLevel()));
+            view.put("fallbackCandidate", descriptor.fallbackCandidate());
+            view.put("preferredMode", descriptor.preferredMode());
+            view.put("description", StringUtils.hasText(tool.description()) ? tool.description() : descriptor.description());
+            view.put("beanName", beanName);
+            view.put("packDescription", descriptor.description());
+            view.put("returnDirect", tool.returnDirect());
+            view.put("parameters", renderParameters(method));
+            return view;
+        }
+
+        private List<Map<String, Object>> renderParameters(Method method) {
+            List<Map<String, Object>> parameters = new ArrayList<>();
+            for (Parameter parameter : method.getParameters()) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("name", parameter.getName());
+                item.put("type", parameter.getType().getSimpleName());
+                parameters.add(item);
+            }
+            return parameters;
+        }
+
+        private boolean requiresConfirmation(String riskLevel) {
+            String risk = riskLevel == null ? "" : riskLevel.trim().toLowerCase(Locale.ROOT);
+            return "write".equals(risk)
+                    || "side_effect".equals(risk)
+                    || "execution".equals(risk)
+                    || "dangerous".equals(risk);
         }
     }
 }

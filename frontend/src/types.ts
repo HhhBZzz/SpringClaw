@@ -276,6 +276,10 @@ export interface RuntimeUsageSummary {
   totalPromptTokens?: number;
   totalCompletionTokens?: number;
   promptCacheHitRate?: number;
+  promptCacheKnownCount?: number;
+  promptCacheHealth?: string;
+  promptCacheInsight?: string;
+  promptCacheRecommendation?: string;
   topProvider?: string;
   topModel?: string;
   recent?: Record<string, unknown>[];

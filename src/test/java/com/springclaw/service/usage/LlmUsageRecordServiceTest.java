@@ -79,6 +79,9 @@ class LlmUsageRecordServiceTest {
         assertThat(summary.get("usageKnownCount")).isEqualTo(0L);
         assertThat(summary.get("usageUnknownCount")).isEqualTo(1L);
         assertThat(summary.get("totalTokens")).isEqualTo(0L);
+        assertThat(summary.get("promptCacheHealth")).isEqualTo("UNKNOWN");
+        assertThat(summary.get("promptCacheInsight")).asString().contains("Provider 暂未返回");
+        assertThat(summary.get("promptCacheRecommendation")).asString().contains("provider 是否返回");
         assertThat(service.listRecent(10).get(0).getUsageKnown()).isEqualTo(0);
     }
 
@@ -112,6 +115,33 @@ class LlmUsageRecordServiceTest {
         assertThat(recent.getPromptCacheHitTokens()).isEqualTo(160);
         assertThat(recent.getPromptCacheMissTokens()).isEqualTo(40);
         assertThat(recent.getRawUsageJson()).contains("prompt_cache_hit_tokens");
+    }
+
+    @Test
+    void shouldExplainLowPromptCacheHitRate() {
+        LlmUsageRecordServiceImpl service = new LlmUsageRecordServiceImpl(false);
+
+        service.recordChatResponse(
+                new LlmUsageRecordService.ChatResponseContext(
+                        "req-cache-low",
+                        "s-cache-low",
+                        "api",
+                        "u-cache",
+                        "coding-plan",
+                        "qwen3.5-plus",
+                        "agent-runtime-summary"
+                ),
+                buildResponse("qwen3.5-plus", new NativeUsage(200, 40, Map.of(
+                        "prompt_cache_hit_tokens", 20,
+                        "prompt_cache_miss_tokens", 180
+                )))
+        );
+
+        Map<String, Object> summary = service.summary(20);
+        assertThat(summary.get("promptCacheHitRate")).isEqualTo(0.1d);
+        assertThat(summary.get("promptCacheHealth")).isEqualTo("LOW");
+        assertThat(summary.get("promptCacheInsight")).asString().contains("命中率偏低");
+        assertThat(summary.get("promptCacheRecommendation")).asString().contains("稳定 system prompt");
     }
 
     private ChatResponse buildResponse(String model, int promptTokens, int completionTokens, int totalTokens) {

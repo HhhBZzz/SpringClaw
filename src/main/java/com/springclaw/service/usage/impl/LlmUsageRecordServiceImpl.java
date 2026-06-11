@@ -130,6 +130,8 @@ public class LlmUsageRecordServiceImpl extends ServiceImpl<LlmUsageRecordMapper,
         long promptCacheKnownCount = all.stream()
                 .filter(record -> record.getPromptCacheHitTokens() != null || record.getPromptCacheMissTokens() != null)
                 .count();
+        double promptCacheHitRate = hitRate(totalPromptCacheHitTokens, totalPromptCacheMissTokens);
+        String promptCacheHealth = promptCacheHealth(promptCacheKnownCount, totalPromptCacheHitTokens, totalPromptCacheMissTokens, promptCacheHitRate);
         long totalCompletionTokens = sumTokens(all, LlmUsageRecord::getCompletionTokens);
         long totalTokens = sumTokens(all, LlmUsageRecord::getTotalTokens);
 
@@ -141,7 +143,10 @@ public class LlmUsageRecordServiceImpl extends ServiceImpl<LlmUsageRecordMapper,
         result.put("totalPromptCacheHitTokens", totalPromptCacheHitTokens);
         result.put("totalPromptCacheMissTokens", totalPromptCacheMissTokens);
         result.put("promptCacheKnownCount", promptCacheKnownCount);
-        result.put("promptCacheHitRate", hitRate(totalPromptCacheHitTokens, totalPromptCacheMissTokens));
+        result.put("promptCacheHitRate", promptCacheHitRate);
+        result.put("promptCacheHealth", promptCacheHealth);
+        result.put("promptCacheInsight", promptCacheInsight(promptCacheHealth, promptCacheKnownCount, promptCacheHitRate));
+        result.put("promptCacheRecommendation", promptCacheRecommendation(promptCacheHealth));
         result.put("totalCompletionTokens", totalCompletionTokens);
         result.put("totalTokens", totalTokens);
         result.put("recentSampleSize", recent.size());
@@ -239,6 +244,43 @@ public class LlmUsageRecordServiceImpl extends ServiceImpl<LlmUsageRecordMapper,
             return 0.0d;
         }
         return Math.round((hitTokens * 1.0d / total) * 10_000d) / 10_000d;
+    }
+
+    private String promptCacheHealth(long knownCount, long hitTokens, long missTokens, double hitRate) {
+        if (knownCount <= 0 || hitTokens + missTokens <= 0) {
+            return "UNKNOWN";
+        }
+        if (hitRate < 0.25d) {
+            return "LOW";
+        }
+        if (hitRate < 0.65d) {
+            return "MEDIUM";
+        }
+        return "HEALTHY";
+    }
+
+    private String promptCacheInsight(String health, long knownCount, double hitRate) {
+        return switch (health) {
+            case "LOW" -> "Prompt cache 命中率偏低（" + formatRate(hitRate) + "），通常说明请求前缀变化大、system prompt/工具说明过于动态，或 provider 未复用相同模型与会话前缀。";
+            case "MEDIUM" -> "Prompt cache 命中率一般（" + formatRate(hitRate) + "），已有部分复用，但上下文前缀仍可能被动态 trace、时间、随机 session 信息打散。";
+            case "HEALTHY" -> "Prompt cache 命中率健康（" + formatRate(hitRate) + "），说明模型请求中有稳定前缀可被 provider 复用。";
+            default -> knownCount <= 0
+                    ? "Provider 暂未返回 prompt cache hit/miss 明细，无法判断真实命中率。"
+                    : "Prompt cache 数据不足，暂不能判断命中率。";
+        };
+    }
+
+    private String promptCacheRecommendation(String health) {
+        return switch (health) {
+            case "LOW" -> "优先稳定 system prompt、工具目录和长文本说明的顺序；把动态 requestId/时间/trace 放到 prompt 后段；固定 provider+model；避免每轮拼入大量变化的历史和文件全文。";
+            case "MEDIUM" -> "继续减少 prompt 前缀中的动态内容，把可复用的工具说明、策略和角色约束放在稳定前缀，把本轮上下文放后面。";
+            case "HEALTHY" -> "保持稳定 prompt 前缀，并继续监控不同 source/provider 的 cache hit rate。";
+            default -> "先确认当前 provider 是否返回 prompt cache usage；如果不返回，只能用 token 趋势和响应耗时辅助判断缓存效果。";
+        };
+    }
+
+    private String formatRate(double rate) {
+        return Math.round(rate * 10_000d) / 100d + "%";
     }
 
     private Map<String, Long> sortDesc(Map<String, Long> source, int limit) {

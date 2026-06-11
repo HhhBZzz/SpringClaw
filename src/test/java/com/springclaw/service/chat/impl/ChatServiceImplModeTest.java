@@ -25,9 +25,11 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -100,6 +102,49 @@ class ChatServiceImplModeTest {
 
         emitter.complete();
         Assertions.assertTrue(elapsed < 180, "stream endpoint should return immediately, elapsed=" + elapsed);
+    }
+
+    @Test
+    void streamShouldEmitLocalFallbackTraceForOparShortcut() {
+        Fixture fixture = new Fixture();
+        fixture.useEngine(fixture.oparLoopEngine);
+        AgentDecision decision = new AgentDecision(
+                "workspace_analysis",
+                "agent_tools",
+                java.util.List.of("workspace-review"),
+                "read",
+                false,
+                "项目分析"
+        );
+        ChatContext context = fixture.buildChatContext(
+                "分析当前项目结构",
+                "opar",
+                "用户显式选择深度模式，使用 OPAR 链路。",
+                "deep",
+                "workspace_analysis",
+                decision
+        );
+        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(fixture.oparLoopEngine.execute(any(), any())).thenReturn(new ChatExecutionResult(
+                "observe",
+                "命中已决策能力的本地执行路线。\n执行路线: BUILTIN_SKILL:CODE_ANALYSIS",
+                "已由受控本地技能完成执行。\n真实执行结果:\nskill=code-analysis\n项目结构概览",
+                "项目结构概览",
+                false
+        ));
+
+        SseEmitter emitter = fixture.build().stream(new ChatRequest("s1", "u1", "分析当前项目结构", "api"));
+
+        verify(fixture.sseEventBridge, timeout(1000)).sendTrace(
+                eq(emitter),
+                eq(context),
+                eq("本地短路执行"),
+                eq("local_fallback"),
+                eq("success"),
+                contains("执行路线"),
+                eq(0L)
+        );
+        emitter.complete();
     }
 
     @Test

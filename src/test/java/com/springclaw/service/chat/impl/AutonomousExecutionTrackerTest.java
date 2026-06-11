@@ -263,4 +263,47 @@ class AutonomousExecutionTrackerTest {
             assertFalse(calls.get(3).success());
         }
     }
+
+    @Nested
+    @DisplayName("TASK_COMPLETE 归一化识别")
+    class TaskCompleteDetectionTests {
+
+        private boolean isTaskComplete(String output) {
+            return AutonomousLoopEngine.isMarkerPresent(output, "TASK_COMPLETE");
+        }
+
+        @Test
+        @DisplayName("正例：各种 Markdown/emoji/列表包裹的 TASK_COMPLETE 都应识别")
+        void positiveCases() {
+            assertTrue(isTaskComplete("TASK_COMPLETE"), "plain");
+            assertTrue(isTaskComplete("**TASK_COMPLETE**"), "bold");
+            assertTrue(isTaskComplete("*TASK_COMPLETE*"), "italic");
+            assertTrue(isTaskComplete("`TASK_COMPLETE`"), "backtick");
+            assertTrue(isTaskComplete("TASK_COMPLETE."), "trailing period");
+            assertTrue(isTaskComplete("✅ TASK_COMPLETE"), "emoji prefix");
+            assertTrue(isTaskComplete("## TASK_COMPLETE"), "heading");
+            assertTrue(isTaskComplete("- TASK_COMPLETE"), "list item");
+            assertTrue(isTaskComplete("1. TASK_COMPLETE"), "numbered list");
+            assertTrue(isTaskComplete("task_complete"), "lowercase");
+            assertTrue(isTaskComplete("Task_Complete"), "mixed case");
+            assertTrue(isTaskComplete("TASK_COMPLETE！"), "Chinese exclamation");
+            assertTrue(isTaskComplete("### TASK_COMPLETE"), "h3 heading");
+            assertTrue(isTaskComplete("+ TASK_COMPLETE"), "plus list");
+            assertTrue(isTaskComplete("2) TASK_COMPLETE"), "paren numbered list");
+            assertTrue(isTaskComplete("🎉 TASK_COMPLETE"), "emoji prefix variant");
+        }
+
+        @Test
+        @DisplayName("负例：不应误识别为 TASK_COMPLETE")
+        void negativeCases() {
+            assertFalse(isTaskComplete("任务还没有完成，稍后输出 TASK_COMPLETE"), "TASK_COMPLETE in middle");
+            assertFalse(isTaskComplete("NOT_TASK_COMPLETE"), "NOT_ prefix");
+            assertFalse(isTaskComplete("TASK_COMPLETED"), "TASK_COMPLETED");
+            assertFalse(isTaskComplete("TASK_COMPLETE_PENDING"), "TASK_COMPLETE_PENDING");
+            assertFalse(isTaskComplete("目前还不能 TASK_COMPLETE"), "TASK_COMPLETE in middle 2");
+            assertFalse(isTaskComplete(""), "empty");
+            assertFalse(isTaskComplete("   "), "whitespace only");
+            assertFalse(isTaskComplete("TASK COMPLETE"), "space instead of underscore");
+        }
+    }
 }

@@ -689,6 +689,12 @@ public class AgentRuntimeEngine implements AgentEngine {
             String answer = deterministicAnswer(context, capabilityResults, verification, modelTransportGuardService.disabledModelReason(activeClient));
             return new ChatExecutionResult(context.assembled().observePrompt(), planText, actionText, answer, false);
         }
+        // 确定性能力结果提前返回：高置信度结构化工具结果不交给模型自由改写
+        // 原则：工具结果 → 工具说了算；只有需要推理/综合/解释时才调模型
+        if (hasDirectCapabilityEvidence(capabilityResults)) {
+            String answer = deterministicAnswer(context, capabilityResults, verification, DIRECT_CAPABILITY_RESULT_REASON);
+            return new ChatExecutionResult(context.assembled().observePrompt(), planText, actionText, answer, false);
+        }
         try {
             ModelCallExecutor.ModelCallResult<String> result = modelCallExecutor.executeChat(
                     activeClient,

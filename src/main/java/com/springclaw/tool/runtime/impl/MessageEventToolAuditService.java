@@ -1,9 +1,16 @@
 package com.springclaw.tool.runtime.impl;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.springclaw.service.agent.AgentRunTraceService;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.tool.runtime.ToolAuditService;
 import com.springclaw.tool.runtime.ToolExecutionContext;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * 基于事件流的工具审计实现。
@@ -11,10 +18,24 @@ import org.springframework.stereotype.Service;
 @Service
 public class MessageEventToolAuditService implements ToolAuditService {
 
-    private final MessageEventService messageEventService;
+    private static final String SCHEMA = "springclaw.tool-audit.v1";
 
-    public MessageEventToolAuditService(MessageEventService messageEventService) {
+    private final MessageEventService messageEventService;
+    private final AgentRunTraceService agentRunTraceService;
+    private final ObjectMapper objectMapper;
+
+    @Autowired
+    public MessageEventToolAuditService(MessageEventService messageEventService,
+                                        @Autowired(required = false) AgentRunTraceService agentRunTraceService,
+                                        ObjectMapper objectMapper) {
         this.messageEventService = messageEventService;
+        this.agentRunTraceService = agentRunTraceService;
+        this.objectMapper = objectMapper == null ? new ObjectMapper() : objectMapper;
+    }
+
+    MessageEventToolAuditService(MessageEventService messageEventService,
+                                 AgentRunTraceService agentRunTraceService) {
+        this(messageEventService, agentRunTraceService, new ObjectMapper());
     }
 
     @Override
@@ -25,7 +46,87 @@ public class MessageEventToolAuditService implements ToolAuditService {
         String requestId = context == null || context.requestId() == null ? "" : context.requestId();
         String phase = context == null || context.phase() == null ? "ACT" : context.phase();
 
-        String content = "tool=" + toolName + ", status=" + status + ", phase=" + phase + ", detail=" + detail;
+        String normalizedStatus = normalizeStatus(status);
+        String summary = "tool=" + toolName + ", status=" + status + ", phase=" + phase + ", detail=" + detail;
+        String content = serialize(buildPayload(toolName, status, normalizedStatus, detail, sessionKey, channel, userId, requestId, phase, summary), summary);
         messageEventService.recordSingle(sessionKey, channel, userId, "SYSTEM", "TOOL", content, requestId);
+        if (agentRunTraceService != null && StringUtils.hasText(requestId)) {
+            agentRunTraceService.record(
+                    sessionKey,
+                    channel,
+                    userId,
+                    requestId,
+                    toolName,
+                    "tool",
+                    normalizedStatus,
+                    content,
+                    0L
+            );
+        }
+    }
+
+    private String normalizeStatus(String status) {
+        if ("FAILED".equalsIgnoreCase(status) || "DENIED".equalsIgnoreCase(status)) {
+            return "failed";
+        }
+        if ("START".equalsIgnoreCase(status)) {
+            return "started";
+        }
+        return "success";
+    }
+
+    private Map<String, Object> buildPayload(String toolName,
+                                             String status,
+                                             String normalizedStatus,
+                                             String detail,
+                                             String sessionKey,
+                                             String channel,
+                                             String userId,
+                                             String requestId,
+                                             String phase,
+                                             String summary) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("schema", SCHEMA);
+        payload.put("eventType", "tool.invoke");
+        payload.put("toolName", safe(toolName));
+        payload.put("toolset", resolveToolset(toolName));
+        payload.put("status", safe(status));
+        payload.put("normalizedStatus", safe(normalizedStatus));
+        payload.put("phase", safe(phase));
+        payload.put("detail", safe(detail));
+        payload.put("summary", safe(summary));
+        payload.put("sessionKey", safe(sessionKey));
+        payload.put("channel", safe(channel));
+        payload.put("userId", safe(userId));
+        payload.put("requestId", safe(requestId));
+        return payload;
+    }
+
+    private String serialize(Map<String, Object> payload, String fallback) {
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (Exception ex) {
+            return fallback;
+        }
+    }
+
+    private String resolveToolset(String toolName) {
+        if (!StringUtils.hasText(toolName)) {
+            return "";
+        }
+        String normalized = toolName.trim();
+        int dot = normalized.indexOf('.');
+        if (dot > 0) {
+            return normalized.substring(0, dot);
+        }
+        int bracket = normalized.indexOf('[');
+        if (bracket > 0) {
+            return normalized.substring(0, bracket);
+        }
+        return normalized;
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value;
     }
 }

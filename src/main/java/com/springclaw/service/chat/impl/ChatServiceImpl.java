@@ -197,6 +197,7 @@ public class ChatServiceImpl implements ChatService {
             sseEventBridge.sendTrace(emitter, context, "选择能力", "agent", "started", "进入 Agent 执行链路。", 0L);
             sseEventBridge.sendStatus(emitter, "正在执行 Agent");
             ChatExecutionResult executionResult = runAgentExecution(context);
+            emitLocalExecutionTraceIfNeeded(emitter, context, executionResult);
             sseEventBridge.sendTrace(emitter, context, "执行能力", "agent", "success", summarizeExecution(executionResult), 0L);
 
             if (shouldSendImmediateAnswer(context, executionResult)) {
@@ -220,6 +221,57 @@ public class ChatServiceImpl implements ChatService {
     private boolean shouldRequestActionConfirmation(ChatContext context) {
         AgentDecision decision = context == null ? null : context.decision();
         return decision != null && decision.requiresConfirmation();
+    }
+
+    private void emitLocalExecutionTraceIfNeeded(SseEmitter emitter,
+                                                 ChatContext context,
+                                                 ChatExecutionResult executionResult) {
+        if (!isLocalExecutionResult(executionResult)) {
+            return;
+        }
+        sseEventBridge.sendTrace(emitter, context, "本地短路执行", "local_fallback", "success",
+                summarizeLocalExecution(executionResult), 0L);
+    }
+
+    private boolean isLocalExecutionResult(ChatExecutionResult executionResult) {
+        if (executionResult == null || executionResult.modelEnabled()) {
+            return false;
+        }
+        return TextUtils.safe(executionResult.plan()).contains("执行路线:")
+                || TextUtils.safe(executionResult.action()).contains("真实执行结果:");
+    }
+
+    private String summarizeLocalExecution(ChatExecutionResult executionResult) {
+        String route = extractMarkerLine(executionResult.plan(), "执行路线:");
+        String result = extractMarkerBlock(executionResult.action(), "真实执行结果:");
+        StringBuilder detail = new StringBuilder("OPAR 入口命中本地短路，跳过模型 Plan/Act。执行路线");
+        if (StringUtils.hasText(route)) {
+            detail.append(": ").append(route);
+        }
+        if (StringUtils.hasText(result)) {
+            detail.append("；结果: ").append(TextUtils.truncate(result, 180));
+        }
+        return detail.toString();
+    }
+
+    private String extractMarkerLine(String text, String marker) {
+        String value = TextUtils.safe(text);
+        int index = value.indexOf(marker);
+        if (index < 0) {
+            return "";
+        }
+        String afterMarker = value.substring(index + marker.length()).trim();
+        int newline = afterMarker.indexOf('\n');
+        return (newline >= 0 ? afterMarker.substring(0, newline) : afterMarker).trim();
+    }
+
+    private String extractMarkerBlock(String text, String marker) {
+        String value = TextUtils.safe(text);
+        int index = value.indexOf(marker);
+        if (index < 0) {
+            return "";
+        }
+        return value.substring(index + marker.length()).trim();
     }
 
     private void streamActionRequired(ChatContext context,

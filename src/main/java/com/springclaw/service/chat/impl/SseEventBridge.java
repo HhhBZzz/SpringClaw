@@ -49,6 +49,17 @@ public class SseEventBridge {
         if (context == null) {
             return;
         }
+        if (agentRunTraceService != null) {
+            agentRunTraceService.recordRunMetadata(
+                    context.session() == null ? null : context.session().getSessionKey(),
+                    context.channel(),
+                    context.userId(),
+                    context.requestId(),
+                    normalizeResponseMode(context.responseMode()),
+                    context.executionMode(),
+                    context.intent()
+            );
+        }
         String payload = """
                 {"requestId":"%s","responseMode":"%s","executionMode":"%s","intent":"%s","routingReason":"%s","originalQuestion":"%s","effectiveQuestion":"%s"}
                 """.formatted(

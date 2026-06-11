@@ -96,19 +96,34 @@ public class SimplifiedOparEngine implements AgentEngine {
                                    String requestId,
                                    AgentEngine.FallbackResponder fallbackResponder,
                                    AgentDecision decision) {
-        LocalSkillFallbackService.LocalSkillResult contextAware = contextAwareSupport.tryContextAwareLocalResult(assembled);
-        if (contextAware != null) {
-            return buildLocalResult(systemPrompt, assembled, contextAware, "SIMPLIFIED:CONTEXT_AWARE");
-        }
+        // 本地短路三件套（context-aware / control-plane / priority structured）内部最终会通过
+        // Spring AOP 反射调用 @Tool 方法（例如 SystemToolPack.now()）。
+        // ToolRuntimeAspect 在拦截时读 ToolExecutionContextHolder，但本地短路路径之前没有 open()，
+        // 导致 audit JSON 里 requestId/sessionKey/userId 是占位值。
+        // 这里在调用本地短路前打开一个 LOCAL-SHORTCUT scope，让 audit 拿到真实上下文。
+        // 见 docs/TURN_CONTRACT.md §2.4 known-gap #2。
+        ToolExecutionContext localCtx = new ToolExecutionContext(
+                assembled.sessionKey(),
+                assembled.channel(),
+                assembled.userId(),
+                requestId,
+                "LOCAL-SHORTCUT"
+        );
+        try (ToolExecutionContextHolder.Scope ignored = ToolExecutionContextHolder.open(localCtx)) {
+            LocalSkillFallbackService.LocalSkillResult contextAware = contextAwareSupport.tryContextAwareLocalResult(assembled);
+            if (contextAware != null) {
+                return buildLocalResult(systemPrompt, assembled, contextAware, "SIMPLIFIED:CONTEXT_AWARE");
+            }
 
-        LocalSkillFallbackService.LocalSkillResult controlPlane = tryControlPlaneLocalResult(assembled.question());
-        if (controlPlane != null) {
-            return buildLocalResult(systemPrompt, assembled, controlPlane, "SIMPLIFIED:CONTROL_PLANE");
-        }
+            LocalSkillFallbackService.LocalSkillResult controlPlane = tryControlPlaneLocalResult(assembled.question());
+            if (controlPlane != null) {
+                return buildLocalResult(systemPrompt, assembled, controlPlane, "SIMPLIFIED:CONTROL_PLANE");
+            }
 
-        LocalSkillFallbackService.LocalSkillResult priorityStructured = tryPriorityStructuredLocalResult(assembled.question());
-        if (priorityStructured != null) {
-            return buildLocalResult(systemPrompt, assembled, priorityStructured, "SIMPLIFIED:PRIORITY_STRUCTURED");
+            LocalSkillFallbackService.LocalSkillResult priorityStructured = tryPriorityStructuredLocalResult(assembled.question());
+            if (priorityStructured != null) {
+                return buildLocalResult(systemPrompt, assembled, priorityStructured, "SIMPLIFIED:PRIORITY_STRUCTURED");
+            }
         }
 
         if (!modelTransportGuardService.isModelCallEnabled(activeClient)) {

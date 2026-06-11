@@ -117,48 +117,63 @@ public class OparLoopEngine implements AgentEngine {
                                        AgentEngine.FallbackResponder fallbackResponder,
                                        AgentDecision decision) {
         AiProviderService.ActiveChatClient currentClient = activeClient;
-        LocalSkillFallbackService.LocalSkillResult decisionBoundResult = tryDecisionBoundLocalResult(assembled.question(), decision);
-        if (decisionBoundResult != null) {
-            return buildLocalExecutionResult(
-                    systemPrompt,
-                    assembled,
-                    decisionBoundResult,
-                    "命中已决策能力的本地执行路线，跳过模型自由规划阶段。",
-                    "已由 AgentDecision 约束的受控能力完成执行。"
-            );
-        }
-        // control-plane 确定性查询始终优先于模型调用，不受 localFallbackFirst 影响
-        LocalSkillFallbackService.LocalSkillResult controlPlaneResult = tryControlPlaneLocalResult(assembled.question());
-        if (controlPlaneResult != null) {
-            return buildLocalExecutionResult(
-                    systemPrompt,
-                    assembled,
-                    controlPlaneResult,
-                    "命中控制面确定性查询，始终优先于模型调用。",
-                    controlPlaneResult.fallbackAnswer()
-            );
-        }
-        // 上下文感知本地能力（确认词承接、历史时间查询等）始终优先于模型调用
-        LocalSkillFallbackService.LocalSkillResult contextAwareResult = contextAwareSupport.tryContextAwareLocalResult(assembled);
-        if (contextAwareResult != null) {
-            return buildLocalExecutionResult(
-                    systemPrompt,
-                    assembled,
-                    contextAwareResult,
-                    "命中上下文感知本地执行路线，始终优先于模型调用。",
-                    "已基于当前会话真实状态生成答复。"
-            );
-        }
-        if (localFallbackFirst) {
-            LocalSkillFallbackService.LocalSkillResult priorityStructuredResult = tryPriorityStructuredLocalResult(assembled.question());
-            if (priorityStructuredResult != null) {
+        // 本地短路四件套（decision-bound / control-plane / context-aware / priority structured）
+        // 最终会通过 Spring AOP 反射调用 @Tool 方法（例如 SystemToolPack.now()）。
+        // ToolRuntimeAspect 在拦截时读 ToolExecutionContextHolder，但本地短路路径之前没有 open()，
+        // 导致 audit JSON 里 requestId/sessionKey/userId 是占位值。
+        // 这里打开一个 LOCAL-SHORTCUT scope，让 audit 拿到真实上下文。
+        // 见 docs/TURN_CONTRACT.md §2.4 known-gap #2。
+        ToolExecutionContext localShortcutCtx = new ToolExecutionContext(
+                assembled.sessionKey(),
+                assembled.channel(),
+                assembled.userId(),
+                requestId,
+                "LOCAL-SHORTCUT"
+        );
+        try (ToolExecutionContextHolder.Scope localScope = ToolExecutionContextHolder.open(localShortcutCtx)) {
+            LocalSkillFallbackService.LocalSkillResult decisionBoundResult = tryDecisionBoundLocalResult(assembled.question(), decision);
+            if (decisionBoundResult != null) {
                 return buildLocalExecutionResult(
                         systemPrompt,
                         assembled,
-                        priorityStructuredResult,
-                        "命中高置信度结构化技能，跳过模型计划阶段。",
-                        "已由受控本地技能完成执行。"
+                        decisionBoundResult,
+                        "命中已决策能力的本地执行路线，跳过模型自由规划阶段。",
+                        "已由 AgentDecision 约束的受控能力完成执行。"
                 );
+            }
+            // control-plane 确定性查询始终优先于模型调用，不受 localFallbackFirst 影响
+            LocalSkillFallbackService.LocalSkillResult controlPlaneResult = tryControlPlaneLocalResult(assembled.question());
+            if (controlPlaneResult != null) {
+                return buildLocalExecutionResult(
+                        systemPrompt,
+                        assembled,
+                        controlPlaneResult,
+                        "命中控制面确定性查询，始终优先于模型调用。",
+                        controlPlaneResult.fallbackAnswer()
+                );
+            }
+            // 上下文感知本地能力（确认词承接、历史时间查询等）始终优先于模型调用
+            LocalSkillFallbackService.LocalSkillResult contextAwareResult = contextAwareSupport.tryContextAwareLocalResult(assembled);
+            if (contextAwareResult != null) {
+                return buildLocalExecutionResult(
+                        systemPrompt,
+                        assembled,
+                        contextAwareResult,
+                        "命中上下文感知本地执行路线，始终优先于模型调用。",
+                        "已基于当前会话真实状态生成答复。"
+                );
+            }
+            if (localFallbackFirst) {
+                LocalSkillFallbackService.LocalSkillResult priorityStructuredResult = tryPriorityStructuredLocalResult(assembled.question());
+                if (priorityStructuredResult != null) {
+                    return buildLocalExecutionResult(
+                            systemPrompt,
+                            assembled,
+                            priorityStructuredResult,
+                            "命中高置信度结构化技能，跳过模型计划阶段。",
+                            "已由受控本地技能完成执行。"
+                    );
+                }
             }
         }
 

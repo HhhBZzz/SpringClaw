@@ -68,4 +68,36 @@ class MessageEventToolAuditServiceTest {
         org.junit.jupiter.api.Assertions.assertEquals("WeatherToolPack.currentWeather", trace.get("toolName"));
         org.junit.jupiter.api.Assertions.assertEquals("北京晴 28C", trace.get("detail"));
     }
+
+    @Test
+    void shouldExpandWorkspaceGuardDetailIntoAuditJson() throws Exception {
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        AgentRunTraceService agentRunTraceService = mock(AgentRunTraceService.class);
+        MessageEventToolAuditService service = new MessageEventToolAuditService(messageEventService, agentRunTraceService);
+        ToolExecutionContext context = new ToolExecutionContext("s1", "api", "u1", "req-guard", "ACT");
+        String guardDetail = """
+                {"schema":"springclaw.workspace-guard.v1","action":"REJECT","reasonCode":"COMMAND_PARENT_PATH","message":"命令包含父目录路径段，已被拦截","resolvedPath":""}
+                """;
+
+        service.recordInvoke("WorkspaceEditToolPack.workspaceRunCommand", "FAILED", guardDetail, context);
+
+        ArgumentCaptor<String> auditPayload = ArgumentCaptor.forClass(String.class);
+        verify(messageEventService).recordSingle(
+                eq("s1"),
+                eq("api"),
+                eq("u1"),
+                eq("SYSTEM"),
+                eq("TOOL"),
+                auditPayload.capture(),
+                eq("req-guard")
+        );
+        Map<String, Object> content = new ObjectMapper().readValue(auditPayload.getValue(), new TypeReference<>() {
+        });
+        org.junit.jupiter.api.Assertions.assertEquals("FAILED", content.get("status"));
+        org.junit.jupiter.api.Assertions.assertEquals("failed", content.get("normalizedStatus"));
+        org.junit.jupiter.api.Assertions.assertEquals("REJECT", content.get("guardAction"));
+        org.junit.jupiter.api.Assertions.assertEquals("COMMAND_PARENT_PATH", content.get("guardReasonCode"));
+        org.junit.jupiter.api.Assertions.assertEquals("命令包含父目录路径段，已被拦截", content.get("guardMessage"));
+        org.junit.jupiter.api.Assertions.assertEquals("命令包含父目录路径段，已被拦截", content.get("detail"));
+    }
 }

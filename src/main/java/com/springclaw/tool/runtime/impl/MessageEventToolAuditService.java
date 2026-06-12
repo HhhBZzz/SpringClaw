@@ -1,5 +1,6 @@
 package com.springclaw.tool.runtime.impl;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.service.agent.AgentRunTraceService;
 import com.springclaw.service.event.MessageEventService;
@@ -58,8 +59,10 @@ public class MessageEventToolAuditService implements ToolAuditService {
         String phase = context == null || context.phase() == null ? "ACT" : context.phase();
 
         String normalizedStatus = normalizeStatus(status);
-        String summary = "tool=" + toolName + ", status=" + status + ", phase=" + phase + ", detail=" + detail;
-        String content = serialize(buildPayload(toolName, status, normalizedStatus, detail, sessionKey, channel, userId, requestId, phase, summary), summary);
+        WorkspaceGuardAuditDetail guardDetail = parseWorkspaceGuardDetail(detail);
+        String effectiveDetail = guardDetail == null ? detail : guardDetail.message();
+        String summary = "tool=" + toolName + ", status=" + status + ", phase=" + phase + ", detail=" + effectiveDetail;
+        String content = serialize(buildPayload(toolName, status, normalizedStatus, effectiveDetail, sessionKey, channel, userId, requestId, phase, summary, guardDetail), summary);
         messageEventService.recordSingle(sessionKey, channel, userId, "SYSTEM", "TOOL", content, requestId);
         if (agentRunTraceService != null && StringUtils.hasText(requestId)) {
             agentRunTraceService.record(
@@ -95,7 +98,8 @@ public class MessageEventToolAuditService implements ToolAuditService {
                                              String userId,
                                              String requestId,
                                              String phase,
-                                             String summary) {
+                                             String summary,
+                                             WorkspaceGuardAuditDetail guardDetail) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("schema", SCHEMA);
         payload.put("eventType", "tool.invoke");
@@ -110,6 +114,12 @@ public class MessageEventToolAuditService implements ToolAuditService {
         payload.put("channel", safe(channel));
         payload.put("userId", safe(userId));
         payload.put("requestId", safe(requestId));
+        if (guardDetail != null) {
+            payload.put("guardAction", guardDetail.action());
+            payload.put("guardReasonCode", guardDetail.reasonCode());
+            payload.put("guardMessage", guardDetail.message());
+            payload.put("guardResolvedPath", guardDetail.resolvedPath());
+        }
         return payload;
     }
 
@@ -146,5 +156,36 @@ public class MessageEventToolAuditService implements ToolAuditService {
 
     private String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private WorkspaceGuardAuditDetail parseWorkspaceGuardDetail(String detail) {
+        if (!StringUtils.hasText(detail) || !detail.trim().startsWith("{")) {
+            return null;
+        }
+        try {
+            Map<String, Object> payload = objectMapper.readValue(detail, new TypeReference<>() {
+            });
+            if (!"springclaw.workspace-guard.v1".equals(safeString(payload.get("schema")))) {
+                return null;
+            }
+            return new WorkspaceGuardAuditDetail(
+                    safeString(payload.get("action")),
+                    safeString(payload.get("reasonCode")),
+                    safeString(payload.get("message")),
+                    safeString(payload.get("resolvedPath"))
+            );
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private String safeString(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private record WorkspaceGuardAuditDetail(String action,
+                                             String reasonCode,
+                                             String message,
+                                             String resolvedPath) {
     }
 }

@@ -3,11 +3,13 @@ package com.springclaw.tool.pack;
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.chat.impl.AutonomousExecutionTracker;
+import com.springclaw.service.workspace.WorkspaceGuard;
 import com.springclaw.tool.runtime.ToolPackDescriptor;
 import com.springclaw.tool.runtime.ToolExecutionContextHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -16,7 +18,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -47,14 +48,24 @@ public class WorkspaceEditToolPack {
     private final Path rootPath;
     private final int maxCommandTimeoutSeconds;
     private final int maxCommandOutputChars;
+    private final WorkspaceGuard workspaceGuard;
 
+    @Autowired
     public WorkspaceEditToolPack(
             @Value("${springclaw.tools.file.root:${user.dir}}") String root,
             @Value("${springclaw.tools.workspace.command-timeout-seconds:30}") int maxCommandTimeoutSeconds,
-            @Value("${springclaw.tools.workspace.max-command-output-chars:8000}") int maxCommandOutputChars) {
+            @Value("${springclaw.tools.workspace.max-command-output-chars:8000}") int maxCommandOutputChars,
+            WorkspaceGuard workspaceGuard) {
         this.rootPath = Path.of(root).toAbsolutePath().normalize();
         this.maxCommandTimeoutSeconds = Math.max(5, maxCommandTimeoutSeconds);
         this.maxCommandOutputChars = Math.max(1000, maxCommandOutputChars);
+        this.workspaceGuard = workspaceGuard == null ? new WorkspaceGuard(root) : workspaceGuard;
+    }
+
+    public WorkspaceEditToolPack(String root,
+                                 int maxCommandTimeoutSeconds,
+                                 int maxCommandOutputChars) {
+        this(root, maxCommandTimeoutSeconds, maxCommandOutputChars, new WorkspaceGuard(root));
     }
 
     /**
@@ -135,9 +146,7 @@ public class WorkspaceEditToolPack {
         }
         String normalizedCommand = command.trim();
         // 安全检查：拦截危险命令
-        if (isDangerousCommand(normalizedCommand)) {
-            throw new BusinessException(40065, "命令包含危险操作，已被拦截: " + TextUtils.truncate(normalizedCommand, 60));
-        }
+        workspaceGuard.requireCommand(normalizedCommand);
 
         log.info("执行命令: {}", TextUtils.truncate(normalizedCommand, 120));
 
@@ -209,24 +218,7 @@ public class WorkspaceEditToolPack {
     }
 
     private Path resolveSafePath(String relativePath) {
-        String normalized = relativePath == null ? "" : relativePath.trim();
-        Path target = rootPath.resolve(normalized).normalize().toAbsolutePath();
-        if (!target.startsWith(rootPath)) {
-            throw new BusinessException(40067, "文件路径越界，禁止访问项目根目录外路径");
-        }
-        return target;
-    }
-
-    private boolean isDangerousCommand(String command) {
-        String lower = command.toLowerCase(Locale.ROOT);
-        // 拦截明显的危险命令
-        return lower.contains("rm -rf") || lower.contains("rm -r /") || lower.contains("rmdir")
-                || lower.contains(":(){ :|:&") // fork bomb
-                || lower.contains("dd if=") && lower.contains("of=/dev/")
-                || lower.contains("mkfs") || lower.contains("format")
-                || lower.contains("> /dev/sd") || lower.contains("shutdown")
-                || lower.contains("reboot") || lower.contains("poweroff")
-                || lower.contains("chmod 777 /") || lower.contains("chown root");
+        return workspaceGuard.requirePath(relativePath);
     }
 
     private String truncate(String text) {

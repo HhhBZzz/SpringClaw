@@ -88,12 +88,21 @@ public class AgentRunTraceService {
                                                String detail,
                                                long durationMs,
                                                AgentQualityScore quality) {
-        ToolAuditDetail auditDetail = parseToolAuditDetail(detail);
-        String category = defaultText(type, "agent");
-        String action = auditDetail == null ? defaultText(type, "agent") : defaultText(auditDetail.eventType(), "tool.invoke");
-        String target = auditDetail == null ? defaultText(stepName, type) : defaultText(auditDetail.toolName(), stepName);
-        String source = auditDetail == null ? "" : defaultText(auditDetail.toolset(), "");
-        String riskLevel = inferRiskLevel(category, target, detail);
+        TimelineStepDetail timelineDetail = parseTimelineStepDetail(detail);
+        ToolAuditDetail auditDetail = timelineDetail == null ? parseToolAuditDetail(detail) : null;
+        String category = timelineDetail == null ? defaultText(type, "agent") : defaultText(timelineDetail.category(), type);
+        String action = timelineDetail == null
+                ? auditDetail == null ? defaultText(type, "agent") : resolveToolAction(auditDetail)
+                : defaultText(timelineDetail.action(), category);
+        String target = timelineDetail == null
+                ? auditDetail == null ? defaultText(stepName, type) : defaultText(auditDetail.toolName(), stepName)
+                : defaultText(timelineDetail.target(), stepName);
+        String source = timelineDetail == null
+                ? auditDetail == null ? "" : defaultText(auditDetail.toolset(), "")
+                : defaultText(timelineDetail.source(), "");
+        String riskLevel = timelineDetail == null
+                ? inferRiskLevel(category, target, detail)
+                : defaultText(timelineDetail.riskLevel(), inferRiskLevel(category, target, detail));
         return new AgentRunTraceEvent(
                 TextUtils.safe(requestId),
                 TextUtils.safe(stepName),
@@ -384,6 +393,28 @@ public class AgentRunTraceService {
         }
     }
 
+    private TimelineStepDetail parseTimelineStepDetail(String detail) {
+        if (!StringUtils.hasText(detail) || !detail.trim().startsWith("{")) {
+            return null;
+        }
+        try {
+            Map<String, Object> payload = objectMapper.readValue(detail, new TypeReference<>() {
+            });
+            if (!AgentRunTraceEvent.TIMELINE_STEP_SCHEMA.equals(text(payload, "schema", "stepSchema"))) {
+                return null;
+            }
+            return new TimelineStepDetail(
+                    text(payload, "category"),
+                    text(payload, "action"),
+                    text(payload, "target"),
+                    text(payload, "source"),
+                    text(payload, "riskLevel", "risk_level")
+            );
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
     private String inputSummary(ToolAuditDetail detail, String status) {
         if (detail == null || !"started".equalsIgnoreCase(status)) {
             return null;
@@ -447,6 +478,27 @@ public class AgentRunTraceService {
             return "read";
         }
         return "";
+    }
+
+    private String resolveToolAction(ToolAuditDetail detail) {
+        String toolName = defaultText(detail == null ? null : detail.toolName(), "");
+        if (toolName.endsWith(".workspaceRunCommand")) {
+            return "command.run";
+        }
+        if (toolName.endsWith(".workspaceWriteFile")) {
+            return "file.write";
+        }
+        if (toolName.endsWith(".workspaceApplyPatch")) {
+            return "file.patch";
+        }
+        return defaultText(detail == null ? null : detail.eventType(), "tool.invoke");
+    }
+
+    private record TimelineStepDetail(String category,
+                                      String action,
+                                      String target,
+                                      String source,
+                                      String riskLevel) {
     }
 
     private record ToolAuditDetail(String eventType,

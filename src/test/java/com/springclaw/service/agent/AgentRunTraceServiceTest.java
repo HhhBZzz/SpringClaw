@@ -158,7 +158,7 @@ class AgentRunTraceServiceTest {
         assertThat(trace)
                 .containsEntry("stepSchema", "springclaw.timeline-step.v1")
                 .containsEntry("category", "tool")
-                .containsEntry("action", "tool.invoke")
+                .containsEntry("action", "command.run")
                 .containsEntry("target", "WorkspaceEditToolPack.workspaceRunCommand")
                 .containsEntry("source", "workspace")
                 .containsEntry("riskLevel", "write");

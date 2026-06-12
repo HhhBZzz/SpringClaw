@@ -2,9 +2,11 @@ package com.springclaw.service.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.service.event.MessageEventService;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
@@ -126,6 +128,40 @@ class AgentRunTraceServiceTest {
 
         assertThat(runs).hasSize(1);
         assertThat(runs.get(0)).containsEntry("productMode", "execution_task");
+    }
+
+    @Test
+    void shouldExposeTimelineStepFieldsFromToolAuditTrace() throws Exception {
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        when(jdbcTemplate.queryForObject(any(String.class), eq(Integer.class), eq("req-1"))).thenReturn(0);
+        ObjectMapper objectMapper = new ObjectMapper();
+        AgentRunTraceService service = new AgentRunTraceService(messageEventService, objectMapper, jdbcTemplate);
+        String detail = """
+                {"schema":"springclaw.tool-audit.v1","eventType":"tool.invoke","toolName":"WorkspaceEditToolPack.workspaceRunCommand","toolset":"workspace","status":"FAILED","normalizedStatus":"failed","phase":"ACT-1","detail":"命令被拒绝","summary":"tool=WorkspaceEditToolPack.workspaceRunCommand, status=FAILED, phase=ACT-1, detail=命令被拒绝"}
+                """;
+
+        service.record("s1", "api", "u1", "req-1", "WorkspaceEditToolPack.workspaceRunCommand", "tool", "failed", detail, 12L);
+
+        ArgumentCaptor<String> tracePayload = ArgumentCaptor.forClass(String.class);
+        verify(messageEventService).recordSingle(
+                eq("s1"),
+                eq("api"),
+                eq("u1"),
+                eq("SYSTEM"),
+                eq("TRACE"),
+                tracePayload.capture(),
+                eq("req-1")
+        );
+        Map<String, Object> trace = objectMapper.readValue(tracePayload.getValue(), new TypeReference<>() {
+        });
+        assertThat(trace)
+                .containsEntry("stepSchema", "springclaw.timeline-step.v1")
+                .containsEntry("category", "tool")
+                .containsEntry("action", "tool.invoke")
+                .containsEntry("target", "WorkspaceEditToolPack.workspaceRunCommand")
+                .containsEntry("source", "workspace")
+                .containsEntry("riskLevel", "write");
     }
 
     @Test

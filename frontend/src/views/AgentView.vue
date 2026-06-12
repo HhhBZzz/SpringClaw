@@ -294,11 +294,13 @@ const qualityMetricRows = computed(() => {
 
 const visibleRunSteps = computed(() => {
   return traceEvents.value.map((event, index) => ({
-    label: event.stepName || `Step ${index + 1}`,
-    detail: event.detail || traceStatusLabel(event.status),
+    label: event.target || event.stepName || `Step ${index + 1}`,
+    detail: timelineStepDetail(event),
     status: normalizeStepStatus(event.status),
     duration: traceDurationLabel(event) || (event.status === 'started' ? 'running' : '-'),
-    tools: event.type
+    tools: event.category || event.type,
+    source: event.source,
+    riskLevel: event.riskLevel
   }));
 });
 
@@ -1356,6 +1358,24 @@ function traceDurationLabel(event: AgentTraceEvent) {
   return typeof event.durationMs === 'number' && event.durationMs > 0 ? formatMs(event.durationMs) : '';
 }
 
+function timelineStepDetail(event: AgentTraceEvent) {
+  const action = (event.action || '').trim();
+  const detail = cleanTraceDetail(event.detail);
+  if (action && detail) return `${action} · ${detail}`;
+  return action || detail || traceStatusLabel(event.status);
+}
+
+function cleanTraceDetail(detail?: string) {
+  const raw = (detail || '').trim();
+  if (!raw.startsWith('{')) return raw;
+  try {
+    const payload = JSON.parse(raw) as { detail?: string; summary?: string; guardMessage?: string };
+    return payload.guardMessage || payload.detail || payload.summary || raw;
+  } catch {
+    return raw;
+  }
+}
+
 function startElapsedTimer(startedAt: number) {
   stopElapsedTimer();
   elapsedSeconds.value = 0;
@@ -1860,7 +1880,7 @@ onUnmounted(() => {
                         <strong>{{ step.label }}</strong>
                         <small>{{ step.detail }}</small>
                       </div>
-                      <em>{{ step.tools || step.duration }}</em>
+                      <em>{{ step.source || step.riskLevel || step.tools || step.duration }}</em>
                     </div>
                   </template>
                   <div v-else class="empty-history">

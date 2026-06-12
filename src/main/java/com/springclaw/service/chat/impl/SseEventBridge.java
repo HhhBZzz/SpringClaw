@@ -356,7 +356,7 @@ public class SseEventBridge {
 
     private String renderTracePayload(AgentRunTraceEvent event) {
         return """
-                {"requestId":"%s","stepName":"%s","type":"%s","status":"%s","detail":"%s","durationMs":%d,"timestamp":%d,"qualityScore":%s,"qualityLevel":"%s","evaluation":%s}
+                {"requestId":"%s","stepName":"%s","type":"%s","status":"%s","detail":"%s","durationMs":%d,"timestamp":%d,"qualityScore":%s,"qualityLevel":"%s","evaluation":%s,"stepSchema":"%s","category":"%s","action":"%s","target":"%s","source":"%s","riskLevel":"%s"}
                 """.formatted(
                 jsonEscape(event.requestId()),
                 jsonEscape(event.stepName()),
@@ -367,7 +367,13 @@ public class SseEventBridge {
                 event.timestamp(),
                 event.qualityScore() == null ? "null" : String.valueOf(event.qualityScore()),
                 jsonEscape(event.qualityLevel()),
-                StringUtils.hasText(event.evaluationJson()) ? event.evaluationJson() : "null"
+                StringUtils.hasText(event.evaluationJson()) ? event.evaluationJson() : "null",
+                jsonEscape(event.stepSchema()),
+                jsonEscape(event.category()),
+                jsonEscape(event.action()),
+                jsonEscape(event.target()),
+                jsonEscape(event.source()),
+                jsonEscape(event.riskLevel())
         ).trim();
     }
 

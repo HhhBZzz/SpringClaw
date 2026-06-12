@@ -17,6 +17,7 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Service
@@ -68,18 +69,7 @@ public class AgentRunTraceService {
                                      String detail,
                                      long durationMs,
                                      AgentQualityScore quality) {
-        AgentRunTraceEvent event = new AgentRunTraceEvent(
-                TextUtils.safe(requestId),
-                TextUtils.safe(stepName),
-                TextUtils.safe(type),
-                TextUtils.safe(status),
-                TextUtils.safe(detail),
-                Math.max(0L, durationMs),
-                System.currentTimeMillis(),
-                quality == null ? null : quality.overallScore(),
-                quality == null ? "" : quality.level(),
-                serializeQuality(quality)
-        );
+        AgentRunTraceEvent event = buildTraceEvent(requestId, stepName, type, status, detail, durationMs, quality);
         if (StringUtils.hasText(sessionKey) && StringUtils.hasText(requestId)) {
             try {
                 messageEventService.recordSingle(sessionKey, channel, userId, "SYSTEM", "TRACE", objectMapper.writeValueAsString(event), requestId);
@@ -89,6 +79,39 @@ public class AgentRunTraceService {
         }
         recordStructuredTrace(sessionKey, channel, userId, requestId, event);
         return event;
+    }
+
+    private AgentRunTraceEvent buildTraceEvent(String requestId,
+                                               String stepName,
+                                               String type,
+                                               String status,
+                                               String detail,
+                                               long durationMs,
+                                               AgentQualityScore quality) {
+        ToolAuditDetail auditDetail = parseToolAuditDetail(detail);
+        String category = defaultText(type, "agent");
+        String action = auditDetail == null ? defaultText(type, "agent") : defaultText(auditDetail.eventType(), "tool.invoke");
+        String target = auditDetail == null ? defaultText(stepName, type) : defaultText(auditDetail.toolName(), stepName);
+        String source = auditDetail == null ? "" : defaultText(auditDetail.toolset(), "");
+        String riskLevel = inferRiskLevel(category, target, detail);
+        return new AgentRunTraceEvent(
+                TextUtils.safe(requestId),
+                TextUtils.safe(stepName),
+                TextUtils.safe(type),
+                TextUtils.safe(status),
+                TextUtils.safe(detail),
+                Math.max(0L, durationMs),
+                System.currentTimeMillis(),
+                quality == null ? null : quality.overallScore(),
+                quality == null ? "" : quality.level(),
+                serializeQuality(quality),
+                AgentRunTraceEvent.TIMELINE_STEP_SCHEMA,
+                category,
+                action,
+                target,
+                source,
+                riskLevel
+        );
     }
 
     public List<AgentRunTraceEvent> listTrace(String requestId, String userId, int limit) {
@@ -347,6 +370,7 @@ public class AgentRunTraceService {
                 return null;
             }
             return new ToolAuditDetail(
+                    text(payload, "eventType"),
                     text(payload, "toolName"),
                     text(payload, "toolset"),
                     text(payload, "status"),
@@ -404,7 +428,29 @@ public class AgentRunTraceService {
         return StringUtils.hasText(value) ? TextUtils.truncate(value, limit) : null;
     }
 
-    private record ToolAuditDetail(String toolName,
+    private String inferRiskLevel(String category, String target, String detail) {
+        String joined = (defaultText(category, "") + " " + defaultText(target, "") + " " + defaultText(detail, ""))
+                .toLowerCase(Locale.ROOT);
+        if (joined.contains("workspaceedit")
+                || joined.contains("runcommand")
+                || joined.contains("command")
+                || joined.contains("write")
+                || joined.contains("delete")
+                || joined.contains("move")
+                || joined.contains("edit")) {
+            return "write";
+        }
+        if (joined.contains("dangerous") || joined.contains("side_effect")) {
+            return "dangerous";
+        }
+        if ("tool".equalsIgnoreCase(category) || "skill".equalsIgnoreCase(category)) {
+            return "read";
+        }
+        return "";
+    }
+
+    private record ToolAuditDetail(String eventType,
+                                   String toolName,
                                    String toolset,
                                    String status,
                                    String normalizedStatus,

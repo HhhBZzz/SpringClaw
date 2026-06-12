@@ -49,6 +49,12 @@ export interface AgentTraceEvent {
   qualityScore?: number | null;
   qualityLevel?: string;
   evaluation?: AgentQualityScore | null;
+  stepSchema?: string;
+  category?: string;
+  action?: string;
+  target?: string;
+  source?: string;
+  riskLevel?: string;
 }
 
 export interface AgentCapabilityEvent {

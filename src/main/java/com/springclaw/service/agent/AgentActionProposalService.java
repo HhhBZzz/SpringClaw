@@ -7,6 +7,8 @@ import com.springclaw.service.task.ScheduledTaskService;
 import com.springclaw.service.task.TaskCreationDraft;
 import com.springclaw.service.task.TaskDraftService;
 import com.springclaw.service.task.TaskUpsertCommand;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -25,16 +27,41 @@ public class AgentActionProposalService {
     private final ScheduledTaskService scheduledTaskService;
     private final ToolRiskPolicyService riskPolicyService;
     private final ObjectMapper objectMapper;
+    private final AgentRunTraceService agentRunTraceService;
     private final ConcurrentMap<String, AgentActionProposal> proposals = new ConcurrentHashMap<>();
+
+    @Autowired
+    public AgentActionProposalService(TaskDraftService taskDraftService,
+                                      ScheduledTaskService scheduledTaskService,
+                                      ToolRiskPolicyService riskPolicyService,
+                                      ObjectMapper objectMapper,
+                                      ObjectProvider<AgentRunTraceService> agentRunTraceServiceProvider) {
+        this(
+                taskDraftService,
+                scheduledTaskService,
+                riskPolicyService,
+                objectMapper,
+                agentRunTraceServiceProvider == null ? null : agentRunTraceServiceProvider.getIfAvailable()
+        );
+    }
 
     public AgentActionProposalService(TaskDraftService taskDraftService,
                                       ScheduledTaskService scheduledTaskService,
                                       ToolRiskPolicyService riskPolicyService,
                                       ObjectMapper objectMapper) {
+        this(taskDraftService, scheduledTaskService, riskPolicyService, objectMapper, (AgentRunTraceService) null);
+    }
+
+    public AgentActionProposalService(TaskDraftService taskDraftService,
+                                      ScheduledTaskService scheduledTaskService,
+                                      ToolRiskPolicyService riskPolicyService,
+                                      ObjectMapper objectMapper,
+                                      AgentRunTraceService agentRunTraceService) {
         this.taskDraftService = taskDraftService;
         this.scheduledTaskService = scheduledTaskService;
         this.riskPolicyService = riskPolicyService;
         this.objectMapper = objectMapper;
+        this.agentRunTraceService = agentRunTraceService;
     }
 
     public AgentActionProposal createProposal(String sessionKey,
@@ -85,6 +112,7 @@ public class AgentActionProposalService {
                 "PENDING"
         );
         proposals.put(proposalId, proposal);
+        recordProposalTrace(proposal, channel, "started", "confirmation.required", summary);
         return proposal;
     }
 
@@ -92,6 +120,7 @@ public class AgentActionProposalService {
         AgentActionProposal proposal = requirePendingProposal(proposalId, username, roleCode);
         if ("dangerous".equalsIgnoreCase(proposal.riskLevel()) && !riskPolicyService.canConfirmDangerous(roleCode)) {
             proposals.put(proposalId, withStatus(proposal, "REJECTED"));
+            recordProposalTrace(proposal, "api", "failed", "confirmation.rejected", "高风险动作只允许 ADMIN/DEVELOPER 确认");
             throw new BusinessException(40331, "高风险动作只允许 ADMIN/DEVELOPER 确认");
         }
         if ("scheduled_task".equalsIgnoreCase(proposal.actionType())) {
@@ -102,6 +131,7 @@ public class AgentActionProposalService {
                     draft.inputPayload(), draft.channel(), draft.deliveryMode(), deliveryTarget, draft.persistToSession(), draft.sessionKeyTemplate()
             ));
             proposals.put(proposalId, withStatus(proposal, "CONFIRMED"));
+            recordProposalTrace(proposal, "api", "success", "confirmation.confirmed", "用户已确认，定时任务已创建");
             return new AgentActionProposalResult(proposalId, "CONFIRMED", "定时任务已创建", Map.of(
                     "taskId", task.getTaskId(),
                     "name", task.getName(),
@@ -110,12 +140,14 @@ public class AgentActionProposalService {
             ));
         }
         proposals.put(proposalId, withStatus(proposal, "CONFIRMED"));
+        recordProposalTrace(proposal, "api", "success", "confirmation.confirmed", "用户已确认，允许继续执行受保护动作");
         return new AgentActionProposalResult(proposalId, "CONFIRMED", "动作已确认，但 v1 未配置对应执行器，未产生副作用。", Map.of("executed", false));
     }
 
     public AgentActionProposalResult cancel(String proposalId, String username, String roleCode) {
         AgentActionProposal proposal = requireAccessibleProposal(proposalId, username, roleCode);
         proposals.put(proposalId, withStatus(proposal, "CANCELLED"));
+        recordProposalTrace(proposal, "api", "success", "confirmation.cancelled", "用户已取消，未执行任何动作");
         return new AgentActionProposalResult(proposalId, "CANCELLED", "已取消，未执行任何动作。", Map.of());
     }
 
@@ -158,5 +190,44 @@ public class AgentActionProposalService {
                 proposal.proposalId(), proposal.requestId(), proposal.sessionKey(), proposal.userId(), proposal.actionType(), proposal.title(),
                 proposal.summary(), proposal.riskLevel(), proposal.payload(), proposal.expiresAt(), status
         );
+    }
+
+    private void recordProposalTrace(AgentActionProposal proposal,
+                                     String channel,
+                                     String status,
+                                     String action,
+                                     String detail) {
+        if (agentRunTraceService == null || proposal == null || !StringUtils.hasText(proposal.requestId())) {
+            return;
+        }
+        agentRunTraceService.record(
+                proposal.sessionKey(),
+                StringUtils.hasText(channel) ? channel : "api",
+                proposal.userId(),
+                proposal.requestId(),
+                proposal.title(),
+                "confirmation",
+                status,
+                renderTimelineDetail(proposal, action, detail),
+                0L
+        );
+    }
+
+    private String renderTimelineDetail(AgentActionProposal proposal, String action, String detail) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("schema", AgentRunTraceEvent.TIMELINE_STEP_SCHEMA);
+        payload.put("category", "confirmation");
+        payload.put("action", action);
+        payload.put("target", proposal.actionType());
+        payload.put("source", "action-proposal");
+        payload.put("riskLevel", proposal.riskLevel());
+        payload.put("proposalId", proposal.proposalId());
+        payload.put("title", proposal.title());
+        payload.put("detail", detail);
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (Exception ex) {
+            return detail == null ? "" : detail;
+        }
     }
 }

@@ -363,6 +363,12 @@ const decisionLabel = computed(() => {
   return `${agentDecision.value.intent} · ${agentDecision.value.executionPath}`;
 });
 
+const currentProductMode = computed(() => {
+  return streamMeta.value?.productMode || inferProductMode(agentDecision.value, streamMeta.value);
+});
+
+const currentProductModeLabel = computed(() => productModeLabel(currentProductMode.value));
+
 const activeResponseMode = computed(() => {
   return responseModes.find((mode) => mode.value === responseMode.value) || responseModes[0];
 });
@@ -1241,6 +1247,40 @@ function responseModeLabel(value?: string) {
   return mode?.label || 'Auto';
 }
 
+function productModeLabel(value?: string) {
+  switch ((value || '').trim()) {
+    case 'quick_answer':
+      return 'Quick Answer';
+    case 'agent_analysis':
+      return 'Agent Analysis';
+    case 'execution_task':
+      return 'Execution Task';
+    default:
+      return '-';
+  }
+}
+
+function runProductMode(run?: { productMode?: string; product_mode?: string }) {
+  return run?.productMode || run?.product_mode || '';
+}
+
+function inferProductMode(decision: AgentDecisionEvent | null, meta: ChatStreamMeta | null) {
+  const response = (meta?.responseMode || responseMode.value || '').toLowerCase();
+  const execution = (meta?.executionMode || decision?.executionPath || '').toLowerCase();
+  const intent = (meta?.intent || decision?.intent || '').toLowerCase();
+  const risk = (decision?.riskLevel || '').toLowerCase();
+  if (decision?.requiresConfirmation || ['write', 'side_effect', 'dangerous', 'command', 'shell'].some((item) => risk.includes(item))) {
+    return 'execution_task';
+  }
+  if (response === 'deep' || execution === 'opar') {
+    return 'execution_task';
+  }
+  if (response === 'fast' || (intent === 'general' && execution === 'simplified')) {
+    return 'quick_answer';
+  }
+  return intent || decision ? 'agent_analysis' : '';
+}
+
 function formatRate(value: number | undefined) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '0%';
   return `${Math.round(value * 1000) / 10}%`;
@@ -1570,7 +1610,7 @@ onUnmounted(() => {
                   >
                     <span>
                       <strong>{{ run.lastStep || run.status || 'Run' }}</strong>
-                      <small>{{ run.requestId || '-' }}</small>
+                      <small>{{ runProductMode(run) ? `${productModeLabel(runProductMode(run))} · ${run.requestId || '-'}` : run.requestId || '-' }}</small>
                     </span>
                     <em>{{ run.status || '-' }}</em>
                   </button>
@@ -1746,7 +1786,7 @@ onUnmounted(() => {
                 </div>
                 <p v-if="actionStatus" class="stream-status">{{ actionStatus }}</p>
                 <p v-if="streamMeta" class="stream-status">
-                  {{ responseModeLabel(streamMeta.responseMode || responseMode) }} · {{ streamMeta.executionMode || 'routing' }} · {{ streamMeta.intent || 'general' }}
+                  {{ currentProductModeLabel }} · {{ responseModeLabel(streamMeta.responseMode || responseMode) }} · {{ streamMeta.intent || 'general' }}
                 </p>
                 <div v-if="traceEvents.length" class="run-trace-strip" aria-label="Agent execution flow">
                   <span class="trace-live-dot" aria-hidden="true"></span>
@@ -1776,6 +1816,7 @@ onUnmounted(() => {
               <section v-if="activeInspectorTab === 'trace'" class="inspector-panel run-timeline-card">
                 <div class="run-facts-card">
                   <div class="context-row"><span>Request ID</span><strong>{{ currentRequestId }}</strong></div>
+                  <div class="context-row"><span>Mode</span><strong>{{ currentProductModeLabel }}</strong></div>
                   <div class="context-row"><span>Question</span><strong>{{ resolvedQuestionLabel }}</strong></div>
                   <div class="context-row"><span>Status</span><strong>{{ runStatus }}</strong></div>
                   <div class="context-row"><span>Start Time</span><strong>{{ taskCreatedLabel }}</strong></div>

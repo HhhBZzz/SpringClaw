@@ -159,7 +159,7 @@ public class AgentRunTraceService {
 
     public List<Map<String, Object>> recentRuns(String userId, int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 50));
-        return messageEventService.pageQuery(null, userId, "SYSTEM", "TRACE", 1, 500).getRecords().stream()
+        List<Map<String, Object>> rows = messageEventService.pageQuery(null, userId, "SYSTEM", "TRACE", 1, 500).getRecords().stream()
                 .map(this::toRunRow)
                 .filter(row -> !row.isEmpty())
                 .collect(LinkedHashMap<String, Map<String, Object>>::new,
@@ -169,6 +169,8 @@ public class AgentRunTraceService {
                 .stream()
                 .limit(safeLimit)
                 .toList();
+        enrichProductMode(rows);
+        return rows;
     }
 
     private Map<String, Object> toRunRow(MessageEvent event) {
@@ -185,6 +187,33 @@ public class AgentRunTraceService {
         row.put("detail", trace.detail());
         row.put("timestamp", trace.timestamp());
         return row;
+    }
+
+    private void enrichProductMode(List<Map<String, Object>> rows) {
+        if (jdbcTemplate == null || rows == null || rows.isEmpty()) {
+            return;
+        }
+        for (Map<String, Object> row : rows) {
+            String requestId = text(row, "requestId");
+            if (!StringUtils.hasText(requestId)) {
+                continue;
+            }
+            try {
+                List<Map<String, Object>> metadataRows = jdbcTemplate.queryForList(
+                        "SELECT product_mode FROM agent_run WHERE request_id = ? AND deleted = 0",
+                        requestId
+                );
+                if (metadataRows.isEmpty()) {
+                    continue;
+                }
+                String productMode = text(metadataRows.get(0), "product_mode", "productMode");
+                if (StringUtils.hasText(productMode)) {
+                    row.put("productMode", productMode);
+                }
+            } catch (Exception ex) {
+                log.debug("Agent run 产品模式补充失败，requestId={}, reason={}", requestId, ex.getMessage());
+            }
+        }
     }
 
     private AgentRunTraceEvent parseTrace(String raw) {
@@ -358,9 +387,17 @@ public class AgentRunTraceService {
         return defaultText(detail.detail(), detail.summary());
     }
 
-    private String text(Map<String, Object> payload, String key) {
-        Object value = payload.get(key);
-        return value == null ? "" : String.valueOf(value);
+    private String text(Map<String, Object> payload, String... keys) {
+        if (payload == null || keys == null) {
+            return "";
+        }
+        for (String key : keys) {
+            Object value = payload.get(key);
+            if (value != null && StringUtils.hasText(String.valueOf(value))) {
+                return String.valueOf(value).trim();
+            }
+        }
+        return "";
     }
 
     private String truncateOrNull(String value, int limit) {

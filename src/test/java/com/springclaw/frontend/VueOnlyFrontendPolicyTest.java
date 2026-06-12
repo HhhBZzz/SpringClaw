@@ -109,4 +109,26 @@ class VueOnlyFrontendPolicyTest {
                 .contains("<LoginPanel />")
                 .contains("需要 ADMIN 角色才能查看后台数据");
     }
+
+    @Test
+    void runtimeConsoleShouldExposeAgentProductMode() throws IOException {
+        String types = Files.readString(projectRoot.resolve("frontend/src/types.ts"));
+        String agentView = Files.readString(projectRoot.resolve("frontend/src/views/AgentView.vue"));
+        String adminView = Files.readString(projectRoot.resolve("frontend/src/views/AdminView.vue"));
+
+        assertThat(types)
+                .contains("export type AgentProductMode")
+                .contains("productMode?: AgentProductMode | string")
+                .contains("product_mode?: AgentProductMode | string");
+
+        assertThat(agentView)
+                .contains("productModeLabel")
+                .contains("currentProductModeLabel")
+                .contains("runProductMode");
+
+        assertThat(adminView)
+                .contains("<th>Mode</th>")
+                .contains("productModeLabel")
+                .contains("runProductMode");
+    }
 }

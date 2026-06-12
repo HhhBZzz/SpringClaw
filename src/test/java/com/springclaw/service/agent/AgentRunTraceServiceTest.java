@@ -1,10 +1,16 @@
 package com.springclaw.service.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.service.event.MessageEventService;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.util.List;
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -85,6 +91,41 @@ class AgentRunTraceServiceTest {
                         && sql.contains("intent = COALESCE(NULLIF(VALUES(intent), ''), intent)")),
                 any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()
         );
+    }
+
+    @Test
+    void recentRunsShouldExposeProductModeFromStructuredRunMetadata() throws Exception {
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        AgentRunTraceService service = new AgentRunTraceService(messageEventService, objectMapper, jdbcTemplate);
+        MessageEvent event = new MessageEvent();
+        event.setSessionKey("s1");
+        event.setUserId("u1");
+        event.setContent(objectMapper.writeValueAsString(new AgentRunTraceEvent(
+                "req-1",
+                "最终回答",
+                "final",
+                "success",
+                "done",
+                15L,
+                1710000000000L,
+                null,
+                "",
+                null
+        )));
+        Page<MessageEvent> page = new Page<>(1, 500);
+        page.setRecords(List.of(event));
+        when(messageEventService.pageQuery(null, null, "SYSTEM", "TRACE", 1, 500)).thenReturn(page);
+        when(jdbcTemplate.queryForList(
+                argThat(sql -> sql.contains("product_mode") && sql.contains("request_id = ?")),
+                eq("req-1")
+        )).thenReturn(List.of(Map.of("product_mode", "execution_task")));
+
+        List<Map<String, Object>> runs = service.recentRuns(null, 10);
+
+        assertThat(runs).hasSize(1);
+        assertThat(runs.get(0)).containsEntry("productMode", "execution_task");
     }
 
     @Test

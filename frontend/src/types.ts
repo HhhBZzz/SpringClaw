@@ -25,9 +25,11 @@ export interface ChatResponse {
 }
 
 export type ChatResponseMode = 'agent' | 'fast' | 'deep' | 'tool';
+export type AgentProductMode = 'quick_answer' | 'agent_analysis' | 'execution_task';
 
 export interface ChatStreamMeta {
   requestId?: string;
+  productMode?: AgentProductMode | string;
   responseMode?: ChatResponseMode | string;
   executionMode?: string;
   intent?: string;
@@ -217,6 +219,8 @@ export interface AdminDashboard {
     userId?: string;
     lastStep?: string;
     status?: string;
+    productMode?: AgentProductMode | string;
+    product_mode?: AgentProductMode | string;
     detail?: string;
     timestamp?: number;
   }>;

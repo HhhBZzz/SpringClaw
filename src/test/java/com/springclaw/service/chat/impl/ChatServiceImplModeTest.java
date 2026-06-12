@@ -4,6 +4,8 @@ import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
 import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.agent.AgentActionProposal;
+import com.springclaw.service.agent.AgentActionProposalService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
 import com.springclaw.service.agent.AgentRun;
@@ -29,6 +31,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -204,6 +207,73 @@ class ChatServiceImplModeTest {
     }
 
     @Test
+    void shouldNotSupportModelLedStreamingWhenDecisionRequiresConfirmation() {
+        Fixture fixture = new Fixture();
+        ChatContext context = fixture.buildChatContext(
+                "修改 README 并执行命令验证",
+                "simplified",
+                "默认",
+                "agent",
+                "workspace_analysis",
+                new AgentDecision("workspace_analysis", "basic_model", java.util.List.of(), "write", true, "写入类请求需要确认")
+        );
+
+        Assertions.assertFalse(fixture.modelLedStreamEngine(true).supports(context));
+    }
+
+    @Test
+    void streamShouldRequestConfirmationBeforeStreamableEngineRuns() {
+        Fixture fixture = new Fixture();
+        AgentDecision decision = new AgentDecision(
+                "workspace_analysis",
+                "basic_model",
+                java.util.List.of(),
+                "write",
+                true,
+                "写入类请求需要确认"
+        );
+        ChatContext context = fixture.buildChatContext(
+                "修改 README 并执行命令验证",
+                "simplified",
+                "默认",
+                "agent",
+                "workspace_analysis",
+                decision
+        );
+        AgentEngine.StreamableAgentEngine streamable = mock(AgentEngine.StreamableAgentEngine.class);
+        AgentActionProposal proposal = new AgentActionProposal(
+                "proposal-1",
+                "req-1",
+                "s1",
+                "u1",
+                "workspace_action",
+                "需要确认",
+                "修改 README 并执行命令验证",
+                "write",
+                java.util.Map.of(),
+                System.currentTimeMillis() + 60_000,
+                "PENDING"
+        );
+        fixture.useEngine(streamable);
+        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(fixture.actionProposalService.createProposal(
+                eq("s1"),
+                eq("api"),
+                eq("u1"),
+                eq("USER"),
+                eq("req-1"),
+                eq("修改 README 并执行命令验证"),
+                eq(decision)
+        )).thenReturn(proposal);
+
+        SseEmitter emitter = fixture.build().stream(new ChatRequest("s1", "u1", "修改 README 并执行命令验证", "api"));
+
+        verify(fixture.sseEventBridge, timeout(1000)).sendActionRequired(eq(emitter), eq(proposal));
+        verify(streamable, timeout(300).times(0)).stream(any(), any(), anyString(), any(), any(), any());
+        emitter.complete();
+    }
+
+    @Test
     void shouldUseAgentRuntimeForNonGeneralDecisions() {
         Fixture fixture = new Fixture();
         fixture.useEngine(fixture.agentRuntimeEngine);
@@ -268,6 +338,7 @@ class ChatServiceImplModeTest {
         private final MetaGuardExecutor metaGuardExecutor = mock(MetaGuardExecutor.class);
         private final ModelCallExecutor modelCallExecutor = mock(ModelCallExecutor.class);
         private final ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
+        private final AgentActionProposalService actionProposalService = mock(AgentActionProposalService.class);
         private final AgentRuntimeEngine agentRuntimeEngine = mock(AgentRuntimeEngine.class);
         private final SseEventBridge sseEventBridge = mock(SseEventBridge.class);
         private final EngineSelector engineSelector = mock(EngineSelector.class);
@@ -386,7 +457,7 @@ class ChatServiceImplModeTest {
                     chatResultPersister,
                     metaGuardExecutor,
                     toolOrchestrator,
-                    null,
+                    actionProposalService,
                     null,
                     engineSelector,
                     null,
@@ -411,7 +482,7 @@ class ChatServiceImplModeTest {
                     chatResultPersister,
                     metaGuardExecutor,
                     toolOrchestrator,
-                    null,
+                    actionProposalService,
                     agentRuntimeEngine,
                     engineSelector,
                     null,

@@ -85,6 +85,7 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
         return modelLedStreamingEnabled
                 && "agent".equals(responseMode)
                 && (decision == null || !decision.isGeneral())
+                && !requiresConfirmation(decision)
                 && !"control_plane".equals(intent)
                 && !"model_control".equals(intent)
                 && !"local_files".equals(intent)
@@ -350,6 +351,10 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
         return "agent_tools".equalsIgnoreCase(executionPath)
                 || "skill_direct".equalsIgnoreCase(executionPath)
                 || "task_draft".equalsIgnoreCase(executionPath);
+    }
+
+    private boolean requiresConfirmation(AgentDecision decision) {
+        return decision != null && (decision.requiresConfirmation() || decision.isDangerous());
     }
 
     private String normalizeResponseMode(String rawResponseMode) {

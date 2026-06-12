@@ -86,11 +86,11 @@
 }
 ```
 
-**已知违约（待修）**：
-1. 控制面短路场景下 `requestId / sessionKey / userId` 为占位值（`""`、`"tool-session"`、`"tool-user"`），导致 trace 漏写
-2. `toolset` 字段可能写入类名（如 `SystemToolPack`）而非 descriptor.toolset（如 `system`）
+**修复历史**：
+1. ~~控制面短路场景下 `requestId / sessionKey / userId` 为占位值~~ — **已修复**（commit `55e67e0`，2026-06-12）。`SimplifiedOparEngine` / `OparLoopEngine` 现在在调用本地短路前 `ToolExecutionContextHolder.open(LOCAL-SHORTCUT)`。守护测试：`TurnContractTest.toolAuditPropagatesContextFromHolder`。
+2. ~~`toolset` 字段可能写入类名而非 descriptor.toolset~~ — **已修复**（commit `d40ae17`，2026-06-12）。`MessageEventToolAuditService` 现在通过 `CapabilityRegistry.findToolsetByClassName` 反查正确的 toolset。守护测试：`TurnContractTest.toolAuditToolsetMatchesDescriptor`。
 
-修复前，所有违约场景必须在 `MessageEventToolAuditServiceTest` 中**显式标注 `@Disabled("known-gap")`**，不要让它们悄悄通过。
+新发现的违约场景必须先在 `TurnContractTest` 或 `MessageEventToolAuditServiceTest` 中标注 `@Disabled("known-gap")` 钉住，然后再排期修复——不要让违约悄悄通过。
 
 ### 2.5 权限事件
 
@@ -138,6 +138,7 @@
 | `AutonomousExecutionTrackerTest$WriteCompletionTests` 等 | 3 行为契约「假完成防护」 |
 | `LocalSkillFallbackServiceTest.shouldAnswerCurrentModelForMuQianPhrase...` | 3 行为契约「控制面确定性」 |
 | `MessageEventToolAuditServiceTest` | 2.4 audit JSON schema |
+| `TurnContractTest` | §2.1 / §2.2 / §2.3 / §2.4 / §2.5 / §3 一站式守护，含 replayRun |
 
 ---
 
@@ -154,3 +155,8 @@
 ## 六、变化日志
 
 - **2026-06-12** — 初版。基于 commit `e2967ef` 时的代码状态。
+- **2026-06-12** — 关闭 §2.4 两个 known-gap：
+  - `toolset` 类名 bug 由 commit `d40ae17` 修复（CapabilityRegistry 反查）
+  - 本地短路 context 丢失由 commit `55e67e0` 修复（LOCAL-SHORTCUT scope）
+  - 新增 `replayRun` 端点（commit `620b49f`）让契约 §2.1-§2.2 可从外部验证
+  - 新增 `TurnContractTest` 11 个测试守护契约（commit `f742282`）

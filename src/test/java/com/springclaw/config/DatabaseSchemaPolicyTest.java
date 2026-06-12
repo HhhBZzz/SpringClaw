@@ -20,6 +20,7 @@ class DatabaseSchemaPolicyTest {
                 .contains("quality_score")
                 .contains("quality_level")
                 .contains("evaluation_json")
+                .contains("product_mode")
                 .contains("uk_agent_run_request")
                 .contains("idx_agent_run_user_time")
                 .contains("idx_agent_run_step_request_sequence")
@@ -43,6 +44,16 @@ class DatabaseSchemaPolicyTest {
                 .contains("quality_score")
                 .contains("quality_level")
                 .contains("evaluation_json")
+                .contains("information_schema.columns");
+    }
+
+    @Test
+    void migrationShouldAddAgentProductModeForExistingDatabases() throws Exception {
+        String migration = Files.readString(Path.of("src/main/resources/sql/migrations/2026-06-12-agent-product-mode.sql"));
+
+        assertThat(migration)
+                .contains("agent_run")
+                .contains("product_mode")
                 .contains("information_schema.columns");
     }
 

@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS `agent_run` (
   `session_key` VARCHAR(128) NULL,
   `channel` VARCHAR(32) NOT NULL DEFAULT 'api',
   `user_id` VARCHAR(64) NOT NULL,
+  `product_mode` VARCHAR(32) NULL,
   `response_mode` VARCHAR(32) NULL,
   `execution_mode` VARCHAR(64) NULL,
   `intent` VARCHAR(64) NULL,

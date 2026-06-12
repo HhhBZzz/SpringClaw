@@ -49,6 +49,7 @@ public class SseEventBridge {
         if (context == null) {
             return;
         }
+        String productMode = AgentProductMode.resolve(context);
         if (agentRunTraceService != null) {
             agentRunTraceService.recordRunMetadata(
                     context.session() == null ? null : context.session().getSessionKey(),
@@ -57,13 +58,15 @@ public class SseEventBridge {
                     context.requestId(),
                     normalizeResponseMode(context.responseMode()),
                     context.executionMode(),
-                    context.intent()
+                    context.intent(),
+                    productMode
             );
         }
         String payload = """
-                {"requestId":"%s","responseMode":"%s","executionMode":"%s","intent":"%s","routingReason":"%s","originalQuestion":"%s","effectiveQuestion":"%s"}
+                {"requestId":"%s","productMode":"%s","responseMode":"%s","executionMode":"%s","intent":"%s","routingReason":"%s","originalQuestion":"%s","effectiveQuestion":"%s"}
                 """.formatted(
                 jsonEscape(context.requestId()),
+                jsonEscape(productMode),
                 jsonEscape(normalizeResponseMode(context.responseMode())),
                 jsonEscape(context.executionMode()),
                 jsonEscape(context.intent()),

@@ -190,6 +190,23 @@ function renderSourceCounts(sourceCounts?: Record<string, number>) {
   if (!sourceCounts || Object.keys(sourceCounts).length === 0) return '等待运行时数据';
   return Object.entries(sourceCounts).map(([key, value]) => `${key} ${value}`).join(' / ');
 }
+
+function productModeLabel(value: unknown) {
+  switch (String(value || '').trim()) {
+    case 'quick_answer':
+      return 'Quick Answer';
+    case 'agent_analysis':
+      return 'Agent Analysis';
+    case 'execution_task':
+      return 'Execution Task';
+    default:
+      return '-';
+  }
+}
+
+function runProductMode(run: { productMode?: unknown; product_mode?: unknown }) {
+  return run.productMode || run.product_mode || '';
+}
 </script>
 
 <template>
@@ -304,6 +321,7 @@ function renderSourceCounts(sourceCounts?: Record<string, number>) {
             <thead>
               <tr>
                 <th>Request</th>
+                <th>Mode</th>
                 <th>User</th>
                 <th>Last Step</th>
                 <th>Status</th>
@@ -314,6 +332,7 @@ function renderSourceCounts(sourceCounts?: Record<string, number>) {
             <tbody>
               <tr v-for="run in agentRuns" :key="run.requestId">
                 <td><code>{{ String(run.requestId || '').slice(0, 10) }}</code></td>
+                <td>{{ productModeLabel(runProductMode(run)) }}</td>
                 <td>{{ run.userId || '-' }}</td>
                 <td>{{ run.lastStep || '-' }}</td>
                 <td><span class="status" :class="run.status === 'failed' ? 'danger' : 'ok'">{{ run.status || '-' }}</span></td>
@@ -321,7 +340,7 @@ function renderSourceCounts(sourceCounts?: Record<string, number>) {
                 <td>{{ formatTime(run.timestamp) }}</td>
               </tr>
               <tr v-if="agentRuns.length === 0">
-                <td colspan="6">暂无 Agent trace。发送一条 Agent 消息后这里会出现。</td>
+                <td colspan="7">暂无 Agent trace。发送一条 Agent 消息后这里会出现。</td>
               </tr>
             </tbody>
           </table>

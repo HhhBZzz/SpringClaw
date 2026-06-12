@@ -1,6 +1,7 @@
 # SpringClaw 核心最小模块进度记录
 
 > 日期：2026-06-11
+> 最近更新：2026-06-12
 > 范围：只记录当前实现位置、成熟度、稳定优先级；不要求继续合并 engine，不删除 legacy/fallback 代码。
 
 ## 一、当前定位
@@ -20,22 +21,28 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 当前分支：
 
 - `codex/bootstrap-github`
-- 本地领先远端 6 个 commit。
+- 跟踪远端 `origin/codex/bootstrap-github`。
 
 当前未提交状态：
 
-- 已修改：`src/main/java/com/springclaw/service/agent/AgentRuntimeEngine.java`
-- 已修改：`src/main/java/com/springclaw/service/chat/impl/AutonomousLoopEngine.java`
-- 已修改：`src/test/java/com/springclaw/service/agent/AgentRuntimeEngineTest.java`
-- 已修改：`src/test/java/com/springclaw/service/chat/impl/AutonomousExecutionTrackerTest.java`
-- 未跟踪：`README_CN.md`
+- 已修改：`docs/CORE_MODULE_PROGRESS_2026-06-11.md`
+- 已修改：`src/main/java/com/springclaw/tool/pack/WorkspaceEditToolPack.java`
+- 已修改：`src/main/java/com/springclaw/tool/runtime/ToolRuntimeAspect.java`
+- 已修改：`src/main/java/com/springclaw/tool/runtime/impl/MessageEventToolAuditService.java`
+- 已修改：`src/test/java/com/springclaw/tool/runtime/impl/MessageEventToolAuditServiceTest.java`
+- 未跟踪：`src/main/java/com/springclaw/service/workspace/WorkspaceGuard.java`
+- 未跟踪：`src/test/java/com/springclaw/service/workspace/WorkspaceGuardTest.java`
+- 未跟踪：`src/test/java/com/springclaw/tool/pack/WorkspaceEditToolPackTest.java`
+- 未跟踪：`src/test/java/com/springclaw/tool/runtime/ToolRuntimeAspectTest.java`
 
 最近测试基线：
 
 - `mvn test`
-- 结果：`Tests run: 298, Failures: 0, Errors: 0, Skipped: 0`
+- 结果：`Tests run: 334, Failures: 0, Errors: 0, Skipped: 0`
+- `git diff --check`
+- 结果：clean
 
-注意：上面的测试通过说明当前工作区可编译、测试可过；不代表未提交的 engine 相关变更已经适合作为长期架构方向。
+注意：当前未提交变更集中在 Workspace Guard、workspace edit 工具边界和 tool audit 结构化记录；不涉及 `AgentRuntimeEngine`、`AutonomousLoopEngine`、`OparLoopEngine` 合并或重构。
 
 ## 三、核心最小模块进度表
 
@@ -51,13 +58,13 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 | --- | --- | --- | --- | --- | --- |
 | Runtime / Engine | `ChatServiceImpl`、`EngineSelector`、`AgentRuntimeEngine`、`BasicStreamEngine`、`AutonomousLoopEngine`、`OparLoopEngine`、`SimplifiedOparEngine` | 请求进入后选择执行引擎，完成同步、流式、OPAR、自动循环等执行路径 | 3 | 65% | 停止合并 engine；先把默认链路、fallback、streamable 确认边界记录清楚 |
 | Model 调用层 | `AiProviderService`、`ModelCallExecutor`、`ModelTransportGuardService`、`LlmUsageRecordServiceImpl` | provider/model 切换、模型调用、传输异常保护、用量记录 | 4 | 80% | 保持稳定；不要在本轮把模型层和 agent loop 继续揉在一起 |
-| Tool 调用层 | `CapabilityRegistry`、`ToolOrchestrator`、`ToolRuntimeAspect`、`ToolPackDescriptor`、`SystemToolPack`、`WebSearchToolPack` | 工具注册、工具选择、工具包描述、AOP 审计、运行时工具调用 | 3 | 60% | 下一步只补结构化审计字段和权限校验，不扩工具数量 |
+| Tool 调用层 | `CapabilityRegistry`、`ToolOrchestrator`、`ToolRuntimeAspect`、`ToolPackDescriptor`、`SystemToolPack`、`WebSearchToolPack` | 工具注册、工具选择、工具包描述、AOP 审计、运行时工具调用；Workspace Guard 拒绝原因已能进入结构化审计 JSON | 3 | 65% | 下一步继续补 input/output/risk/duration 的真实字段，不扩工具数量 |
 | Context 管理 | `ChatContextFactory`、`ContextAssembler`、`VectorMemoryService` | 组装短期上下文、长期记忆召回、prompt 输入 | 3 | 55% | 暂不做复杂压缩系统；先记录上下文来源、窗口大小、召回优先级 |
 | Session / Task 生命周期 | `AgentSession`、`MessageEvent`、`ChatResultPersister`、`AsyncChatResultStore`、task service 包 | 保存会话、消息事件、异步结果、任务入口 | 3 | 50% | 先区分 chat session 和 long-running task；不要马上建新 Task Runtime |
-| Event Stream / Trace | `SseEventBridge`、`AgentRunTraceService`、`message_event`、`agent_run` 相关表 | 前端 SSE、运行 trace、工具审计事件、运行步骤展示 | 3 | 60% | 优先补 tool invocation 的结构化 input/output/risk/status，而不是增加新事件类型 |
-| Workspace 管理 | `WorkspaceReviewService`、`WorkspaceTaskService`、`LocalFilesystemService`、`WorkspaceEditToolPack` | 工作区检索、代码统计、文件候选、本地文件访问、工作区修改/命令 | 2 | 45% | 本轮先收紧边界和确认；不要引入完整 diff/rollback 框架 |
+| Event Stream / Trace | `SseEventBridge`、`AgentRunTraceService`、`message_event`、`agent_run` 相关表 | 前端 SSE、运行 trace、工具审计事件、运行步骤展示；tool audit 可镜像到 run trace | 3 | 65% | 优先补 tool invocation 的结构化 input/output/risk/status，而不是增加新事件类型 |
+| Workspace 管理 | `WorkspaceReviewService`、`WorkspaceTaskService`、`LocalFilesystemService`、`WorkspaceEditToolPack`、`WorkspaceGuard` | 工作区检索、代码统计、文件候选、本地文件访问、工作区修改/命令；最小路径和命令边界校验 | 3 | 55% | 继续保持最小边界模型；不要引入完整 diff/rollback 框架 |
 | Permission / Policy | `ToolRiskPolicyService`、`ToolPermissionServiceImpl`、`AgentActionProposalService`、`application.yml` user-deny-tools | 风险分级、工具权限、动作确认、默认 deny 配置 | 2 | 45% | P0 是确认 streamable engine 写操作是否绕过 action_required；先补最小测试 |
-| Sandbox / Command Execution | `WorkspaceEditToolPack.workspaceRunCommand`、`SystemToolPack.runCommand`、`ScriptSkillExecutorService` | 执行 shell、脚本技能、工作区命令 | 2 | 35% | 当前不是成熟沙箱；默认应谨慎收紧，而不是扩大自动执行 |
+| Sandbox / Command Execution | `WorkspaceGuard`、`WorkspaceEditToolPack.workspaceRunCommand`、`SystemToolPack.runCommand`、`ScriptSkillExecutorService` | 执行 shell、脚本技能、工作区命令；workspace 命令已拦截危险命令和父目录路径段 | 2 | 45% | 当前仍不是成熟沙箱；先把拒绝原因、确认边界、审计记录做实 |
 | Long-term Memory | `VectorMemoryService`、Redis Vector Store 配置、memory service 包 | 会话记忆、语义召回、跨会话用户记忆控制 | 3 | 55% | 保持为记忆召回层；暂不扩成知识库 RAG 平台 |
 | Logs / Observability | `AgentRunTraceService`、`LlmUsageRecordServiceImpl`、audit/service/usage 包、后台页面 | token、耗时、模型调用、运行日志、审计记录 | 3 | 55% | 先统一 requestId/runId/toolCallId 关联；成本和重试统计后置 |
 | Cache 策略 | `config/cache`、Redis 配置、天气/汇率/新闻等工具缓存 | 外部数据缓存、Redis 支撑记忆和状态 | 2 | 45% | 先维持工具级缓存；暂不做全局 agent cache 策略 |
@@ -119,7 +126,7 @@ ChatController
 
 ### 2. Agent 每一步行为是否可追踪？
 
-当前结论：能追踪主干，但不足以完整复盘每一步。
+当前结论：能追踪主干，工具拒绝类事件开始具备结构化复盘能力，但仍不足以完整复盘每一步。
 
 已经存在：
 
@@ -127,18 +134,19 @@ ChatController
 - `message_event`
 - `agent_run` / `AgentRunTraceService`
 - 工具审计文本
+- Workspace Guard 拒绝原因结构化字段：`guardAction`、`guardReasonCode`、`guardMessage`、`guardResolvedPath`
 
 还不完整：
 
-- 工具 input/output/risk/status 结构化不足
+- 工具 input/output/risk/status/duration 结构化不足
 - 文件读取、文件修改、命令执行还没有统一 step schema
 - 失败恢复、用户确认、重试没有形成完整 timeline
 
-当前进度：60%
+当前进度：65%
 
 ### 3. 工具调用是否结构化、可审计？
 
-当前结论：可审计，但结构化不足。
+当前结论：可审计，Workspace Guard 拒绝已经开始结构化；普通工具输入输出仍结构化不足。
 
 已经存在：
 
@@ -147,23 +155,27 @@ ChatController
 - tool orchestrator
 - runtime aspect
 - audit service
+- workspace guard failure detail schema：`springclaw.workspace-guard.v1`
 
 还不完整：
 
-- audit 主要以文本事件保存
+- 普通工具 audit 仍主要以摘要文本保存
 - `tool_invocation` 里 risk/input summary 等字段未充分填充
 - 工具 schema、权限、分组、调用日志还没有完全统一到一个 registry 视角
 
-当前进度：60%
+当前进度：65%
 
 ### 4. 文件和命令执行是否有边界和确认？
 
-当前结论：有边界，但确认链路存在风险点。
+当前结论：工作区文件和命令边界已开始收紧，但确认链路仍存在风险点。
 
 已经存在：
 
 - 工作区 root 边界
 - 部分危险命令阻断
+- symlink 真实路径越界阻断
+- 命令父目录路径段阻断
+- guard 拒绝原因进入工具审计和 run trace
 - 工具权限与 deny-list
 - action proposal / confirmation
 
@@ -174,7 +186,7 @@ ChatController
 - 文件修改没有 staging/diff/rollback
 - shell 执行不是成熟沙箱
 
-当前进度：40%
+当前进度：55%
 
 ### 5. 上下文是否可控，而不是越拼越乱？
 
@@ -231,23 +243,24 @@ ChatController
 
 每一步都应能编译、能测试、能单独提交。
 
-### Step 1：确认当前未提交改动
+### Step 1：提交 Workspace Guard 最小边界
 
 目标：
 
-- 判断当前 4 个 Java/test 修改和 `README_CN.md` 是否要保留。
+- 保留当前 Workspace Guard、workspace edit 工具边界、tool audit 结构化拒绝原因。
+- 不修改 engine，不新增 Runtime/Policy/ChangeSet 大模块。
 
 验证：
 
-- `git diff`
+- `mvn -q -Dtest=WorkspaceGuardTest,WorkspaceEditToolPackTest,ToolRuntimeAspectTest,MessageEventToolAuditServiceTest test`
 - `mvn test`
+- `git diff --check`
 
 建议 commit：
 
-- `docs/status: record current runtime baseline`
-- 或者先不提交代码，只提交本进度文档。
+- `工作区：增加边界守护并结构化拒绝原因`
 
-### Step 2：补一个安全回归测试，不改架构
+### Step 2：继续补确认链路回归测试，不改架构
 
 目标：
 
@@ -279,20 +292,7 @@ ChatController
 - trace service 单测
 - 前端 runtime console 可看到真实字段
 
-### Step 4：Workspace 边界收紧
-
-目标：
-
-- 明确 workspace 写入、命令执行、脚本执行的默认策略。
-- 先通过配置和测试收紧，不做 diff/rollback 大系统。
-
-验证：
-
-- 文件写入越界测试
-- dangerous command deny 测试
-- user-deny-tools 配置回归测试
-
-### Step 5：Context 输入记录化
+### Step 4：Context 输入记录化
 
 目标：
 
@@ -303,6 +303,17 @@ ChatController
 
 - ContextAssembler 单测
 - trace 中能看到 context source summary
+
+### Step 5：再评估 Workspace diff/rollback，不急着实现
+
+目标：
+
+- 只有当写入确认、审计、trace 都稳定后，再设计最小 diff/rollback。
+- 当前阶段只记录缺口，不引入大系统。
+
+验证：
+
+- 设计文档和最小测试计划先行。
 
 ## 八、现在应该继续做什么
 

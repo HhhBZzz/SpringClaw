@@ -1,12 +1,17 @@
 package com.springclaw.tool.runtime;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.service.auth.ToolPermissionService;
+import com.springclaw.service.workspace.WorkspaceGuard;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.stereotype.Component;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * 工具运行时切面：统一限流与审计。
@@ -14,6 +19,8 @@ import org.springframework.stereotype.Component;
 @Aspect
 @Component
 public class ToolRuntimeAspect {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final ToolGuardService toolGuardService;
     private final ToolAuditService toolAuditService;
@@ -50,7 +57,7 @@ public class ToolRuntimeAspect {
             toolAuditService.recordInvoke(runtimeToolName, "SUCCESS", summarize(result), context);
             return result;
         } catch (Throwable ex) {
-            toolAuditService.recordInvoke(runtimeToolName, "FAILED", ex.getClass().getSimpleName() + ": " + ex.getMessage(), context);
+            toolAuditService.recordInvoke(runtimeToolName, "FAILED", summarizeFailure(ex), context);
             throw ex;
         }
     }
@@ -79,5 +86,27 @@ public class ToolRuntimeAspect {
             return text.substring(0, 180) + "...";
         }
         return text;
+    }
+
+    private String summarizeFailure(Throwable ex) {
+        if (ex instanceof WorkspaceGuard.WorkspaceGuardException guardException) {
+            return renderWorkspaceGuardDetail(guardException);
+        }
+        return ex.getClass().getSimpleName() + ": " + ex.getMessage();
+    }
+
+    private String renderWorkspaceGuardDetail(WorkspaceGuard.WorkspaceGuardException ex) {
+        WorkspaceGuard.Decision decision = ex.decision();
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("schema", "springclaw.workspace-guard.v1");
+        payload.put("action", decision == null || decision.action() == null ? "REJECT" : decision.action().name());
+        payload.put("reasonCode", decision == null ? "" : decision.reasonCode());
+        payload.put("message", ex.getMessage());
+        payload.put("resolvedPath", decision == null || decision.resolvedPath() == null ? "" : decision.resolvedPath().toString());
+        try {
+            return OBJECT_MAPPER.writeValueAsString(payload);
+        } catch (Exception ignored) {
+            return "WorkspaceGuardException: " + ex.getMessage();
+        }
     }
 }

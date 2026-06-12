@@ -46,6 +46,7 @@ class RuntimeConsoleSchemaInitializerTest {
 
         initializer.run(null);
 
-        verify(jdbcTemplate, times(5)).execute(startsWith("ALTER TABLE"));
+        verify(jdbcTemplate, times(6)).execute(startsWith("ALTER TABLE"));
+        verify(jdbcTemplate).execute("ALTER TABLE agent_run ADD COLUMN product_mode VARCHAR(32) NULL AFTER user_id");
     }
 }

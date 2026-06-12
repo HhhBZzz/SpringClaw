@@ -48,6 +48,7 @@ public class RuntimeConsoleSchemaInitializer implements ApplicationRunner {
             for (String statement : splitSqlStatements(sql)) {
                 jdbcTemplate.execute(statement);
             }
+            ensureProductModeColumn();
             ensureQualityColumns();
         } catch (Exception ex) {
             log.warn("Runtime Console trace schema initialization skipped, reason={}", ex.getMessage());
@@ -95,6 +96,11 @@ public class RuntimeConsoleSchemaInitializer implements ApplicationRunner {
                 "ALTER TABLE agent_run_step ADD COLUMN quality_score INT NULL AFTER duration_ms");
         addColumnIfMissing("agent_run_step", "quality_level",
                 "ALTER TABLE agent_run_step ADD COLUMN quality_level VARCHAR(32) NULL AFTER quality_score");
+    }
+
+    private void ensureProductModeColumn() {
+        addColumnIfMissing("agent_run", "product_mode",
+                "ALTER TABLE agent_run ADD COLUMN product_mode VARCHAR(32) NULL AFTER user_id");
     }
 
     private void addColumnIfMissing(String tableName, String columnName, String alterSql) {

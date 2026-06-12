@@ -75,13 +75,15 @@ class AgentRunTraceServiceTest {
 
         verify(jdbcTemplate).update(
                 argThat(sql -> sql.startsWith("INSERT INTO agent_run\n")
+                        && sql.contains("product_mode")
                         && sql.contains("response_mode")
                         && sql.contains("execution_mode")
                         && sql.contains("intent")
+                        && sql.contains("product_mode = COALESCE(NULLIF(VALUES(product_mode), ''), product_mode)")
                         && sql.contains("response_mode = COALESCE(NULLIF(VALUES(response_mode), ''), response_mode)")
                         && sql.contains("execution_mode = COALESCE(NULLIF(VALUES(execution_mode), ''), execution_mode)")
                         && sql.contains("intent = COALESCE(NULLIF(VALUES(intent), ''), intent)")),
-                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()
         );
     }
 

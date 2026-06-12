@@ -110,6 +110,17 @@ public class AgentRunTraceService {
                                   String responseMode,
                                   String executionMode,
                                   String intent) {
+        recordRunMetadata(sessionKey, channel, userId, requestId, responseMode, executionMode, intent, null);
+    }
+
+    public void recordRunMetadata(String sessionKey,
+                                  String channel,
+                                  String userId,
+                                  String requestId,
+                                  String responseMode,
+                                  String executionMode,
+                                  String intent,
+                                  String productMode) {
         if (jdbcTemplate == null || !StringUtils.hasText(requestId)) {
             return;
         }
@@ -117,12 +128,13 @@ public class AgentRunTraceService {
         try {
             jdbcTemplate.update("""
                             INSERT INTO agent_run
-                            (id, request_id, session_key, channel, user_id, response_mode, execution_mode, intent, status, started_at, create_time, update_time, deleted)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'RUNNING', ?, ?, ?, 0)
+                            (id, request_id, session_key, channel, user_id, product_mode, response_mode, execution_mode, intent, status, started_at, create_time, update_time, deleted)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'RUNNING', ?, ?, ?, 0)
                             ON DUPLICATE KEY UPDATE
                               session_key = COALESCE(NULLIF(VALUES(session_key), ''), session_key),
                               channel = COALESCE(NULLIF(VALUES(channel), ''), channel),
                               user_id = COALESCE(NULLIF(VALUES(user_id), ''), user_id),
+                              product_mode = COALESCE(NULLIF(VALUES(product_mode), ''), product_mode),
                               response_mode = COALESCE(NULLIF(VALUES(response_mode), ''), response_mode),
                               execution_mode = COALESCE(NULLIF(VALUES(execution_mode), ''), execution_mode),
                               intent = COALESCE(NULLIF(VALUES(intent), ''), intent),
@@ -133,6 +145,7 @@ public class AgentRunTraceService {
                     emptyToNull(sessionKey),
                     defaultText(channel, "api"),
                     defaultText(userId, "unknown"),
+                    emptyToNull(productMode),
                     emptyToNull(responseMode),
                     emptyToNull(executionMode),
                     emptyToNull(intent),
@@ -420,7 +433,7 @@ public class AgentRunTraceService {
             return Map.of();
         }
         List<Map<String, Object>> runRows = jdbcTemplate.queryForList(
-                "SELECT request_id, session_key, channel, user_id, response_mode, " +
+                "SELECT request_id, session_key, channel, user_id, product_mode, response_mode, " +
                         "execution_mode, intent, status, started_at, finished_at, duration_ms, " +
                         "total_tokens, quality_score, quality_level, evaluation_json, error_message " +
                         "FROM agent_run WHERE request_id = ? AND deleted = 0",

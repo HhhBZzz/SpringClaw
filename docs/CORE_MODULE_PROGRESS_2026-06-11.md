@@ -56,12 +56,12 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 
 | 核心模块 | 当前实现位置 | 当前作用 | 成熟度 | 当前进度 | 稳定建议 |
 | --- | --- | --- | --- | --- | --- |
-| Runtime / Engine | `ChatServiceImpl`、`EngineSelector`、`AgentRuntimeEngine`、`BasicStreamEngine`、`AutonomousLoopEngine`、`OparLoopEngine`、`SimplifiedOparEngine` | 请求进入后选择执行引擎，完成同步、流式、OPAR、自动循环等执行路径 | 3 | 65% | 停止合并 engine；先把默认链路、fallback、streamable 确认边界记录清楚 |
+| Runtime / Engine | `ChatServiceImpl`、`EngineSelector`、`AgentRuntimeEngine`、`BasicStreamEngine`、`AutonomousLoopEngine`、`OparLoopEngine`、`SimplifiedOparEngine`、`AgentProductMode` | 请求进入后选择执行引擎，完成同步、流式、OPAR、自动循环等执行路径；后端已记录产品模式 `quick_answer` / `agent_analysis` / `execution_task` | 3 | 68% | 停止合并 engine；继续把内部 engine 名称收敛成用户能理解的产品模式 |
 | Model 调用层 | `AiProviderService`、`ModelCallExecutor`、`ModelTransportGuardService`、`LlmUsageRecordServiceImpl` | provider/model 切换、模型调用、传输异常保护、用量记录 | 4 | 80% | 保持稳定；不要在本轮把模型层和 agent loop 继续揉在一起 |
 | Tool 调用层 | `CapabilityRegistry`、`ToolOrchestrator`、`ToolRuntimeAspect`、`ToolPackDescriptor`、`SystemToolPack`、`WebSearchToolPack` | 工具注册、工具选择、工具包描述、AOP 审计、运行时工具调用；Workspace Guard 拒绝原因已能进入结构化审计 JSON | 3 | 65% | 下一步继续补 input/output/risk/duration 的真实字段，不扩工具数量 |
 | Context 管理 | `ChatContextFactory`、`ContextAssembler`、`VectorMemoryService` | 组装短期上下文、长期记忆召回、prompt 输入 | 3 | 55% | 暂不做复杂压缩系统；先记录上下文来源、窗口大小、召回优先级 |
 | Session / Task 生命周期 | `AgentSession`、`MessageEvent`、`ChatResultPersister`、`AsyncChatResultStore`、task service 包 | 保存会话、消息事件、异步结果、任务入口 | 3 | 50% | 先区分 chat session 和 long-running task；不要马上建新 Task Runtime |
-| Event Stream / Trace | `SseEventBridge`、`AgentRunTraceService`、`message_event`、`agent_run` 相关表 | 前端 SSE、运行 trace、工具审计事件、运行步骤展示；tool audit 可镜像到 run trace | 3 | 65% | 优先补 tool invocation 的结构化 input/output/risk/status，而不是增加新事件类型 |
+| Event Stream / Trace | `SseEventBridge`、`AgentRunTraceService`、`message_event`、`agent_run` 相关表 | 前端 SSE、运行 trace、工具审计事件、运行步骤展示；tool audit 可镜像到 run trace；`agent_run.product_mode` 已可持久化 | 3 | 68% | 下一步让前端 Command Center 消费 `productMode`，并补完整 timeline step schema |
 | Workspace 管理 | `WorkspaceReviewService`、`WorkspaceTaskService`、`LocalFilesystemService`、`WorkspaceEditToolPack`、`WorkspaceGuard` | 工作区检索、代码统计、文件候选、本地文件访问、工作区修改/命令；最小路径和命令边界校验 | 3 | 55% | 继续保持最小边界模型；不要引入完整 diff/rollback 框架 |
 | Permission / Policy | `ToolRiskPolicyService`、`ToolPermissionServiceImpl`、`AgentActionProposalService`、`application.yml` user-deny-tools | 风险分级、工具权限、动作确认、默认 deny 配置 | 2 | 45% | P0 是确认 streamable engine 写操作是否绕过 action_required；先补最小测试 |
 | Sandbox / Command Execution | `WorkspaceGuard`、`WorkspaceEditToolPack.workspaceRunCommand`、`SystemToolPack.runCommand`、`ScriptSkillExecutorService` | 执行 shell、脚本技能、工作区命令；workspace 命令已拦截危险命令和父目录路径段 | 2 | 45% | 当前仍不是成熟沙箱；先把拒绝原因、确认边界、审计记录做实 |
@@ -72,7 +72,7 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 | MCP 适配 | 当前未见稳定主线模块 | 未来外部工具协议适配层 | 1 | 10% | 现在不要做；等 Tool registry/schema/audit 稳定后再接 |
 | Plugin 系统 | 当前主要是 Skill/Tool 形态，未形成插件生命周期 | 未来可加载组件、版本、隔离、安装 | 1 | 15% | 现在不要做；避免项目发散 |
 | Multi-agent 通信 | 当前未形成独立 agent 协作协议 | 未来 agent-to-agent、handoff、角色协作 | 1 | 10% | 现在不要做；先把单 agent 生命周期跑稳 |
-| Frontend Command Center | Vue Agent Console、Admin Console、runtime console 相关页面 | 展示聊天、stream、trace、动作确认、后台运维数据 | 3 | 60% | 继续消费后端真实结构化 trace，不要先堆视觉功能 |
+| Frontend Command Center | Vue Agent Console、Admin Console、runtime console 相关页面 | 展示聊天、stream、trace、动作确认、后台运维数据；后端 SSE meta 已提供 `productMode` | 3 | 62% | 优先展示产品模式、风险等级和真实 timeline，不要先堆视觉功能 |
 
 ## 四、当前默认 Runtime 链路记录
 
@@ -291,6 +291,20 @@ ChatController
 - 工具调用单测
 - trace service 单测
 - 前端 runtime console 可看到真实字段
+
+### Step 3.5：产品模式 metadata 已落地
+
+当前状态：
+
+- `AgentProductMode` 将内部路由映射成 `quick_answer`、`agent_analysis`、`execution_task`。
+- `SseEventBridge.sendMeta` 已在 SSE meta 中输出 `productMode`。
+- `AgentRunTraceService.recordRunMetadata` 已持久化 `agent_run.product_mode`。
+- schema 和已有数据库迁移已补 `product_mode`。
+
+下一步：
+
+- 前端只展示产品模式，不展示 engine 类名。
+- Runtime Console replay 读取 `product_mode` 后，展示为“快速回答 / Agent 分析 / 执行任务”。
 
 ### Step 4：Context 输入记录化
 

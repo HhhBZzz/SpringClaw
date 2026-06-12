@@ -131,4 +131,23 @@ class VueOnlyFrontendPolicyTest {
                 .contains("productModeLabel")
                 .contains("runProductMode");
     }
+
+    @Test
+    void agentTimelineShouldConsumeStructuredStepFields() throws IOException {
+        String types = Files.readString(projectRoot.resolve("frontend/src/types.ts"));
+        String agentView = Files.readString(projectRoot.resolve("frontend/src/views/AgentView.vue"));
+
+        assertThat(types)
+                .contains("stepSchema?: string")
+                .contains("category?: string")
+                .contains("action?: string")
+                .contains("target?: string")
+                .contains("source?: string")
+                .contains("riskLevel?: string");
+
+        assertThat(agentView)
+                .contains("timelineStepDetail")
+                .contains("event.target || event.stepName")
+                .contains("step.source || step.riskLevel");
+    }
 }

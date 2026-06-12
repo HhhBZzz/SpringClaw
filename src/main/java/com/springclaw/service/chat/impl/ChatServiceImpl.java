@@ -178,9 +178,7 @@ public class ChatServiceImpl implements ChatService {
                     System.currentTimeMillis() - requestStartedAt);
             // 统一路由：通过 EngineSelector 选择引擎
             AgentEngine engine = engineSelector.select(context);
-            // StreamableAgentEngine 自行管理 SSE 生命周期和确认逻辑，不需要外部拦截
-            if (!(engine instanceof AgentEngine.StreamableAgentEngine)
-                    && shouldRequestActionConfirmation(context)) {
+            if (shouldRequestActionConfirmation(context)) {
                 streamActionRequired(context, lockToken, lockReleased, emitter);
                 return;
             }

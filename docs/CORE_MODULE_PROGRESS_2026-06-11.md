@@ -26,18 +26,18 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 当前未提交状态：
 
 - 当前瞬时状态以 `git status --short` 为准；本文不再记录易过期的文件列表。
-- 最近稳定基线已包含 Workspace Guard、stream action confirmation、Agent product mode metadata、timeline step schema、confirmation timeline、workspace tool action mapping。
+- 最近稳定基线已包含 Workspace Guard、stream action confirmation、Agent product mode metadata、timeline step schema、confirmation timeline、workspace tool action mapping、memory recall isolation。
 
 最近测试基线：
 
 - `mvn test`
-- 结果：`Tests run: 352, Failures: 0, Errors: 0, Skipped: 0`
+- 结果：`Tests run: 354, Failures: 0, Errors: 0, Skipped: 0`
 - `cd frontend && npm run build`
 - 结果：Vue typecheck 与 Vite build 通过
 - `git diff --check`
 - 结果：clean
 
-注意：当前稳定推进集中在 Workspace Guard、确认链路、trace 元数据、timeline step schema、前端 Command Center 真实展示；确认卡片和 workspace 命令/文件工具已开始进入结构化 timeline，命令预览和文件路径已进入工具输入摘要；不涉及 `AgentRuntimeEngine`、`AutonomousLoopEngine`、`OparLoopEngine` 合并或重构。
+注意：当前稳定推进集中在 Workspace Guard、确认链路、trace 元数据、timeline step schema、前端 Command Center 真实展示、Memory 召回隔离；确认卡片和 workspace 命令/文件工具已开始进入结构化 timeline，命令预览和文件路径已进入工具输入摘要；不涉及 `AgentRuntimeEngine`、`AutonomousLoopEngine`、`OparLoopEngine` 合并或重构。
 
 ## 三、核心最小模块进度表
 
@@ -54,13 +54,13 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 | Runtime / Engine | `ChatServiceImpl`、`EngineSelector`、`AgentRuntimeEngine`、`BasicStreamEngine`、`AutonomousLoopEngine`、`OparLoopEngine`、`SimplifiedOparEngine`、`AgentProductMode` | 请求进入后选择执行引擎，完成同步、流式、OPAR、自动循环等执行路径；后端已记录产品模式 `quick_answer` / `agent_analysis` / `execution_task` | 3 | 70% | 停止合并 engine；继续把内部 engine 名称收敛成用户能理解的产品模式 |
 | Model 调用层 | `AiProviderService`、`ModelCallExecutor`、`ModelTransportGuardService`、`LlmUsageRecordServiceImpl` | provider/model 切换、模型调用、传输异常保护、用量记录 | 4 | 80% | 保持稳定；不要在本轮把模型层和 agent loop 继续揉在一起 |
 | Tool 调用层 | `CapabilityRegistry`、`ToolOrchestrator`、`ToolRuntimeAspect`、`ToolPackDescriptor`、`SystemToolPack`、`WebSearchToolPack` | 工具注册、工具选择、工具包描述、AOP 审计、运行时工具调用；Workspace Guard 拒绝原因已能进入结构化审计 JSON；workspace edit/write/command 已映射为 file/command timeline action，并记录命令预览/文件路径 input summary | 3 | 70% | 下一步继续补 output/risk/duration 的真实字段，不扩工具数量 |
-| Context 管理 | `ChatContextFactory`、`ContextAssembler`、`VectorMemoryService` | 组装短期上下文、长期记忆召回、prompt 输入 | 3 | 55% | 暂不做复杂压缩系统；先记录上下文来源、窗口大小、召回优先级 |
+| Context 管理 | `ChatContextFactory`、`ContextAssembler`、`VectorMemoryService` | 组装短期上下文、长期记忆召回、prompt 输入；长期记忆召回已做 session/user 防御性隔离 | 3 | 58% | 暂不做复杂压缩系统；先记录上下文来源、窗口大小、召回优先级 |
 | Session / Task 生命周期 | `AgentSession`、`MessageEvent`、`ChatResultPersister`、`AsyncChatResultStore`、task service 包 | 保存会话、消息事件、异步结果、任务入口 | 3 | 50% | 先区分 chat session 和 long-running task；不要马上建新 Task Runtime |
 | Event Stream / Trace | `SseEventBridge`、`AgentRunTraceService`、`AgentRunTraceEvent`、`message_event`、`agent_run` 相关表 | 前端 SSE、运行 trace、工具审计事件、运行步骤展示；tool audit 可镜像到 run trace；`agent_run.product_mode` 已可持久化并回显到运行列表；trace event 已带 `springclaw.timeline-step.v1` 基础字段；用户确认 required/confirmed/cancelled 已进入 timeline；workspace 工具输入摘要已进入 trace target/input summary | 3 | 80% | 下一步把失败恢复、模型 fallback、重试等细节继续结构化，保持 MessageEvent 与结构化表的关联 |
 | Workspace 管理 | `WorkspaceReviewService`、`WorkspaceTaskService`、`LocalFilesystemService`、`WorkspaceEditToolPack`、`WorkspaceGuard` | 工作区检索、代码统计、文件候选、本地文件访问、工作区修改/命令；最小路径和命令边界校验 | 3 | 55% | 继续保持最小边界模型；不要引入完整 diff/rollback 框架 |
 | Permission / Policy | `ToolRiskPolicyService`、`ToolPermissionServiceImpl`、`AgentActionProposalService`、`application.yml` user-deny-tools | 风险分级、工具权限、动作确认、默认 deny 配置；动作确认生命周期已写入 run trace | 2 | 50% | 下一步继续把确认后的实际执行结果、拒绝原因和权限来源结构化 |
 | Sandbox / Command Execution | `WorkspaceGuard`、`WorkspaceEditToolPack.workspaceRunCommand`、`SystemToolPack.runCommand`、`ScriptSkillExecutorService` | 执行 shell、脚本技能、工作区命令；workspace 命令已拦截危险命令和父目录路径段 | 2 | 45% | 当前仍不是成熟沙箱；先把拒绝原因、确认边界、审计记录做实 |
-| Long-term Memory | `VectorMemoryService`、Redis Vector Store 配置、memory service 包 | 会话记忆、语义召回、跨会话用户记忆控制 | 3 | 55% | 保持为记忆召回层；暂不扩成知识库 RAG 平台 |
+| Long-term Memory | `VectorMemoryService`、Redis Vector Store 配置、memory service 包 | 会话记忆、语义召回、跨会话用户记忆控制；vector store 召回结果已在服务层二次过滤，降低跨会话/跨用户污染风险 | 3 | 60% | 保持为记忆召回层；下一步补召回来源、命中数和上下文预算记录，暂不扩成知识库 RAG 平台 |
 | Logs / Observability | `AgentRunTraceService`、`AgentRunTraceEvent`、`LlmUsageRecordServiceImpl`、audit/service/usage 包、后台页面 | token、耗时、模型调用、运行日志、审计记录；timeline step 已具备 category/action/target/source/riskLevel 基础字段；确认和 workspace 工具动作已可复盘，workspace 命令/文件输入摘要已可审计 | 3 | 62% | 先统一 requestId/runId/toolCallId 关联；成本和重试统计后置 |
 | Cache 策略 | `config/cache`、Redis 配置、天气/汇率/新闻等工具缓存 | 外部数据缓存、Redis 支撑记忆和状态 | 2 | 45% | 先维持工具级缓存；暂不做全局 agent cache 策略 |
 | Skill 系统 | `SkillCatalogService`、`SkillRegistryService`、`SkillRuntimeService`、skill markdown/runtime/script 包 | Skill 注册、导入、Python/builtin/prompt/script 运行 | 3 | 65% | 本轮冻结扩张；等 Runtime/Tool/Policy 稳定后再继续 marketplace/plugin 化 |
@@ -196,6 +196,7 @@ ChatController
 - 长期记忆召回
 - 会话作用域控制
 - ChatContext/AssembledContext
+- `VectorMemoryService` 对 vector store 结果做 session/user 防御性过滤，避免 filter 失效时串记忆
 
 还不完整：
 
@@ -203,8 +204,9 @@ ChatController
 - 没有文件上下文 map
 - 没有上下文优先级和污染控制
 - 没有摘要压缩策略
+- 召回来源、命中数、裁剪原因还没有进入 trace
 
-当前进度：55%
+当前进度：58%
 
 ## 六、稳定期优先级
 
@@ -351,6 +353,25 @@ ChatController
 
 - 继续补工具 output summary、duration、risk level 的真实来源。
 - 保持不新增大框架，不继续合并 engine。
+
+### Step Memory-1：长期记忆召回隔离已落地
+
+当前状态：
+
+- `VectorMemoryService.recallBySession` 已在 vector store 返回后按 `sessionKey` 再过滤一次。
+- `VectorMemoryService.recallByUser` 已在 vector store 返回后按 `userId` 再过滤一次。
+- 即使底层 vector store 忽略 metadata filter，也不会直接把其他 session/user 的记忆带进上下文。
+- 为了保留目标记忆，vector 查询会取 `topK * 2` 的小缓冲，再在服务层过滤并限制到原始 `topK`。
+
+验证：
+
+- `mvn -Dtest=VectorMemoryServiceTest test`
+- `mvn test`
+
+下一步：
+
+- 记录每次上下文实际使用的 memory source、命中数、裁剪数量。
+- 继续补上下文预算，不扩成知识库 RAG 平台。
 
 ### Step 4：Context 输入记录化
 

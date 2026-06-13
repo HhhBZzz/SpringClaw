@@ -165,7 +165,7 @@ public class VectorMemoryService implements MemoryService {
             List<Document> docs = vectorStore.similaritySearch(
                     SearchRequest.builder()
                             .query(safeQuery)
-                            .topK(safeTopK)
+                            .topK(Math.min(40, safeTopK * 2))
                             .similarityThresholdAll()
                             .filterExpression(filterExpression)
                             .build()
@@ -173,7 +173,7 @@ public class VectorMemoryService implements MemoryService {
             if (docs == null || docs.isEmpty()) {
                 return List.of();
             }
-            return docs;
+            return docs.stream().filter(fallbackFilter).limit(safeTopK).collect(Collectors.toList());
         } catch (Exception ex) {
             try {
                 List<Document> docs = vectorStore.similaritySearch(

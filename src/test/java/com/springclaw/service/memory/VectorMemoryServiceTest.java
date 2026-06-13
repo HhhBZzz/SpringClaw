@@ -47,6 +47,36 @@ class VectorMemoryServiceTest {
         Assertions.assertEquals(1L, status.vectorRecallHitCount());
     }
 
+    @Test
+    void shouldDefensivelyFilterVectorSessionResultsWhenStoreIgnoresFilter() {
+        InMemoryVectorStore vectorStore = new InMemoryVectorStore();
+        VectorMemoryService service = new VectorMemoryService(vectorStore, true, 12);
+
+        service.storeConversationTurn("s1", "api", "u1", "我喜欢Python", "后续按Python建议");
+        service.storeConversationTurn("s2", "api", "u2", "我喜欢Java", "后续按Java建议");
+
+        List<Document> docs = service.recallBySession("s2", "学习路线", 10);
+
+        Assertions.assertFalse(docs.isEmpty());
+        Assertions.assertTrue(docs.stream().allMatch(d -> "s2".equals(String.valueOf(d.getMetadata().get("sessionKey")))));
+        Assertions.assertTrue(docs.stream().noneMatch(d -> d.getText().contains("Python")));
+    }
+
+    @Test
+    void shouldDefensivelyFilterVectorUserResultsWhenStoreIgnoresFilter() {
+        InMemoryVectorStore vectorStore = new InMemoryVectorStore();
+        VectorMemoryService service = new VectorMemoryService(vectorStore, true, 12);
+
+        service.storeConversationTurn("s1", "api", "u1", "我喜欢Python", "后续按Python建议");
+        service.storeConversationTurn("s2", "api", "u2", "我喜欢Java", "后续按Java建议");
+
+        List<Document> docs = service.recallByUser("u2", "学习路线", 10);
+
+        Assertions.assertFalse(docs.isEmpty());
+        Assertions.assertTrue(docs.stream().allMatch(d -> "u2".equals(String.valueOf(d.getMetadata().get("userId")))));
+        Assertions.assertTrue(docs.stream().noneMatch(d -> d.getText().contains("Python")));
+    }
+
     static class InMemoryVectorStore implements VectorStore {
 
         private final List<Document> docs = new ArrayList<>();

@@ -1,6 +1,7 @@
 package com.springclaw.tool.runtime;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.service.auth.ToolPermissionService;
 import com.springclaw.service.workspace.WorkspaceGuard;
@@ -38,7 +39,8 @@ public class ToolRuntimeAspect {
     public Object aroundTool(ProceedingJoinPoint joinPoint) throws Throwable {
         MethodSignature signature = (MethodSignature) joinPoint.getSignature();
         String genericToolName = signature.getDeclaringType().getSimpleName() + "." + signature.getName();
-        String runtimeToolName = resolveRuntimeToolName(genericToolName, joinPoint.getArgs());
+        Object[] args = joinPoint.getArgs();
+        String runtimeToolName = resolveRuntimeToolName(genericToolName, args);
         ToolExecutionContext context = ToolExecutionContextHolder.get();
 
         try {
@@ -50,7 +52,7 @@ public class ToolRuntimeAspect {
         }
 
         toolGuardService.checkRateLimit(runtimeToolName);
-        toolAuditService.recordInvoke(runtimeToolName, "START", "invoke", context);
+        toolAuditService.recordInvoke(runtimeToolName, "START", renderToolInputDetail(runtimeToolName, args), context);
 
         try {
             Object result = joinPoint.proceed();
@@ -75,6 +77,54 @@ public class ToolRuntimeAspect {
         }
         String normalized = skillName.replaceAll("[^a-zA-Z0-9_-]", "_");
         return genericToolName + "[" + normalized + "]";
+    }
+
+    private String renderToolInputDetail(String runtimeToolName, Object[] args) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        String action = resolveToolInputAction(runtimeToolName);
+        String target = resolveToolInputTarget(runtimeToolName, args);
+        payload.put("schema", "springclaw.tool-input.v1");
+        payload.put("action", action);
+        payload.put("target", target);
+        payload.put("inputSummary", target);
+        try {
+            return OBJECT_MAPPER.writeValueAsString(payload);
+        } catch (Exception ignored) {
+            return "invoke";
+        }
+    }
+
+    private String resolveToolInputAction(String runtimeToolName) {
+        if (runtimeToolName.endsWith(".workspaceRunCommand")) {
+            return "command.run";
+        }
+        if (runtimeToolName.endsWith(".workspaceWriteFile")) {
+            return "file.write";
+        }
+        if (runtimeToolName.endsWith(".workspaceApplyPatch")) {
+            return "file.patch";
+        }
+        if (runtimeToolName.startsWith("ScriptSkillToolPack.runScriptSkill")) {
+            return "skill.run";
+        }
+        return "tool.invoke";
+    }
+
+    private String resolveToolInputTarget(String runtimeToolName, Object[] args) {
+        if (runtimeToolName.endsWith(".workspaceRunCommand")
+                || runtimeToolName.endsWith(".workspaceWriteFile")
+                || runtimeToolName.endsWith(".workspaceApplyPatch")
+                || runtimeToolName.startsWith("ScriptSkillToolPack.runScriptSkill")) {
+            return firstArg(args);
+        }
+        return runtimeToolName;
+    }
+
+    private String firstArg(Object[] args) {
+        if (args == null || args.length == 0 || args[0] == null) {
+            return "";
+        }
+        return TextUtils.truncate(String.valueOf(args[0]), 240);
     }
 
     private String summarize(Object result) {

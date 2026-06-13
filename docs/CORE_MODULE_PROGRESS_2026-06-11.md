@@ -31,13 +31,13 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 最近测试基线：
 
 - `mvn test`
-- 结果：`Tests run: 348, Failures: 0, Errors: 0, Skipped: 0`
+- 结果：`Tests run: 352, Failures: 0, Errors: 0, Skipped: 0`
 - `cd frontend && npm run build`
 - 结果：Vue typecheck 与 Vite build 通过
 - `git diff --check`
 - 结果：clean
 
-注意：当前稳定推进集中在 Workspace Guard、确认链路、trace 元数据、timeline step schema、前端 Command Center 真实展示；确认卡片和 workspace 命令/文件工具已开始进入结构化 timeline；不涉及 `AgentRuntimeEngine`、`AutonomousLoopEngine`、`OparLoopEngine` 合并或重构。
+注意：当前稳定推进集中在 Workspace Guard、确认链路、trace 元数据、timeline step schema、前端 Command Center 真实展示；确认卡片和 workspace 命令/文件工具已开始进入结构化 timeline，命令预览和文件路径已进入工具输入摘要；不涉及 `AgentRuntimeEngine`、`AutonomousLoopEngine`、`OparLoopEngine` 合并或重构。
 
 ## 三、核心最小模块进度表
 
@@ -53,15 +53,15 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 | --- | --- | --- | --- | --- | --- |
 | Runtime / Engine | `ChatServiceImpl`、`EngineSelector`、`AgentRuntimeEngine`、`BasicStreamEngine`、`AutonomousLoopEngine`、`OparLoopEngine`、`SimplifiedOparEngine`、`AgentProductMode` | 请求进入后选择执行引擎，完成同步、流式、OPAR、自动循环等执行路径；后端已记录产品模式 `quick_answer` / `agent_analysis` / `execution_task` | 3 | 70% | 停止合并 engine；继续把内部 engine 名称收敛成用户能理解的产品模式 |
 | Model 调用层 | `AiProviderService`、`ModelCallExecutor`、`ModelTransportGuardService`、`LlmUsageRecordServiceImpl` | provider/model 切换、模型调用、传输异常保护、用量记录 | 4 | 80% | 保持稳定；不要在本轮把模型层和 agent loop 继续揉在一起 |
-| Tool 调用层 | `CapabilityRegistry`、`ToolOrchestrator`、`ToolRuntimeAspect`、`ToolPackDescriptor`、`SystemToolPack`、`WebSearchToolPack` | 工具注册、工具选择、工具包描述、AOP 审计、运行时工具调用；Workspace Guard 拒绝原因已能进入结构化审计 JSON；workspace edit/write/command 已映射为 file/command timeline action | 3 | 68% | 下一步继续补 input/output/risk/duration 的真实字段，不扩工具数量 |
+| Tool 调用层 | `CapabilityRegistry`、`ToolOrchestrator`、`ToolRuntimeAspect`、`ToolPackDescriptor`、`SystemToolPack`、`WebSearchToolPack` | 工具注册、工具选择、工具包描述、AOP 审计、运行时工具调用；Workspace Guard 拒绝原因已能进入结构化审计 JSON；workspace edit/write/command 已映射为 file/command timeline action，并记录命令预览/文件路径 input summary | 3 | 70% | 下一步继续补 output/risk/duration 的真实字段，不扩工具数量 |
 | Context 管理 | `ChatContextFactory`、`ContextAssembler`、`VectorMemoryService` | 组装短期上下文、长期记忆召回、prompt 输入 | 3 | 55% | 暂不做复杂压缩系统；先记录上下文来源、窗口大小、召回优先级 |
 | Session / Task 生命周期 | `AgentSession`、`MessageEvent`、`ChatResultPersister`、`AsyncChatResultStore`、task service 包 | 保存会话、消息事件、异步结果、任务入口 | 3 | 50% | 先区分 chat session 和 long-running task；不要马上建新 Task Runtime |
-| Event Stream / Trace | `SseEventBridge`、`AgentRunTraceService`、`AgentRunTraceEvent`、`message_event`、`agent_run` 相关表 | 前端 SSE、运行 trace、工具审计事件、运行步骤展示；tool audit 可镜像到 run trace；`agent_run.product_mode` 已可持久化并回显到运行列表；trace event 已带 `springclaw.timeline-step.v1` 基础字段；用户确认 required/confirmed/cancelled 已进入 timeline | 3 | 78% | 下一步把文件目标、命令预览、失败恢复、模型 fallback 等细节继续结构化，保持 MessageEvent 与结构化表的关联 |
+| Event Stream / Trace | `SseEventBridge`、`AgentRunTraceService`、`AgentRunTraceEvent`、`message_event`、`agent_run` 相关表 | 前端 SSE、运行 trace、工具审计事件、运行步骤展示；tool audit 可镜像到 run trace；`agent_run.product_mode` 已可持久化并回显到运行列表；trace event 已带 `springclaw.timeline-step.v1` 基础字段；用户确认 required/confirmed/cancelled 已进入 timeline；workspace 工具输入摘要已进入 trace target/input summary | 3 | 80% | 下一步把失败恢复、模型 fallback、重试等细节继续结构化，保持 MessageEvent 与结构化表的关联 |
 | Workspace 管理 | `WorkspaceReviewService`、`WorkspaceTaskService`、`LocalFilesystemService`、`WorkspaceEditToolPack`、`WorkspaceGuard` | 工作区检索、代码统计、文件候选、本地文件访问、工作区修改/命令；最小路径和命令边界校验 | 3 | 55% | 继续保持最小边界模型；不要引入完整 diff/rollback 框架 |
 | Permission / Policy | `ToolRiskPolicyService`、`ToolPermissionServiceImpl`、`AgentActionProposalService`、`application.yml` user-deny-tools | 风险分级、工具权限、动作确认、默认 deny 配置；动作确认生命周期已写入 run trace | 2 | 50% | 下一步继续把确认后的实际执行结果、拒绝原因和权限来源结构化 |
 | Sandbox / Command Execution | `WorkspaceGuard`、`WorkspaceEditToolPack.workspaceRunCommand`、`SystemToolPack.runCommand`、`ScriptSkillExecutorService` | 执行 shell、脚本技能、工作区命令；workspace 命令已拦截危险命令和父目录路径段 | 2 | 45% | 当前仍不是成熟沙箱；先把拒绝原因、确认边界、审计记录做实 |
 | Long-term Memory | `VectorMemoryService`、Redis Vector Store 配置、memory service 包 | 会话记忆、语义召回、跨会话用户记忆控制 | 3 | 55% | 保持为记忆召回层；暂不扩成知识库 RAG 平台 |
-| Logs / Observability | `AgentRunTraceService`、`AgentRunTraceEvent`、`LlmUsageRecordServiceImpl`、audit/service/usage 包、后台页面 | token、耗时、模型调用、运行日志、审计记录；timeline step 已具备 category/action/target/source/riskLevel 基础字段；确认和 workspace 工具动作已可复盘 | 3 | 60% | 先统一 requestId/runId/toolCallId 关联；成本和重试统计后置 |
+| Logs / Observability | `AgentRunTraceService`、`AgentRunTraceEvent`、`LlmUsageRecordServiceImpl`、audit/service/usage 包、后台页面 | token、耗时、模型调用、运行日志、审计记录；timeline step 已具备 category/action/target/source/riskLevel 基础字段；确认和 workspace 工具动作已可复盘，workspace 命令/文件输入摘要已可审计 | 3 | 62% | 先统一 requestId/runId/toolCallId 关联；成本和重试统计后置 |
 | Cache 策略 | `config/cache`、Redis 配置、天气/汇率/新闻等工具缓存 | 外部数据缓存、Redis 支撑记忆和状态 | 2 | 45% | 先维持工具级缓存；暂不做全局 agent cache 策略 |
 | Skill 系统 | `SkillCatalogService`、`SkillRegistryService`、`SkillRuntimeService`、skill markdown/runtime/script 包 | Skill 注册、导入、Python/builtin/prompt/script 运行 | 3 | 65% | 本轮冻结扩张；等 Runtime/Tool/Policy 稳定后再继续 marketplace/plugin 化 |
 | MCP 适配 | 当前未见稳定主线模块 | 未来外部工具协议适配层 | 1 | 10% | 现在不要做；等 Tool registry/schema/audit 稳定后再接 |
@@ -135,15 +135,15 @@ ChatController
 
 还不完整：
 
-- 工具 input/output/risk/status/duration 结构化不足
+- 普通工具 output/risk/duration 结构化不足，workspace 工具 input summary 已开始补齐
 - 文件读取、文件修改、命令执行等细分来源还没有完全进入统一 step schema
 - 失败恢复、用户确认、重试没有形成完整 timeline
 
-当前进度：72%
+当前进度：76%
 
 ### 3. 工具调用是否结构化、可审计？
 
-当前结论：可审计，Workspace Guard 拒绝已经开始结构化；普通工具输入输出仍结构化不足。
+当前结论：可审计，Workspace Guard 拒绝和 workspace 工具输入已经开始结构化；普通工具输出、耗时、风险字段仍结构化不足。
 
 已经存在：
 
@@ -157,11 +157,11 @@ ChatController
 
 还不完整：
 
-- 普通工具 audit 仍主要以摘要文本保存，但 run trace 已可提取 action/target/source/riskLevel
-- `tool_invocation` 里 risk/input summary 等字段未充分填充
+- 普通工具 audit 仍主要以摘要文本保存，但 run trace 已可提取 action/target/source/riskLevel，workspace 命令/文件路径已进入 input summary
+- `tool_invocation` 里 risk/output/duration 等字段未充分填充
 - 工具 schema、权限、分组、调用日志还没有完全统一到一个 registry 视角
 
-当前进度：68%
+当前进度：70%
 
 ### 4. 文件和命令执行是否有边界和确认？
 
@@ -330,8 +330,27 @@ ChatController
 
 下一步：
 
-- 给工具审计补真实 input summary，让 `command.run` 能展示命令预览，`file.write/file.patch` 能展示文件路径。
 - 把模型 fallback、失败恢复、重试次数继续补进 timeline。
+
+### Step 3.8：workspace 工具 input summary 已进入 audit/trace
+
+当前状态：
+
+- `ToolRuntimeAspect` 已在工具 START 事件里输出 `springclaw.tool-input.v1`。
+- `MessageEventToolAuditService` 已将 `action`、`target`、`inputSummary` 展开进 `springclaw.tool-audit.v1`。
+- `AgentRunTraceService` 已优先使用工具审计中的 `action/target/inputSummary`。
+- `WorkspaceEditToolPack.workspaceRunCommand` 可展示命令预览。
+- `WorkspaceEditToolPack.workspaceWriteFile` / `workspaceApplyPatch` 可展示文件路径，不记录文件正文。
+
+验证：
+
+- `mvn -Dtest=ToolRuntimeAspectTest,MessageEventToolAuditServiceTest,AgentRunTraceServiceTest test`
+- `mvn test`
+
+下一步：
+
+- 继续补工具 output summary、duration、risk level 的真实来源。
+- 保持不新增大框架，不继续合并 engine。
 
 ### Step 4：Context 输入记录化
 

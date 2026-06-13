@@ -95,7 +95,7 @@ public class AgentRunTraceService {
                 ? auditDetail == null ? defaultText(type, "agent") : resolveToolAction(auditDetail)
                 : defaultText(timelineDetail.action(), category);
         String target = timelineDetail == null
-                ? auditDetail == null ? defaultText(stepName, type) : defaultText(auditDetail.toolName(), stepName)
+                ? auditDetail == null ? defaultText(stepName, type) : defaultText(auditDetail.target(), defaultText(auditDetail.toolName(), stepName))
                 : defaultText(timelineDetail.target(), stepName);
         String source = timelineDetail == null
                 ? auditDetail == null ? "" : defaultText(auditDetail.toolset(), "")
@@ -386,7 +386,10 @@ public class AgentRunTraceService {
                     text(payload, "normalizedStatus"),
                     text(payload, "phase"),
                     text(payload, "detail"),
-                    text(payload, "summary")
+                    text(payload, "summary"),
+                    text(payload, "action"),
+                    text(payload, "target"),
+                    text(payload, "inputSummary")
             );
         } catch (Exception ex) {
             return null;
@@ -419,7 +422,7 @@ public class AgentRunTraceService {
         if (detail == null || !"started".equalsIgnoreCase(status)) {
             return null;
         }
-        return defaultText(detail.detail(), detail.summary());
+        return defaultText(detail.inputSummary(), defaultText(detail.detail(), detail.summary()));
     }
 
     private String outputSummary(ToolAuditDetail detail, String fallback, String status) {
@@ -482,6 +485,9 @@ public class AgentRunTraceService {
 
     private String resolveToolAction(ToolAuditDetail detail) {
         String toolName = defaultText(detail == null ? null : detail.toolName(), "");
+        if (detail != null && StringUtils.hasText(detail.action())) {
+            return detail.action();
+        }
         if (toolName.endsWith(".workspaceRunCommand")) {
             return "command.run";
         }
@@ -508,7 +514,10 @@ public class AgentRunTraceService {
                                    String normalizedStatus,
                                    String phase,
                                    String detail,
-                                   String summary) {
+                                   String summary,
+                                   String action,
+                                   String target,
+                                   String inputSummary) {
     }
 
     private int nextSequenceNo(String requestId) {

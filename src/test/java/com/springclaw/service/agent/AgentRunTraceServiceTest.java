@@ -165,6 +165,54 @@ class AgentRunTraceServiceTest {
     }
 
     @Test
+    void shouldUseToolAuditInputFieldsForTraceTargetAndToolInvocationInput() throws Exception {
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        when(jdbcTemplate.queryForObject(any(String.class), eq(Integer.class), eq("req-1"))).thenReturn(0);
+        ObjectMapper objectMapper = new ObjectMapper();
+        AgentRunTraceService service = new AgentRunTraceService(messageEventService, objectMapper, jdbcTemplate);
+        String detail = """
+                {"schema":"springclaw.tool-audit.v1","eventType":"tool.invoke","toolName":"WorkspaceEditToolPack.workspaceRunCommand","toolset":"workspace","status":"START","normalizedStatus":"started","phase":"ACT-1","detail":"","summary":"tool=WorkspaceEditToolPack.workspaceRunCommand, status=START, phase=ACT-1, detail=mvn test","action":"command.run","target":"mvn test","inputSummary":"mvn test"}
+                """;
+
+        service.record("s1", "api", "u1", "req-1", "WorkspaceEditToolPack.workspaceRunCommand", "tool", "started", detail, 0L);
+
+        ArgumentCaptor<String> tracePayload = ArgumentCaptor.forClass(String.class);
+        verify(messageEventService).recordSingle(
+                eq("s1"),
+                eq("api"),
+                eq("u1"),
+                eq("SYSTEM"),
+                eq("TRACE"),
+                tracePayload.capture(),
+                eq("req-1")
+        );
+        Map<String, Object> trace = objectMapper.readValue(tracePayload.getValue(), new TypeReference<>() {
+        });
+        assertThat(trace)
+                .containsEntry("action", "command.run")
+                .containsEntry("target", "mvn test")
+                .containsEntry("source", "workspace")
+                .containsEntry("riskLevel", "write");
+        verify(jdbcTemplate).update(
+                startsWith("INSERT INTO tool_invocation"),
+                any(),
+                eq("req-1"),
+                eq("s1"),
+                eq("u1"),
+                eq("WorkspaceEditToolPack.workspaceRunCommand"),
+                eq("workspace"),
+                eq("started"),
+                eq(0L),
+                eq("mvn test"),
+                isNull(),
+                isNull(),
+                any(),
+                any()
+        );
+    }
+
+    @Test
     void shouldPersistStructuredToolAuditFieldsIntoToolInvocation() {
         MessageEventService messageEventService = mock(MessageEventService.class);
         JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);

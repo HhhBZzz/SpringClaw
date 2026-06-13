@@ -60,9 +60,12 @@ public class MessageEventToolAuditService implements ToolAuditService {
 
         String normalizedStatus = normalizeStatus(status);
         WorkspaceGuardAuditDetail guardDetail = parseWorkspaceGuardDetail(detail);
-        String effectiveDetail = guardDetail == null ? detail : guardDetail.message();
+        ToolInputAuditDetail inputDetail = guardDetail == null ? parseToolInputDetail(detail) : null;
+        String effectiveDetail = guardDetail == null
+                ? inputDetail == null ? detail : inputDetail.inputSummary()
+                : guardDetail.message();
         String summary = "tool=" + toolName + ", status=" + status + ", phase=" + phase + ", detail=" + effectiveDetail;
-        String content = serialize(buildPayload(toolName, status, normalizedStatus, effectiveDetail, sessionKey, channel, userId, requestId, phase, summary, guardDetail), summary);
+        String content = serialize(buildPayload(toolName, status, normalizedStatus, effectiveDetail, sessionKey, channel, userId, requestId, phase, summary, guardDetail, inputDetail), summary);
         messageEventService.recordSingle(sessionKey, channel, userId, "SYSTEM", "TOOL", content, requestId);
         if (agentRunTraceService != null && StringUtils.hasText(requestId)) {
             agentRunTraceService.record(
@@ -99,7 +102,8 @@ public class MessageEventToolAuditService implements ToolAuditService {
                                              String requestId,
                                              String phase,
                                              String summary,
-                                             WorkspaceGuardAuditDetail guardDetail) {
+                                             WorkspaceGuardAuditDetail guardDetail,
+                                             ToolInputAuditDetail inputDetail) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("schema", SCHEMA);
         payload.put("eventType", "tool.invoke");
@@ -119,6 +123,11 @@ public class MessageEventToolAuditService implements ToolAuditService {
             payload.put("guardReasonCode", guardDetail.reasonCode());
             payload.put("guardMessage", guardDetail.message());
             payload.put("guardResolvedPath", guardDetail.resolvedPath());
+        }
+        if (inputDetail != null) {
+            payload.put("action", inputDetail.action());
+            payload.put("target", inputDetail.target());
+            payload.put("inputSummary", inputDetail.inputSummary());
         }
         return payload;
     }
@@ -179,6 +188,31 @@ public class MessageEventToolAuditService implements ToolAuditService {
         }
     }
 
+    private ToolInputAuditDetail parseToolInputDetail(String detail) {
+        if (!StringUtils.hasText(detail) || !detail.trim().startsWith("{")) {
+            return null;
+        }
+        try {
+            Map<String, Object> payload = objectMapper.readValue(detail, new TypeReference<>() {
+            });
+            if (!"springclaw.tool-input.v1".equals(safeString(payload.get("schema")))) {
+                return null;
+            }
+            String target = safeString(payload.get("target"));
+            String inputSummary = safeString(payload.get("inputSummary"));
+            if (!StringUtils.hasText(inputSummary)) {
+                inputSummary = target;
+            }
+            return new ToolInputAuditDetail(
+                    safeString(payload.get("action")),
+                    target,
+                    inputSummary
+            );
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
     private String safeString(Object value) {
         return value == null ? "" : String.valueOf(value);
     }
@@ -187,5 +221,10 @@ public class MessageEventToolAuditService implements ToolAuditService {
                                              String reasonCode,
                                              String message,
                                              String resolvedPath) {
+    }
+
+    private record ToolInputAuditDetail(String action,
+                                        String target,
+                                        String inputSummary) {
     }
 }

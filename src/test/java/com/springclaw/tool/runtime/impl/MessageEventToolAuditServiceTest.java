@@ -100,4 +100,36 @@ class MessageEventToolAuditServiceTest {
         org.junit.jupiter.api.Assertions.assertEquals("命令包含父目录路径段，已被拦截", content.get("guardMessage"));
         org.junit.jupiter.api.Assertions.assertEquals("命令包含父目录路径段，已被拦截", content.get("detail"));
     }
+
+    @Test
+    void shouldExpandToolInputDetailIntoAuditJson() throws Exception {
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        AgentRunTraceService agentRunTraceService = mock(AgentRunTraceService.class);
+        MessageEventToolAuditService service = new MessageEventToolAuditService(messageEventService, agentRunTraceService);
+        ToolExecutionContext context = new ToolExecutionContext("s1", "api", "u1", "req-input", "ACT");
+        String inputDetail = """
+                {"schema":"springclaw.tool-input.v1","action":"command.run","target":"mvn test","inputSummary":"mvn test"}
+                """;
+
+        service.recordInvoke("WorkspaceEditToolPack.workspaceRunCommand", "START", inputDetail, context);
+
+        ArgumentCaptor<String> auditPayload = ArgumentCaptor.forClass(String.class);
+        verify(messageEventService).recordSingle(
+                eq("s1"),
+                eq("api"),
+                eq("u1"),
+                eq("SYSTEM"),
+                eq("TOOL"),
+                auditPayload.capture(),
+                eq("req-input")
+        );
+        Map<String, Object> content = new ObjectMapper().readValue(auditPayload.getValue(), new TypeReference<>() {
+        });
+        org.junit.jupiter.api.Assertions.assertEquals("START", content.get("status"));
+        org.junit.jupiter.api.Assertions.assertEquals("started", content.get("normalizedStatus"));
+        org.junit.jupiter.api.Assertions.assertEquals("command.run", content.get("action"));
+        org.junit.jupiter.api.Assertions.assertEquals("mvn test", content.get("target"));
+        org.junit.jupiter.api.Assertions.assertEquals("mvn test", content.get("inputSummary"));
+        org.junit.jupiter.api.Assertions.assertEquals("mvn test", content.get("detail"));
+    }
 }

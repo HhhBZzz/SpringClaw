@@ -4,6 +4,8 @@ import com.springclaw.config.ai.SpringClawAiProperties;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.ai.AiProviderStateService;
 import com.springclaw.service.usage.LlmUsageRecordService;
+import com.springclaw.service.usage.ModelCallMetricsService;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.micrometer.observation.ObservationRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.model.tool.ToolCallingManager;
@@ -28,12 +30,15 @@ class ModelCallExecutorTest {
     void shouldFailOverWithinSameProviderWhenCurrentModelTimesOut() throws Exception {
         AiProviderService providerService = newProviderService();
         providerService.switchActiveModel("coding-plan", "qwen3-coder-plus");
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
 
         ModelCallExecutor executor = new ModelCallExecutor(
                 providerService,
                 new ModelTransportGuardService(new ChatResponsePolicyService(""), 30),
                 mock(LlmUsageRecordService.class),
-                2
+                new ModelCallMetricsService(meterRegistry, true),
+                2,
+                0
         );
 
         ModelCallExecutor.ModelCallResult<String> result = executor.execute(
@@ -52,6 +57,13 @@ class ModelCallExecutorTest {
         assertThat(result.value()).isEqualTo("ok:qwen3.5-plus");
         assertThat(result.client().model()).isEqualTo("qwen3.5-plus");
         assertThat(providerService.activeClient().model()).isEqualTo("qwen3.5-plus");
+        assertThat(meterRegistry.counter(
+                "springclaw.ai.model.calls",
+                "outcome", "success",
+                "failover", "used",
+                "retry", "none"
+        ).count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.counter("springclaw.ai.model.failovers").count()).isEqualTo(1.0d);
     }
 
     @Test
@@ -84,10 +96,12 @@ class ModelCallExecutorTest {
     void shouldRetrySameModelOnceBeforeFailingOver() throws Exception {
         AiProviderService providerService = newProviderService();
         ModelTransportGuardService guardService = new ModelTransportGuardService(new ChatResponsePolicyService(""), 30);
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         ModelCallExecutor executor = new ModelCallExecutor(
                 providerService,
                 guardService,
                 mock(LlmUsageRecordService.class),
+                new ModelCallMetricsService(meterRegistry, true),
                 0,
                 1
         );
@@ -109,6 +123,13 @@ class ModelCallExecutorTest {
         assertThat(result.failedOver()).isFalse();
         assertThat(attempts).hasValue(2);
         assertThat(guardService.isModelCallEnabled(providerService.activeClient())).isTrue();
+        assertThat(meterRegistry.counter(
+                "springclaw.ai.model.calls",
+                "outcome", "success",
+                "failover", "none",
+                "retry", "used"
+        ).count()).isEqualTo(1.0d);
+        assertThat(meterRegistry.counter("springclaw.ai.model.retries").count()).isEqualTo(1.0d);
     }
 
     @Test

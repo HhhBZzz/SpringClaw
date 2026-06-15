@@ -3,6 +3,7 @@ package com.springclaw.service.chat.impl;
 import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.usage.LlmUsageRecordService;
+import com.springclaw.service.usage.ModelCallMetricsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatResponse;
@@ -26,6 +27,7 @@ public class ModelCallExecutor {
     private final AiProviderService aiProviderService;
     private final ModelTransportGuardService modelTransportGuardService;
     private final LlmUsageRecordService llmUsageRecordService;
+    private final ModelCallMetricsService modelCallMetricsService;
     private final int maxFailoverAttempts;
     private final int maxSameModelRetries;
 
@@ -33,13 +35,23 @@ public class ModelCallExecutor {
     public ModelCallExecutor(AiProviderService aiProviderService,
                              ModelTransportGuardService modelTransportGuardService,
                              LlmUsageRecordService llmUsageRecordService,
+                             @Autowired(required = false) ModelCallMetricsService modelCallMetricsService,
                              @Value("${springclaw.ai.max-failover-attempts:1}") int maxFailoverAttempts,
                              @Value("${springclaw.ai.same-model-retry-attempts:1}") int maxSameModelRetries) {
         this.aiProviderService = aiProviderService;
         this.modelTransportGuardService = modelTransportGuardService;
         this.llmUsageRecordService = llmUsageRecordService;
+        this.modelCallMetricsService = modelCallMetricsService;
         this.maxFailoverAttempts = Math.max(0, maxFailoverAttempts);
         this.maxSameModelRetries = Math.max(0, maxSameModelRetries);
+    }
+
+    public ModelCallExecutor(AiProviderService aiProviderService,
+                             ModelTransportGuardService modelTransportGuardService,
+                             LlmUsageRecordService llmUsageRecordService,
+                             @Value("${springclaw.ai.max-failover-attempts:1}") int maxFailoverAttempts,
+                             @Value("${springclaw.ai.same-model-retry-attempts:1}") int maxSameModelRetries) {
+        this(aiProviderService, modelTransportGuardService, llmUsageRecordService, null, maxFailoverAttempts, maxSameModelRetries);
     }
 
     ModelCallExecutor(AiProviderService aiProviderService,
@@ -97,6 +109,8 @@ public class ModelCallExecutor {
         Exception lastFailure = null;
         int failoversUsed = failedOver ? 1 : 0;
         int sameModelRetriesUsed = 0;
+        int totalSameModelRetriesUsed = 0;
+        long callStartedAt = System.currentTimeMillis();
 
         while (currentClient != null) {
             attemptedModels.add(displayModel(currentClient));
@@ -111,6 +125,7 @@ public class ModelCallExecutor {
                         source,
                         System.currentTimeMillis() - startedAt,
                         failedOver);
+                recordModelCallMetric(true, callStartedAt, failoversUsed, totalSameModelRetriesUsed);
                 return new ModelCallResult<>(
                         value,
                         currentClient,
@@ -119,6 +134,7 @@ public class ModelCallExecutor {
                 );
             } catch (Exception failure) {
                 if (!allowFailover || !modelTransportGuardService.isTransportFailure(failure)) {
+                    recordModelCallMetric(false, callStartedAt, failoversUsed, totalSameModelRetriesUsed);
                     throw failure;
                 }
                 if (lastFailure != null) {
@@ -127,6 +143,7 @@ public class ModelCallExecutor {
                 lastFailure = failure;
                 if (sameModelRetriesUsed < maxSameModelRetries) {
                     sameModelRetriesUsed++;
+                    totalSameModelRetriesUsed++;
                     log.warn("模型调用出现传输中断，重试同一模型: provider={}, model={}, attempt={}/{}, source={}, reason={}",
                             currentClient.providerId(),
                             currentClient.model(),
@@ -158,8 +175,10 @@ public class ModelCallExecutor {
         }
         if (lastFailure != null) {
             modelTransportGuardService.markProviderFailure(activeClient.providerId(), lastFailure);
+            recordModelCallMetric(false, callStartedAt, failoversUsed, totalSameModelRetriesUsed);
             throw lastFailure;
         }
+        recordModelCallMetric(false, callStartedAt, failoversUsed, totalSameModelRetriesUsed);
         throw new IllegalStateException("未找到可用模型执行请求");
     }
 
@@ -235,6 +254,21 @@ public class ModelCallExecutor {
 
     private String displayModel(AiProviderService.ActiveChatClient client) {
         return client == null ? "" : client.providerId() + ":" + client.model();
+    }
+
+    private void recordModelCallMetric(boolean success,
+                                       long callStartedAt,
+                                       int failoversUsed,
+                                       int sameModelRetriesUsed) {
+        if (modelCallMetricsService == null) {
+            return;
+        }
+        modelCallMetricsService.record(new ModelCallMetricsService.ModelCallMetric(
+                success,
+                System.currentTimeMillis() - callStartedAt,
+                Math.max(0, failoversUsed),
+                Math.max(0, sameModelRetriesUsed)
+        ));
     }
 
     @FunctionalInterface

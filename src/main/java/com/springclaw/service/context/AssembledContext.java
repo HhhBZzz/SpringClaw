@@ -10,12 +10,24 @@ public record AssembledContext(
         String question,
         String eventContext,
         String semanticContext,
-        String observePrompt
+        String observePrompt,
+        int memoryLearningActiveCount,
+        int memoryLearningFilteredCount
 ) {
 
     private static final String PROJECT_MEMORY_HEADING = "# 项目记忆（Memory Bank）";
     private static final String EVENT_CONTEXT_HEADING = "# 短期会话上下文（事件流）";
     private static final String CONTEXT_SOURCE_SCHEMA = "springclaw.context-source.v1";
+
+    public AssembledContext(String sessionKey,
+                            String channel,
+                            String userId,
+                            String question,
+                            String eventContext,
+                            String semanticContext,
+                            String observePrompt) {
+        this(sessionKey, channel, userId, question, eventContext, semanticContext, observePrompt, 0, 0);
+    }
 
     public ContextSourceSummary sourceSummary() {
         String projectMemoryContext = extractProjectMemoryContext(observePrompt);
@@ -25,7 +37,9 @@ public record AssembledContext(
                 safe(projectMemoryContext).length(),
                 safe(eventContext).length(),
                 safe(semanticContext).length(),
-                safe(observePrompt).length()
+                safe(observePrompt).length(),
+                memoryLearningActiveCount,
+                memoryLearningFilteredCount
         );
     }
 
@@ -39,7 +53,9 @@ public record AssembledContext(
                 updatedQuestion,
                 eventContext,
                 semanticContext,
-                renderObservePrompt(updatedQuestion, projectMemoryContext, eventContext, semanticContext)
+                renderObservePrompt(updatedQuestion, projectMemoryContext, eventContext, semanticContext),
+                memoryLearningActiveCount,
+                memoryLearningFilteredCount
         );
     }
 
@@ -94,10 +110,21 @@ public record AssembledContext(
                                        int memoryBankChars,
                                        int shortTermChars,
                                        int semanticMemoryChars,
-                                       int observePromptChars) {
+                                       int observePromptChars,
+                                       int memoryLearningActiveCount,
+                                       int memoryLearningFilteredCount) {
+
+        public ContextSourceSummary(String schema,
+                                    boolean memoryBankUsed,
+                                    int memoryBankChars,
+                                    int shortTermChars,
+                                    int semanticMemoryChars,
+                                    int observePromptChars) {
+            this(schema, memoryBankUsed, memoryBankChars, shortTermChars, semanticMemoryChars, observePromptChars, 0, 0);
+        }
 
         public static ContextSourceSummary empty() {
-            return new ContextSourceSummary(CONTEXT_SOURCE_SCHEMA, false, 0, 0, 0, 0);
+            return new ContextSourceSummary(CONTEXT_SOURCE_SCHEMA, false, 0, 0, 0, 0, 0, 0);
         }
     }
 }

@@ -18,7 +18,9 @@ class AgentContextMetricsServiceTest {
                 12,
                 34,
                 56,
-                78
+                78,
+                2,
+                1
         );
 
         service.record(summary);
@@ -27,6 +29,8 @@ class AgentContextMetricsServiceTest {
         Assertions.assertEquals(34.0D, contextChars(meterRegistry, "short_term").totalAmount());
         Assertions.assertEquals(56.0D, contextChars(meterRegistry, "semantic_memory").totalAmount());
         Assertions.assertEquals(78.0D, contextChars(meterRegistry, "observe_prompt").totalAmount());
+        Assertions.assertEquals(2.0D, learningEntries(meterRegistry, "active").totalAmount());
+        Assertions.assertEquals(1.0D, learningEntries(meterRegistry, "filtered").totalAmount());
         Assertions.assertEquals(1.0D, meterRegistry.counter("springclaw.agent.context.memory_bank.used").count());
         meterRegistry.getMeters().stream()
                 .map(Meter::getId)
@@ -59,6 +63,12 @@ class AgentContextMetricsServiceTest {
     private DistributionSummary contextChars(SimpleMeterRegistry meterRegistry, String source) {
         return meterRegistry.get("springclaw.agent.context.chars")
                 .tag("source", source)
+                .summary();
+    }
+
+    private DistributionSummary learningEntries(SimpleMeterRegistry meterRegistry, String status) {
+        return meterRegistry.get("springclaw.agent.context.learning.entries")
+                .tag("status", status)
                 .summary();
     }
 }

@@ -12,6 +12,7 @@ public class AgentContextMetricsService {
 
     private static final String CONTEXT_CHARS_METRIC = "springclaw.agent.context.chars";
     private static final String MEMORY_BANK_USED_METRIC = "springclaw.agent.context.memory_bank.used";
+    private static final String LEARNING_ENTRIES_METRIC = "springclaw.agent.context.learning.entries";
 
     private final MeterRegistry meterRegistry;
     private final boolean enabled;
@@ -30,6 +31,8 @@ public class AgentContextMetricsService {
         recordChars("short_term", summary.shortTermChars());
         recordChars("semantic_memory", summary.semanticMemoryChars());
         recordChars("observe_prompt", summary.observePromptChars());
+        recordLearningEntries("active", summary.memoryLearningActiveCount());
+        recordLearningEntries("filtered", summary.memoryLearningFilteredCount());
         if (summary.memoryBankUsed()) {
             meterRegistry.counter(MEMORY_BANK_USED_METRIC).increment();
         }
@@ -38,5 +41,10 @@ public class AgentContextMetricsService {
     private void recordChars(String source, int chars) {
         meterRegistry.summary(CONTEXT_CHARS_METRIC, "source", source)
                 .record(Math.max(0, chars));
+    }
+
+    private void recordLearningEntries(String status, int count) {
+        meterRegistry.summary(LEARNING_ENTRIES_METRIC, "status", status)
+                .record(Math.max(0, count));
     }
 }

@@ -48,17 +48,29 @@ public class MemoryBankService {
     }
 
     public String renderContext() {
+        return renderSnapshot().context();
+    }
+
+    public MemoryBankSnapshot renderSnapshot() {
         if (!enabled || !Files.isDirectory(rootPath)) {
-            return "";
+            return MemoryBankSnapshot.empty();
         }
         StringBuilder builder = new StringBuilder();
+        int activeLearningCount = 0;
+        int filteredLearningCount = 0;
         for (Path file : orderedMarkdownFiles()) {
-            appendFile(builder, file);
+            MemoryText memoryText = appendFile(builder, file);
+            activeLearningCount += memoryText.activeLearningCount();
+            filteredLearningCount += memoryText.filteredLearningCount();
             if (builder.length() >= maxChars) {
                 break;
             }
         }
-        return TextUtils.truncate(builder.toString(), maxChars).trim();
+        return new MemoryBankSnapshot(
+                TextUtils.truncate(builder.toString(), maxChars).trim(),
+                activeLearningCount,
+                filteredLearningCount
+        );
     }
 
     private List<Path> orderedMarkdownFiles() {
@@ -80,11 +92,12 @@ public class MemoryBankService {
         return index < 0 ? ORDERED_FILES.size() : index;
     }
 
-    private void appendFile(StringBuilder builder, Path file) {
+    private MemoryText appendFile(StringBuilder builder, Path file) {
         try {
-            String text = TextUtils.normalizeWS(readMemoryText(file));
+            MemoryText memoryText = readMemoryText(file);
+            String text = TextUtils.normalizeWS(memoryText.text());
             if (!StringUtils.hasText(text)) {
-                return;
+                return memoryText;
             }
             String name = file.getFileName().toString().replaceFirst("\\.md$", "");
             if (!builder.isEmpty()) {
@@ -92,22 +105,25 @@ public class MemoryBankService {
             }
             builder.append("### ").append(name).append("\n");
             builder.append(text).append("\n");
+            return memoryText;
         } catch (IOException ignored) {
             // 单个记忆文件读取失败时跳过，避免影响主链路。
+            return MemoryText.empty();
         }
     }
 
-    private String readMemoryText(Path file) throws IOException {
+    private MemoryText readMemoryText(Path file) throws IOException {
         String text = Files.readString(file, StandardCharsets.UTF_8);
         if (AGENT_LEARNINGS_FILE.equals(file.getFileName().toString())) {
-            return filterAgentLearnings(text);
+            LearningFilterResult result = filterAgentLearnings(text);
+            return new MemoryText(result.text(), result.activeCount(), result.filteredCount());
         }
-        return text;
+        return new MemoryText(text, 0, 0);
     }
 
-    private String filterAgentLearnings(String text) {
+    private LearningFilterResult filterAgentLearnings(String text) {
         if (!StringUtils.hasText(text)) {
-            return "";
+            return LearningFilterResult.empty();
         }
         StringBuilder preamble = new StringBuilder();
         List<String> sections = new ArrayList<>();
@@ -135,12 +151,17 @@ public class MemoryBankService {
         }
 
         StringBuilder filtered = new StringBuilder(preamble);
+        int activeCount = 0;
+        int filteredCount = 0;
         for (String section : sections) {
             if (isActiveLearningSection(section)) {
                 filtered.append(section);
+                activeCount++;
+            } else {
+                filteredCount++;
             }
         }
-        return filtered.toString();
+        return new LearningFilterResult(filtered.toString(), activeCount, filteredCount);
     }
 
     private boolean isActiveLearningSection(String section) {
@@ -150,5 +171,38 @@ public class MemoryBankService {
         }
         String status = matcher.group(1).toLowerCase(Locale.ROOT);
         return "active".equals(status) || "approved".equals(status);
+    }
+
+    public record MemoryBankSnapshot(String context,
+                                     int activeLearningCount,
+                                     int filteredLearningCount) {
+
+        public MemoryBankSnapshot {
+            context = TextUtils.safe(context);
+            activeLearningCount = Math.max(0, activeLearningCount);
+            filteredLearningCount = Math.max(0, filteredLearningCount);
+        }
+
+        public static MemoryBankSnapshot empty() {
+            return new MemoryBankSnapshot("", 0, 0);
+        }
+    }
+
+    private record MemoryText(String text,
+                              int activeLearningCount,
+                              int filteredLearningCount) {
+
+        private static MemoryText empty() {
+            return new MemoryText("", 0, 0);
+        }
+    }
+
+    private record LearningFilterResult(String text,
+                                        int activeCount,
+                                        int filteredCount) {
+
+        private static LearningFilterResult empty() {
+            return new LearningFilterResult("", 0, 0);
+        }
     }
 }

@@ -83,7 +83,9 @@ class SseEventBridgeTest {
 
                         # 长期语义记忆（同会话优先）
                         - [SESSION] ASSISTANT: 长期记忆
-                        """
+                        """,
+                2,
+                1
         );
         ChatContext context = chatContext("agent", "simplified", "general", AgentDecision.general("普通聊天"), assembled);
 
@@ -95,6 +97,8 @@ class SseEventBridgeTest {
         Assertions.assertEquals("springclaw.context-source.v1", summary.get("schema"));
         Assertions.assertEquals(true, summary.get("memoryBankUsed"));
         Assertions.assertEquals(12, summary.get("shortTermChars"));
+        Assertions.assertEquals(2, summary.get("memoryLearningActiveCount"));
+        Assertions.assertEquals(1, summary.get("memoryLearningFilteredCount"));
         Assertions.assertFalse(emitter.payloads.get(0).contains("停止合并 engine，优先稳定 harness。"));
     }
 
@@ -126,6 +130,8 @@ class SseEventBridgeTest {
         Assertions.assertEquals(0, summary.get("shortTermChars"));
         Assertions.assertEquals(0, summary.get("semanticMemoryChars"));
         Assertions.assertEquals(0, summary.get("observePromptChars"));
+        Assertions.assertEquals(0, summary.get("memoryLearningActiveCount"));
+        Assertions.assertEquals(0, summary.get("memoryLearningFilteredCount"));
     }
 
     private ChatContext chatContext(String responseMode,

@@ -119,6 +119,46 @@ class ContextAssemblerTest {
                 .contains("停止合并 engine，优先稳定 harness。");
     }
 
+    @Test
+    void shouldExposeMemoryLearningCountsInSourceSummary() throws Exception {
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        MemoryService memoryService = mock(MemoryService.class);
+        when(messageEventService.listRecent("s1", 16)).thenReturn(List.of());
+        when(memoryService.recallBySession("s1", "继续", 8)).thenReturn(List.of());
+        when(memoryService.recallByUser("u1", "继续", 4)).thenReturn(List.of());
+        Files.writeString(tempDir.resolve("agent-learnings.md"), """
+                # Agent Learnings
+
+                ## active learning
+
+                - status: active
+                - rule: 保留 active 经验。
+
+                ## disabled learning
+
+                - status: disabled
+                - rule: 不要带入 disabled 经验。
+                """);
+        MemoryBankService memoryBankService = new MemoryBankService(true, tempDir.toString(), 800);
+        ContextAssembler assembler = new ContextAssembler(
+                messageEventService,
+                memoryService,
+                memoryBankService,
+                8,
+                8,
+                400
+        );
+
+        AssembledContext context = assembler.assemble("s1", "api", "u1", "继续");
+        AssembledContext.ContextSourceSummary summary = context.sourceSummary();
+
+        assertThat(context.observePrompt())
+                .contains("保留 active 经验。")
+                .doesNotContain("不要带入 disabled 经验。");
+        assertThat(summary.memoryLearningActiveCount()).isEqualTo(1);
+        assertThat(summary.memoryLearningFilteredCount()).isEqualTo(1);
+    }
+
     private MessageEvent event(String role, String eventType, String content) {
         return event(role, eventType, content, "api", "s1", "u1");
     }

@@ -219,8 +219,15 @@ const contextSummaryRows = computed(() => {
   const summary = streamMeta.value?.contextSummary;
   if (!summary) return [];
   const chars = (value?: number) => `${Math.max(0, value || 0).toLocaleString()} chars`;
+  const count = (value?: number) => Math.max(0, value || 0).toLocaleString();
   return [
     { label: 'Memory Bank', value: summary.memoryBankUsed ? chars(summary.memoryBankChars) : 'Not used' },
+    {
+      label: 'Learning Rules',
+      value: summary.memoryBankUsed
+        ? `${count(summary.memoryLearningActiveCount)} active / ${count(summary.memoryLearningFilteredCount)} filtered`
+        : 'Not evaluated'
+    },
     { label: 'Short-term Context', value: chars(summary.shortTermChars) },
     { label: 'Semantic Memory', value: chars(summary.semanticMemoryChars) },
     { label: 'Observe Prompt', value: chars(summary.observePromptChars) }

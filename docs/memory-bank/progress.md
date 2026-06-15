@@ -12,8 +12,10 @@
 - Memory Bank 文件化项目记忆接入 ContextAssembler。
 - Agent 循环改写问题时保留 Memory Bank。
 - 历史问题提取避免把 Memory Bank 误当成用户问题。
+- Agent learning 最小闭环已接入：失败 trace 可沉淀到 `agent-learnings.md`，并在 Memory Bank 中优先进入上下文。
 
 当前正在推进：
 
-- Context 可解释。
+- Context 可解释与低基数观测。
+- 自进化经验沉淀，而不是只保存对话。
 - Harness 化，而不是继续扩 demo。

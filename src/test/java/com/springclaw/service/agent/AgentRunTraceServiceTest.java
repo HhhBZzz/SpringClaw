@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.service.event.MessageEventService;
+import com.springclaw.service.memory.AgentLearningService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -162,6 +163,19 @@ class AgentRunTraceServiceTest {
                 .containsEntry("target", "WorkspaceEditToolPack.workspaceRunCommand")
                 .containsEntry("source", "workspace")
                 .containsEntry("riskLevel", "write");
+    }
+
+    @Test
+    void shouldCaptureFailedTraceAsLearningCandidate() {
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        AgentLearningService learningService = mock(AgentLearningService.class);
+        when(jdbcTemplate.queryForObject(any(String.class), eq(Integer.class), eq("req-learn"))).thenReturn(0);
+        AgentRunTraceService service = new AgentRunTraceService(messageEventService, new ObjectMapper(), jdbcTemplate, learningService);
+
+        service.record("s1", "api", "u1", "req-learn", "workspaceRunCommand", "tool", "failed", "guard denied", 12L);
+
+        verify(learningService).captureTraceFailure(any(AgentRunTraceEvent.class));
     }
 
     @Test

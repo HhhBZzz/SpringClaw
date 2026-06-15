@@ -41,4 +41,23 @@ class MemoryBankServiceTest {
         assertThat(disabled.renderContext()).isEmpty();
         assertThat(missing.renderContext()).isEmpty();
     }
+
+    @Test
+    void shouldPrioritizeAgentLearningsBeforeProgressWhenRenderingContext() throws Exception {
+        Files.writeString(tempDir.resolve("project-brief.md"), "# Project Brief\n\nSpringClaw 是本地 Agent Harness。");
+        Files.writeString(tempDir.resolve("current-state.md"), "# Current State\n\n正在稳定 harness。");
+        Files.writeString(tempDir.resolve("architecture-decisions.md"), "# Architecture\n\nMemory Bank 是非 RAG 主线。");
+        Files.writeString(tempDir.resolve("agent-learnings.md"), "# Agent Learnings\n\n- rule: 不要重复执行同一失败命令。");
+        Files.writeString(tempDir.resolve("progress.md"), "# Progress\n\n这段进度可能被截断。");
+
+        MemoryBankService service = new MemoryBankService(true, tempDir.toString(), 900);
+
+        String context = service.renderContext();
+
+        assertThat(context)
+                .contains("### agent-learnings")
+                .contains("不要重复执行同一失败命令");
+        assertThat(context.indexOf("### agent-learnings"))
+                .isLessThan(context.indexOf("### progress"));
+    }
 }

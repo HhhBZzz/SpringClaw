@@ -17,3 +17,13 @@ Memory Bank 是当前非 RAG 记忆主线。
 Wiki.js / docs / README 属于 Project Knowledge，不属于用户 Long-term Memory。
 
 项目知识应该单独建 Knowledge Source，避免污染用户记忆。
+
+## Self Evolution
+
+自进化不是让模型自动改代码或无限写记忆，而是从执行失败、反例和验证结果中提炼可审阅规则。
+
+当前最小闭环：
+
+`AgentRunTraceEvent failed -> AgentLearningService -> docs/memory-bank/agent-learnings.md -> MemoryBankService -> 下一轮 Context`
+
+Obsidian / Wiki.js 后续应作为 Markdown knowledge source 接入，优先复用这个可审阅文件模型，而不是直接扩成 RAG。

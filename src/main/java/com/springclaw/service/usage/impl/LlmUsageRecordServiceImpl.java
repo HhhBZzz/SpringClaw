@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.springclaw.domain.entity.LlmUsageRecord;
 import com.springclaw.mapper.LlmUsageRecordMapper;
 import com.springclaw.service.usage.LlmUsageRecordService;
+import com.springclaw.service.usage.LlmUsageMetricsService;
 import com.springclaw.service.usage.TokenCacheUsage;
 import com.springclaw.service.usage.TokenCacheUsageExtractor;
 import org.slf4j.Logger;
@@ -13,6 +14,7 @@ import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.metadata.EmptyUsage;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -39,10 +41,18 @@ public class LlmUsageRecordServiceImpl extends ServiceImpl<LlmUsageRecordMapper,
     private static final int LOCAL_MAX_RECORDS = 1000;
 
     private final boolean dbEnabled;
+    private final LlmUsageMetricsService metricsService;
     private final Deque<LlmUsageRecord> localRecords = new ArrayDeque<>();
 
-    public LlmUsageRecordServiceImpl(@Value("${springclaw.persistence.db-enabled:false}") boolean dbEnabled) {
+    @Autowired
+    public LlmUsageRecordServiceImpl(@Value("${springclaw.persistence.db-enabled:false}") boolean dbEnabled,
+                                     @Autowired(required = false) LlmUsageMetricsService metricsService) {
         this.dbEnabled = dbEnabled;
+        this.metricsService = metricsService;
+    }
+
+    public LlmUsageRecordServiceImpl(boolean dbEnabled) {
+        this(dbEnabled, null);
     }
 
     @Override
@@ -79,6 +89,9 @@ public class LlmUsageRecordServiceImpl extends ServiceImpl<LlmUsageRecordMapper,
         record.setCompletionTokens(completionTokens);
         record.setTotalTokens(totalTokens);
         record.setRawUsageJson(promptCacheUsage.rawUsageJson());
+        if (metricsService != null) {
+            metricsService.record(record);
+        }
 
         if (dbEnabled) {
             try {

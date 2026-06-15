@@ -108,4 +108,51 @@ class MemoryBankServiceTest {
                 .doesNotContain("不要带入 rejected 经验。")
                 .doesNotContain("不要带入 superseded 经验。");
     }
+
+    @Test
+    void shouldReportLearningCountsWhenRenderingSnapshot() throws Exception {
+        Files.writeString(tempDir.resolve("agent-learnings.md"), """
+                # Agent Learnings
+
+                ## active learning
+
+                - status: active
+                - rule: 保留 active 经验。
+
+                ## legacy learning
+
+                - rule: 保留旧格式经验。
+
+                ## disabled learning
+
+                - status: disabled
+                - rule: 不要带入 disabled 经验。
+                """);
+
+        MemoryBankService service = new MemoryBankService(true, tempDir.toString(), 1200);
+
+        MemoryBankService.MemoryBankSnapshot snapshot = service.renderSnapshot();
+
+        assertThat(snapshot.context()).contains("保留 active 经验。").contains("保留旧格式经验。");
+        assertThat(snapshot.activeLearningCount()).isEqualTo(2);
+        assertThat(snapshot.filteredLearningCount()).isEqualTo(1);
+    }
+
+    @Test
+    void shouldReportFilteredLearningCountWhenNoLearningIsIncluded() throws Exception {
+        Files.writeString(tempDir.resolve("agent-learnings.md"), """
+                ## disabled learning
+
+                - status: disabled
+                - rule: 不要带入 disabled 经验。
+                """);
+
+        MemoryBankService service = new MemoryBankService(true, tempDir.toString(), 1200);
+
+        MemoryBankService.MemoryBankSnapshot snapshot = service.renderSnapshot();
+
+        assertThat(snapshot.context()).doesNotContain("不要带入 disabled 经验。");
+        assertThat(snapshot.activeLearningCount()).isZero();
+        assertThat(snapshot.filteredLearningCount()).isEqualTo(1);
+    }
 }

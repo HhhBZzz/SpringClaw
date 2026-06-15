@@ -164,6 +164,8 @@ class VueOnlyFrontendPolicyTest {
                 .contains("contextSummaryRows")
                 .contains("streamMeta.value?.contextSummary")
                 .contains("Memory Bank")
+                .contains("Learning Rules")
+                .contains("Not evaluated")
                 .contains("Short-term Context")
                 .contains("Semantic Memory")
                 .contains("Observe Prompt")

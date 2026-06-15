@@ -70,7 +70,8 @@ public class ContextAssembler {
                                      String question) {
         String eventContext = buildEventContext(sessionKey);
         String semanticContext = buildSemanticContext(sessionKey, userId, question);
-        String projectMemoryContext = memoryBankService.renderContext();
+        MemoryBankService.MemoryBankSnapshot projectMemory = memoryBankService.renderSnapshot();
+        String projectMemoryContext = projectMemory.context();
 
         String observePrompt = """
                 # 当前问题
@@ -98,7 +99,9 @@ public class ContextAssembler {
                 question,
                 eventContext,
                 semanticContext,
-                observePrompt
+                observePrompt,
+                projectMemory.activeLearningCount(),
+                projectMemory.filteredLearningCount()
         );
     }
 

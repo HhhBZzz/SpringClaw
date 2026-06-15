@@ -34,6 +34,8 @@ export interface ContextSourceSummary {
   shortTermChars?: number;
   semanticMemoryChars?: number;
   observePromptChars?: number;
+  memoryLearningActiveCount?: number;
+  memoryLearningFilteredCount?: number;
 }
 
 export interface ChatStreamMeta {

@@ -54,14 +54,14 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 | Runtime / Engine | `ChatServiceImpl`、`EngineSelector`、`AgentRuntimeEngine`、`BasicStreamEngine`、`AutonomousLoopEngine`、`OparLoopEngine`、`SimplifiedOparEngine`、`AgentProductMode` | 请求进入后选择执行引擎，完成同步、流式、OPAR、自动循环等执行路径；后端已记录产品模式 `quick_answer` / `agent_analysis` / `execution_task` | 3 | 70% | 停止合并 engine；继续把内部 engine 名称收敛成用户能理解的产品模式 |
 | Model 调用层 | `AiProviderService`、`ModelCallExecutor`、`ModelTransportGuardService`、`LlmUsageRecordServiceImpl`、`LlmUsageMetricsService`、`ModelCallMetricsService` | provider/model 切换、模型调用、传输异常保护、用量记录；prompt cache hit/miss、模型调用耗时、fallback、same-model retry 已能进入低基数 Micrometer 指标 | 4 | 84% | 保持稳定；后续只补失败原因聚合，不把 provider/model/source 直接放进指标标签 |
 | Tool 调用层 | `CapabilityRegistry`、`ToolOrchestrator`、`ToolRuntimeAspect`、`ToolPackDescriptor`、`SystemToolPack`、`WebSearchToolPack` | 工具注册、工具选择、工具包描述、AOP 审计、运行时工具调用；Workspace Guard 拒绝原因已能进入结构化审计 JSON；workspace edit/write/command 已映射为 file/command timeline action，并记录命令预览/文件路径 input summary | 3 | 70% | 下一步继续补 output/risk/duration 的真实字段，不扩工具数量 |
-| Context 管理 | `ChatContextFactory`、`ContextAssembler`、`AssembledContext`、`ConversationEventTextSupport`、`MemoryBankService`、`VectorMemoryService` | 组装短期上下文、文件化项目记忆、长期记忆召回、prompt 输入；长期记忆召回已做 session/user 防御性隔离，Memory Bank 已接入 observe prompt，meta 事件已暴露 context summary | 3 | 70% | 暂不做复杂压缩系统；下一步记录上下文来源、窗口大小、召回优先级到 trace |
+| Context 管理 | `ChatContextFactory`、`ContextAssembler`、`AssembledContext`、`ConversationEventTextSupport`、`MemoryBankService`、`VectorMemoryService` | 组装短期上下文、文件化项目记忆、长期记忆召回、prompt 输入；长期记忆召回已做 session/user 防御性隔离，Memory Bank 已接入 observe prompt，meta 事件已暴露 context summary，learning active/filtered count 已进入上下文摘要 | 3 | 72% | 暂不做复杂压缩系统；下一步记录上下文来源、窗口大小、召回优先级到 trace |
 | Session / Task 生命周期 | `AgentSession`、`MessageEvent`、`ChatResultPersister`、`AsyncChatResultStore`、task service 包 | 保存会话、消息事件、异步结果、任务入口 | 3 | 50% | 先区分 chat session 和 long-running task；不要马上建新 Task Runtime |
 | Event Stream / Trace | `SseEventBridge`、`AgentRunTraceService`、`AgentRunTraceEvent`、`message_event`、`agent_run` 相关表 | 前端 SSE、运行 trace、工具审计事件、运行步骤展示；tool audit 可镜像到 run trace；`agent_run.product_mode` 已可持久化并回显到运行列表；trace event 已带 `springclaw.timeline-step.v1` 基础字段；用户确认 required/confirmed/cancelled 已进入 timeline；workspace 工具输入摘要已进入 trace target/input summary | 3 | 80% | 下一步把失败恢复、模型 fallback、重试等细节继续结构化，保持 MessageEvent 与结构化表的关联 |
 | Workspace 管理 | `WorkspaceReviewService`、`WorkspaceTaskService`、`LocalFilesystemService`、`WorkspaceEditToolPack`、`WorkspaceGuard` | 工作区检索、代码统计、文件候选、本地文件访问、工作区修改/命令；最小路径和命令边界校验 | 3 | 55% | 继续保持最小边界模型；不要引入完整 diff/rollback 框架 |
 | Permission / Policy | `ToolRiskPolicyService`、`ToolPermissionServiceImpl`、`AgentActionProposalService`、`application.yml` user-deny-tools | 风险分级、工具权限、动作确认、默认 deny 配置；动作确认生命周期已写入 run trace | 2 | 50% | 下一步继续把确认后的实际执行结果、拒绝原因和权限来源结构化 |
 | Sandbox / Command Execution | `WorkspaceGuard`、`WorkspaceEditToolPack.workspaceRunCommand`、`SystemToolPack.runCommand`、`ScriptSkillExecutorService` | 执行 shell、脚本技能、工作区命令；workspace 命令已拦截危险命令和父目录路径段 | 2 | 45% | 当前仍不是成熟沙箱；先把拒绝原因、确认边界、审计记录做实 |
-| Long-term Memory / Memory Bank | `VectorMemoryService`、`MemoryBankService`、`AgentLearningService`、Redis Vector Store 配置、`docs/memory-bank` | 会话记忆、语义召回、跨会话用户记忆控制、文件化项目记忆；vector store 召回结果已在服务层二次过滤，Memory Bank 已作为非 RAG 项目记忆进入上下文；失败 trace 可沉淀为可审阅 learning 条目，learning status 已可过滤 inactive 经验 | 3 | 74% | 保持向量记忆为召回层，Memory Bank 作为项目长期记忆主线；下一步补召回来源、命中数和上下文预算记录 |
-| Logs / Observability | `AgentRunTraceService`、`AgentRunTraceEvent`、`LlmUsageRecordServiceImpl`、`LlmUsageMetricsService`、`ModelCallMetricsService`、`AgentContextMetricsService`、audit/service/usage 包、后台页面 | token、耗时、模型调用、运行日志、审计记录；timeline step 已具备 category/action/target/source/riskLevel 基础字段；确认和 workspace 工具动作已可复盘，workspace 命令/文件输入摘要已可审计；上下文来源摘要、模型用量、prompt cache hit/miss、模型调用耗时/fallback/retry 已通过 Micrometer 记录为低基数数值指标 | 3 | 70% | 先统一 requestId/runId/toolCallId 关联；下一步补 tool duration/error reason 和 memory recall hit count |
+| Long-term Memory / Memory Bank | `VectorMemoryService`、`MemoryBankService`、`AgentLearningService`、Redis Vector Store 配置、`docs/memory-bank` | 会话记忆、语义召回、跨会话用户记忆控制、文件化项目记忆；vector store 召回结果已在服务层二次过滤，Memory Bank 已作为非 RAG 项目记忆进入上下文；失败 trace 可沉淀为可审阅 learning 条目，learning status 已可过滤 inactive 经验，并统计 active/filtered learning 数量 | 3 | 76% | 保持向量记忆为召回层，Memory Bank 作为项目长期记忆主线；下一步补召回来源、上下文预算记录和 learning 影响复盘 |
+| Logs / Observability | `AgentRunTraceService`、`AgentRunTraceEvent`、`LlmUsageRecordServiceImpl`、`LlmUsageMetricsService`、`ModelCallMetricsService`、`AgentContextMetricsService`、audit/service/usage 包、后台页面 | token、耗时、模型调用、运行日志、审计记录；timeline step 已具备 category/action/target/source/riskLevel 基础字段；确认和 workspace 工具动作已可复盘，workspace 命令/文件输入摘要已可审计；上下文来源摘要、模型用量、prompt cache hit/miss、模型调用耗时/fallback/retry、learning active/filtered 数量已通过 Micrometer 记录为低基数数值指标 | 3 | 72% | 先统一 requestId/runId/toolCallId 关联；下一步补 tool duration/error reason 和 memory recall hit count |
 | Cache 策略 | `config/cache`、Redis 配置、天气/汇率/新闻等工具缓存 | 外部数据缓存、Redis 支撑记忆和状态 | 2 | 45% | 先维持工具级缓存；暂不做全局 agent cache 策略 |
 | Skill 系统 | `SkillCatalogService`、`SkillRegistryService`、`SkillRuntimeService`、skill markdown/runtime/script 包 | Skill 注册、导入、Python/builtin/prompt/script 运行 | 3 | 65% | 本轮冻结扩张；等 Runtime/Tool/Policy 稳定后再继续 marketplace/plugin 化 |
 | MCP 适配 | 当前未见稳定主线模块 | 未来外部工具协议适配层 | 1 | 10% | 现在不要做；等 Tool registry/schema/audit 稳定后再接 |
@@ -477,6 +477,7 @@ ChatController
 - 学习条目写入 `docs/memory-bank/agent-learnings.md`，按 signature 去重，字段短文本截断，不保存完整 prompt。
 - `AgentRunTraceService` 在记录失败 trace 后 best-effort 调用学习服务，不影响 trace 主链路。
 - `MemoryBankService` 已优先读取 `agent-learnings.md`，并只让 active/approved/旧格式经验进入下一轮 Context；`disabled/rejected/superseded` 会被过滤。
+- `MemoryBankService.renderSnapshot`、`AssembledContext.sourceSummary`、SSE meta 和 `AgentContextMetricsService` 已暴露 active/filtered learning count，用于判断 Memory Bank 中按状态可进入上下文的学习规则数量，以及被过滤的失效规则数量。
 
 验证：
 
@@ -488,7 +489,7 @@ ChatController
 
 - 在现有 status 过滤基础上增加用户确认/撤销入口，避免错误规则污染上下文。
 - 把 Obsidian / Wiki.js 作为 Markdown Knowledge Source 接入，不把它们直接混进用户长期记忆或向量 RAG。
-- 增加 learning hit count：统计哪些 learning 被拼入上下文、是否影响后续成功率。
+- 继续补 learning 影响复盘：把 active learning count 和后续任务成功/失败 trace 关联起来。
 
 ### Step 5：再评估 Workspace diff/rollback，不急着实现
 

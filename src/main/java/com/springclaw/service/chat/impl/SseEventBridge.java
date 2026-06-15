@@ -407,14 +407,16 @@ public class SseEventBridge {
                 ? AssembledContext.ContextSourceSummary.empty()
                 : summary;
         return """
-                {"schema":"%s","memoryBankUsed":%s,"memoryBankChars":%d,"shortTermChars":%d,"semanticMemoryChars":%d,"observePromptChars":%d}
+                {"schema":"%s","memoryBankUsed":%s,"memoryBankChars":%d,"shortTermChars":%d,"semanticMemoryChars":%d,"observePromptChars":%d,"memoryLearningActiveCount":%d,"memoryLearningFilteredCount":%d}
                 """.formatted(
                 jsonEscape(value.schema()),
                 value.memoryBankUsed(),
                 Math.max(0, value.memoryBankChars()),
                 Math.max(0, value.shortTermChars()),
                 Math.max(0, value.semanticMemoryChars()),
-                Math.max(0, value.observePromptChars())
+                Math.max(0, value.observePromptChars()),
+                Math.max(0, value.memoryLearningActiveCount()),
+                Math.max(0, value.memoryLearningFilteredCount())
         ).trim();
     }
 

@@ -27,6 +27,15 @@ export interface ChatResponse {
 export type ChatResponseMode = 'agent' | 'fast' | 'deep' | 'tool';
 export type AgentProductMode = 'quick_answer' | 'agent_analysis' | 'execution_task';
 
+export interface ContextSourceSummary {
+  schema?: string;
+  memoryBankUsed?: boolean;
+  memoryBankChars?: number;
+  shortTermChars?: number;
+  semanticMemoryChars?: number;
+  observePromptChars?: number;
+}
+
 export interface ChatStreamMeta {
   requestId?: string;
   productMode?: AgentProductMode | string;
@@ -36,6 +45,7 @@ export interface ChatStreamMeta {
   routingReason?: string;
   originalQuestion?: string;
   effectiveQuestion?: string;
+  contextSummary?: ContextSourceSummary;
 }
 
 export interface AgentTraceEvent {

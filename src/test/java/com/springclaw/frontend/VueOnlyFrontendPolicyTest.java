@@ -150,4 +150,23 @@ class VueOnlyFrontendPolicyTest {
                 .contains("event.target || event.stepName")
                 .contains("step.source || step.riskLevel");
     }
+
+    @Test
+    void agentConsoleShouldExposeContextSummaryMetadata() throws IOException {
+        String types = Files.readString(projectRoot.resolve("frontend/src/types.ts"));
+        String agentView = Files.readString(projectRoot.resolve("frontend/src/views/AgentView.vue"));
+
+        assertThat(types)
+                .contains("export interface ContextSourceSummary")
+                .contains("contextSummary?: ContextSourceSummary");
+
+        assertThat(agentView)
+                .contains("contextSummaryRows")
+                .contains("streamMeta.value?.contextSummary")
+                .contains("Memory Bank")
+                .contains("Short-term Context")
+                .contains("Semantic Memory")
+                .contains("Observe Prompt")
+                .contains("context-summary-grid");
+    }
 }

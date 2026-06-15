@@ -215,6 +215,18 @@ const currentRequestId = computed(() => {
   return streamMeta.value?.requestId || agentDecision.value?.requestId || latestTrace.value?.requestId || '-';
 });
 
+const contextSummaryRows = computed(() => {
+  const summary = streamMeta.value?.contextSummary;
+  if (!summary) return [];
+  const chars = (value?: number) => `${Math.max(0, value || 0).toLocaleString()} chars`;
+  return [
+    { label: 'Memory Bank', value: summary.memoryBankUsed ? chars(summary.memoryBankChars) : 'Not used' },
+    { label: 'Short-term Context', value: chars(summary.shortTermChars) },
+    { label: 'Semantic Memory', value: chars(summary.semanticMemoryChars) },
+    { label: 'Observe Prompt', value: chars(summary.observePromptChars) }
+  ];
+});
+
 const resolvedQuestionLabel = computed(() => {
   const original = (streamMeta.value?.originalQuestion || '').trim();
   const effective = (streamMeta.value?.effectiveQuestion || '').trim();
@@ -1580,6 +1592,12 @@ onUnmounted(() => {
                       {{ historyLoading ? 'Syncing' : 'Sync History' }}
                     </button>
                     <button type="button" :disabled="busy || !messages.length" @click="clearCurrentHistory">Clear Local</button>
+                    <div v-if="contextSummaryRows.length" class="context-summary-grid" aria-label="Context source summary">
+                      <span v-for="row in contextSummaryRows" :key="row.label" class="context-summary-chip">
+                        <small>{{ row.label }}</small>
+                        <strong>{{ row.value }}</strong>
+                      </span>
+                    </div>
                   </div>
                   <p v-if="runtimeActionStatus" class="runtime-action-status">{{ runtimeActionStatus }}</p>
                 </div>

@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
 public final class ConversationEventTextSupport {
 
     private static final Pattern OBSERVE_QUESTION_PATTERN = Pattern.compile(
-            "\\[OBSERVE\\]\\s*# 当前问题\\s*(.*?)\\s*(?:# 短期会话上下文（事件流）|$)",
+            "\\[OBSERVE\\]\\s*# 当前问题\\s*(.*?)\\s*(?:# 项目记忆（Memory Bank）|# 短期会话上下文（事件流）|$)",
             Pattern.DOTALL
     );
 

@@ -9,6 +9,7 @@ import com.springclaw.service.agent.AgentRunTraceEvent;
 import com.springclaw.service.agent.AgentRunTraceService;
 import com.springclaw.service.agent.CapabilityResult;
 import com.springclaw.service.agent.VerificationResult;
+import com.springclaw.service.context.AssembledContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -62,8 +63,11 @@ public class SseEventBridge {
                     productMode
             );
         }
+        AssembledContext.ContextSourceSummary contextSummary = context.assembled() == null
+                ? AssembledContext.ContextSourceSummary.empty()
+                : context.assembled().sourceSummary();
         String payload = """
-                {"requestId":"%s","productMode":"%s","responseMode":"%s","executionMode":"%s","intent":"%s","routingReason":"%s","originalQuestion":"%s","effectiveQuestion":"%s"}
+                {"requestId":"%s","productMode":"%s","responseMode":"%s","executionMode":"%s","intent":"%s","routingReason":"%s","originalQuestion":"%s","effectiveQuestion":"%s","contextSummary":%s}
                 """.formatted(
                 jsonEscape(context.requestId()),
                 jsonEscape(productMode),
@@ -72,7 +76,8 @@ public class SseEventBridge {
                 jsonEscape(context.intent()),
                 jsonEscape(context.routingReason()),
                 jsonEscape(context.userMessage()),
-                jsonEscape(context.effectiveUserMessage())
+                jsonEscape(context.effectiveUserMessage()),
+                renderContextSummary(contextSummary)
         ).trim();
         sendEvent(emitter, "meta", payload);
     }
@@ -384,6 +389,22 @@ public class SseEventBridge {
         return values.stream()
                 .map(value -> "\"" + jsonEscape(value) + "\"")
                 .collect(Collectors.joining(",", "[", "]"));
+    }
+
+    private String renderContextSummary(AssembledContext.ContextSourceSummary summary) {
+        AssembledContext.ContextSourceSummary value = summary == null
+                ? AssembledContext.ContextSourceSummary.empty()
+                : summary;
+        return """
+                {"schema":"%s","memoryBankUsed":%s,"memoryBankChars":%d,"shortTermChars":%d,"semanticMemoryChars":%d,"observePromptChars":%d}
+                """.formatted(
+                jsonEscape(value.schema()),
+                value.memoryBankUsed(),
+                Math.max(0, value.memoryBankChars()),
+                Math.max(0, value.shortTermChars()),
+                Math.max(0, value.semanticMemoryChars()),
+                Math.max(0, value.observePromptChars())
+        ).trim();
     }
 
     private String jsonEscape(String text) {

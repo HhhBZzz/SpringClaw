@@ -15,6 +15,19 @@ public record AssembledContext(
 
     private static final String PROJECT_MEMORY_HEADING = "# 项目记忆（Memory Bank）";
     private static final String EVENT_CONTEXT_HEADING = "# 短期会话上下文（事件流）";
+    private static final String CONTEXT_SOURCE_SCHEMA = "springclaw.context-source.v1";
+
+    public ContextSourceSummary sourceSummary() {
+        String projectMemoryContext = extractProjectMemoryContext(observePrompt);
+        return new ContextSourceSummary(
+                CONTEXT_SOURCE_SCHEMA,
+                hasText(projectMemoryContext),
+                safe(projectMemoryContext).length(),
+                safe(eventContext).length(),
+                safe(semanticContext).length(),
+                safe(observePrompt).length()
+        );
+    }
 
     public AssembledContext withQuestion(String nextQuestion) {
         String updatedQuestion = hasText(nextQuestion) ? nextQuestion.trim() : question;
@@ -74,5 +87,17 @@ public record AssembledContext(
 
     private static String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    public record ContextSourceSummary(String schema,
+                                       boolean memoryBankUsed,
+                                       int memoryBankChars,
+                                       int shortTermChars,
+                                       int semanticMemoryChars,
+                                       int observePromptChars) {
+
+        public static ContextSourceSummary empty() {
+            return new ContextSourceSummary(CONTEXT_SOURCE_SCHEMA, false, 0, 0, 0, 0);
+        }
     }
 }

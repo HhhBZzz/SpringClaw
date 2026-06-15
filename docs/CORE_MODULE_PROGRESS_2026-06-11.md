@@ -31,7 +31,7 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 最近测试基线：
 
 - `mvn test`
-- 结果：`Tests run: 359, Failures: 0, Errors: 0, Skipped: 0`
+- 结果：`Tests run: 362, Failures: 0, Errors: 0, Skipped: 0`
 - `cd frontend && npm run build`
 - 结果：Vue typecheck 与 Vite build 通过
 - `git diff --check`
@@ -54,7 +54,7 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 | Runtime / Engine | `ChatServiceImpl`、`EngineSelector`、`AgentRuntimeEngine`、`BasicStreamEngine`、`AutonomousLoopEngine`、`OparLoopEngine`、`SimplifiedOparEngine`、`AgentProductMode` | 请求进入后选择执行引擎，完成同步、流式、OPAR、自动循环等执行路径；后端已记录产品模式 `quick_answer` / `agent_analysis` / `execution_task` | 3 | 70% | 停止合并 engine；继续把内部 engine 名称收敛成用户能理解的产品模式 |
 | Model 调用层 | `AiProviderService`、`ModelCallExecutor`、`ModelTransportGuardService`、`LlmUsageRecordServiceImpl` | provider/model 切换、模型调用、传输异常保护、用量记录 | 4 | 80% | 保持稳定；不要在本轮把模型层和 agent loop 继续揉在一起 |
 | Tool 调用层 | `CapabilityRegistry`、`ToolOrchestrator`、`ToolRuntimeAspect`、`ToolPackDescriptor`、`SystemToolPack`、`WebSearchToolPack` | 工具注册、工具选择、工具包描述、AOP 审计、运行时工具调用；Workspace Guard 拒绝原因已能进入结构化审计 JSON；workspace edit/write/command 已映射为 file/command timeline action，并记录命令预览/文件路径 input summary | 3 | 70% | 下一步继续补 output/risk/duration 的真实字段，不扩工具数量 |
-| Context 管理 | `ChatContextFactory`、`ContextAssembler`、`ConversationEventTextSupport`、`MemoryBankService`、`VectorMemoryService` | 组装短期上下文、文件化项目记忆、长期记忆召回、prompt 输入；长期记忆召回已做 session/user 防御性隔离，Memory Bank 已接入 observe prompt | 3 | 65% | 暂不做复杂压缩系统；先记录上下文来源、窗口大小、召回优先级 |
+| Context 管理 | `ChatContextFactory`、`ContextAssembler`、`AssembledContext`、`ConversationEventTextSupport`、`MemoryBankService`、`VectorMemoryService` | 组装短期上下文、文件化项目记忆、长期记忆召回、prompt 输入；长期记忆召回已做 session/user 防御性隔离，Memory Bank 已接入 observe prompt，meta 事件已暴露 context summary | 3 | 68% | 暂不做复杂压缩系统；下一步记录上下文来源、窗口大小、召回优先级到 trace |
 | Session / Task 生命周期 | `AgentSession`、`MessageEvent`、`ChatResultPersister`、`AsyncChatResultStore`、task service 包 | 保存会话、消息事件、异步结果、任务入口 | 3 | 50% | 先区分 chat session 和 long-running task；不要马上建新 Task Runtime |
 | Event Stream / Trace | `SseEventBridge`、`AgentRunTraceService`、`AgentRunTraceEvent`、`message_event`、`agent_run` 相关表 | 前端 SSE、运行 trace、工具审计事件、运行步骤展示；tool audit 可镜像到 run trace；`agent_run.product_mode` 已可持久化并回显到运行列表；trace event 已带 `springclaw.timeline-step.v1` 基础字段；用户确认 required/confirmed/cancelled 已进入 timeline；workspace 工具输入摘要已进入 trace target/input summary | 3 | 80% | 下一步把失败恢复、模型 fallback、重试等细节继续结构化，保持 MessageEvent 与结构化表的关联 |
 | Workspace 管理 | `WorkspaceReviewService`、`WorkspaceTaskService`、`LocalFilesystemService`、`WorkspaceEditToolPack`、`WorkspaceGuard` | 工作区检索、代码统计、文件候选、本地文件访问、工作区修改/命令；最小路径和命令边界校验 | 3 | 55% | 继续保持最小边界模型；不要引入完整 diff/rollback 框架 |
@@ -67,7 +67,7 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 | MCP 适配 | 当前未见稳定主线模块 | 未来外部工具协议适配层 | 1 | 10% | 现在不要做；等 Tool registry/schema/audit 稳定后再接 |
 | Plugin 系统 | 当前主要是 Skill/Tool 形态，未形成插件生命周期 | 未来可加载组件、版本、隔离、安装 | 1 | 15% | 现在不要做；避免项目发散 |
 | Multi-agent 通信 | 当前未形成独立 agent 协作协议 | 未来 agent-to-agent、handoff、角色协作 | 1 | 10% | 现在不要做；先把单 agent 生命周期跑稳 |
-| Frontend Command Center | Vue Agent Console、Admin Console、runtime console 相关页面 | 展示聊天、stream、trace、动作确认、后台运维数据；Agent Console 与 Admin 表已展示 `productMode`；timeline 已消费结构化 step 字段并清理 JSON detail 展示 | 3 | 68% | 继续展示风险等级和真实 timeline，不要先堆视觉功能 |
+| Frontend Command Center | Vue Agent Console、Admin Console、runtime console 相关页面、`ChatStreamMeta.contextSummary` | 展示聊天、stream、trace、动作确认、后台运维数据；Agent Console 与 Admin 表已展示 `productMode`；timeline 已消费结构化 step 字段并清理 JSON detail 展示；前端类型已接收 context summary | 3 | 70% | 继续展示风险等级和真实 timeline，不要先堆视觉功能 |
 
 ## 四、当前默认 Runtime 链路记录
 
@@ -199,6 +199,7 @@ ChatController
 - ChatContext/AssembledContext
 - `VectorMemoryService` 对 vector store 结果做 session/user 防御性过滤，避免 filter 失效时串记忆
 - `ConversationEventTextSupport` 已避免把 Memory Bank 内容误提取成用户问题
+- `AssembledContext.sourceSummary` 和 SSE meta 已输出 Memory Bank/短期/长期上下文字符数
 
 还不完整：
 
@@ -208,7 +209,7 @@ ChatController
 - 没有摘要压缩策略
 - 召回来源、命中数、裁剪原因还没有进入 trace
 
-当前进度：65%
+当前进度：68%
 
 ## 六、稳定期优先级
 
@@ -401,10 +402,17 @@ ChatController
 - 记录每次请求实际拼入了哪些上下文来源。
 - 不做复杂压缩，只让上下文来源可解释。
 
+当前状态：
+
+- `AssembledContext.sourceSummary` 已提供 `springclaw.context-source.v1` 摘要。
+- `SseEventBridge.sendMeta` 已输出 `contextSummary`，包含 Memory Bank 是否使用、Memory Bank 字符数、短期上下文字符数、长期语义记忆字符数、observe prompt 总字符数。
+- 前端 `ChatStreamMeta` 已补可选 `contextSummary` 类型。
+
 验证：
 
 - ContextAssembler 单测
-- trace 中能看到 context source summary
+- `mvn -Dtest=AssembledContextTest,SseEventBridgeTest test`
+- SSE meta 事件中能看到 context source summary
 
 ### Step 5：再评估 Workspace diff/rollback，不急着实现
 

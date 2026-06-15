@@ -60,4 +60,52 @@ class MemoryBankServiceTest {
         assertThat(context.indexOf("### agent-learnings"))
                 .isLessThan(context.indexOf("### progress"));
     }
+
+    @Test
+    void shouldFilterInactiveAgentLearningsWhenRenderingContext() throws Exception {
+        Files.writeString(tempDir.resolve("agent-learnings.md"), """
+                # Agent Learnings
+
+                ## active learning
+
+                - status: active
+                - rule: 保留 active 经验。
+
+                ## approved learning
+
+                - status: approved
+                - rule: 保留 approved 经验。
+
+                ## legacy learning
+
+                - rule: 保留旧格式经验。
+
+                ## disabled learning
+
+                - status: disabled
+                - rule: 不要带入 disabled 经验。
+
+                ## rejected learning
+
+                - status: rejected
+                - rule: 不要带入 rejected 经验。
+
+                ## superseded learning
+
+                - status: superseded
+                - rule: 不要带入 superseded 经验。
+                """);
+
+        MemoryBankService service = new MemoryBankService(true, tempDir.toString(), 1200);
+
+        String context = service.renderContext();
+
+        assertThat(context)
+                .contains("保留 active 经验。")
+                .contains("保留 approved 经验。")
+                .contains("保留旧格式经验。")
+                .doesNotContain("不要带入 disabled 经验。")
+                .doesNotContain("不要带入 rejected 经验。")
+                .doesNotContain("不要带入 superseded 经验。");
+    }
 }

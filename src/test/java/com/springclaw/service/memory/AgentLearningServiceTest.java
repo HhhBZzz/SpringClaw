@@ -42,6 +42,7 @@ class AgentLearningServiceTest {
         String learning = Files.readString(tempDir.resolve("agent-learnings.md"));
         assertThat(learning)
                 .contains("springclaw.agent-learning.v1")
+                .contains("status: active")
                 .contains("requestId: req-learn-1")
                 .contains("source: trace-failure")
                 .contains("rule:")

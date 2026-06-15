@@ -13,6 +13,7 @@
 - Agent 循环改写问题时保留 Memory Bank。
 - 历史问题提取避免把 Memory Bank 误当成用户问题。
 - Agent learning 最小闭环已接入：失败 trace 可沉淀到 `agent-learnings.md`，并在 Memory Bank 中优先进入上下文。
+- Agent learning 条目已带 `status: active`，Memory Bank 读取时会过滤 `disabled/rejected/superseded` 条目。
 
 当前正在推进：
 

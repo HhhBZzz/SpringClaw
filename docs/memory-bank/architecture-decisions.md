@@ -26,4 +26,6 @@ Wiki.js / docs / README 属于 Project Knowledge，不属于用户 Long-term Mem
 
 `AgentRunTraceEvent failed -> AgentLearningService -> docs/memory-bank/agent-learnings.md -> MemoryBankService -> 下一轮 Context`
 
+learning 条目先使用 `active/approved/disabled/rejected/superseded` 这类轻量状态做治理，不在当前阶段引入新的审批框架。
+
 Obsidian / Wiki.js 后续应作为 Markdown knowledge source 接入，优先复用这个可审阅文件模型，而不是直接扩成 RAG。

@@ -135,6 +135,7 @@ public class AgentLearningService {
                 ## %s
 
                 - schema: %s
+                - status: active
                 - requestId: %s
                 - source: %s
                 - trigger: %s

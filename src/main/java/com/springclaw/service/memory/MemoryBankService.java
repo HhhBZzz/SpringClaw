@@ -9,14 +9,22 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.Locale;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 文件化项目记忆，面向非 RAG 的 harness 上下文恢复。
  */
 @Service
 public class MemoryBankService {
+
+    private static final String AGENT_LEARNINGS_FILE = "agent-learnings.md";
+    private static final Pattern AGENT_LEARNING_STATUS =
+            Pattern.compile("(?im)^-\\s*status:\\s*(\\S+)\\s*$");
 
     private static final List<String> ORDERED_FILES = List.of(
             "project-brief.md",
@@ -74,7 +82,7 @@ public class MemoryBankService {
 
     private void appendFile(StringBuilder builder, Path file) {
         try {
-            String text = TextUtils.normalizeWS(Files.readString(file, StandardCharsets.UTF_8));
+            String text = TextUtils.normalizeWS(readMemoryText(file));
             if (!StringUtils.hasText(text)) {
                 return;
             }
@@ -87,5 +95,60 @@ public class MemoryBankService {
         } catch (IOException ignored) {
             // 单个记忆文件读取失败时跳过，避免影响主链路。
         }
+    }
+
+    private String readMemoryText(Path file) throws IOException {
+        String text = Files.readString(file, StandardCharsets.UTF_8);
+        if (AGENT_LEARNINGS_FILE.equals(file.getFileName().toString())) {
+            return filterAgentLearnings(text);
+        }
+        return text;
+    }
+
+    private String filterAgentLearnings(String text) {
+        if (!StringUtils.hasText(text)) {
+            return "";
+        }
+        StringBuilder preamble = new StringBuilder();
+        List<String> sections = new ArrayList<>();
+        StringBuilder currentSection = new StringBuilder();
+        boolean inLearningSection = false;
+
+        for (String line : text.split("\\R", -1)) {
+            if (line.startsWith("## ")) {
+                if (inLearningSection) {
+                    sections.add(currentSection.toString());
+                }
+                currentSection = new StringBuilder();
+                currentSection.append(line).append('\n');
+                inLearningSection = true;
+                continue;
+            }
+            if (inLearningSection) {
+                currentSection.append(line).append('\n');
+            } else {
+                preamble.append(line).append('\n');
+            }
+        }
+        if (inLearningSection) {
+            sections.add(currentSection.toString());
+        }
+
+        StringBuilder filtered = new StringBuilder(preamble);
+        for (String section : sections) {
+            if (isActiveLearningSection(section)) {
+                filtered.append(section);
+            }
+        }
+        return filtered.toString();
+    }
+
+    private boolean isActiveLearningSection(String section) {
+        Matcher matcher = AGENT_LEARNING_STATUS.matcher(section);
+        if (!matcher.find()) {
+            return true;
+        }
+        String status = matcher.group(1).toLowerCase(Locale.ROOT);
+        return "active".equals(status) || "approved".equals(status);
     }
 }

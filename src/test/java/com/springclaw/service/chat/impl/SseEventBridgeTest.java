@@ -6,6 +6,7 @@ import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentRunTraceService;
 import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.context.AgentContextMetricsService;
 import com.springclaw.service.context.AssembledContext;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
@@ -94,6 +96,18 @@ class SseEventBridgeTest {
         Assertions.assertEquals(true, summary.get("memoryBankUsed"));
         Assertions.assertEquals(12, summary.get("shortTermChars"));
         Assertions.assertFalse(emitter.payloads.get(0).contains("停止合并 engine，优先稳定 harness。"));
+    }
+
+    @Test
+    void shouldRecordContextSummaryMetricsWhenMetaEventIsSent() {
+        AgentContextMetricsService metricsService = mock(AgentContextMetricsService.class);
+        SseEventBridge bridge = new SseEventBridge(null, metricsService);
+        CapturingEmitter emitter = new CapturingEmitter();
+        ChatContext context = chatContext("agent", "simplified", "general", AgentDecision.general("普通聊天"));
+
+        bridge.sendMeta(emitter, context);
+
+        verify(metricsService).record(any(AssembledContext.ContextSourceSummary.class));
     }
 
     @Test

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.service.event.MessageEventService;
+import com.springclaw.service.memory.AgentLearningService;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,22 +30,41 @@ public class AgentRunTraceService {
     private final MessageEventService messageEventService;
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbcTemplate;
+    private final AgentLearningService agentLearningService;
 
     @Autowired
     public AgentRunTraceService(MessageEventService messageEventService,
                                 ObjectMapper objectMapper,
+                                ObjectProvider<JdbcTemplate> jdbcTemplateProvider,
+                                ObjectProvider<AgentLearningService> agentLearningServiceProvider) {
+        this(messageEventService,
+                objectMapper,
+                jdbcTemplateProvider == null ? null : jdbcTemplateProvider.getIfAvailable(),
+                agentLearningServiceProvider == null ? null : agentLearningServiceProvider.getIfAvailable());
+    }
+
+    public AgentRunTraceService(MessageEventService messageEventService,
+                                ObjectMapper objectMapper,
                                 ObjectProvider<JdbcTemplate> jdbcTemplateProvider) {
-        this(messageEventService, objectMapper, jdbcTemplateProvider == null ? null : jdbcTemplateProvider.getIfAvailable());
+        this(messageEventService, objectMapper, jdbcTemplateProvider == null ? null : jdbcTemplateProvider.getIfAvailable(), null);
     }
 
     public AgentRunTraceService(MessageEventService messageEventService, ObjectMapper objectMapper) {
-        this(messageEventService, objectMapper, (JdbcTemplate) null);
+        this(messageEventService, objectMapper, (JdbcTemplate) null, null);
     }
 
     AgentRunTraceService(MessageEventService messageEventService, ObjectMapper objectMapper, JdbcTemplate jdbcTemplate) {
+        this(messageEventService, objectMapper, jdbcTemplate, null);
+    }
+
+    AgentRunTraceService(MessageEventService messageEventService,
+                         ObjectMapper objectMapper,
+                         JdbcTemplate jdbcTemplate,
+                         AgentLearningService agentLearningService) {
         this.messageEventService = messageEventService;
         this.objectMapper = objectMapper;
         this.jdbcTemplate = jdbcTemplate;
+        this.agentLearningService = agentLearningService;
     }
 
     public AgentRunTraceEvent record(String sessionKey,
@@ -78,7 +98,19 @@ public class AgentRunTraceService {
             }
         }
         recordStructuredTrace(sessionKey, channel, userId, requestId, event);
+        captureLearning(event);
         return event;
+    }
+
+    private void captureLearning(AgentRunTraceEvent event) {
+        if (agentLearningService == null || event == null) {
+            return;
+        }
+        try {
+            agentLearningService.captureTraceFailure(event);
+        } catch (Exception ex) {
+            log.debug("Agent learning capture skipped, requestId={}, reason={}", event.requestId(), ex.getMessage());
+        }
     }
 
     private AgentRunTraceEvent buildTraceEvent(String requestId,

@@ -22,6 +22,7 @@ public class MemoryBankService {
             "project-brief.md",
             "current-state.md",
             "architecture-decisions.md",
+            "agent-learnings.md",
             "progress.md",
             "user-preferences.md"
     );

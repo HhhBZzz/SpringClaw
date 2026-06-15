@@ -5,7 +5,9 @@ import com.springclaw.common.support.ConversationScopeSupport;
 import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.service.chat.ConversationEventTextSupport;
 import com.springclaw.service.event.MessageEventService;
+import com.springclaw.service.memory.MemoryBankService;
 import com.springclaw.service.memory.MemoryService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -29,19 +31,23 @@ public class ContextAssembler {
 
     private final MessageEventService messageEventService;
     private final MemoryService memoryService;
+    private final MemoryBankService memoryBankService;
     private final int memoryWindowTurns;
     private final int memoryWindowEvents;
     private final int sessionRecallTopK;
     private final int userRecallTopK;
     private final int recallMaxChars;
 
+    @Autowired
     public ContextAssembler(MessageEventService messageEventService,
                             MemoryService memoryService,
+                            MemoryBankService memoryBankService,
                             @Value("${springclaw.chat.memory-window-size:8}") int memoryWindowSize,
                             @Value("${springclaw.memory.recall-top-k:8}") int recallTopK,
                             @Value("${springclaw.memory.recall-max-chars:400}") int recallMaxChars) {
         this.messageEventService = messageEventService;
         this.memoryService = memoryService;
+        this.memoryBankService = memoryBankService;
         this.memoryWindowTurns = Math.max(1, Math.min(memoryWindowSize, 20));
         this.memoryWindowEvents = Math.max(2, this.memoryWindowTurns * 2);
         int safeTopK = Math.max(1, recallTopK);
@@ -50,15 +56,27 @@ public class ContextAssembler {
         this.recallMaxChars = Math.max(120, recallMaxChars);
     }
 
+    public ContextAssembler(MessageEventService messageEventService,
+                            MemoryService memoryService,
+                            @Value("${springclaw.chat.memory-window-size:8}") int memoryWindowSize,
+                            @Value("${springclaw.memory.recall-top-k:8}") int recallTopK,
+                            @Value("${springclaw.memory.recall-max-chars:400}") int recallMaxChars) {
+        this(messageEventService, memoryService, new MemoryBankService(false, "", 400), memoryWindowSize, recallTopK, recallMaxChars);
+    }
+
     public AssembledContext assemble(String sessionKey,
                                      String channel,
                                      String userId,
                                      String question) {
         String eventContext = buildEventContext(sessionKey);
         String semanticContext = buildSemanticContext(sessionKey, userId, question);
+        String projectMemoryContext = memoryBankService.renderContext();
 
         String observePrompt = """
                 # 当前问题
+                %s
+
+                # 项目记忆（Memory Bank）
                 %s
 
                 # 短期会话上下文（事件流）
@@ -68,6 +86,7 @@ public class ContextAssembler {
                 %s
                 """.formatted(
                 TextUtils.normalizeWS(question),
+                TextUtils.normalizeWS(projectMemoryContext),
                 TextUtils.normalizeWS(eventContext),
                 TextUtils.normalizeWS(semanticContext)
         );

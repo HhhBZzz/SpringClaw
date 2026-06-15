@@ -9,6 +9,7 @@ import com.springclaw.service.agent.AgentRunTraceEvent;
 import com.springclaw.service.agent.AgentRunTraceService;
 import com.springclaw.service.agent.CapabilityResult;
 import com.springclaw.service.agent.VerificationResult;
+import com.springclaw.service.context.AgentContextMetricsService;
 import com.springclaw.service.context.AssembledContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -30,10 +31,17 @@ import java.util.stream.Collectors;
 public class SseEventBridge {
 
     private final AgentRunTraceService agentRunTraceService;
+    private final AgentContextMetricsService contextMetricsService;
 
     @Autowired
-    public SseEventBridge(@Autowired(required = false) AgentRunTraceService agentRunTraceService) {
+    public SseEventBridge(@Autowired(required = false) AgentRunTraceService agentRunTraceService,
+                          @Autowired(required = false) AgentContextMetricsService contextMetricsService) {
         this.agentRunTraceService = agentRunTraceService;
+        this.contextMetricsService = contextMetricsService;
+    }
+
+    public SseEventBridge(AgentRunTraceService agentRunTraceService) {
+        this(agentRunTraceService, null);
     }
 
     // ── 事件发送方法 ──
@@ -66,6 +74,9 @@ public class SseEventBridge {
         AssembledContext.ContextSourceSummary contextSummary = context.assembled() == null
                 ? AssembledContext.ContextSourceSummary.empty()
                 : context.assembled().sourceSummary();
+        if (contextMetricsService != null) {
+            contextMetricsService.record(contextSummary);
+        }
         String payload = """
                 {"requestId":"%s","productMode":"%s","responseMode":"%s","executionMode":"%s","intent":"%s","routingReason":"%s","originalQuestion":"%s","effectiveQuestion":"%s","contextSummary":%s}
                 """.formatted(

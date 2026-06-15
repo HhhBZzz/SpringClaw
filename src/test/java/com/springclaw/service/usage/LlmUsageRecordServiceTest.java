@@ -1,6 +1,7 @@
 package com.springclaw.service.usage;
 
 import com.springclaw.service.usage.impl.LlmUsageRecordServiceImpl;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
@@ -115,6 +116,38 @@ class LlmUsageRecordServiceTest {
         assertThat(recent.getPromptCacheHitTokens()).isEqualTo(160);
         assertThat(recent.getPromptCacheMissTokens()).isEqualTo(40);
         assertThat(recent.getRawUsageJson()).contains("prompt_cache_hit_tokens");
+    }
+
+    @Test
+    void shouldMirrorPromptCacheUsageIntoMicrometerMetrics() {
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        LlmUsageMetricsService metricsService = new LlmUsageMetricsService(meterRegistry, true);
+        LlmUsageRecordServiceImpl service = new LlmUsageRecordServiceImpl(false, metricsService);
+
+        service.recordChatResponse(
+                new LlmUsageRecordService.ChatResponseContext(
+                        "req-cache-metrics",
+                        "s-cache-metrics",
+                        "api",
+                        "u-cache",
+                        "deepseek",
+                        "deepseek-v4-pro",
+                        "agent-runtime-summary"
+                ),
+                buildResponse("deepseek-v4-pro", new NativeUsage(200, 40, Map.of(
+                        "prompt_cache_hit_tokens", 160,
+                        "prompt_cache_miss_tokens", 40
+                )))
+        );
+
+        assertThat(meterRegistry.counter("springclaw.ai.usage.responses", "usage", "known").count())
+                .isEqualTo(1.0d);
+        assertThat(meterRegistry.get("springclaw.ai.usage.tokens").tag("kind", "prompt_cache_hit").summary().totalAmount())
+                .isEqualTo(160.0d);
+        assertThat(meterRegistry.get("springclaw.ai.usage.tokens").tag("kind", "prompt_cache_miss").summary().totalAmount())
+                .isEqualTo(40.0d);
+        assertThat(meterRegistry.counter("springclaw.ai.prompt_cache.records", "status", "known").count())
+                .isEqualTo(1.0d);
     }
 
     @Test

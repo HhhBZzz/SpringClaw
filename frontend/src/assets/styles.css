@@ -5907,6 +5907,42 @@ button.runtime-nav-item {
   color: #f6c945;
 }
 
+.context-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+.context-summary-chip {
+  min-width: 0;
+  min-height: 48px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 7px;
+  padding: 7px 9px;
+  color: #d8dee8;
+  background: #121720;
+}
+
+.context-summary-chip small,
+.context-summary-chip strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-summary-chip small {
+  color: #99a2b1;
+  font-size: 10px;
+}
+
+.context-summary-chip strong {
+  margin-top: 2px;
+  color: #f0f3f8;
+  font-size: 12px;
+}
+
 .runtime-action-status {
   width: fit-content;
   max-width: 100%;
@@ -6552,6 +6588,10 @@ button.runtime-nav-item {
     display: block;
     overflow: visible;
   }
+
+  .context-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 760px) {
@@ -6584,6 +6624,10 @@ button.runtime-nav-item {
 
   .runtime-workspace .runtime-main-heading.studio-heading.task-header {
     padding: 18px 16px 12px;
+  }
+
+  .context-summary-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .runtime-composer.stitch-composer {

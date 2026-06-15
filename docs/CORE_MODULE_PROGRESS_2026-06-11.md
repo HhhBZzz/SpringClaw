@@ -31,7 +31,7 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 最近测试基线：
 
 - `mvn test`
-- 结果：`Tests run: 362, Failures: 0, Errors: 0, Skipped: 0`
+- 结果：`Tests run: 363, Failures: 0, Errors: 0, Skipped: 0`
 - `cd frontend && npm run build`
 - 结果：Vue typecheck 与 Vite build 通过
 - `git diff --check`
@@ -67,7 +67,7 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 | MCP 适配 | 当前未见稳定主线模块 | 未来外部工具协议适配层 | 1 | 10% | 现在不要做；等 Tool registry/schema/audit 稳定后再接 |
 | Plugin 系统 | 当前主要是 Skill/Tool 形态，未形成插件生命周期 | 未来可加载组件、版本、隔离、安装 | 1 | 15% | 现在不要做；避免项目发散 |
 | Multi-agent 通信 | 当前未形成独立 agent 协作协议 | 未来 agent-to-agent、handoff、角色协作 | 1 | 10% | 现在不要做；先把单 agent 生命周期跑稳 |
-| Frontend Command Center | Vue Agent Console、Admin Console、runtime console 相关页面、`ChatStreamMeta.contextSummary` | 展示聊天、stream、trace、动作确认、后台运维数据；Agent Console 与 Admin 表已展示 `productMode`；timeline 已消费结构化 step 字段并清理 JSON detail 展示；前端类型已接收 context summary | 3 | 70% | 继续展示风险等级和真实 timeline，不要先堆视觉功能 |
+| Frontend Command Center | Vue Agent Console、Admin Console、runtime console 相关页面、`ChatStreamMeta.contextSummary` | 展示聊天、stream、trace、动作确认、后台运维数据；Agent Console 与 Admin 表已展示 `productMode`；timeline 已消费结构化 step 字段并清理 JSON detail 展示；任务元数据面板已展示 context summary | 3 | 72% | 继续展示风险等级和真实 timeline，不要先堆视觉功能 |
 
 ## 四、当前默认 Runtime 链路记录
 
@@ -406,12 +406,13 @@ ChatController
 
 - `AssembledContext.sourceSummary` 已提供 `springclaw.context-source.v1` 摘要。
 - `SseEventBridge.sendMeta` 已输出 `contextSummary`，包含 Memory Bank 是否使用、Memory Bank 字符数、短期上下文字符数、长期语义记忆字符数、observe prompt 总字符数。
-- 前端 `ChatStreamMeta` 已补可选 `contextSummary` 类型。
+- 前端 `ChatStreamMeta` 已补可选 `contextSummary` 类型，Agent Console 的任务元数据展开面板已展示该摘要。
 
 验证：
 
 - ContextAssembler 单测
 - `mvn -Dtest=AssembledContextTest,SseEventBridgeTest test`
+- `mvn -Dtest=VueOnlyFrontendPolicyTest#agentConsoleShouldExposeContextSummaryMetadata test`
 - SSE meta 事件中能看到 context source summary
 
 ### Step 5：再评估 Workspace diff/rollback，不急着实现

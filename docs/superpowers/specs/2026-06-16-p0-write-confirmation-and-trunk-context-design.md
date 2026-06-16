@@ -3,7 +3,7 @@
 > Date: 2026-06-16
 > Branch: codex/bootstrap-github
 > Scope: P0 安全级 + 干路上下文注入（不动 AgentEngine 接口、不合并引擎、不做完整 PolicyService）
-> Status: 设计已确认，待落地
+> Status: 设计已定稿，允许落地
 
 ---
 
@@ -57,8 +57,9 @@
 
 ### 核心不变量
 
-整个状态机围绕这 9 条不变量：
+整个状态机围绕这 16 条不变量：
 
+**Proposal 与执行授权**
 1. **Proposal 创建后冻结** `toolName + toolsetId + canonicalArgs + argsHash + targetPaths`，永不修改
 2. **用户确认的是冻结的 snapshot**，不是模型意图
 3. **confirm 后不重跑模型**，只执行 snapshot 里的工具调用
@@ -68,6 +69,27 @@
 7. **工具实际改动文件必须是 targetPaths 的子集**（newlyChangedFiles ⊆ targetPaths）
 8. **EXECUTED / REJECTED / EXPIRED / CANCELLED / FAILED 均不可再次执行**
 9. **FAILED 不重试原 proposal**，重试必须创建新 proposal
+
+**Git baseline 一致性**
+10. **Proposal 创建时记录 `git_head_sha_at_create`**，执行前 HEAD 必须一致，否则拒绝执行（baseline 失效）
+
+**ToolInvoker 安全**
+11. **ToolInvoker.invoke(snapshot) 必须重新进入 `ToolRuntimeAspect`**，不能绕过最终门禁。CI 测试必须验证 confirm resume 路径命中 Aspect
+
+**路径规范化**
+12. **targetPaths / dirtyFiles / changedFiles 必须统一为 repo-relative normalized path**，禁止混用绝对路径、相对路径、`./` 前缀、`..` 段
+
+**Stuck 状态处理**
+13. **stuck EXECUTING 不自动重放**，只标记 FAILED，用户重新生成 proposal（避免部分落盘后重复写）
+
+**No-op 写入**
+14. **写工具成功但无实际 diff 时**，proposal=EXECUTED，`git_commit_sha` 允许为 NULL，不强制 `--allow-empty`
+
+**回滚精确性**
+15. **rollback/clean 只处理 `newlyChangedFiles` 中由本次工具产生的文件**，不碰用户原 dirty 文件。tracked 文件用 `git checkout`，untracked 文件用文件删除
+
+**事件命名语义**
+16. **confirm 后发布的事件命名为 `ProposalExecutionRequestedEvent`**，反映状态已是 EXECUTING（不是 ProposalApprovedEvent，因为 APPROVED 在事务内是瞬时状态）
 
 ---
 
@@ -328,9 +350,10 @@ CREATE TABLE agent_action_proposal (
     execution_error VARCHAR(1024),
     
     -- Git 闭环
-    git_baseline_sha VARCHAR(40),
-    git_commit_sha VARCHAR(40),
-    git_changed_files TEXT,                    -- JSON array
+    git_head_sha_at_create VARCHAR(40),         -- proposal 创建瞬间的 HEAD（baseline 校验依据）
+    git_baseline_sha VARCHAR(40),               -- 执行开始时的 HEAD（应 == head_sha_at_create）
+    git_commit_sha VARCHAR(40),                 -- 执行后 commit（无 diff 时为 NULL）
+    git_changed_files TEXT,                     -- JSON array
     
     -- 审核
     reviewed_at DATETIME,
@@ -385,25 +408,34 @@ public void confirm(String proposalId, String reason) {
     boolean ok2 = repository.updateStatusOptimistic(
         proposalId, APPROVED, EXECUTING, proposal.version() + 1, null);
     if (!ok2) throw new BusinessException(40409, "进入执行状态失败");
+    
+    // 不变量 16：事件名反映状态已是 EXECUTING（不是 ApprovedEvent）
+    publisher.publishEvent(new ProposalExecutionRequestedEvent(proposalId));
 }
 
 // 事务提交后异步触发执行
 @TransactionalEventListener(phase = AFTER_COMMIT)
-public void onProposalApproved(ProposalApprovedEvent event) {
+public void onProposalExecutionRequested(ProposalExecutionRequestedEvent event) {
     proposalExecutor.executeAsync(event.proposalId());
 }
 ```
 
-**超时清理任务**：
+**Stuck 状态清理任务**（不变量 13）：
 
 ```java
 @Scheduled(fixedDelay = 60_000)
-public void expirePendingProposals() {
-    repository.updateStatusByExpired(PENDING, EXPIRED, now());
-    // 同时找 status=APPROVED 但 update_time > 60s 的，重新触发
-    repository.findStuckApproved(60).forEach(p -> proposalExecutor.executeAsync(p.proposalId()));
+public void cleanupStuckProposals() {
+    // PENDING 超时 → EXPIRED
+    repository.expirePending(PENDING, EXPIRED, now());
+    
+    // EXECUTING 卡死 → FAILED（不自动重放，避免部分落盘后重复写）
+    repository.markStuckExecutingAsFailed(
+        Duration.ofMinutes(10), 
+        "execution interrupted or timeout");
 }
 ```
+
+**注意**：APPROVED 在事务内是瞬时状态，不需要单独清理。如果出现 stuck-APPROVED，说明 confirm 事务内的第二次 update（APPROVED→EXECUTING）失败但事务没回滚，这是数据一致性 bug，应当在测试里发现而不是靠定时任务兜底。
 
 ### 改造点 5：WorkspaceGitGuard
 
@@ -419,10 +451,19 @@ public void expirePendingProposals() {
 public ToolInvocationSnapshot capture(String toolName, String toolsetId, Object[] args, String riskLevel) {
     String canonicalJson = canonicalize(args);
     String argsHash = sha256(toolName + "\n" + toolsetId + "\n" + canonicalJson);
-    List<String> targetPaths = parseTargetPaths(toolName, args);
     
-    // 检查 dirty 与 targetPaths 的交集
-    Set<String> dirtyFiles = git.statusNameOnly();
+    // 解析并规范化 targetPaths（统一为 repo-relative normalized path）
+    List<String> targetPaths = parseTargetPaths(toolName, args).stream()
+        .map(p -> pathNormalizer.normalizeRepoPath(workspaceRoot, p))
+        .toList();
+    
+    // 记录 baseline HEAD（不变量 10）
+    String headShaAtCreate = git.headSha();
+    
+    // 检查 dirty 与 targetPaths 的交集（路径已规范化，不变量 12）
+    Set<String> dirtyFiles = git.statusNameOnly().stream()
+        .map(p -> pathNormalizer.normalizeRepoPath(workspaceRoot, p))
+        .collect(Collectors.toSet());
     Set<String> intersection = dirtyFiles.stream()
         .filter(targetPaths::contains)
         .collect(Collectors.toSet());
@@ -437,7 +478,8 @@ public ToolInvocationSnapshot capture(String toolName, String toolsetId, Object[
         toolName, toolsetId, canonicalJson, argsHash,
         riskLevel, targetPaths,
         previewSummary(toolName, args, targetPaths),
-        !dirtyFiles.isEmpty(), dirtyFiles
+        !dirtyFiles.isEmpty(), dirtyFiles,
+        headShaAtCreate
     );
 }
 ```
@@ -446,12 +488,27 @@ public ToolInvocationSnapshot capture(String toolName, String toolsetId, Object[
 
 ```java
 public <T> T execute(AgentActionProposal proposal, Callable<T> toolExecution) {
-    // baseline 校验
     String currentSha = git.headSha();
-    Set<String> currentDirty = git.statusNameOnly();
     
-    if (!currentDirty.stream().filter(proposal.targetPaths()::contains).collect(toSet()).isEmpty()) {
-        throw new SecurityException("targetPaths 在 proposal 创建后变 dirty，baseline 失效");
+    // 不变量 10：HEAD 必须一致，否则 baseline 失效
+    if (!currentSha.equals(proposal.gitHeadShaAtCreate())) {
+        throw new SecurityException(
+            "工作区 HEAD 已变化（baseline=%s, current=%s），proposal 失效，请重新生成"
+                .formatted(proposal.gitHeadShaAtCreate(), currentSha));
+    }
+    
+    // 路径规范化（不变量 12）
+    Set<String> currentDirty = git.statusNameOnly().stream()
+        .map(p -> pathNormalizer.normalizeRepoPath(workspaceRoot, p))
+        .collect(Collectors.toSet());
+    Set<String> targetPathsSet = new HashSet<>(proposal.targetPaths());
+    
+    // baseline 二次校验：targetPaths 仍必须 clean
+    Set<String> targetPathsDirty = currentDirty.stream()
+        .filter(targetPathsSet::contains)
+        .collect(Collectors.toSet());
+    if (!targetPathsDirty.isEmpty()) {
+        throw new SecurityException("targetPaths 在 proposal 创建后变 dirty，baseline 失效: " + targetPathsDirty);
     }
     
     proposal.recordBaseline(currentSha);
@@ -459,22 +516,30 @@ public <T> T execute(AgentActionProposal proposal, Callable<T> toolExecution) {
     try {
         T result = toolExecution.call();
         
-        // 校验改动范围
-        Set<String> afterDirty = git.statusNameOnly();
-        Set<String> newlyChanged = Sets.difference(afterDirty, currentDirty);
-        Set<String> outOfScope = Sets.difference(newlyChanged, new HashSet<>(proposal.targetPaths()));
+        // 计算 newlyChangedFiles
+        Set<String> afterDirty = git.statusNameOnly().stream()
+            .map(p -> pathNormalizer.normalizeRepoPath(workspaceRoot, p))
+            .collect(Collectors.toSet());
+        Set<String> newlyChanged = Sets.difference(afterDirty, currentDirty).immutableCopy();
+        
+        // 不变量 7：newlyChanged ⊆ targetPaths
+        Set<String> outOfScope = Sets.difference(newlyChanged, targetPathsSet).immutableCopy();
         
         if (!outOfScope.isEmpty()) {
             log.error("工具改动超出 targetPaths: violations={}", outOfScope);
+            // 不变量 15：精确清理，区分 tracked/untracked，不碰用户原 dirty
             rollbackTargetPaths(currentSha, proposal.targetPaths());
-            // 同时清理 outOfScope 里的新文件，让用户现场恢复
-            for (String f : outOfScope) {
-                git.checkout(currentSha, f);
-            }
+            cleanOutOfScope(currentSha, outOfScope);
             throw new SecurityException("工具改动超出授权范围: " + outOfScope);
         }
         
-        // 只 add targetPaths
+        // 不变量 14：处理无实际 diff 的情况
+        if (newlyChanged.isEmpty()) {
+            proposal.recordNoOpExecution();
+            return result;
+        }
+        
+        // 只 add targetPaths，commit
         git.add(proposal.targetPaths());
         String commitSha = git.commit(buildCommitMessage(proposal));
         proposal.recordCommit(commitSha, new ArrayList<>(newlyChanged));
@@ -489,11 +554,21 @@ public <T> T execute(AgentActionProposal proposal, Callable<T> toolExecution) {
 
 private void rollbackTargetPaths(String sha, List<String> targetPaths) {
     for (String path : targetPaths) {
-        try {
-            git.checkout(sha, path);   // 只 checkout 目标路径
-        } catch (Exception ignore) {
-            // path 在 baseline 里不存在 → 删除新建的文件
-            git.cleanFile(path);
+        if (git.isTracked(path)) {
+            git.checkout(sha, path);   // tracked 文件用 checkout 恢复
+        } else {
+            git.deleteFile(path);      // untracked 文件直接删
+        }
+    }
+}
+
+private void cleanOutOfScope(String sha, Set<String> outOfScope) {
+    // 不变量 15：只清理本次工具产生的越界文件，不碰用户原 dirty
+    for (String path : outOfScope) {
+        if (git.isTracked(path)) {
+            git.checkout(sha, path);
+        } else {
+            git.deleteFile(path);
         }
     }
 }
@@ -517,6 +592,21 @@ private String buildCommitMessage(AgentActionProposal p) {
                 p.argumentsHash(), p.gitBaselineSha(),
                 String.join(", ", p.targetPaths())
             );
+}
+```
+
+**PathNormalizer 工具**（独立组件，所有路径校验必须经过它）：
+
+```java
+@Component
+public class PathNormalizer {
+    public String normalizeRepoPath(Path workspaceRoot, String rawPath) {
+        Path normalized = workspaceRoot.resolve(rawPath).normalize();
+        if (!normalized.startsWith(workspaceRoot)) {
+            throw new SecurityException("path escapes workspace: " + rawPath);
+        }
+        return workspaceRoot.relativize(normalized).toString().replace("\\", "/");
+    }
 }
 ```
 
@@ -588,10 +678,15 @@ GET /api/proposals?sessionKey=xxx&status=PENDING
   response: AgentActionProposal[]
 ```
 
-**ToolInvoker 接口**（封装反射）：
+**ToolInvoker 接口**（封装反射，不变量 11：必须经过 Aspect）：
 
 ```java
 public interface ToolInvoker {
+    /**
+     * 执行工具调用。实现必须保证调用路径会被 ToolRuntimeAspect 拦截，
+     * 使 confirm resume 路径能再次触发 Aspect 的二次校验。
+     * 不能直接反射调用 Method 绕过 Spring proxy。
+     */
     Object invoke(String toolName, String argumentsCanonicalJson);
 }
 
@@ -608,6 +703,11 @@ public class SpringToolInvoker implements ToolInvoker {
     }
 }
 ```
+
+> ⚠️ **CI 测试硬约束**：必须有一个集成测试验证 `confirm resume → ToolInvoker.invoke → ToolRuntimeAspect 命中`。
+> 如果 Spring AI 的 `ToolCallback.call()` 内部直接反射调用 method 绕过 Spring proxy，
+> 必须改成显式经过 Aspect 的实现（例如把 Aspect 抽成可注入的 `ToolExecutionGuard` 组件）。
+> **此约束不通过则整个 P0 安全模型失效。**
 
 **ProposalExecutionService**：
 
@@ -663,6 +763,12 @@ public class ProposalExecutionService {
 | 5 个引擎渲染 prompt | 每个都包含 ContextInjection 的 observePrompt 内容 |
 | 工具执行抛异常 | rollback 到 baseline，proposal=FAILED，原 dirty 文件不动 |
 | Run waiting confirmation 后服务重启 | proposal 还在 DB，confirm 后能 resume |
+| **Confirm resume 路径必经 Aspect**（不变量 11） | 集成测试验证 ToolInvoker.invoke 触发 ToolRuntimeAspect.guard |
+| **HEAD 在确认期间被 commit**（不变量 10） | 执行前检测到 HEAD 不一致，抛 SecurityException，proposal=FAILED |
+| **写工具无 diff**（不变量 14） | proposal=EXECUTED，git_commit_sha=NULL，无报错 |
+| **outOfScope 包含 untracked 文件**（不变量 15） | 用 deleteFile 清理而不是 git checkout，不抛错 |
+| **路径形式不一致**（不变量 12） | targetPaths 传 `./src/A.java`，dirtyFiles 是 `src/A.java`，规范化后正确识别为同一文件 |
+| **stuck EXECUTING 超时**（不变量 13） | 标记 FAILED，不重放，不重复写文件 |
 
 ---
 
@@ -670,9 +776,9 @@ public class ProposalExecutionService {
 
 1. **Git 操作的副作用**：rollback 用 `git checkout sha path` 而不是 `git stash`。如果用户在工具执行前刚好 stage 了某个 targetPath 的文件，rollback 会丢失 stage——但 proposal 创建时已经检查 dirtyFiles ∩ targetPaths 为空，不会进入这种状态。
 2. **Aspect 性能**：每次 write 工具调用都查一次 DB。可接受——write 调用频率本来就低，且事务可见性保证比 cache 更重要。
-3. **状态机死锁**：APPROVED 状态进 EXECUTING 失败、或 EXECUTING 后服务宕机。靠定时任务清理 stuck-APPROVED 和 stuck-EXECUTING。
+3. **状态机死锁**：EXECUTING 后服务宕机不知道工具是否部分落盘——按不变量 13 标记 FAILED 不重放，用户重新生成 proposal。APPROVED 在事务内是瞬时状态，不存在 stuck-APPROVED；如果出现，是数据一致性 bug，应当在测试里发现。
 4. **SSE 重连**：用户刷新页面后原 SSE 连接断开。confirm 是独立请求，不依赖原 SSE。前端通过 GET /api/proposals?sessionKey&status=PENDING 拉待确认列表。
-5. **ToolInvoker 反射失败**：Spring AI 的 ToolCallback 解析机制可能不稳。封装在 ToolInvoker 接口后面，便于换实现。
+5. **ToolInvoker 反射失败**：Spring AI 的 ToolCallback 解析机制可能不稳。封装在 ToolInvoker 接口后面，便于换实现。**但实现必须经过 Aspect**（不变量 11），否则二次校验失效，整个安全模型崩塌。
 
 ---
 
@@ -699,7 +805,10 @@ public class ProposalExecutionService {
 | 写后可回滚 | 自动测试：写完后 `git log -1` 能拿到 commit_sha；`git revert` 能恢复 |
 | 干路上下文注入 | 自动测试：5 个引擎的渲染 prompt 都包含 observePrompt |
 | 不阻塞线程 | 代码 review：catch PendingApprovalException 后立即 completeEmitter，不 sleep/wait |
-| 测试覆盖 | mvn test 通过；新增至少 12 个测试用例覆盖矩阵 |
+| **ToolInvoker 必经 Aspect**（不变量 11） | 集成测试：confirm resume 路径调用 ToolInvoker.invoke 时 ToolRuntimeAspect.guard 被命中 |
+| **HEAD 一致性守护**（不变量 10） | 自动测试：proposal 创建后手动 commit 改变 HEAD，confirm 后执行被拒绝 |
+| **路径规范化**（不变量 12） | 自动测试：targetPaths 用 `./src/A.java`，dirtyFiles 是绝对路径，规范化后能正确求交集 |
+| 测试覆盖 | mvn test 通过；新增至少 20 个测试用例覆盖测试矩阵 |
 | 前端验收 | npm run build 通过；前端能渲染 action_required 事件并提供 confirm/reject 按钮 |
 
 ---
@@ -721,3 +830,11 @@ public class ProposalExecutionService {
 | dirty workspace | targetPaths ∩ dirtyFiles 必须为空 | 不混合用户改动和 agent 改动 |
 | FAILED 是否可重试 | 不重试原 proposal，重试创建新 proposal | 一次性授权语义 |
 | Confirm 后是否重跑模型 | 不重跑，只重放 snapshot | 防止模型第二次生成不同参数 |
+| HEAD 在确认期间变化 | 拒绝执行，要求重新生成 proposal | baseline 失效，确认语义改变 |
+| ToolInvoker 是否可绕过 Aspect | 必须经过 Aspect，CI 测试守护 | 绕过则二次校验失效，安全模型崩溃 |
+| 路径比较 | 全部走 PathNormalizer 规范化 | 防止字符串形式差异绕过校验 |
+| Stuck EXECUTING 处理 | 标记 FAILED，不自动重放 | 不知道工具是否部分落盘，重放可能重复写 |
+| Stuck APPROVED 处理 | 不单独清理，靠测试发现一致性 bug | APPROVED 在事务内是瞬时状态，不该长期存在 |
+| 写工具无 diff | EXECUTED，commit_sha=NULL，不强制 --allow-empty | 空 commit 对 rollback 无意义 |
+| outOfScope 文件清理 | 区分 tracked/untracked（checkout vs delete） | tracked 用 checkout 恢复，untracked 用 delete |
+| Confirm 后事件命名 | ProposalExecutionRequestedEvent | 反映 EXECUTING 而不是 APPROVED |

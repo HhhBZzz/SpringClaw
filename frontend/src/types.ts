@@ -310,6 +310,7 @@ export interface RuntimeLearningReviewItem {
   lesson?: string;
   rule?: string;
   counterexample?: string;
+  counterexampleCategory?: string;
   reviewedAt?: string;
   requestId?: string;
   evidence?: string;

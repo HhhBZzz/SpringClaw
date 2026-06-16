@@ -52,6 +52,35 @@ class AgentLearningServiceTest {
     }
 
     @Test
+    void shouldClassifyTraceFailureFromFactsInsteadOfDefaultRuleTemplate() {
+        AgentLearningService service = new AgentLearningService(true, true, tempDir.toString(), 320);
+        AgentRunTraceEvent event = new AgentRunTraceEvent(
+                "req-learn-context",
+                "ContextAssembler.assemble",
+                "model",
+                "failed",
+                "context window missed the relevant file mapping",
+                12L,
+                1710000000000L,
+                null,
+                "",
+                "",
+                AgentRunTraceEvent.TIMELINE_STEP_SCHEMA,
+                "model",
+                "context.load",
+                "prompt",
+                "context",
+                "read"
+        );
+
+        service.captureTraceFailure(event);
+
+        var entries = service.listEntries(10);
+        assertThat(entries).hasSize(1);
+        assertThat(entries.get(0).counterexampleCategory()).isEqualTo("model_or_context");
+    }
+
+    @Test
     void shouldDeduplicateSameLearningSignature() throws Exception {
         AgentLearningService service = new AgentLearningService(true, true, tempDir.toString(), 320);
         AgentRunTraceEvent event = new AgentRunTraceEvent(
@@ -201,7 +230,9 @@ class AgentLearningServiceTest {
                 .containsExactly(active.signature(), disabled.signature());
         assertThat(entries.get(0).status()).isEqualTo("active");
         assertThat(entries.get(0).rule()).isEqualTo("不要原样重复失败命令。");
+        assertThat(entries.get(0).counterexampleCategory()).isEqualTo("tool_failure");
         assertThat(entries.get(1).status()).isEqualTo("disabled");
+        assertThat(entries.get(1).counterexampleCategory()).isEqualTo("permission_boundary");
         assertThat(entries.get(1).reviewReason()).isEqualTo("已由 workspace guard 覆盖");
         assertThat(entries.get(1).reviewedAt()).isNotBlank();
     }

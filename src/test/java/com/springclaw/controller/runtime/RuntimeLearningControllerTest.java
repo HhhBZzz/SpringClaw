@@ -57,6 +57,7 @@ class RuntimeLearningControllerTest {
                         "先分析失败条件。",
                         "不要原样重复失败命令。",
                         "连续重试失败 shell。",
+                        "tool_failure",
                         "",
                         "req-list-1",
                         "trace failed",

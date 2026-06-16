@@ -24,6 +24,18 @@ import {
 import { useAuthStore } from '../stores/auth';
 import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary } from '../types';
 
+type LearningReviewStatusFilter = 'all' | RuntimeLearningReviewStatus;
+
+const learningReviewStatusValues: RuntimeLearningReviewStatus[] = ['active', 'approved', 'disabled', 'rejected', 'superseded'];
+const learningReviewFilterOptions: Array<{ value: LearningReviewStatusFilter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'active', label: 'Active' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'disabled', label: 'Disabled' },
+  { value: 'rejected', label: 'Rejected' },
+  { value: 'superseded', label: 'Superseded' }
+];
+
 const auth = useAuthStore();
 const SESSION_KEY = 'springclaw.frontend.session';
 const SESSIONS_KEY = 'springclaw.frontend.chat.sessions.v1';
@@ -71,6 +83,7 @@ const runtimeRuns = ref<NonNullable<RuntimeOverview['agentRuns']>>([]);
 const runtimeModelProviders = ref<RuntimeModelProviders | null>(null);
 const learningReviewPendingSignature = ref('');
 const learningReviewReasons = ref<Record<string, string>>({});
+const learningReviewStatusFilter = ref<LearningReviewStatusFilter>('all');
 const modelSwitcherOpen = ref(false);
 const sessionSearchOpen = ref(false);
 const sessionSearchQuery = ref('');
@@ -525,8 +538,29 @@ const runtimeTaskItems = computed<RuntimeTask[]>(() => {
   return runtimeTasks.value?.tasks || runtimeOverview.value?.tasks?.tasks || [];
 });
 
+const learningReviewStatusCounts = computed<Record<LearningReviewStatusFilter, number>>(() => {
+  const counts: Record<LearningReviewStatusFilter, number> = {
+    all: runtimeLearningItems.value.length,
+    active: 0,
+    approved: 0,
+    disabled: 0,
+    rejected: 0,
+    superseded: 0
+  };
+  runtimeLearningItems.value.forEach((item) => {
+    counts[normalizeLearningReviewStatus(item)] += 1;
+  });
+  return counts;
+});
+
+const filteredRuntimeLearningItems = computed(() => {
+  const filter = learningReviewStatusFilter.value;
+  if (filter === 'all') return runtimeLearningItems.value;
+  return runtimeLearningItems.value.filter((item) => normalizeLearningReviewStatus(item) === filter);
+});
+
 const activeRuntimeLearningItems = computed(() => {
-  return runtimeLearningItems.value.filter((item) => item.status === 'active' || item.status === 'approved').length;
+  return learningReviewStatusCounts.value.active + learningReviewStatusCounts.value.approved;
 });
 
 const runtimeUsageSummary = computed<RuntimeUsageSummary>(() => {
@@ -759,6 +793,11 @@ async function reviewLearningItem(item: RuntimeLearningReviewItem, status: Runti
   } finally {
     learningReviewPendingSignature.value = '';
   }
+}
+
+function normalizeLearningReviewStatus(item: RuntimeLearningReviewItem): RuntimeLearningReviewStatus {
+  const status = (item.status || 'active') as RuntimeLearningReviewStatus;
+  return learningReviewStatusValues.includes(status) ? status : 'active';
 }
 
 async function openModelSwitcher() {
@@ -1746,11 +1785,23 @@ onUnmounted(() => {
 
                 <div v-else-if="activeResourceView === 'learning'" class="learning-review-list">
                   <div class="learning-review-summary">
-                    <span>Active rules</span>
+                    <span>Influencing rules</span>
                     <strong>{{ formatMetric(activeRuntimeLearningItems) }}</strong>
-                    <small>{{ formatMetric(runtimeLearningItems.length) }} total review items</small>
+                    <small>{{ formatMetric(runtimeLearningItems.length) }} loaded review items</small>
                   </div>
-                  <article v-for="item in runtimeLearningItems" :key="item.signature" class="learning-review-card">
+                  <div class="learning-review-filters" role="tablist" aria-label="Learning rule status filters">
+                    <button
+                      v-for="option in learningReviewFilterOptions"
+                      :key="option.value"
+                      type="button"
+                      :class="{ active: learningReviewStatusFilter === option.value }"
+                      @click="learningReviewStatusFilter = option.value"
+                    >
+                      <span>{{ option.label }}</span>
+                      <strong>{{ formatMetric(learningReviewStatusCounts[option.value]) }}</strong>
+                    </button>
+                  </div>
+                  <article v-for="item in filteredRuntimeLearningItems" :key="item.signature" class="learning-review-card">
                     <header>
                       <span>{{ item.status || 'active' }}</span>
                       <strong>{{ item.rule || item.trigger || item.signature }}</strong>
@@ -1789,6 +1840,7 @@ onUnmounted(() => {
                     </footer>
                   </article>
                   <div v-if="!runtimeLearningItems.length" class="empty-history">暂无可审阅 learning 规则。</div>
+                  <div v-else-if="!filteredRuntimeLearningItems.length" class="empty-history">当前状态没有 learning 规则。</div>
                 </div>
 
                 <div v-else class="runtime-usage-grid">

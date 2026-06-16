@@ -1,0 +1,129 @@
+package com.springclaw.service.knowledge;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+class MarkdownKnowledgeSourceServiceTest {
+
+    @TempDir
+    Path tempDir;
+
+    @Test
+    void shouldRenderOnlyApprovedMarkdownKnowledgeSources() throws Exception {
+        Files.createDirectories(tempDir.resolve("wiki"));
+        Files.writeString(tempDir.resolve("wiki/runtime.md"), """
+                ---
+                status: active
+                source: wiki-js
+                ---
+
+                # Runtime Notes
+
+                Tool calls need trace evidence.
+                """);
+        Files.writeString(tempDir.resolve("draft.md"), """
+                # Draft Note
+
+                This note should not enter project knowledge yet.
+                """);
+        Files.writeString(tempDir.resolve("rejected.md"), """
+                ---
+                status: rejected
+                ---
+
+                # Rejected Note
+
+                Outdated architecture idea.
+                """);
+
+        MarkdownKnowledgeSourceService service = new MarkdownKnowledgeSourceService(true, tempDir.toString(), 1200, 20);
+
+        MarkdownKnowledgeSourceService.KnowledgeSourceSnapshot snapshot = service.renderSnapshot();
+
+        assertThat(snapshot.includedCount()).isEqualTo(1);
+        assertThat(snapshot.filteredCount()).isEqualTo(2);
+        assertThat(snapshot.context())
+                .contains("### knowledge-source/wiki/runtime.md")
+                .contains("Tool calls need trace evidence.")
+                .doesNotContain("status: active")
+                .doesNotContain("Draft Note")
+                .doesNotContain("Rejected Note");
+    }
+
+    @Test
+    void shouldReturnEmptySnapshotWhenDisabledOrMissing() {
+        MarkdownKnowledgeSourceService disabled = new MarkdownKnowledgeSourceService(false, tempDir.toString(), 1200, 20);
+        MarkdownKnowledgeSourceService missing = new MarkdownKnowledgeSourceService(true, tempDir.resolve("missing").toString(), 1200, 20);
+
+        assertThat(disabled.renderSnapshot()).isEqualTo(MarkdownKnowledgeSourceService.KnowledgeSourceSnapshot.empty());
+        assertThat(missing.renderSnapshot()).isEqualTo(MarkdownKnowledgeSourceService.KnowledgeSourceSnapshot.empty());
+    }
+
+    @Test
+    void shouldListKnowledgeSourcesForReview() throws Exception {
+        Files.writeString(tempDir.resolve("active.md"), """
+                ---
+                status: active
+                source: wiki-js
+                ---
+
+                # Active Knowledge
+
+                Runtime facts.
+                """);
+        Files.writeString(tempDir.resolve("draft.md"), """
+                # Draft Knowledge
+
+                Unreviewed facts.
+                """);
+
+        MarkdownKnowledgeSourceService service = new MarkdownKnowledgeSourceService(true, tempDir.toString(), 1200, 20);
+
+        var entries = service.listSources(20);
+
+        assertThat(entries).hasSize(2);
+        assertThat(entries.get(0).path()).isEqualTo("active.md");
+        assertThat(entries.get(0).status()).isEqualTo("active");
+        assertThat(entries.get(0).source()).isEqualTo("wiki-js");
+        assertThat(entries.get(0).contextIncluded()).isTrue();
+        assertThat(entries.get(0).contextImpact()).isEqualTo("included_in_context");
+        assertThat(entries.get(0).title()).isEqualTo("Active Knowledge");
+        assertThat(entries.get(0).chars()).isPositive();
+        assertThat(entries.get(1).path()).isEqualTo("draft.md");
+        assertThat(entries.get(1).status()).isEqualTo("unreviewed");
+        assertThat(entries.get(1).contextIncluded()).isFalse();
+        assertThat(entries.get(1).contextImpact()).isEqualTo("filtered_from_context");
+        assertThat(entries.get(1).title()).isEqualTo("Draft Knowledge");
+    }
+
+    @Test
+    void shouldRespectMaxFilesAndStablePathOrder() throws Exception {
+        Files.writeString(tempDir.resolve("b.md"), """
+                ---
+                status: approved
+                ---
+
+                # B
+                """);
+        Files.writeString(tempDir.resolve("a.md"), """
+                ---
+                status: approved
+                ---
+
+                # A
+                """);
+
+        MarkdownKnowledgeSourceService service = new MarkdownKnowledgeSourceService(true, tempDir.toString(), 1200, 1);
+
+        MarkdownKnowledgeSourceService.KnowledgeSourceSnapshot snapshot = service.renderSnapshot();
+
+        assertThat(snapshot.includedCount()).isEqualTo(1);
+        assertThat(snapshot.filteredCount()).isEqualTo(1);
+        assertThat(snapshot.context()).contains("knowledge-source/a.md").doesNotContain("knowledge-source/b.md");
+    }
+}

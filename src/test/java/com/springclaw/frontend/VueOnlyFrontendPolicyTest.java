@@ -109,6 +109,7 @@ class VueOnlyFrontendPolicyTest {
                 .contains("learning-review-list")
                 .contains("learning-review-counterexample")
                 .contains("learning-review-category")
+                .contains("learning-review-impact")
                 .contains("learning-review-evidence")
                 .contains("learning-review-reason")
                 .contains("learning-review-filters")
@@ -119,8 +120,10 @@ class VueOnlyFrontendPolicyTest {
                 .contains("Counterexample")
                 .contains("Evidence")
                 .contains("Counterexample type")
+                .contains("Context impact")
                 .contains("Review reason")
                 .contains("item.counterexampleCategory")
+                .contains("item.contextImpact")
                 .contains("Influencing rules")
                 .contains("loaded review items")
                 .contains("All")
@@ -142,6 +145,8 @@ class VueOnlyFrontendPolicyTest {
         assertThat(types)
                 .contains("RuntimeLearningReviewItem")
                 .contains("counterexampleCategory?: string")
+                .contains("contextIncluded?: boolean")
+                .contains("contextImpact?: string")
                 .contains("RuntimeLearningStatusUpdate");
     }
 

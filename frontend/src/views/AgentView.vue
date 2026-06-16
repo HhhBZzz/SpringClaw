@@ -560,7 +560,7 @@ const filteredRuntimeLearningItems = computed(() => {
 });
 
 const activeRuntimeLearningItems = computed(() => {
-  return learningReviewStatusCounts.value.active + learningReviewStatusCounts.value.approved;
+  return runtimeLearningItems.value.filter(isLearningContextIncluded).length;
 });
 
 const runtimeUsageSummary = computed<RuntimeUsageSummary>(() => {
@@ -798,6 +798,12 @@ async function reviewLearningItem(item: RuntimeLearningReviewItem, status: Runti
 function normalizeLearningReviewStatus(item: RuntimeLearningReviewItem): RuntimeLearningReviewStatus {
   const status = (item.status || 'active') as RuntimeLearningReviewStatus;
   return learningReviewStatusValues.includes(status) ? status : 'active';
+}
+
+function isLearningContextIncluded(item: RuntimeLearningReviewItem) {
+  if (typeof item.contextIncluded === 'boolean') return item.contextIncluded;
+  const status = normalizeLearningReviewStatus(item);
+  return status === 'active' || status === 'approved';
 }
 
 async function openModelSwitcher() {
@@ -1815,6 +1821,10 @@ onUnmounted(() => {
                     <div v-if="item.counterexampleCategory" class="learning-review-category">
                       <span>Counterexample type</span>
                       <small>{{ item.counterexampleCategory }}</small>
+                    </div>
+                    <div class="learning-review-impact" :class="{ muted: !isLearningContextIncluded(item) }">
+                      <span>Context impact</span>
+                      <small>{{ item.contextImpact || (isLearningContextIncluded(item) ? 'included_in_context' : 'filtered_from_context') }}</small>
                     </div>
                     <div v-if="item.counterexample" class="learning-review-counterexample">
                       <span>Counterexample</span>

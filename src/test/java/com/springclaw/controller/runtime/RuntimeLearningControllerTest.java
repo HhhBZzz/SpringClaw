@@ -58,6 +58,8 @@ class RuntimeLearningControllerTest {
                         "不要原样重复失败命令。",
                         "连续重试失败 shell。",
                         "tool_failure",
+                        true,
+                        "included_in_context",
                         "",
                         "req-list-1",
                         "trace failed",

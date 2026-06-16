@@ -152,17 +152,24 @@ public class AgentLearningService {
                 if (!StringUtils.hasText(signature)) {
                     continue;
                 }
+                String source = sectionField(section.text(), "source");
+                String trigger = sectionField(section.text(), "trigger");
+                String lesson = sectionField(section.text(), "lesson");
+                String rule = sectionField(section.text(), "rule");
+                String counterexample = sectionField(section.text(), "counterexample");
+                String evidence = sectionField(section.text(), "evidence");
                 entries.add(new AgentLearningReviewItem(
                         signature,
                         extractStatus(section.text()).orElse("active"),
-                        sectionField(section.text(), "source"),
-                        sectionField(section.text(), "trigger"),
-                        sectionField(section.text(), "lesson"),
-                        sectionField(section.text(), "rule"),
-                        sectionField(section.text(), "counterexample"),
+                        source,
+                        trigger,
+                        lesson,
+                        rule,
+                        counterexample,
+                        classifyCounterexample(source, trigger, counterexample, evidence),
                         sectionField(section.text(), "reviewedAt"),
                         sectionField(section.text(), "requestId"),
-                        sectionField(section.text(), "evidence"),
+                        evidence,
                         sectionField(section.text(), "reviewReason"),
                         sectionTitle(section.text())
                 ));
@@ -305,6 +312,77 @@ public class AgentLearningService {
         return "";
     }
 
+    private String classifyCounterexample(String source, String trigger, String counterexample, String evidence) {
+        String text = TextUtils.normalizeWS(String.join(" ", source, trigger, counterexample, evidence)).toLowerCase(Locale.ROOT);
+        if (containsAny(text,
+                "workspace guard",
+                "guard denied",
+                "denied",
+                "permission",
+                "forbidden",
+                "unauthorized",
+                "../",
+                "outside",
+                "越界",
+                "拒绝",
+                "权限")) {
+            return "permission_boundary";
+        }
+        if (containsAny(text,
+                "too broad",
+                "overgeneral",
+                "过宽",
+                "误伤",
+                "泛化")) {
+            return "overgeneralized_rule";
+        }
+        if (containsAny(text,
+                "evidence",
+                "unknown",
+                "not enough",
+                "no evidence",
+                "证据",
+                "不足",
+                "缺少")) {
+            return "evidence_gap";
+        }
+        if (containsAny(text,
+                "model",
+                "context",
+                "memory",
+                "prompt",
+                "模型",
+                "上下文",
+                "记忆")) {
+            return "model_or_context";
+        }
+        if (containsAny(text,
+                "tool",
+                "command",
+                "shell",
+                "script",
+                "exit",
+                "timeout",
+                "failed",
+                "工具",
+                "命令",
+                "脚本",
+                "超时",
+                "失败")) {
+            return "tool_failure";
+        }
+        return "unknown";
+    }
+
+    private boolean containsAny(String text, String... needles) {
+        for (String needle : needles) {
+            if (text.contains(needle)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private String updateSectionStatus(String section, String status, String reason) {
         List<String> lines = new ArrayList<>(List.of(section.split("\\R", -1)));
         int statusIndex = firstLineIndex(lines, "- status:");
@@ -405,6 +483,7 @@ public class AgentLearningService {
                                           String lesson,
                                           String rule,
                                           String counterexample,
+                                          String counterexampleCategory,
                                           String reviewedAt,
                                           String requestId,
                                           String evidence,

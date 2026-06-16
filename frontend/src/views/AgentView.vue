@@ -1812,6 +1812,10 @@ onUnmounted(() => {
                       <small>request {{ item.requestId || '-' }}</small>
                       <small>signature {{ item.signature }}</small>
                     </div>
+                    <div v-if="item.counterexampleCategory" class="learning-review-category">
+                      <span>Counterexample type</span>
+                      <small>{{ item.counterexampleCategory }}</small>
+                    </div>
                     <div v-if="item.counterexample" class="learning-review-counterexample">
                       <span>Counterexample</span>
                       <small>{{ item.counterexample }}</small>

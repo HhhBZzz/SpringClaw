@@ -7,6 +7,7 @@ import com.springclaw.web.auth.RequireRole;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,6 +42,35 @@ class RuntimeLearningControllerTest {
         assertThat(response.getCode()).isZero();
         assertThat(response.getData()).isEqualTo(update);
         verify(learningService).updateStatus("sig-1", "disabled", "规则过宽");
+    }
+
+    @Test
+    void shouldListLearningEntriesThroughRuntimeConsole() {
+        AgentLearningService learningService = mock(AgentLearningService.class);
+        RuntimeLearningController controller = new RuntimeLearningController(learningService);
+        List<AgentLearningService.AgentLearningReviewItem> entries = List.of(
+                new AgentLearningService.AgentLearningReviewItem(
+                        "sig-1",
+                        "active",
+                        "manual",
+                        "失败命令",
+                        "先分析失败条件。",
+                        "不要原样重复失败命令。",
+                        "连续重试失败 shell。",
+                        "",
+                        "req-list-1",
+                        "trace failed",
+                        "",
+                        ""
+                )
+        );
+        when(learningService.listEntries(12)).thenReturn(entries);
+
+        ApiResponse<List<AgentLearningService.AgentLearningReviewItem>> response = controller.learningEntries(12);
+
+        assertThat(response.getCode()).isZero();
+        assertThat(response.getData()).isEqualTo(entries);
+        verify(learningService).listEntries(12);
     }
 
     @Test
@@ -79,6 +109,16 @@ class RuntimeLearningControllerTest {
                 "updateLearningStatus",
                 RuntimeLearningController.UpdateLearningStatusRequest.class
         );
+
+        RequireRole requireRole = method.getAnnotation(RequireRole.class);
+
+        assertThat(requireRole).isNotNull();
+        assertThat(requireRole.value()).containsExactly("ADMIN");
+    }
+
+    @Test
+    void learningEntriesShouldRequireAdminRole() throws Exception {
+        Method method = RuntimeLearningController.class.getMethod("learningEntries", int.class);
 
         RequireRole requireRole = method.getAnnotation(RequireRole.class);
 

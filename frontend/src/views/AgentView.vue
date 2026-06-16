@@ -16,11 +16,13 @@ import {
   getRuntimeTasks,
   getRuntimeTools,
   getRuntimeUsage,
+  getRuntimeLearningEntries,
   streamChat,
-  switchRuntimeModelProvider
+  switchRuntimeModelProvider,
+  updateRuntimeLearningStatus
 } from '../services/api';
 import { useAuthStore } from '../stores/auth';
-import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary } from '../types';
+import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary } from '../types';
 
 const auth = useAuthStore();
 const SESSION_KEY = 'springclaw.frontend.session';
@@ -63,9 +65,11 @@ const runtimeOverview = ref<RuntimeOverview | null>(null);
 const runtimeSkills = ref<{ count?: number; scope?: string; sourceCounts?: Record<string, number>; definitions?: RuntimeSkill[] } | null>(null);
 const runtimeTools = ref<RuntimeTool[]>([]);
 const runtimeTasks = ref<{ total?: number; enabled?: number; disabled?: number; scope?: string; tasks?: RuntimeTask[] } | null>(null);
+const runtimeLearningItems = ref<RuntimeLearningReviewItem[]>([]);
 const runtimeUsage = ref<RuntimeUsageSummary | null>(null);
 const runtimeRuns = ref<NonNullable<RuntimeOverview['agentRuns']>>([]);
 const runtimeModelProviders = ref<RuntimeModelProviders | null>(null);
+const learningReviewPendingSignature = ref('');
 const modelSwitcherOpen = ref(false);
 const sessionSearchOpen = ref(false);
 const sessionSearchQuery = ref('');
@@ -110,6 +114,7 @@ const engineerNavItems: Array<{ key: RuntimeResourceView; label: string; classNa
   { key: 'skills', label: 'Skills', className: 'nav-skills' },
   { key: 'tools', label: 'Tools', className: 'nav-tools' },
   { key: 'tasks', label: 'Tasks', className: 'nav-tasks' },
+  { key: 'learning', label: 'Learning', className: 'nav-learning' },
   { key: 'usage', label: 'Usage', className: 'nav-usage' }
 ];
 
@@ -475,6 +480,8 @@ const runtimeResourceTitle = computed(() => {
       return 'Tool Permissions';
     case 'tasks':
       return 'Scheduled Tasks';
+    case 'learning':
+      return 'Learning Review';
     case 'usage':
       return 'Token Usage';
     default:
@@ -494,6 +501,8 @@ const runtimeResourceSubtitle = computed(() => {
       return 'Tool providers resolved through runtime policy and allowed tool packs.';
     case 'tasks':
       return 'User-accessible scheduled tasks, next run time, and latest status.';
+    case 'learning':
+      return 'Review rules distilled from failed runs before they keep influencing context.';
     case 'usage':
       return 'LLM calls, token totals, cache hit rate, provider and model distribution.';
     default:
@@ -513,6 +522,10 @@ const runtimeToolItems = computed<RuntimeTool[]>(() => {
 
 const runtimeTaskItems = computed<RuntimeTask[]>(() => {
   return runtimeTasks.value?.tasks || runtimeOverview.value?.tasks?.tasks || [];
+});
+
+const activeRuntimeLearningItems = computed(() => {
+  return runtimeLearningItems.value.filter((item) => item.status === 'active' || item.status === 'approved').length;
 });
 
 const runtimeUsageSummary = computed<RuntimeUsageSummary>(() => {
@@ -542,6 +555,8 @@ const runtimeResourceCount = computed(() => {
       return runtimeToolItems.value.length;
     case 'tasks':
       return runtimeTaskItems.value.length;
+    case 'learning':
+      return runtimeLearningItems.value.length;
     case 'usage':
       return runtimeUsageSummary.value.totalCalls || 0;
     case 'sessions':
@@ -686,6 +701,7 @@ async function activateRuntimeNav(key: RuntimeNavKey) {
   }
   if (key === 'agents') activeInspectorTab.value = 'trace';
   if (key === 'skills' || key === 'tools') activeInspectorTab.value = 'tools';
+  if (key === 'learning') activeInspectorTab.value = 'memory';
   await loadRuntimeResource(key);
 }
 
@@ -708,6 +724,8 @@ async function loadRuntimeResource(view: RuntimeResourceView = activeResourceVie
       runtimeTools.value = await getRuntimeTools();
     } else if (view === 'tasks') {
       runtimeTasks.value = await getRuntimeTasks(30);
+    } else if (view === 'learning') {
+      runtimeLearningItems.value = await getRuntimeLearningEntries(50);
     } else if (view === 'usage') {
       runtimeUsage.value = await getRuntimeUsage(30);
     } else {
@@ -721,6 +739,23 @@ async function loadRuntimeResource(view: RuntimeResourceView = activeResourceVie
     setRuntimeStatus(message);
   } finally {
     runtimeResourceLoading.value = false;
+  }
+}
+
+async function reviewLearningItem(item: RuntimeLearningReviewItem, status: RuntimeLearningReviewStatus) {
+  if (!item.signature || learningReviewPendingSignature.value) return;
+  learningReviewPendingSignature.value = item.signature;
+  try {
+    const reason = `Runtime Console review: ${status}`;
+    await updateRuntimeLearningStatus(item.signature, status, reason);
+    await loadRuntimeResource('learning');
+    setRuntimeStatus(`学习规则 ${item.signature.slice(0, 8)} 已标记为 ${status}。`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Learning review update failed.';
+    runtimeResourceError.value = message;
+    setRuntimeStatus(message);
+  } finally {
+    learningReviewPendingSignature.value = '';
   }
 }
 
@@ -1705,6 +1740,43 @@ onUnmounted(() => {
                     </div>
                   </article>
                   <div v-if="!runtimeTaskItems.length" class="empty-history">当前账号暂无定时任务。</div>
+                </div>
+
+                <div v-else-if="activeResourceView === 'learning'" class="learning-review-list">
+                  <div class="learning-review-summary">
+                    <span>Active rules</span>
+                    <strong>{{ formatMetric(activeRuntimeLearningItems) }}</strong>
+                    <small>{{ formatMetric(runtimeLearningItems.length) }} total review items</small>
+                  </div>
+                  <article v-for="item in runtimeLearningItems" :key="item.signature" class="learning-review-card">
+                    <header>
+                      <span>{{ item.status || 'active' }}</span>
+                      <strong>{{ item.rule || item.trigger || item.signature }}</strong>
+                    </header>
+                    <p>{{ item.lesson || 'No lesson captured.' }}</p>
+                    <div class="learning-review-meta">
+                      <small>source {{ item.source || '-' }}</small>
+                      <small>request {{ item.requestId || '-' }}</small>
+                      <small>signature {{ item.signature }}</small>
+                    </div>
+                    <div v-if="item.counterexample" class="learning-review-counterexample">
+                      <span>Counterexample</span>
+                      <small>{{ item.counterexample }}</small>
+                    </div>
+                    <div v-if="item.evidence" class="learning-review-evidence">
+                      <span>Evidence</span>
+                      <small>{{ item.evidence }}</small>
+                    </div>
+                    <footer>
+                      <small>{{ item.reviewReason || item.reviewedAt || item.sectionTitle || 'Not reviewed' }}</small>
+                      <div class="learning-review-status-actions">
+                        <button type="button" :disabled="!!learningReviewPendingSignature" @click="reviewLearningItem(item, 'approved')">Approve</button>
+                        <button type="button" :disabled="!!learningReviewPendingSignature" @click="reviewLearningItem(item, 'disabled')">Disable</button>
+                        <button type="button" :disabled="!!learningReviewPendingSignature" @click="reviewLearningItem(item, 'rejected')">Reject</button>
+                      </div>
+                    </footer>
+                  </article>
+                  <div v-if="!runtimeLearningItems.length" class="empty-history">暂无可审阅 learning 规则。</div>
                 </div>
 
                 <div v-else class="runtime-usage-grid">

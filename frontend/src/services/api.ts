@@ -1,4 +1,4 @@
-import type { AdminDashboard, AgentActionProposal, AgentActionProposalResult, AgentCapabilityEvent, AgentDecisionEvent, AgentTraceEvent, AgentVerificationEvent, ApiEnvelope, AuditLogPage, AuthProfileResponse, AuthTokenResponse, ChatHistoryResponse, ChatResponse, ChatResponseMode, ChatStreamMeta, ModelStatusResponse, RuntimeModelProviders, RuntimeOverview, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary } from '../types';
+import type { AdminDashboard, AgentActionProposal, AgentActionProposalResult, AgentCapabilityEvent, AgentDecisionEvent, AgentTraceEvent, AgentVerificationEvent, ApiEnvelope, AuditLogPage, AuthProfileResponse, AuthTokenResponse, ChatHistoryResponse, ChatResponse, ChatResponseMode, ChatStreamMeta, ModelStatusResponse, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeLearningStatusUpdate, RuntimeModelProviders, RuntimeOverview, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary } from '../types';
 
 const TOKEN_KEY = 'springclaw.frontend.token';
 let memoryToken = '';
@@ -133,6 +133,17 @@ export function getRuntimeTools() {
 
 export function getRuntimeTasks(limit = 20) {
   return request<{ total?: number; enabled?: number; disabled?: number; scope?: string; tasks?: RuntimeTask[] }>(`/api/runtime-console/tasks?limit=${encodeURIComponent(String(limit))}`);
+}
+
+export function getRuntimeLearningEntries(limit = 50) {
+  return request<RuntimeLearningReviewItem[]>(`/api/runtime-console/learning?limit=${encodeURIComponent(String(limit))}`);
+}
+
+export function updateRuntimeLearningStatus(signature: string, status: RuntimeLearningReviewStatus, reason?: string) {
+  return request<RuntimeLearningStatusUpdate>('/api/runtime-console/learning/status', {
+    method: 'POST',
+    body: JSON.stringify({ signature, status, reason })
+  });
 }
 
 export function getRuntimeUsage(recentLimit = 20) {

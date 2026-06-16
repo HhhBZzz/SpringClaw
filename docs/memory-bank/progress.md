@@ -16,10 +16,10 @@
 - Agent learning 条目已带 `status: active`，Memory Bank 读取时会过滤 `disabled/rejected/superseded` 条目。
 - Context summary、SSE meta、Micrometer 指标和前端任务元数据已展示/记录 active 与 filtered learning 数量。
 - Agent learning 已支持按 signature 更新 status，并写入 `reviewedAt/reviewReason` 作为最小审计记录。
-- Runtime Console 已提供 ADMIN 后端接口列表化 learning review 条目并更新 learning status；前端确认/撤销按钮仍待补。
+- Runtime Console 已提供 ADMIN learning review 入口：可列表化规则，并在前端执行 approve/disable/reject。
 
 当前正在推进：
 
 - Context 可解释与低基数观测。
-- 自进化经验沉淀，而不是只保存对话。
+- 自进化经验沉淀、人工审核和后续影响复盘，而不是只保存对话。
 - Harness 化，而不是继续扩 demo。

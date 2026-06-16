@@ -244,7 +244,7 @@ export interface AdminDashboard {
   }>;
 }
 
-export type RuntimeResourceView = 'console' | 'sessions' | 'agents' | 'skills' | 'tools' | 'tasks' | 'usage';
+export type RuntimeResourceView = 'console' | 'sessions' | 'agents' | 'skills' | 'tools' | 'tasks' | 'learning' | 'usage';
 
 export interface RuntimeSkill {
   skillId: string;
@@ -298,6 +298,30 @@ export interface RuntimeTask {
   lastRunAt?: string;
   nextRunAt?: string;
   lastStatus?: string;
+}
+
+export type RuntimeLearningReviewStatus = 'active' | 'approved' | 'disabled' | 'rejected' | 'superseded';
+
+export interface RuntimeLearningReviewItem {
+  signature: string;
+  status?: RuntimeLearningReviewStatus | string;
+  source?: string;
+  trigger?: string;
+  lesson?: string;
+  rule?: string;
+  counterexample?: string;
+  reviewedAt?: string;
+  requestId?: string;
+  evidence?: string;
+  reviewReason?: string;
+  sectionTitle?: string;
+}
+
+export interface RuntimeLearningStatusUpdate {
+  signature: string;
+  previousStatus?: string;
+  status: RuntimeLearningReviewStatus | string;
+  reason?: string;
 }
 
 export interface RuntimeUsageSummary {

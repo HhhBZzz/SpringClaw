@@ -26,12 +26,12 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 当前未提交状态：
 
 - 当前瞬时状态以 `git status --short` 为准；本文不再记录易过期的文件列表。
-- 最近稳定基线已包含 Workspace Guard、stream action confirmation、Agent product mode metadata、timeline step schema、confirmation timeline、workspace tool action mapping、memory recall isolation、Memory Bank 文件化项目记忆、context summary 前端展示、模型用量、prompt cache、模型调用过程指标、Agent learning 最小闭环和 learning review 后端查询入口。
+- 最近稳定基线已包含 Workspace Guard、stream action confirmation、Agent product mode metadata、timeline step schema、confirmation timeline、workspace tool action mapping、memory recall isolation、Memory Bank 文件化项目记忆、context summary 前端展示、模型用量、prompt cache、模型调用过程指标、Agent learning 最小闭环和 Runtime Console learning review 入口。
 
 最近测试基线：
 
 - `mvn test`
-- 结果：`Tests run: 392, Failures: 0, Errors: 0, Skipped: 0`
+- 结果：`Tests run: 393, Failures: 0, Errors: 0, Skipped: 0`
 - `cd frontend && npm run build`
 - 结果：Vue typecheck 与 Vite build 通过
 - `git diff --check`
@@ -66,10 +66,10 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 | Skill 系统 | `SkillCatalogService`、`SkillRegistryService`、`SkillRuntimeService`、skill markdown/runtime/script 包 | Skill 注册、导入、Python/builtin/prompt/script 运行 | 3 | 65% | 本轮冻结扩张；等 Runtime/Tool/Policy 稳定后再继续 marketplace/plugin 化 |
 | MCP 适配 | 当前未见稳定主线模块 | 未来外部工具协议适配层 | 1 | 10% | 现在不要做；等 Tool registry/schema/audit 稳定后再接 |
 | Knowledge Source / Wiki | `docs/memory-bank`、未来 Obsidian/Wiki.js Markdown source | 当前只支持本地 Markdown Memory Bank；Wiki.js / Obsidian 应作为项目知识源，不混入用户长期记忆 | 1 | 20% | 先稳定 Markdown 文件模型；不要现在接复杂 Wiki API 或 RAG 管道 |
-| Self Evolution | `AgentLearningService`、`RuntimeLearningController`、`AgentRunTraceService`、`docs/memory-bank/agent-learnings.md` | 从失败 trace 中提炼 lesson/rule/counterexample/evidence，去重后写入可审阅 Memory Bank；新条目默认 active，Memory Bank 只加载 active/approved/旧格式条目，过滤 disabled/rejected/superseded；learning review 条目可按 limit 列出，status 可按 signature 更新并记录 reviewedAt/reviewReason；runtime-console 已提供 ADMIN 后端入口 | 2 | 48% | 下一步增加前端用户确认/撤销入口、反例分类、规则失效回滚；不要让模型自动无限写规则 |
+| Self Evolution | `AgentLearningService`、`RuntimeLearningController`、`AgentRunTraceService`、`docs/memory-bank/agent-learnings.md` | 从失败 trace 中提炼 lesson/rule/counterexample/evidence，去重后写入可审阅 Memory Bank；新条目默认 active，Memory Bank 只加载 active/approved/旧格式条目，过滤 disabled/rejected/superseded；learning review 条目可按 limit 列出，status 可按 signature 更新并记录 reviewedAt/reviewReason；Runtime Console 已提供 ADMIN 审核入口，可 approve/disable/reject 规则 | 3 | 54% | 下一步增加撤销、反例分类、规则失效回滚和影响复盘；不要让模型自动无限写规则 |
 | Plugin 系统 | 当前主要是 Skill/Tool 形态，未形成插件生命周期 | 未来可加载组件、版本、隔离、安装 | 1 | 15% | 现在不要做；避免项目发散 |
 | Multi-agent 通信 | 当前未形成独立 agent 协作协议 | 未来 agent-to-agent、handoff、角色协作 | 1 | 10% | 现在不要做；先把单 agent 生命周期跑稳 |
-| Frontend Command Center | Vue Agent Console、Admin Console、runtime console 相关页面、`ChatStreamMeta.contextSummary` | 展示聊天、stream、trace、动作确认、后台运维数据；Agent Console 与 Admin 表已展示 `productMode`；timeline 已消费结构化 step 字段并清理 JSON detail 展示；任务元数据面板已展示 context summary | 3 | 72% | 继续展示风险等级和真实 timeline，不要先堆视觉功能 |
+| Frontend Command Center | Vue Agent Console、Admin Console、runtime console 相关页面、`ChatStreamMeta.contextSummary` | 展示聊天、stream、trace、动作确认、后台运维数据；Agent Console 与 Admin 表已展示 `productMode`；timeline 已消费结构化 step 字段并清理 JSON detail 展示；任务元数据面板已展示 context summary；Runtime Console 已增加 Learning Review 入口用于审核自进化规则 | 3 | 76% | 继续展示风险等级和真实 timeline，不要先堆视觉功能 |
 
 ## 四、当前默认 Runtime 链路记录
 
@@ -480,7 +480,8 @@ ChatController
 - `MemoryBankService.renderSnapshot`、`AssembledContext.sourceSummary`、SSE meta 和 `AgentContextMetricsService` 已暴露 active/filtered learning count，用于判断 Memory Bank 中按状态可进入上下文的学习规则数量，以及被过滤的失效规则数量。
 - `AgentLearningService.listEntries` 已支持按 limit 读取 review 条目，返回 signature、status、trigger、lesson、rule、counterexample、evidence、reviewedAt/reviewReason 等字段。
 - `AgentLearningService.updateStatus` 已支持按 signature 更新 learning status，并写入 `reviewedAt/reviewReason`，为后续用户确认/撤销入口提供服务层能力。
-- `RuntimeLearningController` 已提供 `/api/runtime-console/learning` 和 `/api/runtime-console/learning/status` ADMIN 后端入口，用于先发现可审阅规则，再程序化确认、禁用、拒绝或替换学习规则；当前还没有前端操作按钮。
+- `RuntimeLearningController` 已提供 `/api/runtime-console/learning` 和 `/api/runtime-console/learning/status` ADMIN 后端入口，用于先发现可审阅规则，再程序化确认、禁用、拒绝或替换学习规则。
+- Agent Console 的 Runtime Resource 面板已增加 `Learning` 入口，可展示 rule/lesson/counterexample/evidence，并对规则执行 approve/disable/reject。
 
 验证：
 
@@ -491,7 +492,7 @@ ChatController
 
 下一步：
 
-- 在现有 status 更新 API 基础上增加前端用户确认/撤销入口，避免错误规则污染上下文。
+- 增加撤销、反例分类和规则失效回滚入口，避免错误规则长期污染上下文。
 - 把 Obsidian / Wiki.js 作为 Markdown Knowledge Source 接入，不把它们直接混进用户长期记忆或向量 RAG。
 - 继续补 learning 影响复盘：把 active learning count 和后续任务成功/失败 trace 关联起来。
 

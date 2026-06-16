@@ -109,11 +109,16 @@ class VueOnlyFrontendPolicyTest {
                 .contains("learning-review-list")
                 .contains("learning-review-counterexample")
                 .contains("learning-review-evidence")
+                .contains("learning-review-reason")
+                .contains("learningReviewReasons")
                 .contains("Counterexample")
                 .contains("Evidence")
+                .contains("Review reason")
                 .contains("@click=\"reviewLearningItem(item, 'approved')\"")
+                .contains("@click=\"reviewLearningItem(item, 'active')\"")
                 .contains("@click=\"reviewLearningItem(item, 'disabled')\"")
-                .contains("@click=\"reviewLearningItem(item, 'rejected')\"");
+                .contains("@click=\"reviewLearningItem(item, 'rejected')\"")
+                .contains("@click=\"reviewLearningItem(item, 'superseded')\"");
 
         assertThat(api)
                 .contains("getRuntimeLearningEntries")

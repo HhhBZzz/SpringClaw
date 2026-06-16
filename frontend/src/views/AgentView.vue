@@ -70,6 +70,7 @@ const runtimeUsage = ref<RuntimeUsageSummary | null>(null);
 const runtimeRuns = ref<NonNullable<RuntimeOverview['agentRuns']>>([]);
 const runtimeModelProviders = ref<RuntimeModelProviders | null>(null);
 const learningReviewPendingSignature = ref('');
+const learningReviewReasons = ref<Record<string, string>>({});
 const modelSwitcherOpen = ref(false);
 const sessionSearchOpen = ref(false);
 const sessionSearchQuery = ref('');
@@ -746,8 +747,9 @@ async function reviewLearningItem(item: RuntimeLearningReviewItem, status: Runti
   if (!item.signature || learningReviewPendingSignature.value) return;
   learningReviewPendingSignature.value = item.signature;
   try {
-    const reason = `Runtime Console review: ${status}`;
+    const reason = learningReviewReasons.value[item.signature]?.trim() || `Runtime Console review: ${status}`;
     await updateRuntimeLearningStatus(item.signature, status, reason);
+    learningReviewReasons.value[item.signature] = '';
     await loadRuntimeResource('learning');
     setRuntimeStatus(`学习规则 ${item.signature.slice(0, 8)} 已标记为 ${status}。`);
   } catch (error) {
@@ -1767,12 +1769,22 @@ onUnmounted(() => {
                       <span>Evidence</span>
                       <small>{{ item.evidence }}</small>
                     </div>
+                    <label class="learning-review-reason">
+                      <span>Review reason</span>
+                      <input
+                        v-model="learningReviewReasons[item.signature]"
+                        type="text"
+                        :placeholder="item.reviewReason || '记录反例、误判原因或恢复说明'"
+                      />
+                    </label>
                     <footer>
                       <small>{{ item.reviewReason || item.reviewedAt || item.sectionTitle || 'Not reviewed' }}</small>
                       <div class="learning-review-status-actions">
+                        <button type="button" :disabled="!!learningReviewPendingSignature" @click="reviewLearningItem(item, 'active')">Restore</button>
                         <button type="button" :disabled="!!learningReviewPendingSignature" @click="reviewLearningItem(item, 'approved')">Approve</button>
                         <button type="button" :disabled="!!learningReviewPendingSignature" @click="reviewLearningItem(item, 'disabled')">Disable</button>
                         <button type="button" :disabled="!!learningReviewPendingSignature" @click="reviewLearningItem(item, 'rejected')">Reject</button>
+                        <button type="button" :disabled="!!learningReviewPendingSignature" @click="reviewLearningItem(item, 'superseded')">Supersede</button>
                       </div>
                     </footer>
                   </article>

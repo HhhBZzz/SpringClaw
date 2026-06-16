@@ -196,7 +196,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
             // 将 tracker 注册到线程上下文，让 WorkspaceEditToolPack 的 @Tool 方法可以记录
             ToolExecutionContextHolder.setTracker(tracker);
 
-            String initialPrompt = renderAutonomousPrompt(assembled.question(), tools, "", riskLevel);
+            String initialPrompt = renderAutonomousPrompt(ctx, tools, "", riskLevel);
 
             for (int stepNo = 1; stepNo <= maxAutonomousSteps; stepNo++) {
                 log.info("自主循环步骤 {}/{}: requestId={}, riskLevel={}, toolsCount={}, trackerState={}",
@@ -293,7 +293,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
                             tracker.hasRunCommandCall());
                     // 不终止循环 — 将拒绝提示加入下一轮 prompt
                     String rejectionHint = tracker.renderFakeCompletionRejection(riskLevel);
-                    initialPrompt = renderAutonomousPrompt(assembled.question(), tools,
+                    initialPrompt = renderAutonomousPrompt(ctx, tools,
                             buildStepHistory(stepSummaries) + "\n\n" + rejectionHint, riskLevel);
                     // SSE 通知前端：假完成被拦截
                     if (emitter != null) {
@@ -328,7 +328,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
                         String toolHint = "你已输出了文字描述，但没有调用任何工具执行实际操作。"
                                 + "请使用 workspaceWriteFile / workspaceApplyPatch / workspaceRunCommand 等工具完成实际修改。"
                                 + "不要只用纯文本描述你做了什么。";
-                        initialPrompt = renderAutonomousPrompt(assembled.question(), tools,
+                        initialPrompt = renderAutonomousPrompt(ctx, tools,
                                 buildStepHistory(stepSummaries) + "\n\n" + toolHint, riskLevel);
                         continue;
                     }
@@ -341,7 +341,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
                     break;
                 }
 
-                initialPrompt = renderAutonomousPrompt(assembled.question(), tools,
+                initialPrompt = renderAutonomousPrompt(ctx, tools,
                         buildStepHistory(stepSummaries), riskLevel);
             }
 
@@ -390,11 +390,13 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
 
     // === Prompt 渲染 ===
 
-    private String renderAutonomousPrompt(String question, Object[] tools, String history, String riskLevel) {
+    String renderAutonomousPrompt(ChatContext ctx, Object[] tools, String history, String riskLevel) {
         String toolList = renderToolList(tools);
         String completionRule = renderCompletionRule(riskLevel);
+        String injection = ctx == null ? "" : ctx.contextInjection().renderForPrompt();
+        String question = ctx == null || ctx.assembled() == null ? "" : ctx.assembled().question();
         String template = """
-                # SpringClaw 自主 Agent 执行循环
+                {{INJECTION}}# SpringClaw 自主 Agent 执行循环
 
                 你是一个自主执行 Agent，可以自主决定每一步做什么来完成任务。
                 你有完整的工具集可用，每一步自主选择调用哪个工具。
@@ -424,6 +426,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
                 {{HISTORY}}
                 """;
         return template
+                .replace("{{INJECTION}}", injection)
                 .replace("{{QUESTION}}", question == null ? "" : question.trim())
                 .replace("{{TOOLS}}", toolList)
                 .replace("{{COMPLETION_RULE}}", completionRule)

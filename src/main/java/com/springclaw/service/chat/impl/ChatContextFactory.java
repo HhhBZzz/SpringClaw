@@ -9,6 +9,7 @@ import com.springclaw.service.agent.AgentDecisionService;
 import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.context.ContextAssembler;
+import com.springclaw.service.context.ContextInjection;
 import com.springclaw.service.prompt.SoulPromptService;
 import com.springclaw.service.session.AgentSessionService;
 import com.springclaw.service.skill.SkillDefinition;
@@ -19,6 +20,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -118,6 +120,17 @@ public class ChatContextFactory {
                 routingDecision.effectiveQuestion()
         );
         AiProviderService.ActiveChatClient activeClient = aiProviderService.activeClient();
+        ContextInjection injection = new ContextInjection(
+                assembled == null ? "" : assembled.observePrompt(),
+                "",
+                "",
+                Map.of(
+                        "contextSummary",
+                        assembled == null
+                                ? AssembledContext.ContextSourceSummary.empty()
+                                : assembled.sourceSummary()
+                )
+        );
         return new ChatContext(
                 session,
                 channel,
@@ -133,7 +146,8 @@ public class ChatContextFactory {
                 routingDecision.reason(),
                 routingDecision.responseMode(),
                 decision.intent(),
-                decision
+                decision,
+                injection
         );
     }
 

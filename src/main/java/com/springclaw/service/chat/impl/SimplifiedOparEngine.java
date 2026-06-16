@@ -5,6 +5,7 @@ import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
+import com.springclaw.service.context.ContextInjection;
 import com.springclaw.tool.runtime.ToolOrchestrator;
 import com.springclaw.tool.runtime.ToolExecutionContext;
 import com.springclaw.tool.runtime.ToolExecutionContextHolder;
@@ -78,7 +79,8 @@ public class SimplifiedOparEngine implements AgentEngine {
                 ctx.assembled(),
                 ctx.requestId(),
                 fallbackResponder,
-                ctx.decision()
+                ctx.decision(),
+                ctx.contextInjection()
         );
     }
 
@@ -87,7 +89,7 @@ public class SimplifiedOparEngine implements AgentEngine {
                                    AssembledContext assembled,
                                    String requestId,
                                    AgentEngine.FallbackResponder fallbackResponder) {
-        return run(activeClient, systemPrompt, assembled, requestId, fallbackResponder, null);
+        return run(activeClient, systemPrompt, assembled, requestId, fallbackResponder, null, null);
     }
 
     public ChatExecutionResult run(AiProviderService.ActiveChatClient activeClient,
@@ -96,6 +98,16 @@ public class SimplifiedOparEngine implements AgentEngine {
                                    String requestId,
                                    AgentEngine.FallbackResponder fallbackResponder,
                                    AgentDecision decision) {
+        return run(activeClient, systemPrompt, assembled, requestId, fallbackResponder, decision, null);
+    }
+
+    public ChatExecutionResult run(AiProviderService.ActiveChatClient activeClient,
+                                   String systemPrompt,
+                                   AssembledContext assembled,
+                                   String requestId,
+                                   AgentEngine.FallbackResponder fallbackResponder,
+                                   AgentDecision decision,
+                                   ContextInjection injection) {
         // 本地短路三件套（context-aware / control-plane / priority structured）内部最终会通过
         // Spring AOP 反射调用 @Tool 方法（例如 SystemToolPack.now()）。
         // ToolRuntimeAspect 在拦截时读 ToolExecutionContextHolder，但本地短路路径之前没有 open()，
@@ -152,7 +164,7 @@ public class SimplifiedOparEngine implements AgentEngine {
                     client -> {
                         var requestSpec = client.chatClient().prompt()
                                 .system(systemPrompt)
-                                .user(renderUserPrompt(assembled.question()));
+                                .user(renderUserPrompt(injection, assembled.question()));
                         if (DeepSeekChatCompatibility.supportsNativeToolCalling(client) && tools != null && tools.length > 0) {
                             requestSpec = requestSpec.tools(tools);
                         }
@@ -254,14 +266,17 @@ public class SimplifiedOparEngine implements AgentEngine {
         return localExecutionSupport.tryPriorityStructured(question, true);
     }
 
-    private String renderUserPrompt(String question) {
+    String renderUserPrompt(ContextInjection injection, String question) {
+        String injectionText = injection == null ? "" : injection.renderForPrompt();
         return """
+                %s
+
                 用户问题：%s
 
                 直接回答用户问题。
                 如果仍需要更多工具，你可以自行决定调用合适的工具；如果不需要工具，就直接给出最终答案。
                 不要输出阶段名、计划过程、内部系统说明。
-                """.formatted(safe(question));
+                """.formatted(injectionText, safe(question));
     }
 
     private String buildActionTrace(ModelCallExecutor.ModelCallResult<String> result,

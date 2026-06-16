@@ -251,7 +251,7 @@ public class AgentRuntimeEngine implements AgentEngine {
                         var response = conversationAdvisorSupport.apply(
                                         client.chatClient().prompt()
                                                 .system(renderReflectionSystemPrompt())
-                                                .user(renderReflectionPrompt(decision, plan, allResults, originalQuestion, currentQuestion, attempt)),
+                                                .user(renderReflectionPrompt(context, decision, plan, allResults, originalQuestion, currentQuestion, attempt)),
                                         context.assembled().sessionKey(),
                                         context.assembled().userId())
                                 .call()
@@ -286,15 +286,17 @@ public class AgentRuntimeEngine implements AgentEngine {
                 """;
     }
 
-    private String renderReflectionPrompt(AgentDecision decision,
+    String renderReflectionPrompt(ChatContext ctx,
+                                          AgentDecision decision,
                                           CapabilityPlan plan,
                                           List<CapabilityResult> allResults,
                                           String originalQuestion,
                                           String currentQuestion,
                                           int attempt) {
+        String injection = ctx == null ? "" : ctx.contextInjection().renderForPrompt();
         // Use .replace() to avoid IllegalFormatConversionException from '%' in payloads
         String template = """
-                # ORIGINAL_QUESTION
+                {{INJECTION}}# ORIGINAL_QUESTION
                 {{ORIG_Q}}
 
                 # CURRENT_QUERY
@@ -317,6 +319,7 @@ public class AgentRuntimeEngine implements AgentEngine {
                 {{RESULTS}}
                 """;
         return template
+                .replace("{{INJECTION}}", injection)
                 .replace("{{ORIG_Q}}", TextUtils.safe(originalQuestion))
                 .replace("{{CUR_Q}}", TextUtils.safe(currentQuestion))
                 .replace("{{ATTEMPT}}", String.valueOf(attempt))
@@ -737,14 +740,15 @@ public class AgentRuntimeEngine implements AgentEngine {
         }
     }
 
-    private String renderSummaryPrompt(ChatContext context,
+    String renderSummaryPrompt(ChatContext context,
                                        CapabilityPlan plan,
                                        List<CapabilityResult> capabilityResults,
                                        VerificationResult verification) {
+        String injection = context == null ? "" : context.contextInjection().renderForPrompt();
         // Use .replace() instead of .formatted() to avoid IllegalFormatConversionException
         // when capability payloads contain literal '%' characters (e.g., "24h=-2.91%").
         String template = """
-                # SpringClaw Agent 最终回答整理
+                {{INJECTION}}# SpringClaw Agent 最终回答整理
 
                 后端已完成意图判断、能力选择、工具执行和证据校验。请基于执行结果，给用户一个自然、简洁、有帮助的答复。
 
@@ -776,6 +780,7 @@ public class AgentRuntimeEngine implements AgentEngine {
                 {{VERIFICATION}}
                 """;
         return template
+                .replace("{{INJECTION}}", injection)
                 .replace("{{QUESTION}}", TextUtils.safe(context.assembled().question()))
                 .replace("{{INTENT}}", plan.intent())
                 .replace("{{PATH}}", plan.executionPath())

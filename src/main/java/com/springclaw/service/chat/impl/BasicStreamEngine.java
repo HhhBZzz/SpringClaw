@@ -5,7 +5,6 @@ import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.chat.LocalSkillFallbackService;
-import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
 import com.springclaw.service.usage.LlmUsageRecordService;
 import org.slf4j.Logger;
@@ -112,7 +111,7 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
             Disposable disposable = conversationAdvisorSupport.apply(
                             streamClient.chatClient().prompt()
                                     .system(context.systemPrompt())
-                                    .user(renderBasicChatPrompt(context.assembled())),
+                                    .user(renderBasicChatPrompt(context)),
                             context.assembled().sessionKey(),
                             context.assembled().userId())
                     .stream()
@@ -217,7 +216,7 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
                         var response = conversationAdvisorSupport.apply(
                                         client.chatClient().prompt()
                                                 .system(ctx.systemPrompt())
-                                                .user(renderBasicChatPrompt(ctx.assembled())),
+                                                .user(renderBasicChatPrompt(ctx)),
                                         ctx.assembled().sessionKey(),
                                         ctx.assembled().userId())
                                 .call()
@@ -300,15 +299,17 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
         sseEventBridge.completeEmitter(emitter);
     }
 
-    private String renderBasicChatPrompt(AssembledContext assembled) {
+    String renderBasicChatPrompt(ChatContext ctx) {
+        String injection = ctx.contextInjection().renderForPrompt();
+        String question = TextUtils.safe(ctx.assembled() == null ? null : ctx.assembled().question());
         return """
-                用户问题：
+                %s## 用户当前问题
                 %s
 
                 直接回答用户问题，保持中文自然、完整、有重点。
                 这是普通聊天路径：不要调用工具，不要输出内部阶段名，不要提到路由、OPAR、兜底或实现细节。
                 如果问题本身需要外部文件、网页、项目源码或实时数据，简洁说明需要进入 Agent 工具链路。
-                """.formatted(TextUtils.safe(assembled == null ? null : assembled.question()));
+                """.formatted(injection, question);
     }
 
     private boolean isGeneralIntent(ChatContext ctx) {

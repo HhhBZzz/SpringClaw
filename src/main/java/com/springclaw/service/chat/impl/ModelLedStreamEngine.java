@@ -4,7 +4,6 @@ import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
 import com.springclaw.service.ai.AiProviderService;
-import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
 import com.springclaw.service.usage.LlmUsageRecordService;
 import com.springclaw.tool.runtime.ToolExecutionContext;
@@ -128,7 +127,7 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
                     activeClient -> {
                         var requestSpec = activeClient.chatClient().prompt()
                                 .system(ctx.systemPrompt())
-                                .user(renderModelLedPrompt(ctx.assembled()));
+                                .user(renderModelLedPrompt(ctx));
                         if (DeepSeekChatCompatibility.supportsNativeToolCalling(activeClient) && tools != null && tools.length > 0) {
                             requestSpec = requestSpec.tools(tools);
                         }
@@ -206,7 +205,7 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
                     : toolOrchestrator.selectAgentTools(context.channel(), context.userId(), context.decision());
             var requestSpec = streamClient.chatClient().prompt()
                     .system(context.systemPrompt())
-                    .user(renderModelLedPrompt(context.assembled()));
+                    .user(renderModelLedPrompt(context));
             if (DeepSeekChatCompatibility.supportsNativeToolCalling(streamClient) && tools != null && tools.length > 0) {
                 requestSpec = requestSpec.tools(tools);
             }
@@ -400,9 +399,11 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
         sseEventBridge.completeEmitter(emitter);
     }
 
-    private String renderModelLedPrompt(AssembledContext assembled) {
+    String renderModelLedPrompt(ChatContext ctx) {
+        String injection = ctx.contextInjection().renderForPrompt();
+        String question = TextUtils.safe(ctx.assembled() == null ? null : ctx.assembled().question());
         return """
-                用户问题：
+                %s用户问题：
                 %s
 
                 请像成熟 Agent 一样完成这次请求：
@@ -410,6 +411,6 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
                 - 工具结果只是证据，最终回答要由你组织成完整中文回复。
                 - 不要输出内部阶段名、route、OPAR、兜底、本地工具等实现词。
                 - 回答要有结论、依据和下一步；如果信息不足，明确说明还缺什么。
-                """.formatted(TextUtils.safe(assembled == null ? null : assembled.question()));
+                """.formatted(injection, question);
     }
 }

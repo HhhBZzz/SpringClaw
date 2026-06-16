@@ -98,6 +98,35 @@ class VueOnlyFrontendPolicyTest {
     }
 
     @Test
+    void runtimeConsoleShouldExposeLearningReviewPanel() throws IOException {
+        String agentView = Files.readString(projectRoot.resolve("frontend/src/views/AgentView.vue"));
+        String api = Files.readString(projectRoot.resolve("frontend/src/services/api.ts"));
+        String types = Files.readString(projectRoot.resolve("frontend/src/types.ts"));
+
+        assertThat(agentView)
+                .contains("nav-learning")
+                .contains("runtimeLearningItems")
+                .contains("learning-review-list")
+                .contains("learning-review-counterexample")
+                .contains("learning-review-evidence")
+                .contains("Counterexample")
+                .contains("Evidence")
+                .contains("@click=\"reviewLearningItem(item, 'approved')\"")
+                .contains("@click=\"reviewLearningItem(item, 'disabled')\"")
+                .contains("@click=\"reviewLearningItem(item, 'rejected')\"");
+
+        assertThat(api)
+                .contains("getRuntimeLearningEntries")
+                .contains("updateRuntimeLearningStatus")
+                .contains("/api/runtime-console/learning")
+                .contains("/api/runtime-console/learning/status");
+
+        assertThat(types)
+                .contains("RuntimeLearningReviewItem")
+                .contains("RuntimeLearningStatusUpdate");
+    }
+
+    @Test
     void adminRouteShouldRemainReachableForUnauthenticatedLogin() throws IOException {
         String router = Files.readString(projectRoot.resolve("frontend/src/router/index.ts"));
         String adminView = Files.readString(projectRoot.resolve("frontend/src/views/AdminView.vue"));

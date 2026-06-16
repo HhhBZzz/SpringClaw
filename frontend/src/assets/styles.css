@@ -6456,6 +6456,7 @@ button.runtime-nav-item {
 .runtime-session-resource-list,
 .runtime-run-list,
 .runtime-task-list,
+.learning-review-list,
 .runtime-usage-recent {
   display: grid;
   gap: 10px;
@@ -6472,6 +6473,8 @@ button.runtime-nav-item {
 .runtime-resource-card,
 .runtime-resource-row,
 .runtime-task-row,
+.learning-review-card,
+.learning-review-summary,
 .runtime-usage-card {
   min-width: 0;
   border: 1px solid rgba(255, 255, 255, 0.075);
@@ -6490,6 +6493,8 @@ button.runtime-nav-item {
 
 .runtime-resource-card span,
 .runtime-task-row span,
+.learning-review-card span,
+.learning-review-summary span,
 .runtime-usage-card span {
   color: #f6c945;
   font-size: 11px;
@@ -6500,6 +6505,8 @@ button.runtime-nav-item {
 .runtime-resource-card strong,
 .runtime-resource-row strong,
 .runtime-task-row strong,
+.learning-review-card strong,
+.learning-review-summary strong,
 .runtime-usage-card strong {
   color: #f5f7fb;
   font-size: 14px;
@@ -6539,12 +6546,104 @@ button.runtime-nav-item {
 
 .runtime-resource-row small,
 .runtime-task-row small,
+.learning-review-card small,
+.learning-review-summary small,
 .runtime-usage-card small {
   overflow: hidden;
   color: #a8b0bd;
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.learning-review-summary,
+.learning-review-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.learning-review-summary {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.learning-review-summary small {
+  grid-column: 1 / -1;
+}
+
+.learning-review-card header,
+.learning-review-card footer,
+.learning-review-status-actions,
+.learning-review-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.learning-review-card header,
+.learning-review-card footer {
+  justify-content: space-between;
+}
+
+.learning-review-card p {
+  margin: 0;
+  color: #c1c8d3;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.learning-review-meta,
+.learning-review-counterexample,
+.learning-review-evidence {
+  min-width: 0;
+}
+
+.learning-review-meta {
+  flex-wrap: wrap;
+}
+
+.learning-review-counterexample,
+.learning-review-evidence {
+  display: grid;
+  gap: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 7px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.learning-review-counterexample span,
+.learning-review-evidence span {
+  color: #f6c945;
+  font-size: 10px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.learning-review-status-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.learning-review-status-actions button {
+  min-height: 30px;
+  border: 1px solid rgba(246, 201, 69, 0.18);
+  border-radius: 7px;
+  padding: 0 9px;
+  color: #f5f7fb;
+  background: rgba(255, 255, 255, 0.055);
+  font-weight: 760;
+}
+
+.learning-review-status-actions button:hover:not(:disabled) {
+  border-color: rgba(246, 201, 69, 0.42);
+  background: rgba(246, 201, 69, 0.12);
+}
+
+.learning-review-status-actions button:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 @media (max-width: 1380px) {

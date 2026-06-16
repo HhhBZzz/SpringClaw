@@ -116,4 +116,57 @@ class AgentLearningServiceTest {
         assertThat(service.captureTraceFailure(event)).isEmpty();
         assertThat(Files.exists(tempDir.resolve("agent-learnings.md"))).isFalse();
     }
+
+    @Test
+    void shouldUpdateLearningStatusBySignature() throws Exception {
+        AgentLearningService service = new AgentLearningService(true, true, tempDir.toString(), 320);
+        var entry = service.capture(new AgentLearningService.AgentLearningCandidate(
+                "req-review-1",
+                "manual",
+                "重复失败命令",
+                "同一个失败命令需要先改变条件。",
+                "不要原样重复执行失败命令。",
+                "连续两次执行同一失败 shell。",
+                "trace failed"
+        )).orElseThrow();
+
+        var update = service.updateStatus(entry.signature(), "disabled", "规则过宽，容易阻止合法重试");
+
+        assertThat(update).isPresent();
+        assertThat(update.get().signature()).isEqualTo(entry.signature());
+        assertThat(update.get().previousStatus()).isEqualTo("active");
+        assertThat(update.get().status()).isEqualTo("disabled");
+        String learning = Files.readString(tempDir.resolve("agent-learnings.md"));
+        assertThat(learning)
+                .contains("- status: disabled")
+                .contains("- reviewedAt:")
+                .contains("- reviewReason: 规则过宽，容易阻止合法重试")
+                .doesNotContain("- status: active");
+
+        MemoryBankService memoryBankService = new MemoryBankService(true, tempDir.toString(), 1200);
+        assertThat(memoryBankService.renderContext()).doesNotContain("不要原样重复执行失败命令。");
+    }
+
+    @Test
+    void shouldSkipStatusUpdateWhenSignatureOrStatusIsInvalid() throws Exception {
+        AgentLearningService service = new AgentLearningService(true, true, tempDir.toString(), 320);
+        service.capture(new AgentLearningService.AgentLearningCandidate(
+                "req-review-2",
+                "manual",
+                "失败工具",
+                "先复盘失败原因。",
+                "不要忽略失败原因。",
+                "直接重试。",
+                "trace failed"
+        ));
+        String before = Files.readString(tempDir.resolve("agent-learnings.md"));
+
+        assertThat(service.updateStatus("missing-signature", "disabled", "not found")).isEmpty();
+        assertThat(service.updateStatus("missing-signature", "active", "not found")).isEmpty();
+        assertThat(service.updateStatus("missing-signature", "approved", "not found")).isEmpty();
+        assertThat(service.updateStatus("missing-signature", "rejected", "not found")).isEmpty();
+        assertThat(service.updateStatus("missing-signature", "superseded", "not found")).isEmpty();
+        assertThat(service.updateStatus("missing-signature", "pending", "bad status")).isEmpty();
+        assertThat(Files.readString(tempDir.resolve("agent-learnings.md"))).isEqualTo(before);
+    }
 }

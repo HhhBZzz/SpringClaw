@@ -37,6 +37,7 @@ public class AgentLearningService {
             "superseded"
     );
     private static final Pattern LEARNING_STATUS = Pattern.compile("(?im)^-\\s*status:\\s*(\\S+)\\s*$");
+    private static final Pattern LEARNING_HEADING = Pattern.compile("(?m)^##\\s+.*$");
 
     private final boolean enabled;
     private final boolean traceFailureEnabled;
@@ -134,6 +135,47 @@ public class AgentLearningService {
         }
     }
 
+    public List<AgentLearningReviewItem> listEntries(int limit) {
+        if (!enabled) {
+            return List.of();
+        }
+        int safeLimit = Math.max(1, Math.min(limit, 100));
+        try {
+            Path file = rootPath.resolve(LEARNING_FILE);
+            if (!Files.exists(file)) {
+                return List.of();
+            }
+            String existing = Files.readString(file, StandardCharsets.UTF_8);
+            List<AgentLearningReviewItem> entries = new ArrayList<>();
+            for (LearningSection section : learningSections(existing)) {
+                String signature = sectionField(section.text(), "signature");
+                if (!StringUtils.hasText(signature)) {
+                    continue;
+                }
+                entries.add(new AgentLearningReviewItem(
+                        signature,
+                        extractStatus(section.text()).orElse("active"),
+                        sectionField(section.text(), "source"),
+                        sectionField(section.text(), "trigger"),
+                        sectionField(section.text(), "lesson"),
+                        sectionField(section.text(), "rule"),
+                        sectionField(section.text(), "counterexample"),
+                        sectionField(section.text(), "reviewedAt"),
+                        sectionField(section.text(), "requestId"),
+                        sectionField(section.text(), "evidence"),
+                        sectionField(section.text(), "reviewReason"),
+                        sectionTitle(section.text())
+                ));
+                if (entries.size() >= safeLimit) {
+                    break;
+                }
+            }
+            return List.copyOf(entries);
+        } catch (IOException ex) {
+            return List.of();
+        }
+    }
+
     private AgentLearningEntry normalize(AgentLearningCandidate candidate) {
         String requestId = field(candidate.requestId());
         String source = field(TextUtils.safe(candidate.source(), "manual"));
@@ -207,26 +249,32 @@ public class AgentLearningService {
     }
 
     private Optional<LearningSection> findSection(String text, String signature) {
+        String target = "- signature: " + signature;
+        for (LearningSection section : learningSections(text)) {
+            if (section.text().contains(target)) {
+                return Optional.of(section);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private List<LearningSection> learningSections(String text) {
         if (!StringUtils.hasText(text)) {
-            return Optional.empty();
+            return List.of();
         }
-        int signatureIndex = text.indexOf("- signature: " + signature);
-        if (signatureIndex < 0) {
-            return Optional.empty();
+        List<LearningSection> sections = new ArrayList<>();
+        Matcher matcher = LEARNING_HEADING.matcher(text);
+        int sectionStart = -1;
+        while (matcher.find()) {
+            if (sectionStart >= 0) {
+                sections.add(new LearningSection(sectionStart, matcher.start(), text.substring(sectionStart, matcher.start())));
+            }
+            sectionStart = matcher.start();
         }
-        int start = text.lastIndexOf("\n## ", signatureIndex);
-        if (start >= 0) {
-            start += 1;
-        } else if (text.startsWith("## ")) {
-            start = 0;
-        } else {
-            return Optional.empty();
+        if (sectionStart >= 0) {
+            sections.add(new LearningSection(sectionStart, text.length(), text.substring(sectionStart)));
         }
-        int end = text.indexOf("\n## ", signatureIndex);
-        if (end < 0) {
-            end = text.length();
-        }
-        return Optional.of(new LearningSection(start, end, text.substring(start, end)));
+        return sections;
     }
 
     private Optional<String> extractStatus(String section) {
@@ -234,6 +282,27 @@ public class AgentLearningService {
         return matcher.find()
                 ? Optional.of(TextUtils.normalize(matcher.group(1)))
                 : Optional.empty();
+    }
+
+    private String sectionField(String section, String name) {
+        String prefix = "- " + name + ":";
+        for (String line : TextUtils.safe(section).split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith(prefix)) {
+                return trimmed.substring(prefix.length()).trim();
+            }
+        }
+        return "";
+    }
+
+    private String sectionTitle(String section) {
+        for (String line : TextUtils.safe(section).split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("## ")) {
+                return trimmed.substring(3).trim();
+            }
+        }
+        return "";
     }
 
     private String updateSectionStatus(String section, String status, String reason) {
@@ -327,6 +396,20 @@ public class AgentLearningService {
                                             String previousStatus,
                                             String status,
                                             String reason) {
+    }
+
+    public record AgentLearningReviewItem(String signature,
+                                          String status,
+                                          String source,
+                                          String trigger,
+                                          String lesson,
+                                          String rule,
+                                          String counterexample,
+                                          String reviewedAt,
+                                          String requestId,
+                                          String evidence,
+                                          String reviewReason,
+                                          String sectionTitle) {
     }
 
     private record LearningSection(int start, int end, String text) {

@@ -26,12 +26,12 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 当前未提交状态：
 
 - 当前瞬时状态以 `git status --short` 为准；本文不再记录易过期的文件列表。
-- 最近稳定基线已包含 Workspace Guard、stream action confirmation、Agent product mode metadata、timeline step schema、confirmation timeline、workspace tool action mapping、memory recall isolation、Memory Bank 文件化项目记忆、context summary 前端展示、模型用量、prompt cache、模型调用过程指标、Agent learning 最小闭环。
+- 最近稳定基线已包含 Workspace Guard、stream action confirmation、Agent product mode metadata、timeline step schema、confirmation timeline、workspace tool action mapping、memory recall isolation、Memory Bank 文件化项目记忆、context summary 前端展示、模型用量、prompt cache、模型调用过程指标、Agent learning 最小闭环和 learning review 后端查询入口。
 
 最近测试基线：
 
 - `mvn test`
-- 结果：`Tests run: 378, Failures: 0, Errors: 0, Skipped: 0`
+- 结果：`Tests run: 392, Failures: 0, Errors: 0, Skipped: 0`
 - `cd frontend && npm run build`
 - 结果：Vue typecheck 与 Vite build 通过
 - `git diff --check`
@@ -60,13 +60,13 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 | Workspace 管理 | `WorkspaceReviewService`、`WorkspaceTaskService`、`LocalFilesystemService`、`WorkspaceEditToolPack`、`WorkspaceGuard` | 工作区检索、代码统计、文件候选、本地文件访问、工作区修改/命令；最小路径和命令边界校验 | 3 | 55% | 继续保持最小边界模型；不要引入完整 diff/rollback 框架 |
 | Permission / Policy | `ToolRiskPolicyService`、`ToolPermissionServiceImpl`、`AgentActionProposalService`、`application.yml` user-deny-tools | 风险分级、工具权限、动作确认、默认 deny 配置；动作确认生命周期已写入 run trace | 2 | 50% | 下一步继续把确认后的实际执行结果、拒绝原因和权限来源结构化 |
 | Sandbox / Command Execution | `WorkspaceGuard`、`WorkspaceEditToolPack.workspaceRunCommand`、`SystemToolPack.runCommand`、`ScriptSkillExecutorService` | 执行 shell、脚本技能、工作区命令；workspace 命令已拦截危险命令和父目录路径段 | 2 | 45% | 当前仍不是成熟沙箱；先把拒绝原因、确认边界、审计记录做实 |
-| Long-term Memory / Memory Bank | `VectorMemoryService`、`MemoryBankService`、`AgentLearningService`、Redis Vector Store 配置、`docs/memory-bank` | 会话记忆、语义召回、跨会话用户记忆控制、文件化项目记忆；vector store 召回结果已在服务层二次过滤，Memory Bank 已作为非 RAG 项目记忆进入上下文；失败 trace 可沉淀为可审阅 learning 条目，learning status 已可过滤 inactive 经验，并统计 active/filtered learning 数量 | 3 | 76% | 保持向量记忆为召回层，Memory Bank 作为项目长期记忆主线；下一步补召回来源、上下文预算记录和 learning 影响复盘 |
+| Long-term Memory / Memory Bank | `VectorMemoryService`、`MemoryBankService`、`AgentLearningService`、Redis Vector Store 配置、`docs/memory-bank` | 会话记忆、语义召回、跨会话用户记忆控制、文件化项目记忆；vector store 召回结果已在服务层二次过滤，Memory Bank 已作为非 RAG 项目记忆进入上下文；失败 trace 可沉淀为可审阅 learning 条目，learning status 已可过滤 inactive 经验，并统计 active/filtered learning 数量；后端已可按 limit 列出 learning review 条目 | 3 | 78% | 保持向量记忆为召回层，Memory Bank 作为项目长期记忆主线；下一步补召回来源、上下文预算记录和 learning 影响复盘 |
 | Logs / Observability | `AgentRunTraceService`、`AgentRunTraceEvent`、`LlmUsageRecordServiceImpl`、`LlmUsageMetricsService`、`ModelCallMetricsService`、`AgentContextMetricsService`、audit/service/usage 包、后台页面 | token、耗时、模型调用、运行日志、审计记录；timeline step 已具备 category/action/target/source/riskLevel 基础字段；确认和 workspace 工具动作已可复盘，workspace 命令/文件输入摘要已可审计；上下文来源摘要、模型用量、prompt cache hit/miss、模型调用耗时/fallback/retry、learning active/filtered 数量已通过 Micrometer 记录为低基数数值指标 | 3 | 72% | 先统一 requestId/runId/toolCallId 关联；下一步补 tool duration/error reason 和 memory recall hit count |
 | Cache 策略 | `config/cache`、Redis 配置、天气/汇率/新闻等工具缓存 | 外部数据缓存、Redis 支撑记忆和状态 | 2 | 45% | 先维持工具级缓存；暂不做全局 agent cache 策略 |
 | Skill 系统 | `SkillCatalogService`、`SkillRegistryService`、`SkillRuntimeService`、skill markdown/runtime/script 包 | Skill 注册、导入、Python/builtin/prompt/script 运行 | 3 | 65% | 本轮冻结扩张；等 Runtime/Tool/Policy 稳定后再继续 marketplace/plugin 化 |
 | MCP 适配 | 当前未见稳定主线模块 | 未来外部工具协议适配层 | 1 | 10% | 现在不要做；等 Tool registry/schema/audit 稳定后再接 |
 | Knowledge Source / Wiki | `docs/memory-bank`、未来 Obsidian/Wiki.js Markdown source | 当前只支持本地 Markdown Memory Bank；Wiki.js / Obsidian 应作为项目知识源，不混入用户长期记忆 | 1 | 20% | 先稳定 Markdown 文件模型；不要现在接复杂 Wiki API 或 RAG 管道 |
-| Self Evolution | `AgentLearningService`、`RuntimeLearningController`、`AgentRunTraceService`、`docs/memory-bank/agent-learnings.md` | 从失败 trace 中提炼 lesson/rule/counterexample/evidence，去重后写入可审阅 Memory Bank；新条目默认 active，Memory Bank 只加载 active/approved/旧格式条目，过滤 disabled/rejected/superseded；learning status 可按 signature 更新并记录 reviewedAt/reviewReason；runtime-console 已提供 ADMIN 后端入口 | 2 | 46% | 下一步增加前端用户确认/撤销入口、反例分类、规则失效回滚；不要让模型自动无限写规则 |
+| Self Evolution | `AgentLearningService`、`RuntimeLearningController`、`AgentRunTraceService`、`docs/memory-bank/agent-learnings.md` | 从失败 trace 中提炼 lesson/rule/counterexample/evidence，去重后写入可审阅 Memory Bank；新条目默认 active，Memory Bank 只加载 active/approved/旧格式条目，过滤 disabled/rejected/superseded；learning review 条目可按 limit 列出，status 可按 signature 更新并记录 reviewedAt/reviewReason；runtime-console 已提供 ADMIN 后端入口 | 2 | 48% | 下一步增加前端用户确认/撤销入口、反例分类、规则失效回滚；不要让模型自动无限写规则 |
 | Plugin 系统 | 当前主要是 Skill/Tool 形态，未形成插件生命周期 | 未来可加载组件、版本、隔离、安装 | 1 | 15% | 现在不要做；避免项目发散 |
 | Multi-agent 通信 | 当前未形成独立 agent 协作协议 | 未来 agent-to-agent、handoff、角色协作 | 1 | 10% | 现在不要做；先把单 agent 生命周期跑稳 |
 | Frontend Command Center | Vue Agent Console、Admin Console、runtime console 相关页面、`ChatStreamMeta.contextSummary` | 展示聊天、stream、trace、动作确认、后台运维数据；Agent Console 与 Admin 表已展示 `productMode`；timeline 已消费结构化 step 字段并清理 JSON detail 展示；任务元数据面板已展示 context summary | 3 | 72% | 继续展示风险等级和真实 timeline，不要先堆视觉功能 |
@@ -478,11 +478,13 @@ ChatController
 - `AgentRunTraceService` 在记录失败 trace 后 best-effort 调用学习服务，不影响 trace 主链路。
 - `MemoryBankService` 已优先读取 `agent-learnings.md`，并只让 active/approved/旧格式经验进入下一轮 Context；`disabled/rejected/superseded` 会被过滤。
 - `MemoryBankService.renderSnapshot`、`AssembledContext.sourceSummary`、SSE meta 和 `AgentContextMetricsService` 已暴露 active/filtered learning count，用于判断 Memory Bank 中按状态可进入上下文的学习规则数量，以及被过滤的失效规则数量。
+- `AgentLearningService.listEntries` 已支持按 limit 读取 review 条目，返回 signature、status、trigger、lesson、rule、counterexample、evidence、reviewedAt/reviewReason 等字段。
 - `AgentLearningService.updateStatus` 已支持按 signature 更新 learning status，并写入 `reviewedAt/reviewReason`，为后续用户确认/撤销入口提供服务层能力。
-- `RuntimeLearningController` 已提供 `/api/runtime-console/learning/status` ADMIN 后端入口，用于程序化确认、禁用、拒绝或替换学习规则；当前还没有前端操作按钮。
+- `RuntimeLearningController` 已提供 `/api/runtime-console/learning` 和 `/api/runtime-console/learning/status` ADMIN 后端入口，用于先发现可审阅规则，再程序化确认、禁用、拒绝或替换学习规则；当前还没有前端操作按钮。
 
 验证：
 
+- `mvn -Dtest=AgentLearningServiceTest,RuntimeLearningControllerTest test`
 - `mvn -Dtest=AgentLearningServiceTest,AgentRunTraceServiceTest,MemoryBankServiceTest test`
 - `mvn test`
 - `git diff --check`

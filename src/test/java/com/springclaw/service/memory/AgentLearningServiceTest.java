@@ -169,4 +169,40 @@ class AgentLearningServiceTest {
         assertThat(service.updateStatus("missing-signature", "pending", "bad status")).isEmpty();
         assertThat(Files.readString(tempDir.resolve("agent-learnings.md"))).isEqualTo(before);
     }
+
+    @Test
+    void shouldListLearningEntriesForReview() throws Exception {
+        AgentLearningService service = new AgentLearningService(true, true, tempDir.toString(), 320);
+        var active = service.capture(new AgentLearningService.AgentLearningCandidate(
+                "req-list-1",
+                "manual",
+                "失败命令",
+                "先分析失败条件。",
+                "不要原样重复失败命令。",
+                "连续重试失败 shell。",
+                "trace failed"
+        )).orElseThrow();
+        var disabled = service.capture(new AgentLearningService.AgentLearningCandidate(
+                "req-list-2",
+                "manual",
+                "错误路径",
+                "路径越界要停下。",
+                "不要访问 workspace 外路径。",
+                "../outside",
+                "guard denied"
+        )).orElseThrow();
+        service.updateStatus(disabled.signature(), "disabled", "已由 workspace guard 覆盖");
+
+        var entries = service.listEntries(20);
+
+        assertThat(entries).hasSize(2);
+        assertThat(entries)
+                .extracting(AgentLearningService.AgentLearningReviewItem::signature)
+                .containsExactly(active.signature(), disabled.signature());
+        assertThat(entries.get(0).status()).isEqualTo("active");
+        assertThat(entries.get(0).rule()).isEqualTo("不要原样重复失败命令。");
+        assertThat(entries.get(1).status()).isEqualTo("disabled");
+        assertThat(entries.get(1).reviewReason()).isEqualTo("已由 workspace guard 覆盖");
+        assertThat(entries.get(1).reviewedAt()).isNotBlank();
+    }
 }

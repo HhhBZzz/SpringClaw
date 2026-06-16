@@ -6632,6 +6632,7 @@ button.runtime-nav-item {
 
 .learning-review-meta,
 .learning-review-category,
+.learning-review-impact,
 .learning-review-counterexample,
 .learning-review-evidence,
 .learning-review-reason {
@@ -6643,6 +6644,7 @@ button.runtime-nav-item {
 }
 
 .learning-review-category,
+.learning-review-impact,
 .learning-review-counterexample,
 .learning-review-evidence {
   display: grid;
@@ -6658,7 +6660,18 @@ button.runtime-nav-item {
   background: rgba(246, 201, 69, 0.055);
 }
 
+.learning-review-impact {
+  border-color: rgba(105, 214, 178, 0.16);
+  background: rgba(105, 214, 178, 0.055);
+}
+
+.learning-review-impact.muted {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.028);
+}
+
 .learning-review-category span,
+.learning-review-impact span,
 .learning-review-counterexample span,
 .learning-review-evidence span,
 .learning-review-reason span {
@@ -6669,6 +6682,7 @@ button.runtime-nav-item {
 }
 
 .learning-review-category small,
+.learning-review-impact small,
 .learning-review-counterexample small,
 .learning-review-evidence small {
   overflow: visible;

@@ -231,8 +231,12 @@ class AgentLearningServiceTest {
         assertThat(entries.get(0).status()).isEqualTo("active");
         assertThat(entries.get(0).rule()).isEqualTo("不要原样重复失败命令。");
         assertThat(entries.get(0).counterexampleCategory()).isEqualTo("tool_failure");
+        assertThat(entries.get(0).contextIncluded()).isTrue();
+        assertThat(entries.get(0).contextImpact()).isEqualTo("included_in_context");
         assertThat(entries.get(1).status()).isEqualTo("disabled");
         assertThat(entries.get(1).counterexampleCategory()).isEqualTo("permission_boundary");
+        assertThat(entries.get(1).contextIncluded()).isFalse();
+        assertThat(entries.get(1).contextImpact()).isEqualTo("filtered_from_context");
         assertThat(entries.get(1).reviewReason()).isEqualTo("已由 workspace guard 覆盖");
         assertThat(entries.get(1).reviewedAt()).isNotBlank();
     }

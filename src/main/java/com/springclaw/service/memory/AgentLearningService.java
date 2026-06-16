@@ -158,15 +158,19 @@ public class AgentLearningService {
                 String rule = sectionField(section.text(), "rule");
                 String counterexample = sectionField(section.text(), "counterexample");
                 String evidence = sectionField(section.text(), "evidence");
+                String status = extractStatus(section.text()).orElse("active");
+                boolean contextIncluded = isContextIncludedStatus(status);
                 entries.add(new AgentLearningReviewItem(
                         signature,
-                        extractStatus(section.text()).orElse("active"),
+                        status,
                         source,
                         trigger,
                         lesson,
                         rule,
                         counterexample,
                         classifyCounterexample(source, trigger, counterexample, evidence),
+                        contextIncluded,
+                        contextIncluded ? "included_in_context" : "filtered_from_context",
                         sectionField(section.text(), "reviewedAt"),
                         sectionField(section.text(), "requestId"),
                         evidence,
@@ -374,6 +378,13 @@ public class AgentLearningService {
         return "unknown";
     }
 
+    private boolean isContextIncludedStatus(String status) {
+        String normalized = TextUtils.normalize(status);
+        return normalized.isBlank()
+                || normalized.equals("active")
+                || normalized.equals("approved");
+    }
+
     private boolean containsAny(String text, String... needles) {
         for (String needle : needles) {
             if (text.contains(needle)) {
@@ -484,6 +495,8 @@ public class AgentLearningService {
                                           String rule,
                                           String counterexample,
                                           String counterexampleCategory,
+                                          boolean contextIncluded,
+                                          String contextImpact,
                                           String reviewedAt,
                                           String requestId,
                                           String evidence,

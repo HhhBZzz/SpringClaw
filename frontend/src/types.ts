@@ -311,6 +311,8 @@ export interface RuntimeLearningReviewItem {
   rule?: string;
   counterexample?: string;
   counterexampleCategory?: string;
+  contextIncluded?: boolean;
+  contextImpact?: string;
   reviewedAt?: string;
   requestId?: string;
   evidence?: string;

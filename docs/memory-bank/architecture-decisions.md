@@ -18,6 +18,8 @@ Wiki.js / docs / README 属于 Project Knowledge，不属于用户 Long-term Mem
 
 项目知识应该单独建 Knowledge Source，避免污染用户记忆。
 
+当前先使用只读 Markdown Knowledge Source snapshot：只有 `status: active/approved` 的项目知识进入 snapshot，未审核文档默认过滤。
+
 ## Self Evolution
 
 自进化不是让模型自动改代码或无限写记忆，而是从执行失败、反例和验证结果中提炼可审阅规则。

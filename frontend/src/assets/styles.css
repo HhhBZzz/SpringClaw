@@ -6457,6 +6457,7 @@ button.runtime-nav-item {
 .runtime-run-list,
 .runtime-task-list,
 .learning-review-list,
+.knowledge-source-list,
 .runtime-usage-recent {
   display: grid;
   gap: 10px;
@@ -6474,6 +6475,8 @@ button.runtime-nav-item {
 .runtime-resource-row,
 .runtime-task-row,
 .learning-review-card,
+.knowledge-source-card,
+.knowledge-source-snapshot,
 .learning-review-summary,
 .runtime-usage-card {
   min-width: 0;
@@ -6494,6 +6497,7 @@ button.runtime-nav-item {
 .runtime-resource-card span,
 .runtime-task-row span,
 .learning-review-card span,
+.knowledge-source-snapshot span,
 .learning-review-summary span,
 .runtime-usage-card span {
   color: #f6c945;
@@ -6506,6 +6510,7 @@ button.runtime-nav-item {
 .runtime-resource-row strong,
 .runtime-task-row strong,
 .learning-review-card strong,
+.knowledge-source-snapshot strong,
 .learning-review-summary strong,
 .runtime-usage-card strong {
   color: #f5f7fb;
@@ -6547,6 +6552,7 @@ button.runtime-nav-item {
 .runtime-resource-row small,
 .runtime-task-row small,
 .learning-review-card small,
+.knowledge-source-snapshot small,
 .learning-review-summary small,
 .runtime-usage-card small {
   overflow: hidden;
@@ -6557,10 +6563,24 @@ button.runtime-nav-item {
 }
 
 .learning-review-summary,
-.learning-review-card {
+.learning-review-card,
+.knowledge-source-card {
   display: grid;
   gap: 10px;
   padding: 14px;
+}
+
+.knowledge-source-snapshot {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 14px;
+}
+
+.knowledge-source-snapshot div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
 }
 
 .learning-review-summary {
@@ -6611,6 +6631,8 @@ button.runtime-nav-item {
 
 .learning-review-card header,
 .learning-review-card footer,
+.knowledge-source-card header,
+.knowledge-source-card footer,
 .learning-review-status-actions,
 .learning-review-meta {
   display: flex;
@@ -6619,11 +6641,14 @@ button.runtime-nav-item {
 }
 
 .learning-review-card header,
-.learning-review-card footer {
+.learning-review-card footer,
+.knowledge-source-card header,
+.knowledge-source-card footer {
   justify-content: space-between;
 }
 
-.learning-review-card p {
+.learning-review-card p,
+.knowledge-source-card p {
   margin: 0;
   color: #c1c8d3;
   font-size: 13px;
@@ -6635,6 +6660,7 @@ button.runtime-nav-item {
 .learning-review-impact,
 .learning-review-counterexample,
 .learning-review-evidence,
+.knowledge-source-impact,
 .learning-review-reason {
   min-width: 0;
 }
@@ -6646,7 +6672,8 @@ button.runtime-nav-item {
 .learning-review-category,
 .learning-review-impact,
 .learning-review-counterexample,
-.learning-review-evidence {
+.learning-review-evidence,
+.knowledge-source-impact {
   display: grid;
   gap: 5px;
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -6670,10 +6697,21 @@ button.runtime-nav-item {
   background: rgba(255, 255, 255, 0.028);
 }
 
+.knowledge-source-impact {
+  border-color: rgba(255, 125, 116, 0.14);
+  background: rgba(255, 125, 116, 0.05);
+}
+
+.knowledge-source-impact.included {
+  border-color: rgba(56, 217, 121, 0.18);
+  background: rgba(56, 217, 121, 0.06);
+}
+
 .learning-review-category span,
 .learning-review-impact span,
 .learning-review-counterexample span,
 .learning-review-evidence span,
+.knowledge-source-impact span,
 .learning-review-reason span {
   color: #f6c945;
   font-size: 10px;
@@ -6684,7 +6722,8 @@ button.runtime-nav-item {
 .learning-review-category small,
 .learning-review-impact small,
 .learning-review-counterexample small,
-.learning-review-evidence small {
+.learning-review-evidence small,
+.knowledge-source-impact small {
   overflow: visible;
   line-height: 1.45;
   text-overflow: clip;

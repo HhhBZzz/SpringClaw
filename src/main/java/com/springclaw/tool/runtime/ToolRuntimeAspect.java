@@ -150,7 +150,7 @@ public class ToolRuntimeAspect {
             proposalService.markFailed(latest.proposalId(), "runId 不匹配");
             throw new SecurityException("runId 不匹配");
         }
-        if (!latest.userId().equals(approved.userId())) {
+        if (!Objects.equals(latest.userId(), approved.userId())) {
             proposalService.markFailed(latest.proposalId(), "userId 不匹配");
             throw new SecurityException("userId 不匹配");
         }

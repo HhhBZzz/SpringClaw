@@ -55,7 +55,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(tokenAuthenticationInterceptor)
-                .addPathPatterns("/api/chat/**", "/api/admin/**", "/api/cache/**", "/api/memory/**", "/api/rabbitmq/**", "/api/tasks/**", "/api/runtime-console/**");
+                .addPathPatterns("/api/chat/**", "/api/admin/**", "/api/cache/**", "/api/memory/**", "/api/rabbitmq/**", "/api/tasks/**", "/api/runtime-console/**", "/api/tool-proposals/**");
         registry.addInterceptor(roleAuthorizationInterceptor)
                 .addPathPatterns("/api/admin/**", "/api/cache/**", "/api/memory/**", "/api/rabbitmq/**", "/api/runtime-console/**");
     }

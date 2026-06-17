@@ -15,6 +15,8 @@ import com.springclaw.service.chat.ChatService;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
+import com.springclaw.service.proposal.PendingToolApprovalException;
+import com.springclaw.service.proposal.ToolInvocationProposalService;
 import com.springclaw.service.usage.LlmUsageRecordService;
 import com.springclaw.tool.runtime.ToolOrchestrator;
 import org.slf4j.Logger;
@@ -57,6 +59,7 @@ public class ChatServiceImpl implements ChatService {
     private final EngineSelector engineSelector;
     private final LocalExecutionSupport localExecutionSupport;
     private final SseEventBridge sseEventBridge;
+    private final ToolInvocationProposalService proposalService;
     private final boolean modelLedStreamingEnabled;
     private final boolean basicStreamingEnabled;
 
@@ -78,6 +81,7 @@ public class ChatServiceImpl implements ChatService {
                            EngineSelector engineSelector,
                            LocalExecutionSupport localExecutionSupport,
                            SseEventBridge sseEventBridge,
+                           ToolInvocationProposalService proposalService,
                            @Value("${springclaw.chat.model-led-streaming-enabled:false}") boolean modelLedStreamingEnabled,
                            @Value("${springclaw.chat.basic-streaming-enabled:true}") boolean basicStreamingEnabled) {
         this.aiProviderService = aiProviderService;
@@ -97,6 +101,7 @@ public class ChatServiceImpl implements ChatService {
         this.engineSelector = engineSelector;
         this.localExecutionSupport = localExecutionSupport;
         this.sseEventBridge = sseEventBridge;
+        this.proposalService = proposalService;
         this.modelLedStreamingEnabled = modelLedStreamingEnabled;
         this.basicStreamingEnabled = basicStreamingEnabled;
     }
@@ -118,7 +123,7 @@ public class ChatServiceImpl implements ChatService {
         this(aiProviderService, chatGuardService, oparLoopEngine, simplifiedOparEngine,
                 chatResponsePolicyService, modelTransportGuardService, llmUsageRecordService,
                 conversationAdvisorSupport, chatContextFactory, chatResultPersister,
-                metaGuardExecutor, null, null, null, null, null, null, false, true);
+                metaGuardExecutor, null, null, null, null, null, null, null, false, true);
     }
 
     @Override
@@ -208,12 +213,31 @@ public class ChatServiceImpl implements ChatService {
 
             sseEventBridge.sendTrace(emitter, context, "模型整理", "model", "started", "正在基于执行结果生成最终回答。", 0L);
             streamReflectAnswer(context, executionResult, lockToken, lockReleased, emitter, disposableRef);
+        } catch (PendingToolApprovalException pending) {
+            handlePendingApproval(emitter, request, lockToken, lockReleased, pending);
         } catch (Exception ex) {
             log.warn("流式聊天启动失败，sessionKey={}, reason={}", request.sessionKey(), ex.getMessage());
             sseEventBridge.sendError(emitter, chatResponsePolicyService.simplifyFailureReason(ex.getMessage()));
             releaseSessionLockOnce(request.sessionKey(), lockToken, lockReleased);
             sseEventBridge.completeEmitter(emitter);
         }
+    }
+
+    /**
+     * 包可见用于精确单测 PendingToolApprovalException 分支。
+     * agent_run status update is deferred to a follow-up — confirmation visibility is via SSE + REST polling.
+     */
+    void handlePendingApproval(SseEmitter emitter,
+                               ChatRequest request,
+                               String lockToken,
+                               AtomicBoolean lockReleased,
+                               PendingToolApprovalException pending) {
+        log.info("Tool proposal pending approval, sessionKey={}, proposalId={}",
+                request.sessionKey(), pending.proposalId());
+        proposalService.findByProposalId(pending.proposalId())
+                .ifPresent(proposal -> sseEventBridge.sendToolActionRequired(emitter, proposal));
+        releaseSessionLockOnce(request.sessionKey(), lockToken, lockReleased);
+        sseEventBridge.completeEmitter(emitter);
     }
 
     private boolean shouldRequestActionConfirmation(ChatContext context) {

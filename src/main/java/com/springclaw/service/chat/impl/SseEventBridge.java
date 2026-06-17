@@ -11,6 +11,7 @@ import com.springclaw.service.agent.CapabilityResult;
 import com.springclaw.service.agent.VerificationResult;
 import com.springclaw.service.context.AgentContextMetricsService;
 import com.springclaw.service.context.AssembledContext;
+import com.springclaw.service.proposal.ToolInvocationProposal;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -132,6 +133,29 @@ public class SseEventBridge {
                 jsonEscape(proposal.status())
         ).trim();
         sendEvent(emitter, "action_required", payload);
+    }
+
+    public void sendToolActionRequired(SseEmitter emitter, ToolInvocationProposal proposal) {
+        if (proposal == null) {
+            return;
+        }
+        String targetPathsJson = proposal.targetPaths().stream()
+                .map(p -> "\"" + jsonEscape(p) + "\"")
+                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+        String payload = """
+                {"proposalId":"%s","requestId":"%s","runId":"%s","toolName":"%s","riskLevel":"%s","targetPaths":%s,"previewSummary":"%s","workspaceDirty":%s,"expiresAt":"%s"}
+                """.formatted(
+                jsonEscape(proposal.proposalId()),
+                jsonEscape(proposal.requestId()),
+                jsonEscape(proposal.runId() == null ? "" : proposal.runId()),
+                jsonEscape(proposal.toolName()),
+                jsonEscape(proposal.riskLevel()),
+                targetPathsJson,
+                jsonEscape(proposal.previewSummary() == null ? "" : proposal.previewSummary()),
+                proposal.workspaceDirtyAtCreate(),
+                jsonEscape(proposal.expiresAt() == null ? "" : proposal.expiresAt().toString())
+        ).trim();
+        sendEvent(emitter, "tool_action_required", payload);
     }
 
     public void sendCapabilityCall(SseEmitter emitter,

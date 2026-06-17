@@ -1939,7 +1939,7 @@ onUnmounted(() => {
                       />
                     </label>
                     <footer>
-                      <small>{{ item.source || 'markdown' }}</small>
+                      <small>{{ item.reviewReason || item.reviewedAt || item.source || 'markdown' }}</small>
                       <div class="knowledge-source-status-actions">
                         <button type="button" :disabled="!!knowledgeReviewPendingPath" @click="reviewKnowledgeSource(item, 'active')">Restore</button>
                         <button type="button" :disabled="!!knowledgeReviewPendingPath" @click="reviewKnowledgeSource(item, 'approved')">Approve</button>

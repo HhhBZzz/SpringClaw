@@ -30,7 +30,9 @@ class RuntimeKnowledgeSourceControllerTest {
                         true,
                         "included_in_context",
                         "Runtime Notes",
-                        128
+                        128,
+                        "2026-06-17T10:00:00Z",
+                        "架构师确认"
                 )
         );
         when(service.listSources(12)).thenReturn(entries);
@@ -53,6 +55,7 @@ class RuntimeKnowledgeSourceControllerTest {
                         "unreviewed",
                         "approved",
                         "人工确认",
+                        "2026-06-17T10:01:00Z",
                         true,
                         "included_in_context"
                 );
@@ -67,6 +70,7 @@ class RuntimeKnowledgeSourceControllerTest {
 
         assertThat(response.getCode()).isZero();
         assertThat(response.getData()).isEqualTo(update);
+        assertThat(response.getData().reviewedAt()).isEqualTo("2026-06-17T10:01:00Z");
         verify(service).updateStatus("wiki/runtime.md", "approved", "人工确认");
     }
 

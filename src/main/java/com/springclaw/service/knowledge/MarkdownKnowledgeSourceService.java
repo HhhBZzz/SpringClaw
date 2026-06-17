@@ -84,7 +84,7 @@ public class MarkdownKnowledgeSourceService {
         int safeLimit = Math.max(1, Math.min(limit, 100));
         List<KnowledgeSourceReviewItem> entries = new ArrayList<>();
         for (Path file : markdownFiles()) {
-            ParsedMarkdown parsed = readMarkdown(file).orElse(new ParsedMarkdown("", "", TextUtils.safe(file.getFileName().toString())));
+            ParsedMarkdown parsed = readMarkdown(file).orElse(new ParsedMarkdown("", "", "", "", TextUtils.safe(file.getFileName().toString())));
             String status = reviewStatus(parsed.status());
             boolean contextIncluded = isContextIncludedStatus(status);
             entries.add(new KnowledgeSourceReviewItem(
@@ -94,7 +94,9 @@ public class MarkdownKnowledgeSourceService {
                     contextIncluded,
                     contextIncluded ? "included_in_context" : "filtered_from_context",
                     titleFor(file, parsed.body()),
-                    parsed.body().length()
+                    parsed.body().length(),
+                    parsed.reviewedAt(),
+                    parsed.reviewReason()
             ));
             if (entries.size() >= safeLimit) {
                 break;
@@ -116,9 +118,10 @@ public class MarkdownKnowledgeSourceService {
             String existing = Files.readString(file.get(), StandardCharsets.UTF_8);
             String previousStatus = reviewStatus(parseMarkdown(existing).status());
             String reviewReason = TextUtils.truncate(TextUtils.normalizeWS(reason), 400);
+            String reviewedAt = Instant.now().toString();
             Files.writeString(
                     file.get(),
-                    renderStatusFrontMatter(existing, normalizedStatus, reviewReason),
+                    renderStatusFrontMatter(existing, normalizedStatus, reviewReason, reviewedAt),
                     StandardCharsets.UTF_8
             );
             boolean contextIncluded = isContextIncludedStatus(normalizedStatus);
@@ -127,6 +130,7 @@ public class MarkdownKnowledgeSourceService {
                     previousStatus,
                     normalizedStatus,
                     reviewReason,
+                    reviewedAt,
                     contextIncluded,
                     contextIncluded ? "included_in_context" : "filtered_from_context"
             ));
@@ -184,11 +188,11 @@ public class MarkdownKnowledgeSourceService {
     private ParsedMarkdown parseMarkdown(String raw) {
         String text = TextUtils.safe(raw);
         if (!text.startsWith("---")) {
-            return new ParsedMarkdown("", "", text.trim());
+            return new ParsedMarkdown("", "", "", "", text.trim());
         }
         String[] lines = text.split("\\R", -1);
         if (lines.length < 3 || !"---".equals(lines[0].trim())) {
-            return new ParsedMarkdown("", "", text.trim());
+            return new ParsedMarkdown("", "", "", "", text.trim());
         }
         List<String> frontMatter = new ArrayList<>();
         int bodyStart = -1;
@@ -200,15 +204,17 @@ public class MarkdownKnowledgeSourceService {
             frontMatter.add(lines[i]);
         }
         if (bodyStart < 0) {
-            return new ParsedMarkdown("", "", text.trim());
+            return new ParsedMarkdown("", "", "", "", text.trim());
         }
         String status = frontMatterValue(frontMatter, "status");
         String source = frontMatterValue(frontMatter, "source");
+        String reviewedAt = frontMatterValue(frontMatter, "reviewedAt");
+        String reviewReason = frontMatterValue(frontMatter, "reviewReason");
         String body = String.join("\n", List.of(lines).subList(bodyStart, lines.length)).trim();
-        return new ParsedMarkdown(status, source, body);
+        return new ParsedMarkdown(status, source, reviewedAt, reviewReason, body);
     }
 
-    private String renderStatusFrontMatter(String raw, String status, String reason) {
+    private String renderStatusFrontMatter(String raw, String status, String reason, String reviewedAt) {
         String text = TextUtils.safe(raw);
         String[] splitLines = text.split("\\R", -1);
         List<String> lines = new ArrayList<>(List.of(splitLines));
@@ -217,7 +223,7 @@ public class MarkdownKnowledgeSourceService {
             if (closing > 0) {
                 List<String> frontMatter = new ArrayList<>(lines.subList(1, closing));
                 upsertFrontMatter(frontMatter, "status", status);
-                upsertFrontMatter(frontMatter, "reviewedAt", Instant.now().toString());
+                upsertFrontMatter(frontMatter, "reviewedAt", reviewedAt);
                 if (StringUtils.hasText(reason)) {
                     upsertFrontMatter(frontMatter, "reviewReason", reason);
                 }
@@ -227,7 +233,7 @@ public class MarkdownKnowledgeSourceService {
         }
         List<String> frontMatter = new ArrayList<>();
         frontMatter.add("status: " + status);
-        frontMatter.add("reviewedAt: " + Instant.now());
+        frontMatter.add("reviewedAt: " + reviewedAt);
         if (StringUtils.hasText(reason)) {
             frontMatter.add("reviewReason: " + reason);
         }
@@ -256,7 +262,7 @@ public class MarkdownKnowledgeSourceService {
     }
 
     private String frontMatterValue(List<String> frontMatter, String key) {
-        String prefix = key + ":";
+        String prefix = key.toLowerCase(Locale.ROOT) + ":";
         for (String line : frontMatter) {
             String trimmed = TextUtils.safe(line).trim();
             if (trimmed.toLowerCase(Locale.ROOT).startsWith(prefix)) {
@@ -325,18 +331,21 @@ public class MarkdownKnowledgeSourceService {
                                             boolean contextIncluded,
                                             String contextImpact,
                                             String title,
-                                            int chars) {
+                                            int chars,
+                                            String reviewedAt,
+                                            String reviewReason) {
     }
 
     public record KnowledgeSourceStatusUpdate(String path,
                                               String previousStatus,
                                               String status,
                                               String reason,
+                                              String reviewedAt,
                                               boolean contextIncluded,
                                               String contextImpact) {
     }
 
-    private record ParsedMarkdown(String status, String source, String body) {
+    private record ParsedMarkdown(String status, String source, String reviewedAt, String reviewReason, String body) {
     }
 
     private record KnowledgeFile(boolean contextIncluded, String body) {

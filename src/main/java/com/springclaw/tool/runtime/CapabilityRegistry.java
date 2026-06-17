@@ -171,6 +171,32 @@ public class CapabilityRegistry {
     }
 
     /**
+     * 通过 tool pack 类的 simpleName 反查 descriptor.riskLevel()。
+     * 用于 ToolRuntimeAspect 决定是否需要进入写操作确认门禁。
+     *
+     * @return 找到返回 descriptor.riskLevel()（"read" / "write" / "side_effect" / "dangerous"），
+     *         找不到返回 null
+     */
+    public String findRiskLevelByClassName(String simpleClassName) {
+        if (!StringUtils.hasText(simpleClassName)) {
+            return null;
+        }
+        return entries.stream()
+                .filter(entry -> entry.toolPackBean() != null)
+                .filter(entry -> {
+                    Class<?> target = AopUtils.getTargetClass(entry.toolPackBean());
+                    if (target == null) {
+                        target = ClassUtils.getUserClass(entry.toolPackBean());
+                    }
+                    return target != null && simpleClassName.equals(target.getSimpleName());
+                })
+                .map(CapabilityEntry::riskLevel)
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
      * 按触发关键词匹配能力，返回匹配列表（按匹配关键词数量降序）。
      *
      * @param text 用户输入文本

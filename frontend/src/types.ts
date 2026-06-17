@@ -125,6 +125,23 @@ export interface AgentActionProposal {
   status: string;
 }
 
+export interface ToolActionRequiredEvent {
+  proposalId: string;
+  requestId: string;
+  runId: string;
+  toolName: string;
+  riskLevel: 'write' | 'dangerous' | 'side_effect' | string;
+  targetPaths: string[];
+  previewSummary: string;
+  workspaceDirty: boolean;
+  expiresAt: string;
+}
+
+export interface ToolProposalResult {
+  proposalId: string;
+  status: string;
+}
+
 export interface AgentActionProposalResult {
   proposalId: string;
   status: string;

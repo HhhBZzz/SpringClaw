@@ -1,4 +1,4 @@
-import type { AdminDashboard, AgentActionProposal, AgentActionProposalResult, AgentCapabilityEvent, AgentDecisionEvent, AgentTraceEvent, AgentVerificationEvent, ApiEnvelope, AuditLogPage, AuthProfileResponse, AuthTokenResponse, ChatHistoryResponse, ChatResponse, ChatResponseMode, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeKnowledgeSourceStatusUpdate, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeLearningStatusUpdate, RuntimeModelProviders, RuntimeOverview, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary } from '../types';
+import type { AdminDashboard, AgentActionProposal, AgentActionProposalResult, AgentCapabilityEvent, AgentDecisionEvent, AgentTraceEvent, AgentVerificationEvent, ApiEnvelope, AuditLogPage, AuthProfileResponse, AuthTokenResponse, ChatHistoryResponse, ChatResponse, ChatResponseMode, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeKnowledgeSourceStatusUpdate, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeLearningStatusUpdate, RuntimeModelProviders, RuntimeOverview, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary, ToolActionRequiredEvent, ToolProposalResult } from '../types';
 
 const TOKEN_KEY = 'springclaw.frontend.token';
 let memoryToken = '';
@@ -115,6 +115,20 @@ export function cancelActionProposal(proposalId: string) {
   });
 }
 
+export function confirmToolProposal(proposalId: string, reason = '用户确认执行') {
+  return request<ToolProposalResult>(`/api/tool-proposals/${encodeURIComponent(proposalId)}/confirm`, {
+    method: 'POST',
+    body: JSON.stringify({ reason })
+  });
+}
+
+export function rejectToolProposal(proposalId: string, reason = '用户拒绝执行') {
+  return request<ToolProposalResult>(`/api/tool-proposals/${encodeURIComponent(proposalId)}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ reason })
+  });
+}
+
 export function getAdminDashboard() {
   return request<AdminDashboard>('/api/admin/manage/dashboard');
 }
@@ -200,6 +214,7 @@ export interface ChatStreamHandlers {
   onSkillCall?: (event: AgentCapabilityEvent) => void;
   onVerification?: (event: AgentVerificationEvent) => void;
   onActionRequired?: (proposal: AgentActionProposal) => void;
+  onToolActionRequired?: (proposal: ToolActionRequiredEvent) => void;
   onError?: (message: string) => void;
   onDone?: () => void;
 }
@@ -338,6 +353,22 @@ function dispatchSseEvent(raw: string, handlers: ChatStreamHandlers) {
       handlers.onActionRequired?.(JSON.parse(data) as AgentActionProposal);
     } catch {
       handlers.onActionRequired?.({ proposalId: '', actionType: 'unknown', title: '需要确认', summary: data, riskLevel: 'side_effect', expiresAt: Date.now(), status: 'PENDING' });
+    }
+  } else if (eventName === 'tool_action_required') {
+    try {
+      handlers.onToolActionRequired?.(JSON.parse(data) as ToolActionRequiredEvent);
+    } catch {
+      handlers.onToolActionRequired?.({
+        proposalId: '',
+        requestId: '',
+        runId: '',
+        toolName: 'unknown',
+        riskLevel: 'write',
+        targetPaths: [],
+        previewSummary: data,
+        workspaceDirty: false,
+        expiresAt: ''
+      });
     }
   } else if (eventName === 'error') {
     handlers.onError?.(data);

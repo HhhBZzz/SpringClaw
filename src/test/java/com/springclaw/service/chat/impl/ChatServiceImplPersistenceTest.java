@@ -114,6 +114,7 @@ class ChatServiceImplPersistenceTest {
                 engineSelector,
                 null,
                 sseEventBridge,
+                null,
                 false,
                 true
         );
@@ -212,6 +213,7 @@ class ChatServiceImplPersistenceTest {
                 engineSelector,
                 null,
                 sseEventBridge,
+                null,
                 false,
                 true
         );

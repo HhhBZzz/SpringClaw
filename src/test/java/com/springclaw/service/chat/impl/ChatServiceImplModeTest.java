@@ -462,6 +462,7 @@ class ChatServiceImplModeTest {
                     engineSelector,
                     null,
                     sseEventBridge,
+                    null,
                     false,
                     true
             );
@@ -487,6 +488,7 @@ class ChatServiceImplModeTest {
                     engineSelector,
                     null,
                     sseEventBridge,
+                    null,
                     false,
                     true
             );

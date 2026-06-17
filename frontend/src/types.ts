@@ -142,6 +142,39 @@ export interface ToolProposalResult {
   status: string;
 }
 
+export interface RuntimeToolProposal {
+  id?: number;
+  proposalId: string;
+  requestId?: string;
+  runId?: string;
+  sessionKey?: string;
+  userId?: string;
+  roleCode?: string;
+  toolName: string;
+  toolsetId?: string;
+  argumentsCanonicalJson?: string;
+  argumentsHash?: string;
+  riskLevel?: string;
+  targetPaths: string[];
+  previewSummary?: string;
+  workspaceDirtyAtCreate?: boolean;
+  dirtyFilesAtCreate?: string[];
+  status: string;
+  version?: number;
+  executedAt?: string;
+  executionResult?: string;
+  executionError?: string;
+  gitHeadShaAtCreate?: string;
+  gitBaselineSha?: string;
+  gitCommitSha?: string;
+  gitChangedFiles?: string[];
+  reviewedAt?: string;
+  reviewReason?: string;
+  createTime?: string;
+  updateTime?: string;
+  expiresAt?: string;
+}
+
 export interface AgentActionProposalResult {
   proposalId: string;
   status: string;
@@ -261,7 +294,7 @@ export interface AdminDashboard {
   }>;
 }
 
-export type RuntimeResourceView = 'console' | 'sessions' | 'agents' | 'skills' | 'tools' | 'tasks' | 'learning' | 'knowledge' | 'usage';
+export type RuntimeResourceView = 'console' | 'sessions' | 'agents' | 'skills' | 'tools' | 'proposals' | 'tasks' | 'learning' | 'knowledge' | 'usage';
 
 export interface RuntimeSkill {
   skillId: string;

@@ -17,6 +17,7 @@ import {
   getRuntimeTasks,
   getRuntimeTools,
   getRuntimeUsage,
+  getToolProposals,
   getRuntimeLearningEntries,
   getRuntimeKnowledgeSources,
   getRuntimeKnowledgeSourceSnapshot,
@@ -27,7 +28,7 @@ import {
   updateRuntimeLearningStatus
 } from '../services/api';
 import { useAuthStore } from '../stores/auth';
-import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
+import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
 
 type LearningReviewStatusFilter = 'all' | RuntimeLearningReviewStatus;
 
@@ -83,6 +84,7 @@ const runtimeResourceError = ref('');
 const runtimeOverview = ref<RuntimeOverview | null>(null);
 const runtimeSkills = ref<{ count?: number; scope?: string; sourceCounts?: Record<string, number>; definitions?: RuntimeSkill[] } | null>(null);
 const runtimeTools = ref<RuntimeTool[]>([]);
+const runtimeToolProposals = ref<RuntimeToolProposal[]>([]);
 const runtimeTasks = ref<{ total?: number; enabled?: number; disabled?: number; scope?: string; tasks?: RuntimeTask[] } | null>(null);
 const runtimeLearningItems = ref<RuntimeLearningReviewItem[]>([]);
 const runtimeKnowledgeSources = ref<RuntimeKnowledgeSourceReviewItem[]>([]);
@@ -138,6 +140,7 @@ const engineerNavItems: Array<{ key: RuntimeResourceView; label: string; classNa
   { key: 'agents', label: 'Agents', className: 'nav-agents' },
   { key: 'skills', label: 'Skills', className: 'nav-skills' },
   { key: 'tools', label: 'Tools', className: 'nav-tools' },
+  { key: 'proposals', label: 'Proposals', className: 'nav-proposals' },
   { key: 'tasks', label: 'Tasks', className: 'nav-tasks' },
   { key: 'learning', label: 'Learning', className: 'nav-learning' },
   { key: 'knowledge', label: 'Knowledge', className: 'nav-knowledge' },
@@ -504,6 +507,8 @@ const runtimeResourceTitle = computed(() => {
       return 'Installed Skills';
     case 'tools':
       return 'Tool Permissions';
+    case 'proposals':
+      return 'Tool Proposals';
     case 'tasks':
       return 'Scheduled Tasks';
     case 'learning':
@@ -527,6 +532,8 @@ const runtimeResourceSubtitle = computed(() => {
       return 'Local SKILL.md registry and Agent-visible execution capabilities.';
     case 'tools':
       return 'Tool providers resolved through runtime policy and allowed tool packs.';
+    case 'proposals':
+      return 'Write or side-effect tool confirmations, execution status, and git evidence.';
     case 'tasks':
       return 'User-accessible scheduled tasks, next run time, and latest status.';
     case 'learning':
@@ -548,6 +555,17 @@ const runtimeSkillItems = computed<RuntimeSkill[]>(() => {
 
 const runtimeToolItems = computed<RuntimeTool[]>(() => {
   return runtimeTools.value.length ? runtimeTools.value : runtimeOverview.value?.tools || [];
+});
+
+const pendingRuntimeToolProposals = computed(() => {
+  return runtimeToolProposals.value.filter((proposal) => {
+    const status = String(proposal.status || '').toUpperCase();
+    return status === 'PENDING' || status === 'APPROVED' || status === 'EXECUTING';
+  }).length;
+});
+
+const failedRuntimeToolProposals = computed(() => {
+  return runtimeToolProposals.value.filter((proposal) => String(proposal.status || '').toUpperCase() === 'FAILED').length;
 });
 
 const runtimeTaskItems = computed<RuntimeTask[]>(() => {
@@ -604,6 +622,8 @@ const runtimeResourceCount = computed(() => {
       return runtimeSkillItems.value.length;
     case 'tools':
       return runtimeToolItems.value.length;
+    case 'proposals':
+      return runtimeToolProposals.value.length;
     case 'tasks':
       return runtimeTaskItems.value.length;
     case 'learning':
@@ -759,7 +779,7 @@ async function activateRuntimeNav(key: RuntimeNavKey) {
     setRuntimeStatus('已打开 Sessions 面板，可按标题或 sessionKey 过滤。');
   }
   if (key === 'agents') activeInspectorTab.value = 'trace';
-  if (key === 'skills' || key === 'tools') activeInspectorTab.value = 'tools';
+  if (key === 'skills' || key === 'tools' || key === 'proposals') activeInspectorTab.value = 'tools';
   if (key === 'learning' || key === 'knowledge') activeInspectorTab.value = 'memory';
   await loadRuntimeResource(key);
 }
@@ -781,6 +801,8 @@ async function loadRuntimeResource(view: RuntimeResourceView = activeResourceVie
       runtimeSkills.value = await getRuntimeSkills();
     } else if (view === 'tools') {
       runtimeTools.value = await getRuntimeTools();
+    } else if (view === 'proposals') {
+      runtimeToolProposals.value = await getToolProposals({ sessionKey: sessionKey.value });
     } else if (view === 'tasks') {
       runtimeTasks.value = await getRuntimeTasks(30);
     } else if (view === 'learning') {
@@ -1510,6 +1532,11 @@ function formatDateTimeLabel(value?: string | number) {
   });
 }
 
+function toolProposalStatusClass(status?: string) {
+  const normalized = (status || 'unknown').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  return `status-${normalized}`;
+}
+
 function formatMs(value: number) {
   return value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${value}ms`;
 }
@@ -1881,6 +1908,40 @@ onUnmounted(() => {
                     </footer>
                   </article>
                   <div v-if="!runtimeToolItems.length" class="empty-history">未发现可用工具 Provider。</div>
+                </div>
+
+                <div v-else-if="activeResourceView === 'proposals'" class="tool-proposal-list">
+                  <div class="learning-review-summary tool-proposal-summary">
+                    <span>Confirmation audit</span>
+                    <strong>{{ formatMetric(pendingRuntimeToolProposals) }} active</strong>
+                    <small>{{ formatMetric(runtimeToolProposals.length) }} proposals loaded; {{ formatMetric(failedRuntimeToolProposals) }} failed executions need review.</small>
+                  </div>
+                  <article v-for="proposal in runtimeToolProposals" :key="proposal.proposalId" class="tool-proposal-card">
+                    <header>
+                      <span class="risk-badge">{{ proposal.riskLevel || 'tool' }}</span>
+                      <em :class="toolProposalStatusClass(proposal.status)">{{ proposal.status || '-' }}</em>
+                    </header>
+                    <div>
+                      <strong>{{ proposal.previewSummary || proposal.toolName }}</strong>
+                      <p>{{ proposal.toolName }} · {{ proposal.toolsetId || 'toolset' }}</p>
+                    </div>
+                    <ul v-if="proposal.targetPaths.length" class="tool-target-paths">
+                      <li v-for="path in proposal.targetPaths" :key="path">{{ path }}</li>
+                    </ul>
+                    <div class="tool-proposal-meta">
+                      <small>proposal {{ proposal.proposalId.slice(0, 8) }}</small>
+                      <small>request {{ proposal.requestId || '-' }}</small>
+                      <small>user {{ proposal.userId || '-' }}</small>
+                      <small>dirty {{ proposal.workspaceDirtyAtCreate ? 'yes' : 'no' }}</small>
+                      <small>dirty files {{ formatMetric(proposal.dirtyFilesAtCreate?.length || 0) }}</small>
+                      <small>commit {{ proposal.gitCommitSha ? proposal.gitCommitSha.slice(0, 8) : '-' }}</small>
+                      <small>changed {{ formatMetric(proposal.gitChangedFiles?.length || 0) }}</small>
+                      <small>updated {{ formatDateTimeLabel(proposal.updateTime || proposal.createTime) }}</small>
+                    </div>
+                    <p v-if="proposal.executionError" class="runtime-resource-error">{{ proposal.executionError }}</p>
+                    <p v-else-if="proposal.executionResult" class="tool-proposal-result">{{ proposal.executionResult }}</p>
+                  </article>
+                  <div v-if="!runtimeToolProposals.length" class="empty-history">暂无工具确认单。写入文件、执行命令或其他副作用工具会在这里留下审计记录。</div>
                 </div>
 
                 <div v-else-if="activeResourceView === 'tasks'" class="runtime-task-list">

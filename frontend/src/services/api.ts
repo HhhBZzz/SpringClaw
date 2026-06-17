@@ -1,4 +1,4 @@
-import type { AdminDashboard, AgentActionProposal, AgentActionProposalResult, AgentCapabilityEvent, AgentDecisionEvent, AgentTraceEvent, AgentVerificationEvent, ApiEnvelope, AuditLogPage, AuthProfileResponse, AuthTokenResponse, ChatHistoryResponse, ChatResponse, ChatResponseMode, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeKnowledgeSourceStatusUpdate, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeLearningStatusUpdate, RuntimeModelProviders, RuntimeOverview, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary, ToolActionRequiredEvent, ToolProposalResult } from '../types';
+import type { AdminDashboard, AgentActionProposal, AgentActionProposalResult, AgentCapabilityEvent, AgentDecisionEvent, AgentTraceEvent, AgentVerificationEvent, ApiEnvelope, AuditLogPage, AuthProfileResponse, AuthTokenResponse, ChatHistoryResponse, ChatResponse, ChatResponseMode, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeKnowledgeSourceStatusUpdate, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeLearningStatusUpdate, RuntimeModelProviders, RuntimeOverview, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent, ToolProposalResult } from '../types';
 
 const TOKEN_KEY = 'springclaw.frontend.token';
 let memoryToken = '';
@@ -127,6 +127,14 @@ export function rejectToolProposal(proposalId: string, reason = '用户拒绝执
     method: 'POST',
     body: JSON.stringify({ reason })
   });
+}
+
+export function getToolProposals(input: { sessionKey?: string; status?: string } = {}) {
+  const params = new URLSearchParams();
+  if (input.sessionKey) params.set('sessionKey', input.sessionKey);
+  if (input.status) params.set('status', input.status);
+  const query = params.toString();
+  return request<RuntimeToolProposal[]>(`/api/tool-proposals${query ? `?${query}` : ''}`);
 }
 
 export function getAdminDashboard() {

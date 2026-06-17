@@ -202,6 +202,49 @@ class VueOnlyFrontendPolicyTest {
     }
 
     @Test
+    void runtimeConsoleShouldExposeToolProposalAuditPanel() throws IOException {
+        String agentView = Files.readString(projectRoot.resolve("frontend/src/views/AgentView.vue"));
+        String api = Files.readString(projectRoot.resolve("frontend/src/services/api.ts"));
+        String types = Files.readString(projectRoot.resolve("frontend/src/types.ts"));
+
+        assertThat(agentView)
+                .contains("nav-proposals")
+                .contains("runtimeToolProposals")
+                .contains("tool-proposal-list")
+                .contains("tool-proposal-card")
+                .contains("Tool Proposals")
+                .contains("workspaceDirtyAtCreate")
+                .contains("gitCommitSha")
+                .contains("executionError")
+                .contains("getToolProposals")
+                .contains("toolProposalStatusClass")
+                .contains("activeResourceView === 'proposals'");
+
+        assertThat(api)
+                .contains("getToolProposals")
+                .contains("RuntimeToolProposal")
+                .contains("/api/tool-proposals")
+                .contains("sessionKey")
+                .contains("status");
+
+        assertThat(types)
+                .contains("'proposals'")
+                .contains("RuntimeToolProposal")
+                .contains("workspaceDirtyAtCreate?: boolean")
+                .contains("gitCommitSha?: string")
+                .contains("executionError?: string")
+                .contains("dirtyFilesAtCreate?: string[]")
+                .contains("gitChangedFiles?: string[]");
+
+        String styles = Files.readString(projectRoot.resolve("frontend/src/assets/styles.css"));
+        assertThat(styles)
+                .contains(".tool-proposal-card em.status-failed")
+                .contains(".tool-proposal-card em.status-rejected")
+                .contains(".tool-proposal-card em.status-executed")
+                .contains(".tool-proposal-card .runtime-resource-error");
+    }
+
+    @Test
     void adminRouteShouldRemainReachableForUnauthenticatedLogin() throws IOException {
         String router = Files.readString(projectRoot.resolve("frontend/src/router/index.ts"));
         String adminView = Files.readString(projectRoot.resolve("frontend/src/views/AdminView.vue"));

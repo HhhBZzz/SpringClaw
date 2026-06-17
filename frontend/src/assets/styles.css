@@ -6467,6 +6467,7 @@ button.runtime-nav-item {
 .runtime-session-resource-list,
 .runtime-run-list,
 .runtime-task-list,
+.tool-proposal-list,
 .learning-review-list,
 .knowledge-source-list,
 .runtime-usage-recent {
@@ -6485,6 +6486,7 @@ button.runtime-nav-item {
 .runtime-resource-card,
 .runtime-resource-row,
 .runtime-task-row,
+.tool-proposal-card,
 .learning-review-card,
 .knowledge-source-card,
 .knowledge-source-snapshot,
@@ -6574,6 +6576,7 @@ button.runtime-nav-item {
 }
 
 .learning-review-summary,
+.tool-proposal-card,
 .learning-review-card,
 .knowledge-source-card {
   display: grid;
@@ -6642,6 +6645,7 @@ button.runtime-nav-item {
 
 .learning-review-card header,
 .learning-review-card footer,
+.tool-proposal-card header,
 .knowledge-source-card header,
 .knowledge-source-card footer,
 .learning-review-status-actions,
@@ -6654,12 +6658,14 @@ button.runtime-nav-item {
 
 .learning-review-card header,
 .learning-review-card footer,
+.tool-proposal-card header,
 .knowledge-source-card header,
 .knowledge-source-card footer {
   justify-content: space-between;
 }
 
 .learning-review-card p,
+.tool-proposal-card p,
 .knowledge-source-card p {
   margin: 0;
   color: #c1c8d3;
@@ -6672,13 +6678,70 @@ button.runtime-nav-item {
 .learning-review-impact,
 .learning-review-counterexample,
 .learning-review-evidence,
+.tool-proposal-meta,
 .knowledge-source-impact,
 .learning-review-reason {
   min-width: 0;
 }
 
-.learning-review-meta {
+.learning-review-meta,
+.tool-proposal-meta {
   flex-wrap: wrap;
+}
+
+.tool-proposal-card em {
+  color: #38d979;
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.tool-proposal-card em.status-pending,
+.tool-proposal-card em.status-approved,
+.tool-proposal-card em.status-executing {
+  color: #f6c945;
+}
+
+.tool-proposal-card em.status-executed {
+  color: #38d979;
+}
+
+.tool-proposal-card em.status-failed,
+.tool-proposal-card em.status-rejected,
+.tool-proposal-card em.status-expired,
+.tool-proposal-card em.status-cancelled {
+  color: #ff9b93;
+}
+
+.tool-proposal-card .tool-target-paths {
+  margin: 0;
+  color: #a8b0bd;
+}
+
+.tool-proposal-card .runtime-resource-error {
+  color: #ff9b93;
+}
+
+.tool-proposal-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-proposal-meta small {
+  max-width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.tool-proposal-result {
+  border: 1px solid rgba(56, 217, 121, 0.16);
+  border-radius: 7px;
+  padding: 8px 10px;
+  background: rgba(56, 217, 121, 0.055);
 }
 
 .learning-review-category,

@@ -1,7 +1,7 @@
 # SpringClaw 核心最小模块进度记录
 
 > 日期：2026-06-11
-> 最近更新：2026-06-16
+> 最近更新：2026-06-17
 > 范围：只记录当前实现位置、成熟度、稳定优先级；不要求继续合并 engine，不删除 legacy/fallback 代码。
 
 ## 一、当前定位
@@ -37,7 +37,7 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 - `git diff --check`
 - 结果：clean
 
-注意：当前稳定推进集中在 Workspace Guard、确认链路、trace 元数据、timeline step schema、前端 Command Center 真实展示、Memory 召回隔离、Memory Bank 文件化项目记忆、context summary 可解释、模型用量、prompt cache、模型调用过程 Micrometer 指标化、失败 trace 经验沉淀；确认卡片和 workspace 命令/文件工具已开始进入结构化 timeline，命令预览和文件路径已进入工具输入摘要；不涉及 `AgentRuntimeEngine`、`AutonomousLoopEngine`、`OparLoopEngine` 合并或重构。
+注意：当前稳定推进集中在 Workspace Guard、确认链路、trace 元数据、timeline step schema、前端 Command Center 真实展示、Memory 召回隔离、Memory Bank 文件化项目记忆、context summary 可解释、模型用量、prompt cache、模型调用过程 Micrometer 指标化、失败 trace 经验沉淀；确认卡片和 workspace 命令/文件工具已开始进入结构化 timeline，命令预览和文件路径已进入工具输入摘要，工具确认单已能在 Runtime Console 作为 Proposals 审计列表回看；不涉及 `AgentRuntimeEngine`、`AutonomousLoopEngine`、`OparLoopEngine` 合并或重构。
 
 ## 三、核心最小模块进度表
 
@@ -56,9 +56,9 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 | Tool 调用层 | `CapabilityRegistry`、`ToolOrchestrator`、`ToolRuntimeAspect`、`ToolPackDescriptor`、`SystemToolPack`、`WebSearchToolPack` | 工具注册、工具选择、工具包描述、AOP 审计、运行时工具调用；Workspace Guard 拒绝原因已能进入结构化审计 JSON；workspace edit/write/command 已映射为 file/command timeline action，并记录命令预览/文件路径 input summary | 3 | 70% | 下一步继续补 output/risk/duration 的真实字段，不扩工具数量 |
 | Context 管理 | `ChatContextFactory`、`ContextAssembler`、`AssembledContext`、`ConversationEventTextSupport`、`MemoryBankService`、`VectorMemoryService` | 组装短期上下文、文件化项目记忆、长期记忆召回、prompt 输入；长期记忆召回已做 session/user 防御性隔离，Memory Bank 已接入 observe prompt，meta 事件已暴露 context summary，learning active/filtered count 已进入上下文摘要 | 3 | 72% | 暂不做复杂压缩系统；下一步记录上下文来源、窗口大小、召回优先级到 trace |
 | Session / Task 生命周期 | `AgentSession`、`MessageEvent`、`ChatResultPersister`、`AsyncChatResultStore`、task service 包 | 保存会话、消息事件、异步结果、任务入口 | 3 | 50% | 先区分 chat session 和 long-running task；不要马上建新 Task Runtime |
-| Event Stream / Trace | `SseEventBridge`、`AgentRunTraceService`、`AgentRunTraceEvent`、`message_event`、`agent_run` 相关表 | 前端 SSE、运行 trace、工具审计事件、运行步骤展示；tool audit 可镜像到 run trace；`agent_run.product_mode` 已可持久化并回显到运行列表；trace event 已带 `springclaw.timeline-step.v1` 基础字段；用户确认 required/confirmed/cancelled 已进入 timeline；workspace 工具输入摘要已进入 trace target/input summary | 3 | 80% | 下一步把失败恢复、模型 fallback、重试等细节继续结构化，保持 MessageEvent 与结构化表的关联 |
+| Event Stream / Trace | `SseEventBridge`、`AgentRunTraceService`、`AgentRunTraceEvent`、`message_event`、`agent_run` 相关表 | 前端 SSE、运行 trace、工具审计事件、运行步骤展示；tool audit 可镜像到 run trace；`agent_run.product_mode` 已可持久化并回显到运行列表；trace event 已带 `springclaw.timeline-step.v1` 基础字段；用户确认 required/confirmed/cancelled 已进入 timeline；workspace 工具输入摘要已进入 trace target/input summary；工具确认单可通过 Proposals 列表查看状态、dirty/git 证据和执行错误 | 3 | 82% | 下一步把失败恢复、模型 fallback、重试等细节继续结构化，保持 MessageEvent 与结构化表的关联 |
 | Workspace 管理 | `WorkspaceReviewService`、`WorkspaceTaskService`、`LocalFilesystemService`、`WorkspaceEditToolPack`、`WorkspaceGuard` | 工作区检索、代码统计、文件候选、本地文件访问、工作区修改/命令；最小路径和命令边界校验 | 3 | 55% | 继续保持最小边界模型；不要引入完整 diff/rollback 框架 |
-| Permission / Policy | `ToolRiskPolicyService`、`ToolPermissionServiceImpl`、`AgentActionProposalService`、`application.yml` user-deny-tools | 风险分级、工具权限、动作确认、默认 deny 配置；动作确认生命周期已写入 run trace | 2 | 50% | 下一步继续把确认后的实际执行结果、拒绝原因和权限来源结构化 |
+| Permission / Policy | `ToolRiskPolicyService`、`ToolPermissionServiceImpl`、`AgentActionProposalService`、`ToolInvocationProposal`、`ToolProposalController`、`application.yml` user-deny-tools | 风险分级、工具权限、动作确认、默认 deny 配置；动作确认生命周期已写入 run trace；写入/副作用工具确认单已有 PENDING/EXECUTING/EXECUTED/FAILED/REJECTED 状态与前端审计入口 | 2 | 56% | 下一步继续把确认后的实际执行结果、拒绝原因和权限来源结构化 |
 | Sandbox / Command Execution | `WorkspaceGuard`、`WorkspaceEditToolPack.workspaceRunCommand`、`SystemToolPack.runCommand`、`ScriptSkillExecutorService` | 执行 shell、脚本技能、工作区命令；workspace 命令已拦截危险命令和父目录路径段 | 2 | 45% | 当前仍不是成熟沙箱；先把拒绝原因、确认边界、审计记录做实 |
 | Long-term Memory / Memory Bank | `VectorMemoryService`、`MemoryBankService`、`AgentLearningService`、Redis Vector Store 配置、`docs/memory-bank` | 会话记忆、语义召回、跨会话用户记忆控制、文件化项目记忆；vector store 召回结果已在服务层二次过滤，Memory Bank 已作为非 RAG 项目记忆进入上下文；失败 trace 可沉淀为可审阅 learning 条目，learning status 已可过滤 inactive 经验，并统计 active/filtered learning 数量；后端已可按 limit 列出 learning review 条目并派生 counterexample category/context impact，前端可按状态筛选复核队列并看到规则是否正在进入上下文 | 3 | 81% | 保持向量记忆为召回层，Memory Bank 作为项目长期记忆主线；下一步补召回来源、上下文预算记录，并把 learning impact 和后续 trace 结果关联起来 |
 | Logs / Observability | `AgentRunTraceService`、`AgentRunTraceEvent`、`LlmUsageRecordServiceImpl`、`LlmUsageMetricsService`、`ModelCallMetricsService`、`AgentContextMetricsService`、audit/service/usage 包、后台页面 | token、耗时、模型调用、运行日志、审计记录；timeline step 已具备 category/action/target/source/riskLevel 基础字段；确认和 workspace 工具动作已可复盘，workspace 命令/文件输入摘要已可审计；上下文来源摘要、模型用量、prompt cache hit/miss、模型调用耗时/fallback/retry、learning active/filtered 数量已通过 Micrometer 记录为低基数数值指标 | 3 | 72% | 先统一 requestId/runId/toolCallId 关联；下一步补 tool duration/error reason 和 memory recall hit count |
@@ -69,7 +69,7 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 | Self Evolution | `AgentLearningService`、`RuntimeLearningController`、`AgentRunTraceService`、`docs/memory-bank/agent-learnings.md` | 从失败 trace 中提炼 lesson/rule/counterexample/evidence，去重后写入可审阅 Memory Bank；新条目默认 active，Memory Bank 只加载 active/approved/旧格式条目，过滤 disabled/rejected/superseded；learning review 条目可按 limit 列出，status 可按 signature 更新并记录 reviewedAt/reviewReason，并从反例/证据中派生 permission_boundary/tool_failure/evidence_gap 等分类，也能派生 included_in_context/filtered_from_context 影响状态；Runtime Console 已提供 ADMIN 审核入口，可填写 review reason，按状态筛选，查看反例类型、上下文影响并执行状态更新 | 3 | 66% | 下一步把 learning impact 和后续任务成功/失败 trace 关联起来；不要让模型自动无限写规则 |
 | Plugin 系统 | 当前主要是 Skill/Tool 形态，未形成插件生命周期 | 未来可加载组件、版本、隔离、安装 | 1 | 15% | 现在不要做；避免项目发散 |
 | Multi-agent 通信 | 当前未形成独立 agent 协作协议 | 未来 agent-to-agent、handoff、角色协作 | 1 | 10% | 现在不要做；先把单 agent 生命周期跑稳 |
-| Frontend Command Center | Vue Agent Console、Admin Console、runtime console 相关页面、`ChatStreamMeta.contextSummary` | 展示聊天、stream、trace、动作确认、后台运维数据；Agent Console 与 Admin 表已展示 `productMode`；timeline 已消费结构化 step 字段并清理 JSON detail 展示；任务元数据面板已展示 context summary；Runtime Console 已增加 Learning Review 入口用于审核自进化规则、记录人工 reason、按状态筛选、查看反例类型、上下文影响和恢复/废弃规则 | 3 | 81% | 继续展示风险等级和真实 timeline，不要先堆视觉功能 |
+| Frontend Command Center | Vue Agent Console、Admin Console、runtime console 相关页面、`ChatStreamMeta.contextSummary` | 展示聊天、stream、trace、动作确认、后台运维数据；Agent Console 与 Admin 表已展示 `productMode`；timeline 已消费结构化 step 字段并清理 JSON detail 展示；任务元数据面板已展示 context summary；Runtime Console 已增加 Learning Review 与 Tool Proposals 入口，用于审核自进化规则、查看写操作确认单状态、dirty/git 证据和执行错误 | 3 | 84% | 继续展示风险等级和真实 timeline，不要先堆视觉功能 |
 
 ## 四、当前默认 Runtime 链路记录
 

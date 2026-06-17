@@ -21,10 +21,11 @@ import {
   getRuntimeKnowledgeSourceSnapshot,
   streamChat,
   switchRuntimeModelProvider,
+  updateRuntimeKnowledgeSourceStatus,
   updateRuntimeLearningStatus
 } from '../services/api';
 import { useAuthStore } from '../stores/auth';
-import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary } from '../types';
+import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary } from '../types';
 
 type LearningReviewStatusFilter = 'all' | RuntimeLearningReviewStatus;
 
@@ -87,6 +88,8 @@ const runtimeRuns = ref<NonNullable<RuntimeOverview['agentRuns']>>([]);
 const runtimeModelProviders = ref<RuntimeModelProviders | null>(null);
 const learningReviewPendingSignature = ref('');
 const learningReviewReasons = ref<Record<string, string>>({});
+const knowledgeReviewPendingPath = ref('');
+const knowledgeReviewReasons = ref<Record<string, string>>({});
 const learningReviewStatusFilter = ref<LearningReviewStatusFilter>('all');
 const modelSwitcherOpen = ref(false);
 const sessionSearchOpen = ref(false);
@@ -810,6 +813,24 @@ async function reviewLearningItem(item: RuntimeLearningReviewItem, status: Runti
     setRuntimeStatus(message);
   } finally {
     learningReviewPendingSignature.value = '';
+  }
+}
+
+async function reviewKnowledgeSource(item: RuntimeKnowledgeSourceReviewItem, status: RuntimeKnowledgeSourceReviewStatus) {
+  if (!item.path || knowledgeReviewPendingPath.value) return;
+  knowledgeReviewPendingPath.value = item.path;
+  try {
+    const reason = knowledgeReviewReasons.value[item.path]?.trim() || `Runtime Console knowledge review: ${status}`;
+    await updateRuntimeKnowledgeSourceStatus(item.path, status, reason);
+    knowledgeReviewReasons.value[item.path] = '';
+    await loadRuntimeResource('knowledge');
+    setRuntimeStatus(`知识源 ${item.path} 已标记为 ${status}。`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Knowledge source review update failed.';
+    runtimeResourceError.value = message;
+    setRuntimeStatus(message);
+  } finally {
+    knowledgeReviewPendingPath.value = '';
   }
 }
 
@@ -1909,9 +1930,22 @@ onUnmounted(() => {
                       <span>Context impact</span>
                       <small>{{ knowledgeSourceImpactLabel(item.contextImpact, item.contextIncluded) }}</small>
                     </div>
+                    <label class="learning-review-reason knowledge-source-reason">
+                      <span>Review reason</span>
+                      <input
+                        v-model="knowledgeReviewReasons[item.path]"
+                        type="text"
+                        placeholder="记录来源确认、过期原因或拒绝说明"
+                      />
+                    </label>
                     <footer>
                       <small>{{ item.source || 'markdown' }}</small>
-                      <em>{{ formatMetric(item.chars) }} chars</em>
+                      <div class="knowledge-source-status-actions">
+                        <button type="button" :disabled="!!knowledgeReviewPendingPath" @click="reviewKnowledgeSource(item, 'active')">Restore</button>
+                        <button type="button" :disabled="!!knowledgeReviewPendingPath" @click="reviewKnowledgeSource(item, 'approved')">Approve</button>
+                        <button type="button" :disabled="!!knowledgeReviewPendingPath" @click="reviewKnowledgeSource(item, 'disabled')">Disable</button>
+                        <button type="button" :disabled="!!knowledgeReviewPendingPath" @click="reviewKnowledgeSource(item, 'rejected')">Reject</button>
+                      </div>
                     </footer>
                   </article>
                   <div v-if="!runtimeKnowledgeSources.length" class="empty-history">暂无 Knowledge Source。把 Wiki.js / Obsidian Markdown 放入后端配置目录后刷新。</div>

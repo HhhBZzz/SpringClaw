@@ -6634,6 +6634,7 @@ button.runtime-nav-item {
 .knowledge-source-card header,
 .knowledge-source-card footer,
 .learning-review-status-actions,
+.knowledge-source-status-actions,
 .learning-review-meta {
   display: flex;
   align-items: center;
@@ -6752,12 +6753,14 @@ button.runtime-nav-item {
   box-shadow: 0 0 0 2px rgba(246, 201, 69, 0.1);
 }
 
-.learning-review-status-actions {
+.learning-review-status-actions,
+.knowledge-source-status-actions {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
 
-.learning-review-status-actions button {
+.learning-review-status-actions button,
+.knowledge-source-status-actions button {
   min-height: 30px;
   border: 1px solid rgba(246, 201, 69, 0.18);
   border-radius: 7px;
@@ -6767,12 +6770,14 @@ button.runtime-nav-item {
   font-weight: 760;
 }
 
-.learning-review-status-actions button:hover:not(:disabled) {
+.learning-review-status-actions button:hover:not(:disabled),
+.knowledge-source-status-actions button:hover:not(:disabled) {
   border-color: rgba(246, 201, 69, 0.42);
   background: rgba(246, 201, 69, 0.12);
 }
 
-.learning-review-status-actions button:disabled {
+.learning-review-status-actions button:disabled,
+.knowledge-source-status-actions button:disabled {
   cursor: wait;
   opacity: 0.55;
 }

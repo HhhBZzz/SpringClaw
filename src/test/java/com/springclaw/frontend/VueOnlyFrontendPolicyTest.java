@@ -168,19 +168,30 @@ class VueOnlyFrontendPolicyTest {
                 .contains("not injected into runtime prompt yet")
                 .contains("runtimeKnowledgeSnapshot")
                 .contains("injectedToRuntimePrompt")
+                .contains("knowledgeReviewReasons")
+                .contains("knowledgeReviewPendingPath")
+                .contains("reviewKnowledgeSource")
+                .contains("knowledge-source-status-actions")
+                .contains("@click=\"reviewKnowledgeSource(item, 'approved')\"")
+                .contains("@click=\"reviewKnowledgeSource(item, 'disabled')\"")
+                .contains("@click=\"reviewKnowledgeSource(item, 'rejected')\"")
                 .contains("included_in_context")
                 .contains("filtered_from_context");
 
         assertThat(api)
                 .contains("getRuntimeKnowledgeSources")
                 .contains("getRuntimeKnowledgeSourceSnapshot")
+                .contains("updateRuntimeKnowledgeSourceStatus")
                 .contains("/api/runtime-console/knowledge-sources")
-                .contains("/api/runtime-console/knowledge-sources/snapshot");
+                .contains("/api/runtime-console/knowledge-sources/snapshot")
+                .contains("/api/runtime-console/knowledge-sources/status");
 
         assertThat(types)
                 .contains("'knowledge'")
+                .contains("RuntimeKnowledgeSourceReviewStatus")
                 .contains("RuntimeKnowledgeSourceReviewItem")
                 .contains("RuntimeKnowledgeSourceSnapshot")
+                .contains("RuntimeKnowledgeSourceStatusUpdate")
                 .contains("contextIncluded: boolean")
                 .contains("contextImpact: string")
                 .contains("injectedToRuntimePrompt: boolean")

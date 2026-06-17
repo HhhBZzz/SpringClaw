@@ -1,5 +1,6 @@
 package com.springclaw.controller.runtime;
 
+import com.springclaw.common.exception.BusinessException;
 import com.springclaw.common.response.ApiResponse;
 import com.springclaw.service.knowledge.MarkdownKnowledgeSourceService;
 import com.springclaw.web.auth.RequireRole;
@@ -7,8 +8,10 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -41,6 +44,63 @@ class RuntimeKnowledgeSourceControllerTest {
     }
 
     @Test
+    void shouldUpdateKnowledgeSourceStatusThroughRuntimeConsole() {
+        MarkdownKnowledgeSourceService service = mock(MarkdownKnowledgeSourceService.class);
+        RuntimeKnowledgeSourceController controller = new RuntimeKnowledgeSourceController(service);
+        MarkdownKnowledgeSourceService.KnowledgeSourceStatusUpdate update =
+                new MarkdownKnowledgeSourceService.KnowledgeSourceStatusUpdate(
+                        "wiki/runtime.md",
+                        "unreviewed",
+                        "approved",
+                        "人工确认",
+                        true,
+                        "included_in_context"
+                );
+        when(service.updateStatus("wiki/runtime.md", "approved", "人工确认")).thenReturn(Optional.of(update));
+
+        ApiResponse<MarkdownKnowledgeSourceService.KnowledgeSourceStatusUpdate> response =
+                controller.updateStatus(new RuntimeKnowledgeSourceController.UpdateKnowledgeSourceStatusRequest(
+                        "wiki/runtime.md",
+                        "approved",
+                        "人工确认"
+                ));
+
+        assertThat(response.getCode()).isZero();
+        assertThat(response.getData()).isEqualTo(update);
+        verify(service).updateStatus("wiki/runtime.md", "approved", "人工确认");
+    }
+
+    @Test
+    void shouldRejectMissingKnowledgeSourceStatusUpdateTarget() {
+        RuntimeKnowledgeSourceController controller = new RuntimeKnowledgeSourceController(mock(MarkdownKnowledgeSourceService.class));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> controller.updateStatus(new RuntimeKnowledgeSourceController.UpdateKnowledgeSourceStatusRequest(
+                        "",
+                        "approved",
+                        "missing path"
+                )));
+
+        assertThat(ex.getCode()).isEqualTo(40103);
+    }
+
+    @Test
+    void shouldReturnNotFoundWhenKnowledgeSourceStatusCannotBeUpdated() {
+        MarkdownKnowledgeSourceService service = mock(MarkdownKnowledgeSourceService.class);
+        RuntimeKnowledgeSourceController controller = new RuntimeKnowledgeSourceController(service);
+        when(service.updateStatus("missing.md", "approved", "missing")).thenReturn(Optional.empty());
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> controller.updateStatus(new RuntimeKnowledgeSourceController.UpdateKnowledgeSourceStatusRequest(
+                        "missing.md",
+                        "approved",
+                        "missing"
+                )));
+
+        assertThat(ex.getCode()).isEqualTo(40404);
+    }
+
+    @Test
     void shouldExposeSnapshotPreviewWithoutRuntimePromptInjection() {
         MarkdownKnowledgeSourceService service = mock(MarkdownKnowledgeSourceService.class);
         RuntimeKnowledgeSourceController controller = new RuntimeKnowledgeSourceController(service);
@@ -67,13 +127,20 @@ class RuntimeKnowledgeSourceControllerTest {
     void knowledgeSourcesShouldRequireAdminRole() throws Exception {
         Method method = RuntimeKnowledgeSourceController.class.getMethod("knowledgeSources", int.class);
         Method snapshotMethod = RuntimeKnowledgeSourceController.class.getMethod("snapshot");
+        Method updateStatusMethod = RuntimeKnowledgeSourceController.class.getMethod(
+                "updateStatus",
+                RuntimeKnowledgeSourceController.UpdateKnowledgeSourceStatusRequest.class
+        );
 
         RequireRole requireRole = method.getAnnotation(RequireRole.class);
         RequireRole snapshotRequireRole = snapshotMethod.getAnnotation(RequireRole.class);
+        RequireRole updateStatusRequireRole = updateStatusMethod.getAnnotation(RequireRole.class);
 
         assertThat(requireRole).isNotNull();
         assertThat(requireRole.value()).containsExactly("ADMIN");
         assertThat(snapshotRequireRole).isNotNull();
         assertThat(snapshotRequireRole.value()).containsExactly("ADMIN");
+        assertThat(updateStatusRequireRole).isNotNull();
+        assertThat(updateStatusRequireRole.value()).containsExactly("ADMIN");
     }
 }

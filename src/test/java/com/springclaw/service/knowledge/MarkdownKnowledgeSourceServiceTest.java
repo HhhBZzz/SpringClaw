@@ -126,4 +126,49 @@ class MarkdownKnowledgeSourceServiceTest {
         assertThat(snapshot.filteredCount()).isEqualTo(1);
         assertThat(snapshot.context()).contains("knowledge-source/a.md").doesNotContain("knowledge-source/b.md");
     }
+
+    @Test
+    void shouldUpdateKnowledgeSourceStatusAndFrontMatter() throws Exception {
+        Files.writeString(tempDir.resolve("draft.md"), """
+                # Draft Knowledge
+
+                Runtime facts need review.
+                """);
+        MarkdownKnowledgeSourceService service = new MarkdownKnowledgeSourceService(true, tempDir.toString(), 1200, 20);
+
+        var update = service.updateStatus("draft.md", "approved", "人工确认来自 Wiki.js");
+
+        assertThat(update).isPresent();
+        assertThat(update.get().path()).isEqualTo("draft.md");
+        assertThat(update.get().previousStatus()).isEqualTo("unreviewed");
+        assertThat(update.get().status()).isEqualTo("approved");
+        assertThat(update.get().contextIncluded()).isTrue();
+        assertThat(update.get().contextImpact()).isEqualTo("included_in_context");
+        String markdown = Files.readString(tempDir.resolve("draft.md"));
+        assertThat(markdown)
+                .startsWith("---\n")
+                .contains("status: approved")
+                .contains("reviewedAt:")
+                .contains("reviewReason: 人工确认来自 Wiki.js")
+                .contains("# Draft Knowledge");
+        assertThat(service.renderSnapshot().context()).contains("Runtime facts need review.");
+    }
+
+    @Test
+    void shouldSkipKnowledgeSourceStatusUpdateWhenTargetOrStatusIsInvalid() throws Exception {
+        Files.writeString(tempDir.resolve("note.md"), """
+                ---
+                status: active
+                ---
+
+                # Note
+                """);
+        MarkdownKnowledgeSourceService service = new MarkdownKnowledgeSourceService(true, tempDir.toString(), 1200, 20);
+        String before = Files.readString(tempDir.resolve("note.md"));
+
+        assertThat(service.updateStatus("../outside.md", "approved", "bad path")).isEmpty();
+        assertThat(service.updateStatus("note.md", "pending", "bad status")).isEmpty();
+        assertThat(service.updateStatus("missing.md", "approved", "missing")).isEmpty();
+        assertThat(Files.readString(tempDir.resolve("note.md"))).isEqualTo(before);
+    }
 }

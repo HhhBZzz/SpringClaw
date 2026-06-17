@@ -1,4 +1,4 @@
-import type { AdminDashboard, AgentActionProposal, AgentActionProposalResult, AgentCapabilityEvent, AgentDecisionEvent, AgentTraceEvent, AgentVerificationEvent, ApiEnvelope, AuditLogPage, AuthProfileResponse, AuthTokenResponse, ChatHistoryResponse, ChatResponse, ChatResponseMode, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeLearningStatusUpdate, RuntimeModelProviders, RuntimeOverview, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary } from '../types';
+import type { AdminDashboard, AgentActionProposal, AgentActionProposalResult, AgentCapabilityEvent, AgentDecisionEvent, AgentTraceEvent, AgentVerificationEvent, ApiEnvelope, AuditLogPage, AuthProfileResponse, AuthTokenResponse, ChatHistoryResponse, ChatResponse, ChatResponseMode, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeKnowledgeSourceStatusUpdate, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeLearningStatusUpdate, RuntimeModelProviders, RuntimeOverview, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary } from '../types';
 
 const TOKEN_KEY = 'springclaw.frontend.token';
 let memoryToken = '';
@@ -145,6 +145,13 @@ export function getRuntimeKnowledgeSources(limit = 50) {
 
 export function getRuntimeKnowledgeSourceSnapshot() {
   return request<RuntimeKnowledgeSourceSnapshot>('/api/runtime-console/knowledge-sources/snapshot');
+}
+
+export function updateRuntimeKnowledgeSourceStatus(path: string, status: RuntimeKnowledgeSourceReviewStatus, reason?: string) {
+  return request<RuntimeKnowledgeSourceStatusUpdate>('/api/runtime-console/knowledge-sources/status', {
+    method: 'POST',
+    body: JSON.stringify({ path, status, reason })
+  });
 }
 
 export function updateRuntimeLearningStatus(signature: string, status: RuntimeLearningReviewStatus, reason?: string) {

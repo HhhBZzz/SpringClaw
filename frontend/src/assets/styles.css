@@ -1239,6 +1239,17 @@ p { line-height: 1.68; }
   justify-content: flex-end;
 }
 
+.tool-target-paths {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.tool-target-paths li {
+  word-break: break-all;
+}
+
 .run-trace-strip strong {
   flex: 0 0 auto;
   font-size: 12px;

@@ -6,6 +6,7 @@ import { useAgentGsapMotion } from '../composables/useAgentGsapMotion';
 import {
   cancelActionProposal,
   confirmActionProposal,
+  confirmToolProposal,
   getChatHistory,
   getModelStatus,
   getRunTrace,
@@ -19,13 +20,14 @@ import {
   getRuntimeLearningEntries,
   getRuntimeKnowledgeSources,
   getRuntimeKnowledgeSourceSnapshot,
+  rejectToolProposal,
   streamChat,
   switchRuntimeModelProvider,
   updateRuntimeKnowledgeSourceStatus,
   updateRuntimeLearningStatus
 } from '../services/api';
 import { useAuthStore } from '../stores/auth';
-import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary } from '../types';
+import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
 
 type LearningReviewStatusFilter = 'all' | RuntimeLearningReviewStatus;
 
@@ -62,7 +64,9 @@ const capabilityEvents = ref<AgentCapabilityEvent[]>([]);
 const verificationEvent = ref<AgentVerificationEvent | null>(null);
 const agentDecision = ref<AgentDecisionEvent | null>(null);
 const pendingAction = ref<AgentActionProposal | null>(null);
+const pendingToolAction = ref<ToolActionRequiredEvent | null>(null);
 const actionStatus = ref('');
+const toolActionStatus = ref('');
 const modelStatus = ref<ModelStatusResponse | null>(null);
 const modelStatusLoading = ref(false);
 const modelStatusError = ref('');
@@ -647,6 +651,12 @@ watch(pendingAction, (value) => {
   }
 });
 
+watch(pendingToolAction, (value) => {
+  if (value) {
+    void motion.revealActionCard();
+  }
+});
+
 watch(activeInspectorTab, () => {
   void motion.revealInspectorPanel();
 }, { flush: 'post' });
@@ -1039,7 +1049,9 @@ async function send() {
   verificationEvent.value = null;
   agentDecision.value = null;
   pendingAction.value = null;
+  pendingToolAction.value = null;
   actionStatus.value = '';
+  toolActionStatus.value = '';
   historyStatus.value = '';
   firstTokenMs.value = null;
   stoppingStream.value = false;
@@ -1094,6 +1106,11 @@ async function send() {
         onActionRequired(proposal) {
           pendingAction.value = proposal;
           actionStatus.value = '等待确认，确认前不会执行。';
+        },
+        onToolActionRequired(proposal) {
+          pendingToolAction.value = proposal;
+          toolActionStatus.value = '工具调用等待确认。';
+          addMessage('system', `工具调用需要确认：${proposal.toolName}`);
         },
         onToken(token) {
           if (firstTokenMs.value == null) {
@@ -1178,6 +1195,42 @@ async function cancelPendingAction() {
   }
 }
 
+async function confirmPendingToolAction() {
+  if (!pendingToolAction.value || busy.value) return;
+  if (!pendingToolAction.value.proposalId) {
+    toolActionStatus.value = '确认失败：缺少 proposalId，请重新发起请求。';
+    return;
+  }
+  toolActionStatus.value = '正在确认工具调用...';
+  try {
+    const result = await confirmToolProposal(pendingToolAction.value.proposalId, '用户确认执行工具调用');
+    toolActionStatus.value = `已确认，状态：${result.status || 'EXECUTING'}。工具执行将在后台继续，请稍后查看执行结果。`;
+    addMessage('system', `工具调用已确认：${pendingToolAction.value.toolName}，后台正在执行。`);
+    pendingToolAction.value = null;
+    await scrollBottom();
+  } catch (error) {
+    toolActionStatus.value = error instanceof Error ? error.message : '确认工具调用失败。';
+  }
+}
+
+async function rejectPendingToolAction() {
+  if (!pendingToolAction.value || busy.value) return;
+  if (!pendingToolAction.value.proposalId) {
+    toolActionStatus.value = '拒绝失败：缺少 proposalId，请重新发起请求。';
+    return;
+  }
+  toolActionStatus.value = '正在拒绝工具调用...';
+  try {
+    const result = await rejectToolProposal(pendingToolAction.value.proposalId, '用户拒绝执行工具调用');
+    toolActionStatus.value = `已拒绝，状态：${result.status || 'REJECTED'}`;
+    addMessage('system', `工具调用已拒绝：${pendingToolAction.value.toolName}`);
+    pendingToolAction.value = null;
+    await scrollBottom();
+  } catch (error) {
+    toolActionStatus.value = error instanceof Error ? error.message : '拒绝工具调用失败。';
+  }
+}
+
 function newSession() {
   persistCurrentMessages(true);
   sessionKey.value = makeSessionKey();
@@ -1189,6 +1242,9 @@ function newSession() {
   verificationEvent.value = null;
   agentDecision.value = null;
   pendingAction.value = null;
+  pendingToolAction.value = null;
+  actionStatus.value = '';
+  toolActionStatus.value = '';
   taskMetaExpanded.value = false;
   historyStatus.value = '已创建新会话。';
   setRuntimeStatus('已创建新会话。');
@@ -1212,6 +1268,10 @@ async function switchSession(targetSessionKey: string) {
   localStorage.setItem(SESSION_KEY, targetSessionKey);
   messages.value = readLocalMessages(targetSessionKey);
   input.value = '';
+  pendingAction.value = null;
+  pendingToolAction.value = null;
+  actionStatus.value = '';
+  toolActionStatus.value = '';
   historyStatus.value = messages.value.length ? '已从本地恢复历史。' : '正在读取服务端历史。';
   await loadServerHistory();
   await scrollBottom();
@@ -1223,6 +1283,10 @@ function clearCurrentHistory() {
   historySessions.value = historySessions.value.filter((item) => item.sessionKey !== sessionKey.value);
   saveHistorySessions();
   messages.value = [];
+  pendingAction.value = null;
+  pendingToolAction.value = null;
+  actionStatus.value = '';
+  toolActionStatus.value = '';
   historyStatus.value = '当前会话历史已清空。';
 }
 
@@ -2073,7 +2137,24 @@ onUnmounted(() => {
                     <button class="btn-primary" type="button" :disabled="busy" @click="confirmPendingAction">确认执行</button>
                   </div>
                 </div>
+                <div v-if="pendingToolAction" class="action-required-card tool-action-required-card">
+                  <div>
+                    <span class="risk-badge">{{ pendingToolAction.riskLevel }}</span>
+                    <h3>工具调用需要确认</h3>
+                    <p>{{ pendingToolAction.previewSummary || pendingToolAction.toolName }}</p>
+                    <small>工具：{{ pendingToolAction.toolName }}</small>
+                    <ul v-if="pendingToolAction.targetPaths.length" class="tool-target-paths">
+                      <li v-for="path in pendingToolAction.targetPaths" :key="path">{{ path }}</li>
+                    </ul>
+                    <small>确认前不会执行。proposal: {{ pendingToolAction.proposalId.slice(0, 8) }}</small>
+                  </div>
+                  <div class="action-required-buttons">
+                    <button class="btn-subtle light" type="button" :disabled="busy || !pendingToolAction.proposalId" @click="rejectPendingToolAction">拒绝</button>
+                    <button class="btn-primary" type="button" :disabled="busy || !pendingToolAction.proposalId" @click="confirmPendingToolAction">确认执行</button>
+                  </div>
+                </div>
                 <p v-if="actionStatus" class="stream-status">{{ actionStatus }}</p>
+                <p v-if="toolActionStatus" class="stream-status">{{ toolActionStatus }}</p>
                 <p v-if="streamMeta" class="stream-status">
                   {{ currentProductModeLabel }} · {{ responseModeLabel(streamMeta.responseMode || responseMode) }} · {{ streamMeta.intent || 'general' }}
                 </p>

@@ -17,7 +17,7 @@
 - Context summary、SSE meta、Micrometer 指标和前端任务元数据已展示/记录 active 与 filtered learning 数量。
 - Agent learning 已支持按 signature 更新 status，并写入 `reviewedAt/reviewReason` 作为最小审计记录。
 - Runtime Console 已提供 ADMIN learning review 入口：可列表化规则、按状态筛选、查看反例类型和上下文影响、填写 review reason，并在前端执行 active/approved/disabled/rejected/superseded。
-- Markdown Knowledge Source review/list + snapshot preview + status 治理已接入：可扫描 Wiki.js / Obsidian 风格 Markdown，按 front matter `status: active/approved` 进入 snapshot，并过滤未审核文档；Runtime Console 可展示 context impact、填写 review reason、执行 active/approved/disabled/rejected，并显示 `injectedToRuntimePrompt=false`。
+- Markdown Knowledge Source review/list + snapshot preview + status 治理已接入：可扫描 Wiki.js / Obsidian 风格 Markdown，按 front matter `status: active/approved` 进入 snapshot，并过滤未审核文档；Runtime Console 可展示 context impact、reviewedAt/reviewReason、填写 review reason、执行 active/approved/disabled/rejected，并显示 `injectedToRuntimePrompt=false`。
 
 当前正在推进：
 

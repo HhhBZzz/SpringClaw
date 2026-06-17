@@ -337,6 +337,8 @@ export interface RuntimeKnowledgeSourceReviewItem {
   contextImpact: string;
   title: string;
   chars: number;
+  reviewedAt?: string;
+  reviewReason?: string;
 }
 
 export interface RuntimeKnowledgeSourceSnapshot {
@@ -353,6 +355,7 @@ export interface RuntimeKnowledgeSourceStatusUpdate {
   previousStatus?: string;
   status: RuntimeKnowledgeSourceReviewStatus | string;
   reason?: string;
+  reviewedAt?: string;
   contextIncluded: boolean;
   contextImpact: string;
 }

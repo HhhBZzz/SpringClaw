@@ -70,6 +70,8 @@ class MarkdownKnowledgeSourceServiceTest {
                 ---
                 status: active
                 source: wiki-js
+                reviewedAt: 2026-06-17T10:00:00Z
+                reviewReason: 架构师确认
                 ---
 
                 # Active Knowledge
@@ -94,11 +96,15 @@ class MarkdownKnowledgeSourceServiceTest {
         assertThat(entries.get(0).contextImpact()).isEqualTo("included_in_context");
         assertThat(entries.get(0).title()).isEqualTo("Active Knowledge");
         assertThat(entries.get(0).chars()).isPositive();
+        assertThat(entries.get(0).reviewedAt()).isEqualTo("2026-06-17T10:00:00Z");
+        assertThat(entries.get(0).reviewReason()).isEqualTo("架构师确认");
         assertThat(entries.get(1).path()).isEqualTo("draft.md");
         assertThat(entries.get(1).status()).isEqualTo("unreviewed");
         assertThat(entries.get(1).contextIncluded()).isFalse();
         assertThat(entries.get(1).contextImpact()).isEqualTo("filtered_from_context");
         assertThat(entries.get(1).title()).isEqualTo("Draft Knowledge");
+        assertThat(entries.get(1).reviewedAt()).isBlank();
+        assertThat(entries.get(1).reviewReason()).isBlank();
     }
 
     @Test
@@ -142,6 +148,7 @@ class MarkdownKnowledgeSourceServiceTest {
         assertThat(update.get().path()).isEqualTo("draft.md");
         assertThat(update.get().previousStatus()).isEqualTo("unreviewed");
         assertThat(update.get().status()).isEqualTo("approved");
+        assertThat(update.get().reviewedAt()).isNotBlank();
         assertThat(update.get().contextIncluded()).isTrue();
         assertThat(update.get().contextImpact()).isEqualTo("included_in_context");
         String markdown = Files.readString(tempDir.resolve("draft.md"));

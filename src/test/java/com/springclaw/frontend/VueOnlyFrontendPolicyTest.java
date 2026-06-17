@@ -172,6 +172,7 @@ class VueOnlyFrontendPolicyTest {
                 .contains("knowledgeReviewPendingPath")
                 .contains("reviewKnowledgeSource")
                 .contains("knowledge-source-status-actions")
+                .contains("item.reviewReason || item.reviewedAt")
                 .contains("@click=\"reviewKnowledgeSource(item, 'approved')\"")
                 .contains("@click=\"reviewKnowledgeSource(item, 'disabled')\"")
                 .contains("@click=\"reviewKnowledgeSource(item, 'rejected')\"")
@@ -194,6 +195,8 @@ class VueOnlyFrontendPolicyTest {
                 .contains("RuntimeKnowledgeSourceStatusUpdate")
                 .contains("contextIncluded: boolean")
                 .contains("contextImpact: string")
+                .contains("reviewedAt?: string")
+                .contains("reviewReason?: string")
                 .contains("injectedToRuntimePrompt: boolean")
                 .contains("contextPolicy: string");
     }

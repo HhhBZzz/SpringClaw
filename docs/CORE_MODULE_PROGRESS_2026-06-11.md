@@ -65,7 +65,7 @@ SpringClaw 当前是一个基于 Spring Boot / Spring AI 的本地 Agent Runtime
 | Cache 策略 | `config/cache`、Redis 配置、天气/汇率/新闻等工具缓存 | 外部数据缓存、Redis 支撑记忆和状态 | 2 | 45% | 先维持工具级缓存；暂不做全局 agent cache 策略 |
 | Skill 系统 | `SkillCatalogService`、`SkillRegistryService`、`SkillRuntimeService`、skill markdown/runtime/script 包 | Skill 注册、导入、Python/builtin/prompt/script 运行 | 3 | 65% | 本轮冻结扩张；等 Runtime/Tool/Policy 稳定后再继续 marketplace/plugin 化 |
 | MCP 适配 | 当前未见稳定主线模块 | 未来外部工具协议适配层 | 1 | 10% | 现在不要做；等 Tool registry/schema/audit 稳定后再接 |
-| Knowledge Source / Wiki | `MarkdownKnowledgeSourceService`、`RuntimeKnowledgeSourceController`、Runtime Console Knowledge 面板、`docs/memory-bank`、未来 Obsidian/Wiki.js Markdown source | 已有 Markdown Knowledge Source 治理底座，可扫描 Wiki.js / Obsidian 风格导出的 Markdown；只有 front matter `status: active/approved` 的文档会进入 snapshot，无 status/draft/disabled/rejected 等会被过滤；后端已提供 ADMIN review/list、snapshot preview 与 status 更新接口，前端已可展示项目知识来源、context impact、填写 review reason 并执行 active/approved/disabled/rejected；当前仍显示 `injectedToRuntimePrompt=false`，尚未接 Wiki API，也未接入 RAG 或用户长期记忆 | 3 | 48% | 下一步补来源审计和变更 trace；不要现在接复杂 Wiki API、向量 RAG 管道或自动注入主 prompt |
+| Knowledge Source / Wiki | `MarkdownKnowledgeSourceService`、`RuntimeKnowledgeSourceController`、Runtime Console Knowledge 面板、`docs/memory-bank`、未来 Obsidian/Wiki.js Markdown source | 已有 Markdown Knowledge Source 治理底座，可扫描 Wiki.js / Obsidian 风格导出的 Markdown；只有 front matter `status: active/approved` 的文档会进入 snapshot，无 status/draft/disabled/rejected 等会被过滤；后端已提供 ADMIN review/list、snapshot preview 与 status 更新接口，前端已可展示项目知识来源、context impact、reviewedAt/reviewReason，填写 review reason 并执行 active/approved/disabled/rejected；当前仍显示 `injectedToRuntimePrompt=false`，尚未接 Wiki API，也未接入 RAG 或用户长期记忆 | 3 | 50% | 下一步把 status 变更写入 run trace/audit；不要现在接复杂 Wiki API、向量 RAG 管道或自动注入主 prompt |
 | Self Evolution | `AgentLearningService`、`RuntimeLearningController`、`AgentRunTraceService`、`docs/memory-bank/agent-learnings.md` | 从失败 trace 中提炼 lesson/rule/counterexample/evidence，去重后写入可审阅 Memory Bank；新条目默认 active，Memory Bank 只加载 active/approved/旧格式条目，过滤 disabled/rejected/superseded；learning review 条目可按 limit 列出，status 可按 signature 更新并记录 reviewedAt/reviewReason，并从反例/证据中派生 permission_boundary/tool_failure/evidence_gap 等分类，也能派生 included_in_context/filtered_from_context 影响状态；Runtime Console 已提供 ADMIN 审核入口，可填写 review reason，按状态筛选，查看反例类型、上下文影响并执行状态更新 | 3 | 66% | 下一步把 learning impact 和后续任务成功/失败 trace 关联起来；不要让模型自动无限写规则 |
 | Plugin 系统 | 当前主要是 Skill/Tool 形态，未形成插件生命周期 | 未来可加载组件、版本、隔离、安装 | 1 | 15% | 现在不要做；避免项目发散 |
 | Multi-agent 通信 | 当前未形成独立 agent 协作协议 | 未来 agent-to-agent、handoff、角色协作 | 1 | 10% | 现在不要做；先把单 agent 生命周期跑稳 |
@@ -493,7 +493,7 @@ ChatController
 下一步：
 
 - 继续补 learning 影响复盘：把当前 `included_in_context/filtered_from_context` 与后续任务成功/失败 trace 关联起来，避免错误规则长期污染上下文。
-- 继续把 Obsidian / Wiki.js 作为受控 Markdown Knowledge Source：当前已有 review/list、snapshot preview 与人工 status 治理，下一步再决定是否提供来源审计或受控上下文注入点。
+- 继续把 Obsidian / Wiki.js 作为受控 Markdown Knowledge Source：当前已有 review/list、snapshot preview、人工 status 治理和可见 reviewedAt/reviewReason，下一步再决定是否提供 run trace/audit 或受控上下文注入点。
 - 继续补 learning 影响复盘：把 active learning count、具体 rule signature 和后续任务成功/失败 trace 关联起来。
 
 ### Step 4.4：Markdown Knowledge Source 治理底座已落地
@@ -502,7 +502,7 @@ ChatController
 
 - `MarkdownKnowledgeSourceService` 已提供 Markdown snapshot 与 status 更新，面向 Wiki.js / Obsidian 导出的项目知识。
 - `RuntimeKnowledgeSourceController` 已提供 ADMIN review/list、snapshot preview 与 status 更新接口。
-- Runtime Console 已提供 Knowledge 面板展示来源状态、context impact、snapshot 字符数和 `injectedToRuntimePrompt=false`，并可填写 review reason 执行 active/approved/disabled/rejected。
+- Runtime Console 已提供 Knowledge 面板展示来源状态、context impact、reviewedAt/reviewReason、snapshot 字符数和 `injectedToRuntimePrompt=false`，并可填写 review reason 执行 active/approved/disabled/rejected。
 - Knowledge Source 与用户 Long-term Memory 分离；当前不写入 `VectorMemoryService`，不写入 `agent-learnings.md`，也不接入 RAG。
 - 只有 Markdown front matter 中 `status: active` 或 `status: approved` 的文档会进入 snapshot；无 status、draft、disabled、rejected 等文档会被过滤，避免默认污染上下文。
 - snapshot 会输出 `includedCount/filteredCount/context`，并以 `### knowledge-source/<relative-path>` 标注来源，front matter 不进入 prompt 文本。

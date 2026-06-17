@@ -327,6 +327,8 @@ export interface RuntimeLearningStatusUpdate {
   reason?: string;
 }
 
+export type RuntimeKnowledgeSourceReviewStatus = 'active' | 'approved' | 'disabled' | 'rejected';
+
 export interface RuntimeKnowledgeSourceReviewItem {
   path: string;
   status: string;
@@ -344,6 +346,15 @@ export interface RuntimeKnowledgeSourceSnapshot {
   contextChars: number;
   injectedToRuntimePrompt: boolean;
   contextPolicy: string;
+}
+
+export interface RuntimeKnowledgeSourceStatusUpdate {
+  path: string;
+  previousStatus?: string;
+  status: RuntimeKnowledgeSourceReviewStatus | string;
+  reason?: string;
+  contextIncluded: boolean;
+  contextImpact: string;
 }
 
 export interface RuntimeUsageSummary {

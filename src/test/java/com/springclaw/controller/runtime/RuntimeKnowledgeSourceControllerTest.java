@@ -1,27 +1,35 @@
 package com.springclaw.controller.runtime;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.common.response.ApiResponse;
+import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.knowledge.MarkdownKnowledgeSourceService;
 import com.springclaw.web.auth.RequireRole;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class RuntimeKnowledgeSourceControllerTest {
 
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
     @Test
     void shouldListKnowledgeSourcesThroughRuntimeConsole() {
         MarkdownKnowledgeSourceService service = mock(MarkdownKnowledgeSourceService.class);
-        RuntimeKnowledgeSourceController controller = new RuntimeKnowledgeSourceController(service);
+        RuntimeKnowledgeSourceController controller = controller(service);
         List<MarkdownKnowledgeSourceService.KnowledgeSourceReviewItem> entries = List.of(
                 new MarkdownKnowledgeSourceService.KnowledgeSourceReviewItem(
                         "wiki/runtime.md",
@@ -48,7 +56,7 @@ class RuntimeKnowledgeSourceControllerTest {
     @Test
     void shouldUpdateKnowledgeSourceStatusThroughRuntimeConsole() {
         MarkdownKnowledgeSourceService service = mock(MarkdownKnowledgeSourceService.class);
-        RuntimeKnowledgeSourceController controller = new RuntimeKnowledgeSourceController(service);
+        RuntimeKnowledgeSourceController controller = controller(service);
         MarkdownKnowledgeSourceService.KnowledgeSourceStatusUpdate update =
                 new MarkdownKnowledgeSourceService.KnowledgeSourceStatusUpdate(
                         "wiki/runtime.md",
@@ -75,8 +83,63 @@ class RuntimeKnowledgeSourceControllerTest {
     }
 
     @Test
+    void shouldAuditKnowledgeSourceStatusUpdateAsMessageEvent() throws Exception {
+        MarkdownKnowledgeSourceService service = mock(MarkdownKnowledgeSourceService.class);
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        RuntimeKnowledgeSourceController controller = new RuntimeKnowledgeSourceController(
+                service,
+                messageEventService,
+                objectMapper
+        );
+        MarkdownKnowledgeSourceService.KnowledgeSourceStatusUpdate update =
+                new MarkdownKnowledgeSourceService.KnowledgeSourceStatusUpdate(
+                        "wiki/runtime.md",
+                        "unreviewed",
+                        "approved",
+                        "人工确认",
+                        "2026-06-17T10:01:00Z",
+                        true,
+                        "included_in_context"
+                );
+        when(service.updateStatus("wiki/runtime.md", "approved", "人工确认")).thenReturn(Optional.of(update));
+
+        controller.updateStatus(new RuntimeKnowledgeSourceController.UpdateKnowledgeSourceStatusRequest(
+                "wiki/runtime.md",
+                "approved",
+                "人工确认"
+        ));
+
+        ArgumentCaptor<String> contentCaptor = ArgumentCaptor.forClass(String.class);
+        verify(messageEventService).recordSingle(
+                eq("runtime-console:knowledge-source"),
+                eq("runtime-console"),
+                eq("admin"),
+                eq("SYSTEM"),
+                eq("KNOWLEDGE_SOURCE"),
+                contentCaptor.capture(),
+                eq("")
+        );
+        Map<String, Object> payload = objectMapper.readValue(
+                contentCaptor.getValue(),
+                new TypeReference<>() {
+                }
+        );
+
+        assertThat(payload)
+                .containsEntry("schema", "springclaw.knowledge-source-review.v1")
+                .containsEntry("eventType", "knowledge_source.review")
+                .containsEntry("path", "wiki/runtime.md")
+                .containsEntry("previousStatus", "unreviewed")
+                .containsEntry("status", "approved")
+                .containsEntry("reason", "人工确认")
+                .containsEntry("reviewedAt", "2026-06-17T10:01:00Z")
+                .containsEntry("contextIncluded", true)
+                .containsEntry("contextImpact", "included_in_context");
+    }
+
+    @Test
     void shouldRejectMissingKnowledgeSourceStatusUpdateTarget() {
-        RuntimeKnowledgeSourceController controller = new RuntimeKnowledgeSourceController(mock(MarkdownKnowledgeSourceService.class));
+        RuntimeKnowledgeSourceController controller = controller(mock(MarkdownKnowledgeSourceService.class));
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> controller.updateStatus(new RuntimeKnowledgeSourceController.UpdateKnowledgeSourceStatusRequest(
@@ -91,7 +154,7 @@ class RuntimeKnowledgeSourceControllerTest {
     @Test
     void shouldReturnNotFoundWhenKnowledgeSourceStatusCannotBeUpdated() {
         MarkdownKnowledgeSourceService service = mock(MarkdownKnowledgeSourceService.class);
-        RuntimeKnowledgeSourceController controller = new RuntimeKnowledgeSourceController(service);
+        RuntimeKnowledgeSourceController controller = controller(service);
         when(service.updateStatus("missing.md", "approved", "missing")).thenReturn(Optional.empty());
 
         BusinessException ex = assertThrows(BusinessException.class,
@@ -107,7 +170,7 @@ class RuntimeKnowledgeSourceControllerTest {
     @Test
     void shouldExposeSnapshotPreviewWithoutRuntimePromptInjection() {
         MarkdownKnowledgeSourceService service = mock(MarkdownKnowledgeSourceService.class);
-        RuntimeKnowledgeSourceController controller = new RuntimeKnowledgeSourceController(service);
+        RuntimeKnowledgeSourceController controller = controller(service);
         when(service.renderSnapshot()).thenReturn(new MarkdownKnowledgeSourceService.KnowledgeSourceSnapshot(
                 "### knowledge-source/wiki/runtime.md\nRuntime facts.",
                 1,
@@ -146,5 +209,9 @@ class RuntimeKnowledgeSourceControllerTest {
         assertThat(snapshotRequireRole.value()).containsExactly("ADMIN");
         assertThat(updateStatusRequireRole).isNotNull();
         assertThat(updateStatusRequireRole.value()).containsExactly("ADMIN");
+    }
+
+    private RuntimeKnowledgeSourceController controller(MarkdownKnowledgeSourceService service) {
+        return new RuntimeKnowledgeSourceController(service, mock(MessageEventService.class), objectMapper);
     }
 }

@@ -18,7 +18,7 @@ Wiki.js / docs / README 属于 Project Knowledge，不属于用户 Long-term Mem
 
 项目知识应该单独建 Knowledge Source，避免污染用户记忆。
 
-当前先使用 Markdown Knowledge Source review/list + snapshot preview + status 治理：只有 `status: active/approved` 的项目知识进入 snapshot，未审核、disabled、rejected 文档默认过滤；Runtime Console 展示来源状态、context impact、reviewedAt/reviewReason，并允许人工写入 review reason 调整状态，但不把 snapshot 自动注入运行时 prompt。
+当前先使用 Markdown Knowledge Source review/list + snapshot preview + status 治理：只有 `status: active/approved` 的项目知识进入 snapshot，未审核、disabled、rejected 文档默认过滤；Runtime Console 展示来源状态、context impact、reviewedAt/reviewReason，并允许人工写入 review reason 调整状态；status 变更写入 MessageEvent 结构化审计事件，但不把 snapshot 自动注入运行时 prompt。
 
 ## Self Evolution
 

@@ -7,7 +7,7 @@
 - Tool audit、workspace guard、confirmation timeline、workspace tool input summary 已开始结构化。
 - Memory 方向开始从向量召回转向 Memory Bank + Context 可解释。
 - 自进化方向开始从失败 trace 提炼经验，写入 `agent-learnings.md`，通过 status 过滤控制哪些规则进入下一轮上下文，并提供 ADMIN 后端入口列表化 review 条目、按 signature 更新 status、记录 reviewedAt/reviewReason；review DTO 已从反例和证据中派生 counterexample category，并派生 context impact 表达规则当前是否会进入上下文；Runtime Console 已有 Learning 入口可按状态筛选、查看反例类型和上下文影响、填写 review reason，并 approve/disable/reject、恢复 active 或标记 superseded。
-- Knowledge Source 方向已新增 Markdown review/list + snapshot preview + status 治理底座：Wiki.js / Obsidian 导出的 Markdown 只有 front matter `status: active/approved` 才会进入 project knowledge snapshot；Runtime Console 可展示来源状态、context impact、reviewedAt/reviewReason，填写 review reason，并执行 active/approved/disabled/rejected；它仍显示 `injectedToRuntimePrompt=false`，尚未接入 RAG，也不写入用户长期记忆。
+- Knowledge Source 方向已新增 Markdown review/list + snapshot preview + status 治理底座：Wiki.js / Obsidian 导出的 Markdown 只有 front matter `status: active/approved` 才会进入 project knowledge snapshot；Runtime Console 可展示来源状态、context impact、reviewedAt/reviewReason，填写 review reason，并执行 active/approved/disabled/rejected；status 更新已写入 MessageEvent 结构化审计事件；它仍显示 `injectedToRuntimePrompt=false`，尚未接入 RAG，也不写入用户长期记忆。
 
 下一步优先级：
 

@@ -151,6 +151,43 @@ class VueOnlyFrontendPolicyTest {
     }
 
     @Test
+    void runtimeConsoleShouldExposeKnowledgeSourceReviewPanel() throws IOException {
+        String agentView = Files.readString(projectRoot.resolve("frontend/src/views/AgentView.vue"));
+        String api = Files.readString(projectRoot.resolve("frontend/src/services/api.ts"));
+        String types = Files.readString(projectRoot.resolve("frontend/src/types.ts"));
+
+        assertThat(agentView)
+                .contains("nav-knowledge")
+                .contains("runtimeKnowledgeSources")
+                .contains("knowledge-source-list")
+                .contains("knowledge-source-card")
+                .contains("knowledge-source-impact")
+                .contains("knowledge-source-snapshot")
+                .contains("Knowledge Source")
+                .contains("Project knowledge")
+                .contains("not injected into runtime prompt yet")
+                .contains("runtimeKnowledgeSnapshot")
+                .contains("injectedToRuntimePrompt")
+                .contains("included_in_context")
+                .contains("filtered_from_context");
+
+        assertThat(api)
+                .contains("getRuntimeKnowledgeSources")
+                .contains("getRuntimeKnowledgeSourceSnapshot")
+                .contains("/api/runtime-console/knowledge-sources")
+                .contains("/api/runtime-console/knowledge-sources/snapshot");
+
+        assertThat(types)
+                .contains("'knowledge'")
+                .contains("RuntimeKnowledgeSourceReviewItem")
+                .contains("RuntimeKnowledgeSourceSnapshot")
+                .contains("contextIncluded: boolean")
+                .contains("contextImpact: string")
+                .contains("injectedToRuntimePrompt: boolean")
+                .contains("contextPolicy: string");
+    }
+
+    @Test
     void adminRouteShouldRemainReachableForUnauthenticatedLogin() throws IOException {
         String router = Files.readString(projectRoot.resolve("frontend/src/router/index.ts"));
         String adminView = Files.readString(projectRoot.resolve("frontend/src/views/AdminView.vue"));

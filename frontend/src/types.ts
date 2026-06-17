@@ -244,7 +244,7 @@ export interface AdminDashboard {
   }>;
 }
 
-export type RuntimeResourceView = 'console' | 'sessions' | 'agents' | 'skills' | 'tools' | 'tasks' | 'learning' | 'usage';
+export type RuntimeResourceView = 'console' | 'sessions' | 'agents' | 'skills' | 'tools' | 'tasks' | 'learning' | 'knowledge' | 'usage';
 
 export interface RuntimeSkill {
   skillId: string;
@@ -325,6 +325,25 @@ export interface RuntimeLearningStatusUpdate {
   previousStatus?: string;
   status: RuntimeLearningReviewStatus | string;
   reason?: string;
+}
+
+export interface RuntimeKnowledgeSourceReviewItem {
+  path: string;
+  status: string;
+  source?: string;
+  contextIncluded: boolean;
+  contextImpact: string;
+  title: string;
+  chars: number;
+}
+
+export interface RuntimeKnowledgeSourceSnapshot {
+  contextPreview: string;
+  includedCount: number;
+  filteredCount: number;
+  contextChars: number;
+  injectedToRuntimePrompt: boolean;
+  contextPolicy: string;
 }
 
 export interface RuntimeUsageSummary {

@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 /**
@@ -67,6 +68,32 @@ public class MarkdownKnowledgeSourceService {
         );
     }
 
+    public List<KnowledgeSourceReviewItem> listSources(int limit) {
+        if (!enabled || !Files.isDirectory(rootPath)) {
+            return List.of();
+        }
+        int safeLimit = Math.max(1, Math.min(limit, 100));
+        List<KnowledgeSourceReviewItem> entries = new ArrayList<>();
+        for (Path file : markdownFiles()) {
+            ParsedMarkdown parsed = readMarkdown(file).orElse(new ParsedMarkdown("", "", TextUtils.safe(file.getFileName().toString())));
+            String status = reviewStatus(parsed.status());
+            boolean contextIncluded = isContextIncludedStatus(status);
+            entries.add(new KnowledgeSourceReviewItem(
+                    relativePath(file),
+                    status,
+                    parsed.source(),
+                    contextIncluded,
+                    contextIncluded ? "included_in_context" : "filtered_from_context",
+                    titleFor(file, parsed.body()),
+                    parsed.body().length()
+            ));
+            if (entries.size() >= safeLimit) {
+                break;
+            }
+        }
+        return List.copyOf(entries);
+    }
+
     private List<Path> markdownFiles() {
         try (Stream<Path> stream = Files.walk(rootPath)) {
             return stream
@@ -81,23 +108,27 @@ public class MarkdownKnowledgeSourceService {
     }
 
     private KnowledgeFile readKnowledgeFile(Path file) {
+        return readMarkdown(file)
+                .map(parsed -> new KnowledgeFile(isContextIncludedStatus(parsed.status()), parsed.body()))
+                .orElseGet(() -> new KnowledgeFile(false, ""));
+    }
+
+    private Optional<ParsedMarkdown> readMarkdown(Path file) {
         try {
-            String raw = Files.readString(file, StandardCharsets.UTF_8);
-            ParsedMarkdown parsed = parseMarkdown(raw);
-            return new KnowledgeFile(isContextIncludedStatus(parsed.status()), parsed.body());
+            return Optional.of(parseMarkdown(Files.readString(file, StandardCharsets.UTF_8)));
         } catch (IOException ex) {
-            return new KnowledgeFile(false, "");
+            return Optional.empty();
         }
     }
 
     private ParsedMarkdown parseMarkdown(String raw) {
         String text = TextUtils.safe(raw);
         if (!text.startsWith("---")) {
-            return new ParsedMarkdown("", text.trim());
+            return new ParsedMarkdown("", "", text.trim());
         }
         String[] lines = text.split("\\R", -1);
         if (lines.length < 3 || !"---".equals(lines[0].trim())) {
-            return new ParsedMarkdown("", text.trim());
+            return new ParsedMarkdown("", "", text.trim());
         }
         List<String> frontMatter = new ArrayList<>();
         int bodyStart = -1;
@@ -109,11 +140,12 @@ public class MarkdownKnowledgeSourceService {
             frontMatter.add(lines[i]);
         }
         if (bodyStart < 0) {
-            return new ParsedMarkdown("", text.trim());
+            return new ParsedMarkdown("", "", text.trim());
         }
         String status = frontMatterValue(frontMatter, "status");
+        String source = frontMatterValue(frontMatter, "source");
         String body = String.join("\n", List.of(lines).subList(bodyStart, lines.length)).trim();
-        return new ParsedMarkdown(status, body);
+        return new ParsedMarkdown(status, source, body);
     }
 
     private String frontMatterValue(List<String> frontMatter, String key) {
@@ -130,6 +162,21 @@ public class MarkdownKnowledgeSourceService {
     private boolean isContextIncludedStatus(String status) {
         String normalized = TextUtils.normalize(status);
         return normalized.equals("active") || normalized.equals("approved");
+    }
+
+    private String reviewStatus(String status) {
+        String normalized = TextUtils.normalize(status);
+        return normalized.isBlank() ? "unreviewed" : normalized;
+    }
+
+    private String titleFor(Path file, String body) {
+        for (String line : TextUtils.safe(body).split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("# ")) {
+                return trimmed.substring(2).trim();
+            }
+        }
+        return relativePath(file);
     }
 
     private boolean isMarkdownFile(Path path) {
@@ -165,7 +212,16 @@ public class MarkdownKnowledgeSourceService {
         }
     }
 
-    private record ParsedMarkdown(String status, String body) {
+    public record KnowledgeSourceReviewItem(String path,
+                                            String status,
+                                            String source,
+                                            boolean contextIncluded,
+                                            String contextImpact,
+                                            String title,
+                                            int chars) {
+    }
+
+    private record ParsedMarkdown(String status, String source, String body) {
     }
 
     private record KnowledgeFile(boolean contextIncluded, String body) {

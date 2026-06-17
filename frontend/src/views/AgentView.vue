@@ -17,12 +17,14 @@ import {
   getRuntimeTools,
   getRuntimeUsage,
   getRuntimeLearningEntries,
+  getRuntimeKnowledgeSources,
+  getRuntimeKnowledgeSourceSnapshot,
   streamChat,
   switchRuntimeModelProvider,
   updateRuntimeLearningStatus
 } from '../services/api';
 import { useAuthStore } from '../stores/auth';
-import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary } from '../types';
+import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeUsageSummary } from '../types';
 
 type LearningReviewStatusFilter = 'all' | RuntimeLearningReviewStatus;
 
@@ -78,6 +80,8 @@ const runtimeSkills = ref<{ count?: number; scope?: string; sourceCounts?: Recor
 const runtimeTools = ref<RuntimeTool[]>([]);
 const runtimeTasks = ref<{ total?: number; enabled?: number; disabled?: number; scope?: string; tasks?: RuntimeTask[] } | null>(null);
 const runtimeLearningItems = ref<RuntimeLearningReviewItem[]>([]);
+const runtimeKnowledgeSources = ref<RuntimeKnowledgeSourceReviewItem[]>([]);
+const runtimeKnowledgeSnapshot = ref<RuntimeKnowledgeSourceSnapshot | null>(null);
 const runtimeUsage = ref<RuntimeUsageSummary | null>(null);
 const runtimeRuns = ref<NonNullable<RuntimeOverview['agentRuns']>>([]);
 const runtimeModelProviders = ref<RuntimeModelProviders | null>(null);
@@ -129,6 +133,7 @@ const engineerNavItems: Array<{ key: RuntimeResourceView; label: string; classNa
   { key: 'tools', label: 'Tools', className: 'nav-tools' },
   { key: 'tasks', label: 'Tasks', className: 'nav-tasks' },
   { key: 'learning', label: 'Learning', className: 'nav-learning' },
+  { key: 'knowledge', label: 'Knowledge', className: 'nav-knowledge' },
   { key: 'usage', label: 'Usage', className: 'nav-usage' }
 ];
 
@@ -496,6 +501,8 @@ const runtimeResourceTitle = computed(() => {
       return 'Scheduled Tasks';
     case 'learning':
       return 'Learning Review';
+    case 'knowledge':
+      return 'Knowledge Source';
     case 'usage':
       return 'Token Usage';
     default:
@@ -517,6 +524,8 @@ const runtimeResourceSubtitle = computed(() => {
       return 'User-accessible scheduled tasks, next run time, and latest status.';
     case 'learning':
       return 'Review rules distilled from failed runs before they keep influencing context.';
+    case 'knowledge':
+      return 'Project knowledge imported from Wiki.js or Obsidian Markdown; eligibility is visible here, but not injected into runtime prompt yet.';
     case 'usage':
       return 'LLM calls, token totals, cache hit rate, provider and model distribution.';
     default:
@@ -592,6 +601,8 @@ const runtimeResourceCount = computed(() => {
       return runtimeTaskItems.value.length;
     case 'learning':
       return runtimeLearningItems.value.length;
+    case 'knowledge':
+      return runtimeKnowledgeSources.value.length;
     case 'usage':
       return runtimeUsageSummary.value.totalCalls || 0;
     case 'sessions':
@@ -736,7 +747,7 @@ async function activateRuntimeNav(key: RuntimeNavKey) {
   }
   if (key === 'agents') activeInspectorTab.value = 'trace';
   if (key === 'skills' || key === 'tools') activeInspectorTab.value = 'tools';
-  if (key === 'learning') activeInspectorTab.value = 'memory';
+  if (key === 'learning' || key === 'knowledge') activeInspectorTab.value = 'memory';
   await loadRuntimeResource(key);
 }
 
@@ -761,6 +772,13 @@ async function loadRuntimeResource(view: RuntimeResourceView = activeResourceVie
       runtimeTasks.value = await getRuntimeTasks(30);
     } else if (view === 'learning') {
       runtimeLearningItems.value = await getRuntimeLearningEntries(50);
+    } else if (view === 'knowledge') {
+      const [sources, snapshot] = await Promise.all([
+        getRuntimeKnowledgeSources(50),
+        getRuntimeKnowledgeSourceSnapshot()
+      ]);
+      runtimeKnowledgeSources.value = sources;
+      runtimeKnowledgeSnapshot.value = snapshot;
     } else if (view === 'usage') {
       runtimeUsage.value = await getRuntimeUsage(30);
     } else {
@@ -804,6 +822,12 @@ function isLearningContextIncluded(item: RuntimeLearningReviewItem) {
   if (typeof item.contextIncluded === 'boolean') return item.contextIncluded;
   const status = normalizeLearningReviewStatus(item);
   return status === 'active' || status === 'approved';
+}
+
+function knowledgeSourceImpactLabel(impact: string, included: boolean) {
+  if (impact === 'included_in_context' || included) return 'included_in_context';
+  if (impact === 'filtered_from_context' || !included) return 'filtered_from_context';
+  return impact || 'filtered_from_context';
 }
 
 async function openModelSwitcher() {
@@ -1855,6 +1879,42 @@ onUnmounted(() => {
                   </article>
                   <div v-if="!runtimeLearningItems.length" class="empty-history">暂无可审阅 learning 规则。</div>
                   <div v-else-if="!filteredRuntimeLearningItems.length" class="empty-history">当前状态没有 learning 规则。</div>
+                </div>
+
+                <div v-else-if="activeResourceView === 'knowledge'" class="knowledge-source-list">
+                  <div class="learning-review-summary knowledge-source-summary">
+                    <span>Project knowledge</span>
+                    <strong>{{ formatMetric(runtimeKnowledgeSources.filter((item) => item.contextIncluded).length) }}</strong>
+                    <small>{{ formatMetric(runtimeKnowledgeSources.length) }} loaded sources; active/approved means eligible, not injected into runtime prompt yet.</small>
+                  </div>
+                  <div class="knowledge-source-snapshot">
+                    <div>
+                      <span>Snapshot preview</span>
+                      <strong>{{ formatMetric(runtimeKnowledgeSnapshot?.contextChars) }} chars</strong>
+                      <small>{{ formatMetric(runtimeKnowledgeSnapshot?.includedCount) }} included / {{ formatMetric(runtimeKnowledgeSnapshot?.filteredCount) }} filtered</small>
+                    </div>
+                    <div>
+                      <span>Runtime prompt</span>
+                      <strong>{{ runtimeKnowledgeSnapshot?.injectedToRuntimePrompt ? 'Injected' : 'Not injected' }}</strong>
+                      <small>{{ runtimeKnowledgeSnapshot?.contextPolicy || 'review_only_not_runtime_prompt' }}</small>
+                    </div>
+                  </div>
+                  <article v-for="item in runtimeKnowledgeSources" :key="item.path" class="knowledge-source-card">
+                    <header>
+                      <span>{{ item.status || 'unreviewed' }}</span>
+                      <strong>{{ item.title || item.path }}</strong>
+                    </header>
+                    <p>{{ item.path }}</p>
+                    <div class="knowledge-source-impact" :class="{ included: item.contextIncluded }">
+                      <span>Context impact</span>
+                      <small>{{ knowledgeSourceImpactLabel(item.contextImpact, item.contextIncluded) }}</small>
+                    </div>
+                    <footer>
+                      <small>{{ item.source || 'markdown' }}</small>
+                      <em>{{ formatMetric(item.chars) }} chars</em>
+                    </footer>
+                  </article>
+                  <div v-if="!runtimeKnowledgeSources.length" class="empty-history">暂无 Knowledge Source。把 Wiki.js / Obsidian Markdown 放入后端配置目录后刷新。</div>
                 </div>
 
                 <div v-else class="runtime-usage-grid">

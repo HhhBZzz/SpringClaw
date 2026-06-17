@@ -17,11 +17,11 @@
 - Context summary、SSE meta、Micrometer 指标和前端任务元数据已展示/记录 active 与 filtered learning 数量。
 - Agent learning 已支持按 signature 更新 status，并写入 `reviewedAt/reviewReason` 作为最小审计记录。
 - Runtime Console 已提供 ADMIN learning review 入口：可列表化规则、按状态筛选、查看反例类型和上下文影响、填写 review reason，并在前端执行 active/approved/disabled/rejected/superseded。
-- Markdown Knowledge Source 只读底座已接入：可扫描 Wiki.js / Obsidian 风格 Markdown，按 front matter `status: active/approved` 进入 snapshot，并过滤未审核文档。
+- Markdown Knowledge Source 只读 review/list + snapshot preview 已接入：可扫描 Wiki.js / Obsidian 风格 Markdown，按 front matter `status: active/approved` 进入 snapshot，并过滤未审核文档；Runtime Console 可展示 context impact 和 `injectedToRuntimePrompt=false`。
 
 当前正在推进：
 
 - Context 可解释与低基数观测。
 - 自进化经验沉淀、人工审核、状态筛选、反例分类、上下文影响展示、状态修正和后续影响复盘，而不是只保存对话。
-- Knowledge Source 继续走受控 Markdown review/list 或上下文注入点，不走直接 RAG 化。
+- Knowledge Source 继续走受控 Markdown review/list、snapshot preview 或上下文注入点，不走直接 RAG 化。
 - Harness 化，而不是继续扩 demo。

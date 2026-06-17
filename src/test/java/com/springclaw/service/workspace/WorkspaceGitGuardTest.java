@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -173,6 +174,36 @@ class WorkspaceGitGuardTest {
     }
 
     @Test
+    void dirtyNonTargetModifiedByTool_restoresSnapshotAndThrows() throws Exception {
+        Path notes = tmpRoot.resolve("docs/notes.md");
+        Files.createDirectories(notes.getParent());
+        Files.writeString(notes, "user dirty before", StandardCharsets.UTF_8);
+
+        GitOperations git = Mockito.mock(GitOperations.class);
+        Mockito.when(git.workspaceRoot()).thenReturn(tmpRoot);
+        Mockito.when(git.headSha()).thenReturn("abc1234");
+        Mockito.when(git.statusNameOnly())
+                .thenReturn(List.of("docs/notes.md"))
+                .thenReturn(List.of("docs/notes.md", "src/A.java"));
+        Mockito.when(git.isTracked("src/A.java")).thenReturn(true);
+        Mockito.when(repository.recordBaseline(Mockito.anyString(), Mockito.anyString())).thenReturn(true);
+
+        WorkspaceGitGuard guard = new WorkspaceGitGuard(git, pathNormalizer, repository);
+        ToolInvocationProposal p = proposal("abc1234", List.of("src/A.java"));
+
+        assertThatThrownBy(() -> guard.execute(p, () -> {
+            Files.writeString(notes, "tool corrupted", StandardCharsets.UTF_8);
+            return "ok";
+        }))
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("docs/notes.md");
+
+        assertThat(Files.readString(notes, StandardCharsets.UTF_8)).isEqualTo("user dirty before");
+        Mockito.verify(git).checkoutFromSha("abc1234", "src/A.java");
+        Mockito.verify(git, Mockito.never()).commit(Mockito.anyString());
+    }
+
+    @Test
     void noOpWrite_recordsExecutedWithNullCommitSha() throws Exception {
         GitOperations git = Mockito.mock(GitOperations.class);
         Mockito.when(git.workspaceRoot()).thenReturn(tmpRoot);
@@ -213,6 +244,34 @@ class WorkspaceGitGuardTest {
                 () -> guard.execute(p, () -> { throw new RuntimeException("tool boom"); }));
         Assertions.assertEquals("tool boom", ex.getMessage());
 
+        Mockito.verify(git).checkoutFromSha("abc1234", "src/A.java");
+        Mockito.verify(git, Mockito.never()).commit(Mockito.anyString());
+    }
+
+    @Test
+    void toolException_restoresDirtyNonTargetSnapshotAndPropagates() throws Exception {
+        Path notes = tmpRoot.resolve("docs/notes.md");
+        Files.createDirectories(notes.getParent());
+        Files.writeString(notes, "user dirty before", StandardCharsets.UTF_8);
+
+        GitOperations git = Mockito.mock(GitOperations.class);
+        Mockito.when(git.workspaceRoot()).thenReturn(tmpRoot);
+        Mockito.when(git.headSha()).thenReturn("abc1234");
+        Mockito.when(git.statusNameOnly()).thenReturn(List.of("docs/notes.md"));
+        Mockito.when(git.isTracked("src/A.java")).thenReturn(true);
+        Mockito.when(repository.recordBaseline(Mockito.anyString(), Mockito.anyString())).thenReturn(true);
+
+        WorkspaceGitGuard guard = new WorkspaceGitGuard(git, pathNormalizer, repository);
+        ToolInvocationProposal p = proposal("abc1234", List.of("src/A.java"));
+
+        RuntimeException ex = Assertions.assertThrows(RuntimeException.class,
+                () -> guard.execute(p, () -> {
+                    Files.writeString(notes, "tool corrupted before throwing", StandardCharsets.UTF_8);
+                    throw new RuntimeException("tool boom");
+                }));
+        Assertions.assertEquals("tool boom", ex.getMessage());
+
+        assertThat(Files.readString(notes, StandardCharsets.UTF_8)).isEqualTo("user dirty before");
         Mockito.verify(git).checkoutFromSha("abc1234", "src/A.java");
         Mockito.verify(git, Mockito.never()).commit(Mockito.anyString());
     }

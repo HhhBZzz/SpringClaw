@@ -9,6 +9,7 @@ import com.springclaw.service.proposal.ToolInvocationProposalStatus;
 import com.springclaw.service.proposal.ToolInvocationSnapshot;
 import com.springclaw.service.proposal.ToolInvocationSnapshotService;
 import com.springclaw.service.workspace.WorkspaceGitGuard;
+import com.springclaw.tool.pack.FileToolPack;
 import com.springclaw.tool.pack.WorkspaceEditToolPack;
 import com.springclaw.tool.pack.WorkspaceSearchToolPack;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -74,6 +75,10 @@ class ToolRuntimeAspectGuardTest {
         return buildPjp(WorkspaceEditToolPack.class, "workspaceWriteFile", args);
     }
 
+    private ProceedingJoinPoint pjpForFileReadTool(Object[] args) {
+        return buildPjp(FileToolPack.class, "readTextFile", args);
+    }
+
     private ProceedingJoinPoint buildPjp(Class<?> declaring, String name, Object[] args) {
         ProceedingJoinPoint pjp = Mockito.mock(ProceedingJoinPoint.class);
         MethodSignature sig = Mockito.mock(MethodSignature.class);
@@ -135,6 +140,68 @@ class ToolRuntimeAspectGuardTest {
         Mockito.verifyNoInteractions(snapshotService);
         Mockito.verifyNoInteractions(proposalService);
         Mockito.verifyNoInteractions(workspaceGitGuard);
+    }
+
+    @Test
+    void fileReadTool_proceedsDirectlyDespitePackWriteRisk() throws Throwable {
+        ProceedingJoinPoint pjp = pjpForFileReadTool(new Object[]{"docs/a.md"});
+        Mockito.when(pjp.proceed()).thenReturn("file content");
+
+        Object result = aspect.aroundTool(pjp);
+
+        Assertions.assertEquals("file content", result);
+        Mockito.verify(pjp, Mockito.times(1)).proceed();
+        Mockito.verify(capabilityRegistry, Mockito.never()).findRiskLevelByClassName("FileToolPack");
+        Mockito.verifyNoInteractions(snapshotService);
+        Mockito.verifyNoInteractions(proposalService);
+        Mockito.verifyNoInteractions(workspaceGitGuard);
+    }
+
+    @Test
+    void executionRisk_noApproved_throwsPendingAndCreatesProposal() throws Throwable {
+        Mockito.when(capabilityRegistry.findRiskLevelByClassName("WorkspaceEditToolPack"))
+                .thenReturn("execution");
+        Mockito.when(capabilityRegistry.findToolsetByClassName("WorkspaceEditToolPack"))
+                .thenReturn("workspace");
+        ToolInvocationSnapshot snap = new ToolInvocationSnapshot(
+                "WorkspaceEditToolPack.workspaceWriteFile",
+                "workspace",
+                "[\"docs/a.md\"]",
+                "abcd1234",
+                "execution",
+                List.of("docs/a.md"),
+                "preview",
+                false,
+                Set.of(),
+                "abc1234"
+        );
+        Mockito.when(snapshotService.capture(
+                Mockito.eq("WorkspaceEditToolPack.workspaceWriteFile"),
+                Mockito.eq("workspace"),
+                ArgumentMatchers.any(),
+                Mockito.eq("execution"))
+        ).thenReturn(snap);
+        ToolInvocationProposal pending = proposal(ToolInvocationProposalStatus.PENDING,
+                "WorkspaceEditToolPack.workspaceWriteFile",
+                "req-x", "run-x", "user-x", "abcd1234");
+        Mockito.when(proposalService.createPending(Mockito.eq(snap), ArgumentMatchers.any()))
+                .thenReturn(pending);
+
+        ProceedingJoinPoint pjp = pjpForWriteTool(new Object[]{"docs/a.md", "content"});
+
+        PendingToolApprovalException ex = Assertions.assertThrows(
+                PendingToolApprovalException.class,
+                () -> aspect.aroundTool(pjp)
+        );
+        Assertions.assertEquals("tip-1", ex.proposalId());
+
+        Mockito.verify(pjp, Mockito.never()).proceed();
+        Mockito.verify(snapshotService).capture(
+                Mockito.eq("WorkspaceEditToolPack.workspaceWriteFile"),
+                Mockito.eq("workspace"),
+                ArgumentMatchers.any(),
+                Mockito.eq("execution")
+        );
     }
 
     @Test

@@ -75,6 +75,22 @@ class ToolInvocationSnapshotServiceTest {
     }
 
     @Test
+    void captureFileWriteTextFile_extractsTargetPath() throws Exception {
+        Path root = tmpRoot();
+        GitOperations git = mockGit(root, "abc1234", List.of());
+        ToolInvocationSnapshotService svc = newService(git);
+
+        ToolInvocationSnapshot snap = svc.capture(
+                "FileToolPack.writeTextFile",
+                "file",
+                new Object[]{"notes/a.txt", "hello", true},
+                "write");
+
+        assertThat(snap.targetPaths()).containsExactly("notes/a.txt");
+        assertThat(snap.previewSummary()).contains("writeTextFile").contains("notes/a.txt");
+    }
+
+    @Test
     void captureRejectsWhenTargetIntersectsDirty() throws Exception {
         Path root = tmpRoot();
         GitOperations git = mockGit(root, "abc1234", List.of("src/A.java"));

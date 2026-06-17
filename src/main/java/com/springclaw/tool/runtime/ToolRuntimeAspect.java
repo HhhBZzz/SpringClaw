@@ -87,14 +87,16 @@ public class ToolRuntimeAspect {
                 renderToolInputDetail(runtimeToolName, args), context);
 
         // 新增：风险等级反查
-        String riskLevel = capabilityRegistry.findRiskLevelByClassName(simpleClass);
-        boolean writeOrDangerous = "write".equalsIgnoreCase(riskLevel)
-                || "dangerous".equalsIgnoreCase(riskLevel);
+        String riskLevel = resolveRiskLevel(simpleClass, signature.getName());
+        boolean requiresProposal = "write".equalsIgnoreCase(riskLevel)
+                || "dangerous".equalsIgnoreCase(riskLevel)
+                || "side_effect".equalsIgnoreCase(riskLevel)
+                || "execution".equalsIgnoreCase(riskLevel);
 
         try {
             Object result;
-            if (!writeOrDangerous) {
-                // read / side_effect / null → 旧路径
+            if (!requiresProposal) {
+                // read / null → 旧路径
                 result = joinPoint.proceed();
             } else {
                 ApprovedProposalContext approved = ToolExecutionContextHolder.getApprovedProposal();
@@ -189,6 +191,17 @@ public class ToolRuntimeAspect {
                             + (ex.getMessage() == null ? "" : ex.getMessage()));
             throw ex;
         }
+    }
+
+    private String resolveRiskLevel(String simpleClass, String methodName) {
+        if ("FileToolPack".equals(simpleClass)
+                && ("listFiles".equals(methodName)
+                || "readTextFile".equals(methodName)
+                || "searchFiles".equals(methodName)
+                || "searchInFiles".equals(methodName))) {
+            return "read";
+        }
+        return capabilityRegistry.findRiskLevelByClassName(simpleClass);
     }
 
     private String resolveRuntimeToolName(String genericToolName, Object[] args) {

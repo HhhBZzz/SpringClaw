@@ -101,7 +101,7 @@ public class ToolInvocationSnapshotService {
 
     /**
      * 工具 → targetPaths 解析规则：
-     * - workspaceWriteFile / workspaceApplyPatch：args[0] 是 relativePath
+     * - workspaceWriteFile / workspaceApplyPatch / writeTextFile：args[0] 是 relativePath
      * - workspaceRunCommand：无法静态预测目标文件，返回空列表（确认提示按命令文本展示）
      * - 其他写工具：默认返回空列表（调用方按零目标处理，等于"无法预测影响范围"）
      */
@@ -110,7 +110,8 @@ public class ToolInvocationSnapshotService {
         String simple = simpleName(toolName);
         return switch (simple) {
             case "workspaceWriteFile",
-                 "workspaceApplyPatch" -> args[0] == null ? List.of() : List.of(args[0].toString());
+                 "workspaceApplyPatch",
+                 "writeTextFile" -> args[0] == null ? List.of() : List.of(args[0].toString());
             case "workspaceRunCommand" -> List.of();
             // 未知写工具回退到不变量 7 的执行期保护：任何文件改动都会被 WorkspaceGitGuard 判为
             // out-of-scope 并触发 rollback。这是 fail-closed 默认——比"放行未知工具"更安全。

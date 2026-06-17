@@ -6,10 +6,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
@@ -69,6 +74,8 @@ public class WorkspaceGitGuard {
             throw new SecurityException("targetPaths 在 proposal 创建后变 dirty，baseline 失效: " + targetPathsDirtyNow);
         }
 
+        Map<String, DirtyFileSnapshot> dirtyNonTargetSnapshots = snapshotDirtyNonTargets(beforeDirty, targetPaths);
+
         if (!repository.recordBaseline(proposal.proposalId(), currentSha)) {
             throw new SecurityException(
                     "proposal 状态在 baseline 写入时已变化，拒绝执行: " + proposal.proposalId());
@@ -78,11 +85,17 @@ public class WorkspaceGitGuard {
         try {
             result = toolExecution.call();
         } catch (Exception ex) {
-            // 不变量 15：tool 抛异常 → 只 rollback targetPaths
+            // 不变量 15：tool 抛异常 → rollback targetPaths，并恢复执行期间被碰过的 dirty 非目标文件
             List<String> failedRollback = rollbackPaths(currentSha, proposal.targetPaths());
-            if (!failedRollback.isEmpty()) {
-                log.error("rollback after tool exception partial-failed for proposal={}, failed={}",
-                        proposal.proposalId(), failedRollback);
+            List<String> changedDirtyNonTargets = changedSnapshots(dirtyNonTargetSnapshots);
+            List<String> failedDirtyRestore = restoreSnapshots(dirtyNonTargetSnapshots, changedDirtyNonTargets);
+            if (!failedRollback.isEmpty() || !failedDirtyRestore.isEmpty()) {
+                log.error("rollback after tool exception partial-failed for proposal={}, targetFailed={}, dirtyRestoreFailed={}",
+                        proposal.proposalId(), failedRollback, failedDirtyRestore);
+            }
+            if (!changedDirtyNonTargets.isEmpty()) {
+                log.error("tool exception path restored dirty non-target files for proposal={}, restored={}",
+                        proposal.proposalId(), changedDirtyNonTargets);
             }
             throw ex;
         }
@@ -96,18 +109,25 @@ public class WorkspaceGitGuard {
 
         Set<String> outOfScope = newlyChanged.stream()
                 .filter(p -> !targetPaths.contains(p))
-                .collect(Collectors.toUnmodifiableSet());
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        List<String> changedDirtyNonTargets = changedSnapshots(dirtyNonTargetSnapshots);
+        outOfScope.addAll(changedDirtyNonTargets);
 
         if (!outOfScope.isEmpty()) {
             log.error("工具改动超出 targetPaths: outOfScope={}", outOfScope);
-            // 不变量 15：精确清理，区分 tracked/untracked，不碰用户原 dirty
+            // 不变量 15：精确清理，区分 tracked/untracked；dirty 非目标文件恢复到工具执行前快照
+            List<String> newlyOutOfScope = newlyChanged.stream()
+                    .filter(p -> !targetPaths.contains(p))
+                    .toList();
             List<String> failedTargets = rollbackPaths(currentSha, proposal.targetPaths());
-            List<String> failedOut = rollbackPaths(currentSha, List.copyOf(outOfScope));
+            List<String> failedOut = rollbackPaths(currentSha, newlyOutOfScope);
+            List<String> failedDirtyRestore = restoreSnapshots(dirtyNonTargetSnapshots, changedDirtyNonTargets);
             String suffix = "";
-            if (!failedTargets.isEmpty() || !failedOut.isEmpty()) {
+            if (!failedTargets.isEmpty() || !failedOut.isEmpty() || !failedDirtyRestore.isEmpty()) {
                 List<String> all = new ArrayList<>();
                 all.addAll(failedTargets);
                 all.addAll(failedOut);
+                all.addAll(failedDirtyRestore);
                 suffix = "；rollback 部分失败，需手工介入: " + all;
             }
             throw new SecurityException("工具改动超出授权范围: " + outOfScope + suffix);
@@ -133,6 +153,8 @@ public class WorkspaceGitGuard {
         return result;
     }
 
+    private record DirtyFileSnapshot(boolean exists, byte[] content) { }
+
     /**
      * Try to rollback each path. Returns the list of paths that failed; never throws.
      * Caller decides how to surface partial failures.
@@ -148,6 +170,70 @@ public class WorkspaceGitGuard {
                 }
             } catch (RuntimeException ex) {
                 log.error("rollback path {} failed: {}", path, ex.getMessage());
+                failed.add(path);
+            }
+        }
+        return failed;
+    }
+
+    private Map<String, DirtyFileSnapshot> snapshotDirtyNonTargets(Set<String> beforeDirty, Set<String> targetPaths) {
+        Map<String, DirtyFileSnapshot> snapshots = new LinkedHashMap<>();
+        for (String path : beforeDirty) {
+            if (!targetPaths.contains(path)) {
+                snapshots.put(path, snapshotPath(path));
+            }
+        }
+        return snapshots;
+    }
+
+    private DirtyFileSnapshot snapshotPath(String path) {
+        Path absolutePath = git.workspaceRoot().resolve(path);
+        try {
+            if (!Files.exists(absolutePath)) {
+                return new DirtyFileSnapshot(false, null);
+            }
+            return new DirtyFileSnapshot(true, Files.readAllBytes(absolutePath));
+        } catch (IOException ex) {
+            throw new SecurityException("dirty 文件快照读取失败: " + path, ex);
+        }
+    }
+
+    private List<String> changedSnapshots(Map<String, DirtyFileSnapshot> before) {
+        List<String> changed = new ArrayList<>();
+        for (Map.Entry<String, DirtyFileSnapshot> entry : before.entrySet()) {
+            DirtyFileSnapshot current = snapshotPath(entry.getKey());
+            DirtyFileSnapshot previous = entry.getValue();
+            boolean existsChanged = previous.exists() != current.exists();
+            boolean contentChanged = previous.exists()
+                    && current.exists()
+                    && !java.util.Arrays.equals(previous.content(), current.content());
+            if (existsChanged || contentChanged) {
+                changed.add(entry.getKey());
+            }
+        }
+        return changed;
+    }
+
+    private List<String> restoreSnapshots(Map<String, DirtyFileSnapshot> snapshots, List<String> paths) {
+        List<String> failed = new ArrayList<>();
+        for (String path : paths) {
+            DirtyFileSnapshot snapshot = snapshots.get(path);
+            if (snapshot == null) {
+                continue;
+            }
+            Path absolutePath = git.workspaceRoot().resolve(path);
+            try {
+                if (!snapshot.exists()) {
+                    Files.deleteIfExists(absolutePath);
+                } else {
+                    Path parent = absolutePath.getParent();
+                    if (parent != null) {
+                        Files.createDirectories(parent);
+                    }
+                    Files.write(absolutePath, snapshot.content());
+                }
+            } catch (IOException ex) {
+                log.error("restore dirty snapshot {} failed: {}", path, ex.getMessage());
                 failed.add(path);
             }
         }

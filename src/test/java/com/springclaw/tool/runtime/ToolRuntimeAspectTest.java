@@ -1,6 +1,9 @@
 package com.springclaw.tool.runtime;
 
 import com.springclaw.service.auth.ToolPermissionService;
+import com.springclaw.service.proposal.ToolInvocationProposalService;
+import com.springclaw.service.proposal.ToolInvocationSnapshotService;
+import com.springclaw.service.workspace.WorkspaceGitGuard;
 import com.springclaw.service.workspace.WorkspaceGuard;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.reflect.MethodSignature;
@@ -14,12 +17,26 @@ import static org.mockito.Mockito.when;
 
 class ToolRuntimeAspectTest {
 
+    private static ToolRuntimeAspect newAspect(ToolGuardService toolGuardService,
+                                               ToolAuditService toolAuditService,
+                                               ToolPermissionService toolPermissionService) {
+        return new ToolRuntimeAspect(
+                toolGuardService,
+                toolAuditService,
+                toolPermissionService,
+                mock(CapabilityRegistry.class),
+                mock(ToolInvocationSnapshotService.class),
+                mock(ToolInvocationProposalService.class),
+                mock(WorkspaceGitGuard.class)
+        );
+    }
+
     @Test
     void shouldRecordWorkspaceGuardDecisionAsStructuredFailureDetail() throws Throwable {
         ToolGuardService toolGuardService = mock(ToolGuardService.class);
         ToolAuditService toolAuditService = mock(ToolAuditService.class);
         ToolPermissionService toolPermissionService = mock(ToolPermissionService.class);
-        ToolRuntimeAspect aspect = new ToolRuntimeAspect(toolGuardService, toolAuditService, toolPermissionService);
+        ToolRuntimeAspect aspect = newAspect(toolGuardService, toolAuditService, toolPermissionService);
         ProceedingJoinPoint joinPoint = mock(ProceedingJoinPoint.class);
         MethodSignature signature = mock(MethodSignature.class);
         ToolExecutionContext context = new ToolExecutionContext("s1", "api", "u1", "req-1", "ACT");
@@ -61,7 +78,7 @@ class ToolRuntimeAspectTest {
         ToolGuardService toolGuardService = mock(ToolGuardService.class);
         ToolAuditService toolAuditService = mock(ToolAuditService.class);
         ToolPermissionService toolPermissionService = mock(ToolPermissionService.class);
-        ToolRuntimeAspect aspect = new ToolRuntimeAspect(toolGuardService, toolAuditService, toolPermissionService);
+        ToolRuntimeAspect aspect = newAspect(toolGuardService, toolAuditService, toolPermissionService);
         ProceedingJoinPoint joinPoint = mock(ProceedingJoinPoint.class);
         MethodSignature signature = mock(MethodSignature.class);
         ToolExecutionContext context = new ToolExecutionContext("s1", "api", "u1", "req-1", "ACT");
@@ -101,7 +118,7 @@ class ToolRuntimeAspectTest {
         ToolGuardService toolGuardService = mock(ToolGuardService.class);
         ToolAuditService toolAuditService = mock(ToolAuditService.class);
         ToolPermissionService toolPermissionService = mock(ToolPermissionService.class);
-        ToolRuntimeAspect aspect = new ToolRuntimeAspect(toolGuardService, toolAuditService, toolPermissionService);
+        ToolRuntimeAspect aspect = newAspect(toolGuardService, toolAuditService, toolPermissionService);
         ProceedingJoinPoint joinPoint = mock(ProceedingJoinPoint.class);
         MethodSignature signature = mock(MethodSignature.class);
         ToolExecutionContext context = new ToolExecutionContext("s1", "api", "u1", "req-1", "ACT");

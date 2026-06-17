@@ -31,6 +31,8 @@ import { useAuthStore } from '../stores/auth';
 import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
 
 type LearningReviewStatusFilter = 'all' | RuntimeLearningReviewStatus;
+type ToolProposalScopeFilter = 'current-session' | 'all-visible';
+type ToolProposalStatusFilter = 'all' | 'PENDING' | 'APPROVED' | 'EXECUTING' | 'EXECUTED' | 'FAILED' | 'REJECTED' | 'EXPIRED' | 'CANCELLED';
 
 const learningReviewStatusValues: RuntimeLearningReviewStatus[] = ['active', 'approved', 'disabled', 'rejected', 'superseded'];
 const learningReviewFilterOptions: Array<{ value: LearningReviewStatusFilter; label: string }> = [
@@ -40,6 +42,17 @@ const learningReviewFilterOptions: Array<{ value: LearningReviewStatusFilter; la
   { value: 'disabled', label: 'Disabled' },
   { value: 'rejected', label: 'Rejected' },
   { value: 'superseded', label: 'Superseded' }
+];
+const toolProposalStatusFilterOptions: Array<{ value: ToolProposalStatusFilter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'PENDING', label: 'PENDING' },
+  { value: 'APPROVED', label: 'APPROVED' },
+  { value: 'EXECUTING', label: 'EXECUTING' },
+  { value: 'EXECUTED', label: 'EXECUTED' },
+  { value: 'FAILED', label: 'FAILED' },
+  { value: 'REJECTED', label: 'REJECTED' },
+  { value: 'EXPIRED', label: 'EXPIRED' },
+  { value: 'CANCELLED', label: 'CANCELLED' }
 ];
 
 const auth = useAuthStore();
@@ -97,6 +110,8 @@ const learningReviewReasons = ref<Record<string, string>>({});
 const knowledgeReviewPendingPath = ref('');
 const knowledgeReviewReasons = ref<Record<string, string>>({});
 const learningReviewStatusFilter = ref<LearningReviewStatusFilter>('all');
+const toolProposalScopeFilter = ref<ToolProposalScopeFilter>('current-session');
+const toolProposalStatusFilter = ref<ToolProposalStatusFilter>('all');
 const modelSwitcherOpen = ref(false);
 const sessionSearchOpen = ref(false);
 const sessionSearchQuery = ref('');
@@ -108,6 +123,7 @@ let persistTimer: number | undefined;
 let scrollQueued = false;
 let elapsedTimer: number | undefined;
 let activeStreamController: AbortController | null = null;
+let toolProposalLoadSeq = 0;
 
 const modeActions = [
   {
@@ -802,7 +818,13 @@ async function loadRuntimeResource(view: RuntimeResourceView = activeResourceVie
     } else if (view === 'tools') {
       runtimeTools.value = await getRuntimeTools();
     } else if (view === 'proposals') {
-      runtimeToolProposals.value = await getToolProposals({ sessionKey: sessionKey.value });
+      const loadSeq = ++toolProposalLoadSeq;
+      const proposals = await getToolProposals({
+        sessionKey: toolProposalScopeFilter.value === 'current-session' ? sessionKey.value : undefined,
+        status: toolProposalStatusFilter.value === 'all' ? undefined : toolProposalStatusFilter.value
+      });
+      if (loadSeq !== toolProposalLoadSeq) return;
+      runtimeToolProposals.value = proposals;
     } else if (view === 'tasks') {
       runtimeTasks.value = await getRuntimeTasks(30);
     } else if (view === 'learning') {
@@ -827,6 +849,22 @@ async function loadRuntimeResource(view: RuntimeResourceView = activeResourceVie
     setRuntimeStatus(message);
   } finally {
     runtimeResourceLoading.value = false;
+  }
+}
+
+async function setToolProposalScope(scope: ToolProposalScopeFilter) {
+  if (toolProposalScopeFilter.value === scope) return;
+  toolProposalScopeFilter.value = scope;
+  if (activeResourceView.value === 'proposals') {
+    await loadRuntimeResource('proposals');
+  }
+}
+
+async function setToolProposalStatusFilter(status: ToolProposalStatusFilter) {
+  if (toolProposalStatusFilter.value === status) return;
+  toolProposalStatusFilter.value = status;
+  if (activeResourceView.value === 'proposals') {
+    await loadRuntimeResource('proposals');
   }
 }
 
@@ -1912,9 +1950,39 @@ onUnmounted(() => {
 
                 <div v-else-if="activeResourceView === 'proposals'" class="tool-proposal-list">
                   <div class="learning-review-summary tool-proposal-summary">
-                    <span>Confirmation audit</span>
+                    <span>Selected confirmation audit</span>
                     <strong>{{ formatMetric(pendingRuntimeToolProposals) }} active</strong>
-                    <small>{{ formatMetric(runtimeToolProposals.length) }} proposals loaded; {{ formatMetric(failedRuntimeToolProposals) }} failed executions need review.</small>
+                    <small>{{ formatMetric(runtimeToolProposals.length) }} selected results; {{ formatMetric(failedRuntimeToolProposals) }} failed executions in this filter.</small>
+                  </div>
+                  <div class="tool-proposal-toolbar">
+                    <div class="tool-proposal-scope-toggle" role="group" aria-label="Tool proposal scope">
+                      <button
+                        type="button"
+                        :class="{ active: toolProposalScopeFilter === 'current-session' }"
+                        @click="setToolProposalScope('current-session')"
+                      >
+                        Current Session
+                      </button>
+                      <button
+                        type="button"
+                        :class="{ active: toolProposalScopeFilter === 'all-visible' }"
+                        @click="setToolProposalScope('all-visible')"
+                      >
+                        All Visible
+                      </button>
+                    </div>
+                    <div class="tool-proposal-status-filters" role="group" aria-label="Tool proposal status filters">
+                      <button
+                        v-for="option in toolProposalStatusFilterOptions"
+                        :key="option.value"
+                        type="button"
+                        :class="{ active: toolProposalStatusFilter === option.value }"
+                        :aria-pressed="toolProposalStatusFilter === option.value"
+                        @click="setToolProposalStatusFilter(option.value)"
+                      >
+                        {{ option.label }}
+                      </button>
+                    </div>
                   </div>
                   <article v-for="proposal in runtimeToolProposals" :key="proposal.proposalId" class="tool-proposal-card">
                     <header>

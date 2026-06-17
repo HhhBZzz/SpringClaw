@@ -6714,6 +6714,39 @@ button.runtime-nav-item {
   color: #ff9b93;
 }
 
+.tool-proposal-toolbar {
+  display: grid;
+  gap: 10px;
+}
+
+.tool-proposal-scope-toggle,
+.tool-proposal-status-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tool-proposal-scope-toggle button,
+.tool-proposal-status-filters button {
+  min-height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 7px;
+  padding: 0 10px;
+  color: #cbd3df;
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.tool-proposal-scope-toggle button:hover,
+.tool-proposal-scope-toggle button.active,
+.tool-proposal-status-filters button:hover,
+.tool-proposal-status-filters button.active {
+  border-color: rgba(246, 201, 69, 0.36);
+  color: #f7fafc;
+  background: rgba(246, 201, 69, 0.12);
+}
+
 .tool-proposal-card .tool-target-paths {
   margin: 0;
   color: #a8b0bd;

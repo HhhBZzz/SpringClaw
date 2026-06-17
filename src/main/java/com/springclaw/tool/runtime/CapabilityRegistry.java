@@ -171,6 +171,30 @@ public class CapabilityRegistry {
     }
 
     /**
+     * 通过 tool pack 类的 simpleName 反查代理 bean 实例（CGLIB 代理）。
+     * 用于 SpringToolInvoker 在 confirm-resume 路径上反射调用 @Tool 方法。
+     *
+     * @return 找到返回代理 bean，找不到返回 null
+     */
+    public Object findToolPackBeanByClassName(String simpleClassName) {
+        if (!StringUtils.hasText(simpleClassName)) {
+            return null;
+        }
+        return entries.stream()
+                .filter(entry -> entry.toolPackBean() != null)
+                .filter(entry -> {
+                    Class<?> target = AopUtils.getTargetClass(entry.toolPackBean());
+                    if (target == null) {
+                        target = ClassUtils.getUserClass(entry.toolPackBean());
+                    }
+                    return target != null && simpleClassName.equals(target.getSimpleName());
+                })
+                .map(CapabilityEntry::toolPackBean)
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
      * 通过 tool pack 类的 simpleName 反查 descriptor.riskLevel()。
      * 用于 ToolRuntimeAspect 决定是否需要进入写操作确认门禁。
      *

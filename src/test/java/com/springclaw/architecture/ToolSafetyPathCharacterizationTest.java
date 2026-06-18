@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       side_effect / execution} as the runtime "needs a proposal" set —
  *       see {@link ToolRuntimeAspect#aroundTool} line 91-94.</li>
  *   <li>{@link ToolInvocationProposalStatus} state machine has the documented
- *       9 states with the documented terminal set.</li>
+ *       8 states with the documented terminal set.</li>
  * </ol>
  *
  * <p>If a future refactor moves the safety boundary somewhere else — e.g., a
@@ -93,7 +93,7 @@ class ToolSafetyPathCharacterizationTest {
     }
 
     @Test
-    @DisplayName("ProposalStatus state machine has the documented 9 states "
+    @DisplayName("ProposalStatus state machine has the documented 8 states "
             + "and terminal set")
     void proposalStatusEnumShape() {
         // The audit doc § 11 + the P0 spec rely on this state inventory and

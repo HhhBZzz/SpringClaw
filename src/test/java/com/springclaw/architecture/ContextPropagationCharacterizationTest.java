@@ -145,25 +145,12 @@ class ContextPropagationCharacterizationTest {
     @DisplayName("QuestionAnswerAdvisor (Spring AI built-in RAG advisor) is NOT registered "
             + "in this codebase — RAG is hand-rolled inside ContextAssembler instead")
     void questionAnswerAdvisorIsAbsent() {
-        // Documented finding from the audit § 4.2. If a future commit wires
-        // QuestionAnswerAdvisor in, this assertion needs to flip together with
-        // the spec change.
-        boolean qaPresent;
-        try {
-            Class<?> qa = Class.forName(
-                    "org.springframework.ai.chat.client.advisor.vectorstore.QuestionAnswerAdvisor");
-            // Class exists on the classpath, but the project does not register it.
-            // We cannot prove "no bean" without Spring context; we instead check that
-            // ConversationAdvisorSupport's declared advisor fields do not include it.
-            qaPresent = qa != null;
-        } catch (ClassNotFoundException e) {
-            qaPresent = false;
-        }
-
-        // The Spring AI class itself may or may not be on the classpath depending on
-        // dependency resolution; the meaningful invariant is that
-        // ConversationAdvisorSupport only declares messageChatMemoryAdvisor and
-        // semanticMemoryAdvisor as injected advisor dependencies.
+        // Spring AI's QuestionAnswerAdvisor is not registered as an advisor dependency.
+        // We cannot prove "no bean" without a Spring context, but we can prove the
+        // advisor inventory: ConversationAdvisorSupport only declares
+        // messageChatMemoryAdvisor and semanticMemoryAdvisor as injected advisor
+        // dependencies. Any future wiring of QuestionAnswerAdvisor would add a new
+        // Advisor-typed field here, which this assertion would catch.
         Field[] declaredFields = ConversationAdvisorSupport.class.getDeclaredFields();
         List<String> advisorFieldNames = java.util.Arrays.stream(declaredFields)
                 .filter(f -> Advisor.class.isAssignableFrom(f.getType()))
@@ -171,8 +158,6 @@ class ContextPropagationCharacterizationTest {
                 .toList();
         assertThat(advisorFieldNames)
                 .containsExactlyInAnyOrder("messageChatMemoryAdvisor", "semanticMemoryAdvisor");
-        // qaPresent on classpath is informational only.
-        assertThat(qaPresent || !qaPresent).isTrue();
     }
 
     @Test

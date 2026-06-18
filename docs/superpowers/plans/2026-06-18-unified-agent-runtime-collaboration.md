@@ -117,7 +117,7 @@ Phase 1 work may run in parallel because Codex writes the architecture spec whil
 
 ### Codex workstream A — Canonical Runtime Design
 
-- [ ] **A1 — Map the four complete request lifecycles**
+- [x] **A1 — Map the four complete request lifecycles**
   - Owner: Codex
   - Cover:
     - synchronous chat
@@ -126,7 +126,7 @@ Phase 1 work may run in parallel because Codex writes the architecture spec whil
     - proposal confirmation and resumed execution
   - Required output: lifecycle diagrams and exact owner classes in the new spec.
 
-- [ ] **A2 — Build the responsibility source-of-truth matrix**
+- [x] **A2 — Build the responsibility source-of-truth matrix**
   - Owner: Codex
   - Responsibilities:
     - routing
@@ -140,7 +140,7 @@ Phase 1 work may run in parallel because Codex writes the architecture spec whil
     - stream termination
   - Acceptance: every responsibility lists current owners, target owner, and deletion target.
 
-- [ ] **A3 — Define canonical domain contracts**
+- [x] **A3 — Define canonical domain contracts**
   - Owner: Codex
   - Required contracts:
 
@@ -158,7 +158,7 @@ Phase 1 work may run in parallel because Codex writes the architecture spec whil
 
   - Acceptance: each contract has responsibility, fields, producer, consumers, and forbidden responsibilities.
 
-- [ ] **A4 — Define the Run state machine**
+- [x] **A4 — Define the Run state machine**
   - Owner: Codex
   - Required states:
 
@@ -176,7 +176,7 @@ Phase 1 work may run in parallel because Codex writes the architecture spec whil
 
   - Acceptance: valid transitions, terminal states, retry semantics, confirmation resume semantics, and failure ownership are explicit.
 
-- [ ] **A5 — Define incremental migration and rollback**
+- [x] **A5 — Define incremental migration and rollback**
   - Owner: Codex
   - Acceptance:
     - initial runtime delegates through compatibility adapters;
@@ -184,7 +184,7 @@ Phase 1 work may run in parallel because Codex writes the architecture spec whil
     - old owner is disabled in the same phase;
     - rollback unit and compatibility acceptance are defined for every phase.
 
-- [ ] **A6 — Write and self-review the architecture spec**
+- [x] **A6 — Write and self-review the architecture spec**
   - Owner: Codex
   - Create:
 
@@ -201,6 +201,27 @@ Phase 1 work may run in parallel because Codex writes the architecture spec whil
     ```
 
   - Expected: no placeholders and no whitespace errors.
+
+### Codex Phase 1 evidence
+
+```text
+Task: A1-A6
+Owner: Codex
+Branch: codex/unified-agent-runtime
+Commit: 8ae585c
+Files: docs/superpowers/specs/2026-06-18-unified-agent-runtime-design.md
+Tests: mvn -q -Dtest=EngineSelectorTest,ChatContextFactoryTest,PromptInjectionTest,AgentRuntimeEngineTest,ToolRuntimeAspectInterceptionIT,ToolInvocationProposalServiceConfirmTest test
+Findings:
+- The focused suite passed: 27 tests, 0 failures, 0 errors, 0 skipped.
+- MySQL emitted the known `Public Key Retrieval is not allowed` warning; Runtime Console and tool-proposal schema initialization were skipped, but the Maven command exited 0.
+- RabbitMQ async creates outer requestId A, then ChatContextFactory creates runtime requestId B; result polling and run trace therefore refer to different identifiers.
+- Runtime confirmation has two authorities: in-memory AgentActionProposal and persisted ToolInvocationProposal. Generic AgentActionProposal confirmation does not resume execution.
+- Sync and SSE have different trace, final-status, failover, persistence, lock-release, and pending-confirmation semantics.
+- Streamable engines, ChatServiceImpl, SseEventBridge, AgentRunTraceService, and MessageEventToolAuditService duplicate persistence, termination, and trace ownership.
+- WorkspaceGitGuard does not isolate the existing Git index or concurrent repository mutations, so unrelated staged files or parallel confirmed proposals can cross commit boundaries.
+- The target design assigns one owner for identity, lifecycle, context, decision, tool gateway, completion, final answer, persistence, trace/audit, and transport termination.
+Next dependency: Claude B1-B7 evidence, cross-review against characterization tests, then user approval of the architecture spec.
+```
 
 ### Claude workstream B — Characterization and Evidence
 
@@ -288,11 +309,11 @@ Phase 1 work may run in parallel because Codex writes the architecture spec whil
 
 No implementation plan may be written until all checks pass:
 
-- [ ] Codex spec includes the four lifecycle maps.
-- [ ] Codex spec defines one owner per runtime responsibility.
+- [x] Codex spec includes the four lifecycle maps.
+- [x] Codex spec defines one owner per runtime responsibility.
 - [ ] Claude audit and characterization tests are available for review.
-- [ ] P0 invariants map to explicit target-runtime enforcement points.
-- [ ] The design does not assume a fixed engine count.
+- [x] P0 invariants map to explicit target-runtime enforcement points.
+- [x] The design does not assume a fixed engine count.
 - [ ] The user approves the new spec.
 
 ## 7. Future Implementation Plans

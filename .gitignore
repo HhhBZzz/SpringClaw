@@ -26,6 +26,9 @@ skills/.usage.json
 # Browser automation artifacts
 .playwright-cli/
 
+# Isolated development worktrees
+.worktrees/
+
 # Frontend workspace
 frontend/node_modules/
 frontend/dist/

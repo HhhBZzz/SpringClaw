@@ -345,7 +345,8 @@ No implementation plan may be written until all checks pass:
 - [x] Claude audit and characterization tests are available for review.
 - [x] P0 invariants map to explicit target-runtime enforcement points.
 - [x] The design does not assume a fixed engine count.
-- [ ] The user approves the new spec.
+- [x] The user approves the new spec.
+  - Evidence: user approval in the collaboration thread on `2026-06-19` followed by the instruction to begin implementation.
 
 ## 7. Future Implementation Plans
 

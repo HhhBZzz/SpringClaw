@@ -423,3 +423,37 @@ Use three commits:
 
 Return commit SHAs, files changed, tests run, environmental blockers, and all duplicated sources of truth found.
 ```
+
+---
+
+## Update: unified-runtime-domain-contracts (Phase 2 first plan)
+
+```text
+Task: unified-runtime-domain-contracts
+Owner: Claude (completed; Codex owner of record per §8 planned Phase 2 ownership, executed by Claude after Codex quota exhausted)
+Branch: codex/unified-agent-runtime
+Commits:
+  44ca5e4 feat: define canonical run lifecycle states
+  817fa8e feat: add runtime context and decision contracts
+  c96b9f9 feat: define runtime safety and result contracts
+  f2b97be feat: add canonical runtime event contract
+  6fda7b3 feat: add canonical run state aggregate
+  75ca615 feat: define canonical runtime strategy boundary
+  3d3332d test: verify unified runtime contract compatibility
+Files: isolated com.springclaw.runtime.contract package (7 records + enums + nested records) and 7 contract test classes + 1 test-only legacy fixture translator
+Tests:
+  - 25 domain contract tests pass (RunStatus, ContextAndDecision, ToolCompletionAndResult, RunEvent, RunState, RuntimeStrategy, LegacyFixtures)
+  - 41 characterization tests still pass (baseline unchanged)
+  - 27 focused baseline tests still pass (EngineSelectorTest et al.)
+  - total 93, 0 failures, 0 errors, 0 skips
+Findings:
+  - No existing production routing, safety, persistence, or transport file changed (git diff src/main/java outside runtime/contract/ = empty)
+  - Plan's ContextAndDecisionContractTest used non-existent AssertJ MapAssert.containsOnlyEntry(); corrected to containsOnly(Map.entry(...)) — same invariant
+  - Plan's characterization prose said "9 states" for an 8-state enum; corrected to "8 states" in Task 1 quality review
+  - Task 4 original 3 tests left 3 enforced constraints uncovered (WAITING_CONFIRMATION→proposalId, status≠FAILED rejects FAILURE, RETRY retryAllowed=false); added 3 covering tests and amended the commit
+  - RunState needed a Builder/toBuilder() (not in plan) to keep transition fixtures readable across 25 fields; pure construction helper, no responsibility added
+  - Spec reviewers (independent subagents) confirmed Task 4 and Task 6 spec-compliant field-for-field
+Next dependency: unified-runtime-legacy-bridge plan
+```
+
+Production implementation remains unauthorized beyond this isolated contract package. No existing API, engine selection, tool authorization, persistence, or transport behavior changed.

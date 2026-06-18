@@ -1182,6 +1182,14 @@ Bridge ownership rule:
 - `RunCoordinator` owns canonical revision and lifecycle boundary state;
 - bridge translation cannot independently repair or replace a legacy answer.
 
+Legacy routing-order freeze:
+
+- before the bridge is activated, its compatibility metadata must record the characterized engine order as an explicit, version-controlled `legacyRank`: `basic-stream` (10), `agent-runtime` (20), `autonomous-loop` (30), `opar-loop` (40), `model-led-stream` (50), `simplified` (60);
+- while legacy routing remains active, ties are resolved by `(priority, legacyRank)` so Spring bean-list order is no longer an implicit compatibility input;
+- the two current priority-2 engines have mutually exclusive characterized `supports()` conditions, but the explicit rank still prevents future condition changes from silently changing tie behavior;
+- class name, bean name, discovery order, or alphabetical order must not be invented as a new tie-break rule;
+- Phase 3B removes this compatibility ordering when `RuntimeDecisionService` selects one exact strategy identifier.
+
 Compatibility acceptance:
 
 - current answers, engine selection, and transport payloads remain characterized;

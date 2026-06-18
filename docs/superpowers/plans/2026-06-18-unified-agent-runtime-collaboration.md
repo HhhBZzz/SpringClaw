@@ -100,11 +100,11 @@ Claude must not modify production Java in Phase 1.
   - Result: exit code `0`.
   - Environment note: application-context tests log local MySQL authentication warnings (`Public Key Retrieval is not allowed`), but the focused command passes.
 
-- [ ] **C0.4 — Create Claude characterization worktree**
+- [x] **C0.4 — Create Claude characterization worktree**
   - Owner: Claude
   - Base: `36ca396`
   - Branch: `claude/runtime-characterization`
-  - Required result:
+  - Result:
 
     ```text
     clean worktree
@@ -225,7 +225,7 @@ Next dependency: Claude B1-B7 evidence, cross-review against characterization te
 
 ### Claude workstream B — Characterization and Evidence
 
-- [ ] **B1 — Audit current responsibility ownership**
+- [x] **B1 — Audit current responsibility ownership**
   - Owner: Claude
   - Create:
 
@@ -243,7 +243,7 @@ Next dependency: Claude B1-B7 evidence, cross-review against characterization te
     - all completion signals;
     - actual configuration keys and environment variable names.
 
-- [ ] **B2 — Characterize routing**
+- [x] **B2 — Characterize routing**
   - Owner: Claude
   - Create:
 
@@ -253,7 +253,7 @@ Next dependency: Claude B1-B7 evidence, cross-review against characterization te
 
   - Tests must record current behavior without changing production code.
 
-- [ ] **B3 — Characterize context propagation**
+- [x] **B3 — Characterize context propagation**
   - Owner: Claude
   - Create:
 
@@ -263,7 +263,7 @@ Next dependency: Claude B1-B7 evidence, cross-review against characterization te
 
   - Acceptance: asserts which paths receive `ContextInjection`, ChatMemory Advisor, semantic memory, and Memory Bank content.
 
-- [ ] **B4 — Characterize tool safety**
+- [x] **B4 — Characterize tool safety**
   - Owner: Claude
   - Create:
 
@@ -273,7 +273,7 @@ Next dependency: Claude B1-B7 evidence, cross-review against characterization te
 
   - Acceptance: asserts write calls cannot bypass `ToolRuntimeAspect` and proposal confirmation.
 
-- [ ] **B5 — Characterize final-answer ownership**
+- [x] **B5 — Characterize final-answer ownership**
   - Owner: Claude
   - Create:
 
@@ -283,7 +283,7 @@ Next dependency: Claude B1-B7 evidence, cross-review against characterization te
 
   - Acceptance: records every path that composes, repairs, narrates, or replaces the final answer.
 
-- [ ] **B6 — Characterize transport parity**
+- [x] **B6 — Characterize transport parity**
   - Owner: Claude
   - Create:
 
@@ -293,7 +293,7 @@ Next dependency: Claude B1-B7 evidence, cross-review against characterization te
 
   - Acceptance: records sync/SSE/async differences in result, persistence, trace, and completion behavior.
 
-- [ ] **B7 — Commit Phase 1 evidence**
+- [x] **B7 — Commit Phase 1 evidence**
   - Owner: Claude
   - Required commits:
 
@@ -305,13 +305,44 @@ Next dependency: Claude B1-B7 evidence, cross-review against characterization te
 
   - Claude reports SHAs; Codex records them in this ledger.
 
+### Claude Phase 1 evidence
+
+```text
+Task: B1-B7
+Owner: Claude
+Branch: claude/runtime-characterization
+Commits:
+- dab2dbc docs: audit current runtime responsibility ownership
+- 9b87c65 test: characterize runtime routing and context propagation
+- 8f6135f test: characterize safety completion and transport parity
+Files:
+- docs/architecture/runtime-current-state-audit.md
+- src/test/java/com/springclaw/architecture/ContextPropagationCharacterizationTest.java
+- src/test/java/com/springclaw/architecture/FinalAnswerOwnershipCharacterizationTest.java
+- src/test/java/com/springclaw/architecture/RuntimeRouteCharacterizationTest.java
+- src/test/java/com/springclaw/architecture/ToolSafetyPathCharacterizationTest.java
+- src/test/java/com/springclaw/architecture/TransportParityCharacterizationTest.java
+Tests:
+- mvn -q -Dtest=RuntimeRouteCharacterizationTest,ContextPropagationCharacterizationTest,ToolSafetyPathCharacterizationTest,FinalAnswerOwnershipCharacterizationTest,TransportParityCharacterizationTest test
+- mvn -q -Dtest=EngineSelectorTest,ChatContextFactoryTest,PromptInjectionTest,AgentRuntimeEngineTest,ToolRuntimeAspectInterceptionIT,ToolInvocationProposalServiceConfirmTest test
+Findings:
+- The characterization suite passed: 41 JUnit testcase elements, 0 failures, 0 errors, 0 skipped.
+- Surefire reports RuntimeRouteCharacterizationTest as an outer suite with tests="0", but its XML contains 13 executed nested testcases; the five classes contain 13 + 8 + 5 + 7 + 8 = 41 testcases.
+- The focused baseline passed: 27 tests, 0 failures, 0 errors, 0 skipped.
+- MySQL emitted the known Public Key Retrieval is not allowed warning, but the Maven command exited 0.
+- The verified diff contains 6 files: 1 audit document and 5 test classes, with 0 production Java changes.
+- The architecture spec cross-review approved the design with one non-blocking clarification: freeze equal-priority legacy engine ordering before Phase 3B.
+- The spec now records explicit version-controlled legacyRank compatibility ordering and forbids inventing alphabetical tie-breaking.
+Next dependency: user approval of the architecture spec before any implementation plan or production-code change.
+```
+
 ## 6. Phase 1 Review Gate
 
 No implementation plan may be written until all checks pass:
 
 - [x] Codex spec includes the four lifecycle maps.
 - [x] Codex spec defines one owner per runtime responsibility.
-- [ ] Claude audit and characterization tests are available for review.
+- [x] Claude audit and characterization tests are available for review.
 - [x] P0 invariants map to explicit target-runtime enforcement points.
 - [x] The design does not assume a fixed engine count.
 - [ ] The user approves the new spec.

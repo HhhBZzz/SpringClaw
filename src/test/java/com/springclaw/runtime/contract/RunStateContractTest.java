@@ -175,7 +175,7 @@ class RunStateContractTest {
         )).hasMessageContaining("acceptedAt");
 
         assertThatThrownBy(() -> runningAt(
-                T0, T1, T3.plusSeconds(31), null, T3.plusSeconds(30), null
+                T1, T1, T2, null, T0, null
         )).hasMessageContaining("deadlineAt");
 
         assertThatThrownBy(() -> runningAt(
@@ -197,6 +197,39 @@ class RunStateContractTest {
         assertThatThrownBy(() -> runningAt(
                 T0, T1, T2, T3, T3.plusSeconds(30), null
         )).hasMessageContaining("finishedAt");
+    }
+
+    @Test
+    void deadlineMayBeExceededWhenRecordingTimeoutOrRecovery() {
+        Instant deadline = T1;
+        Instant recoveredAt = T3;
+        assertThatCode(() -> new RunState(
+                "run-1",
+                "run-1",
+                4,
+                RunStatus.FAILED,
+                "session-1",
+                "web",
+                "user-1",
+                "USER",
+                "hello",
+                "agent",
+                T0,
+                T1,
+                recoveredAt,
+                recoveredAt,
+                deadline,
+                snapshot("run-1"),
+                decision("run-1"),
+                "strategy-1",
+                1,
+                "",
+                List.of(),
+                completion("run-1", CompletionDecision.Outcome.FAIL, 0),
+                result("run-1", RunStatus.FAILED, recoveredAt, "failed"),
+                Map.of(),
+                failure()
+        )).doesNotThrowAnyException();
     }
 
     @Test
@@ -481,7 +514,35 @@ class RunStateContractTest {
     }
 
     @Test
-    void transitionsPreserveToolInvocationPrefixAndUsageMonotonicity() {
+    void transitionsPreserveStartedAtOnceEstablished() {
+        RunState created = createdState();
+        RunState contextReady = stateWithStartedAt(
+                created, 1, RunStatus.CONTEXT_READY, T1, null, T1,
+                snapshot("run-1"), null, "", 1, "", List.of(), null, null,
+                Map.of(), null
+        );
+        RunTransitionPolicy.validate(created, contextReady);
+
+        RunState running = runningState();
+        RunState clearedStart = stateWithStartedAt(
+                running, 4, RunStatus.VERIFYING, T3, null, null,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                List.of(), null, null, Map.of(), null
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(running, clearedStart))
+                .hasMessageContaining("startedAt");
+
+        RunState changedStart = stateWithStartedAt(
+                running, 4, RunStatus.VERIFYING, T3, null, T2,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                List.of(), null, null, Map.of(), null
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(running, changedStart))
+                .hasMessageContaining("startedAt");
+    }
+
+    @Test
+    void transitionsRejectInvocationRemovalReorderAndRequestMutation() {
         ToolInvocation first = invocation("inv-1", "run-1", 1);
         ToolInvocation second = invocation("inv-2", "run-1", 1);
         RunState running = state(
@@ -513,10 +574,157 @@ class RunStateContractTest {
                 nextState(
                         running, 4, RunStatus.VERIFYING, T3, null,
                         snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
-                        List.of(approvedInvocation("inv-1", "run-1", 1), second),
+                        List.of(invocationWithCapability(
+                                "inv-1", "run-1", 1, "changed-capability"
+                        ), second),
                         null, null, Map.of("tokens", 10L), null
                 )
         )).hasMessageContaining("toolInvocations");
+    }
+
+    @Test
+    void transitionsAllowCanonicalInvocationLifecycleProgression() {
+        ToolInvocation requested = lifecycleInvocation(
+                ToolInvocation.Status.REQUESTED, "", null, null, null
+        );
+        ToolInvocation waiting = lifecycleInvocation(
+                ToolInvocation.Status.WAITING_CONFIRMATION,
+                "proposal-1", null, null, null
+        );
+        ToolInvocation approved = lifecycleInvocation(
+                ToolInvocation.Status.APPROVED,
+                "proposal-1", null, null, null
+        );
+        ToolInvocation running = lifecycleInvocation(
+                ToolInvocation.Status.RUNNING,
+                "proposal-1", T1, null, null
+        );
+        ToolInvocation succeeded = lifecycleInvocation(
+                ToolInvocation.Status.SUCCEEDED,
+                "proposal-1", T1, T2, successfulOutcome(T2)
+        );
+
+        assertInvocationProgressionAccepted(requested, waiting);
+        assertInvocationProgressionAccepted(waiting, approved);
+        assertInvocationProgressionAccepted(approved, running);
+        assertInvocationProgressionAccepted(running, succeeded);
+        assertInvocationProgressionAccepted(succeeded, succeeded);
+    }
+
+    @Test
+    void transitionsRejectInvalidInvocationStatusProgression() {
+        assertInvocationProgressionRejected(
+                lifecycleInvocation(ToolInvocation.Status.REQUESTED, "", null, null, null),
+                lifecycleInvocation(
+                        ToolInvocation.Status.SUCCEEDED,
+                        "", T1, T2, successfulOutcome(T2)
+                )
+        );
+        assertInvocationProgressionRejected(
+                lifecycleInvocation(
+                        ToolInvocation.Status.WAITING_CONFIRMATION,
+                        "proposal-1", null, null, null
+                ),
+                lifecycleInvocation(
+                        ToolInvocation.Status.RUNNING,
+                        "proposal-1", T1, null, null
+                )
+        );
+        assertInvocationProgressionRejected(
+                lifecycleInvocation(
+                        ToolInvocation.Status.RUNNING,
+                        "", T1, null, null
+                ),
+                lifecycleInvocation(
+                        ToolInvocation.Status.DENIED,
+                        "", T1, T2, failedOutcome(T2)
+                )
+        );
+        assertInvocationProgressionRejected(
+                lifecycleInvocation(
+                        ToolInvocation.Status.SUCCEEDED,
+                        "", T1, T2, successfulOutcome(T2)
+                ),
+                lifecycleInvocation(
+                        ToolInvocation.Status.FAILED,
+                        "", T1, T2, failedOutcome(T2)
+                )
+        );
+    }
+
+    @Test
+    void transitionsPreserveInvocationLifecycleIdentityFields() {
+        ToolInvocation requested = lifecycleInvocation(
+                ToolInvocation.Status.REQUESTED, "", null, null, null
+        );
+
+        assertInvocationProgressionRejected(
+                requested,
+                lifecycleInvocation(
+                        ToolInvocation.Status.APPROVED,
+                        "proposal-1", null, null, null
+                )
+        );
+        assertInvocationProgressionRejected(
+                lifecycleInvocation(
+                        ToolInvocation.Status.WAITING_CONFIRMATION,
+                        "proposal-1", null, null, null
+                ),
+                lifecycleInvocation(
+                        ToolInvocation.Status.APPROVED,
+                        "", null, null, null
+                )
+        );
+        assertInvocationProgressionRejected(
+                lifecycleInvocation(
+                        ToolInvocation.Status.WAITING_CONFIRMATION,
+                        "proposal-1", null, null, null
+                ),
+                lifecycleInvocation(
+                        ToolInvocation.Status.APPROVED,
+                        "proposal-2", null, null, null
+                )
+        );
+
+        ToolInvocation running = lifecycleInvocation(
+                ToolInvocation.Status.RUNNING, "", T1, null, null
+        );
+        assertInvocationProgressionRejected(
+                running,
+                lifecycleInvocation(
+                        ToolInvocation.Status.FAILED,
+                        "", null, T2, failedOutcome(T2)
+                )
+        );
+        assertInvocationProgressionRejected(
+                running,
+                lifecycleInvocation(
+                        ToolInvocation.Status.RUNNING,
+                        "", T2, null, null
+                )
+        );
+
+        ToolInvocation failed = lifecycleInvocation(
+                ToolInvocation.Status.FAILED, "", T1, T2, failedOutcome(T2)
+        );
+        assertInvocationProgressionRejected(
+                failed,
+                lifecycleInvocation(
+                        ToolInvocation.Status.FAILED,
+                        "", T1, T3, failedOutcome(T3)
+                )
+        );
+    }
+
+    @Test
+    void transitionsPreserveUsageAndAllowInvocationAppend() {
+        ToolInvocation first = invocation("inv-1", "run-1", 1);
+        ToolInvocation second = invocation("inv-2", "run-1", 1);
+        RunState running = state(
+                "run-1", "run-1", 3, RunStatus.RUNNING, T3, null,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                List.of(first, second), null, null, Map.of("tokens", 10L), null
+        );
 
         assertThatThrownBy(() -> RunTransitionPolicy.validate(
                 running,
@@ -912,6 +1120,53 @@ class RunStateContractTest {
         );
     }
 
+    private static RunState stateWithStartedAt(
+            RunState previous,
+            long revision,
+            RunStatus status,
+            Instant updatedAt,
+            Instant finishedAt,
+            Instant startedAt,
+            ContextSnapshot contextSnapshot,
+            ExecutionDecision executionDecision,
+            String strategyId,
+            int attempt,
+            String pendingProposalId,
+            List<ToolInvocation> toolInvocations,
+            CompletionDecision completionDecision,
+            RunResult result,
+            Map<String, Long> usage,
+            RunState.Failure failure
+    ) {
+        return new RunState(
+                previous.runId(),
+                previous.requestId(),
+                revision,
+                status,
+                previous.sessionKey(),
+                previous.channel(),
+                previous.userId(),
+                previous.roleCodeAtAcceptance(),
+                previous.originalMessage(),
+                previous.responseMode(),
+                previous.acceptedAt(),
+                startedAt,
+                updatedAt,
+                finishedAt,
+                previous.deadlineAt(),
+                contextSnapshot,
+                executionDecision,
+                strategyId,
+                attempt,
+                pendingProposalId,
+                toolInvocations,
+                completionDecision,
+                result,
+                usage,
+                failure
+        );
+    }
+
     private static RunState acceptanceVariant(
             RunState source,
             String sessionKey,
@@ -1027,17 +1282,97 @@ class RunStateContractTest {
         );
     }
 
-    private static ToolInvocation approvedInvocation(
+    private static ToolInvocation invocationWithCapability(
             String invocationId,
             String runId,
-            int attempt
+            int attempt,
+            String capabilityId
     ) {
         return new ToolInvocation(
-                invocationId, runId, attempt, "web.search", "search",
+                invocationId, runId, attempt, capabilityId, "search",
                 "search", "web", "{}", "hash", ToolInvocation.RiskLevel.READ,
                 List.of(), List.of(), runId + ":" + attempt + ":" + invocationId,
-                ToolInvocation.Status.APPROVED, null, null, null, null
+                ToolInvocation.Status.REQUESTED, null, null, null, null
         );
+    }
+
+    private static ToolInvocation lifecycleInvocation(
+            ToolInvocation.Status status,
+            String proposalId,
+            Instant startedAt,
+            Instant finishedAt,
+            ToolInvocation.Outcome outcome
+    ) {
+        return new ToolInvocation(
+                "inv-lifecycle",
+                "run-1",
+                1,
+                "web.search",
+                "search",
+                "search",
+                "web",
+                "{}",
+                "hash",
+                ToolInvocation.RiskLevel.READ,
+                List.of(),
+                List.of("search-result"),
+                "run-1:1:inv-lifecycle",
+                status,
+                proposalId,
+                startedAt,
+                finishedAt,
+                outcome
+        );
+    }
+
+    private static ToolInvocation.Outcome successfulOutcome(Instant completedAt) {
+        return new ToolInvocation.Outcome(
+                true, "ok", "completed", List.of("search-result"), completedAt
+        );
+    }
+
+    private static ToolInvocation.Outcome failedOutcome(Instant completedAt) {
+        return new ToolInvocation.Outcome(
+                false, "failed", "failed", List.of("failure"), completedAt
+        );
+    }
+
+    private static void assertInvocationProgressionAccepted(
+            ToolInvocation previousInvocation,
+            ToolInvocation nextInvocation
+    ) {
+        RunState previous = state(
+                "run-1", "run-1", 3, RunStatus.RUNNING, T3, null,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                List.of(previousInvocation), null, null, Map.of(), null
+        );
+        RunState next = nextState(
+                previous, 4, RunStatus.VERIFYING, T3, null,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                List.of(nextInvocation), null, null, Map.of(), null
+        );
+
+        assertThatCode(() -> RunTransitionPolicy.validate(previous, next))
+                .doesNotThrowAnyException();
+    }
+
+    private static void assertInvocationProgressionRejected(
+            ToolInvocation previousInvocation,
+            ToolInvocation nextInvocation
+    ) {
+        RunState previous = state(
+                "run-1", "run-1", 3, RunStatus.RUNNING, T3, null,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                List.of(previousInvocation), null, null, Map.of(), null
+        );
+        RunState next = nextState(
+                previous, 4, RunStatus.VERIFYING, T3, null,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                List.of(nextInvocation), null, null, Map.of(), null
+        );
+
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(previous, next))
+                .hasMessageContaining("toolInvocations");
     }
 
     private static ToolInvocation completedInvocation(

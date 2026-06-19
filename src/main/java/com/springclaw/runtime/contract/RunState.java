@@ -78,8 +78,8 @@ public record RunState(
         if (updatedAt.isBefore(acceptedAt)) {
             throw new IllegalArgumentException("updatedAt must not be before acceptedAt");
         }
-        if (updatedAt.isAfter(deadlineAt)) {
-            throw new IllegalArgumentException("updatedAt must not be after deadlineAt");
+        if (deadlineAt.isBefore(acceptedAt)) {
+            throw new IllegalArgumentException("deadlineAt must not be before acceptedAt");
         }
         if (startedAt != null
                 && (startedAt.isBefore(acceptedAt) || startedAt.isAfter(updatedAt))) {

@@ -25,6 +25,18 @@ public final class RunTransitionPolicy {
                 || !previous.requestId().equals(next.requestId())) {
             throw new IllegalStateException("run identity cannot change");
         }
+        requireEqual(previous.sessionKey(), next.sessionKey(), "sessionKey");
+        requireEqual(previous.channel(), next.channel(), "channel");
+        requireEqual(previous.userId(), next.userId(), "userId");
+        requireEqual(
+                previous.roleCodeAtAcceptance(),
+                next.roleCodeAtAcceptance(),
+                "roleCodeAtAcceptance"
+        );
+        requireEqual(previous.originalMessage(), next.originalMessage(), "originalMessage");
+        requireEqual(previous.responseMode(), next.responseMode(), "responseMode");
+        requireEqual(previous.acceptedAt(), next.acceptedAt(), "acceptedAt");
+        requireEqual(previous.deadlineAt(), next.deadlineAt(), "deadlineAt");
         if (next.revision() != previous.revision() + 1) {
             throw new IllegalStateException("revision must increase by exactly one");
         }
@@ -41,6 +53,11 @@ public final class RunTransitionPolicy {
         if (!verificationRetry && next.attempt() != previous.attempt()) {
             throw new IllegalStateException("attempt cannot change outside verification retry");
         }
+        validateContextSnapshot(previous, next);
+        validateExecutionDecision(previous, next, verificationRetry);
+        validateStrategy(previous, next, verificationRetry);
+        validateToolInvocations(previous, next);
+        validateUsage(previous, next);
         if (next.status() == RunStatus.FAILED && next.failure() == null) {
             throw new IllegalStateException("failure is required for transition to FAILED");
         }
@@ -64,7 +81,7 @@ public final class RunTransitionPolicy {
             throw new IllegalStateException("strategyId is required for DECIDED -> RUNNING");
         }
         if (verificationRetry) {
-            CompletionDecision completionDecision = previous.completionDecision();
+            CompletionDecision completionDecision = next.completionDecision();
             if (completionDecision == null
                     || completionDecision.outcome() != CompletionDecision.Outcome.RETRY) {
                 throw new IllegalStateException(
@@ -91,6 +108,101 @@ public final class RunTransitionPolicy {
                         "CompletionDecision FAIL is required for VERIFYING -> FAILED"
                 );
             }
+        }
+    }
+
+    private static void validateContextSnapshot(RunState previous, RunState next) {
+        ContextSnapshot previousSnapshot = previous.contextSnapshot();
+        ContextSnapshot nextSnapshot = next.contextSnapshot();
+        if (previousSnapshot != null) {
+            requireEqual(previousSnapshot, nextSnapshot, "contextSnapshot");
+            return;
+        }
+        if (nextSnapshot != null
+                && !(previous.status() == RunStatus.CREATED
+                && next.status() == RunStatus.CONTEXT_READY)) {
+            throw new IllegalStateException(
+                    "contextSnapshot may only be introduced by CREATED -> CONTEXT_READY"
+            );
+        }
+    }
+
+    private static void validateExecutionDecision(
+            RunState previous,
+            RunState next,
+            boolean verificationRetry
+    ) {
+        ExecutionDecision previousDecision = previous.executionDecision();
+        if (previousDecision == null) {
+            return;
+        }
+        if (next.executionDecision() == null) {
+            throw new IllegalStateException("executionDecision cannot disappear");
+        }
+        if (!verificationRetry) {
+            requireEqual(previousDecision, next.executionDecision(), "executionDecision");
+        }
+    }
+
+    private static void validateStrategy(
+            RunState previous,
+            RunState next,
+            boolean verificationRetry
+    ) {
+        if (verificationRetry) {
+            if (!next.strategyId().isBlank()) {
+                throw new IllegalStateException(
+                        "strategyId must be blank for VERIFYING -> DECIDED retry"
+                );
+            }
+            return;
+        }
+        boolean selectsStrategy = previous.status() == RunStatus.DECIDED
+                && next.status() == RunStatus.RUNNING
+                && previous.strategyId().isBlank();
+        if (!selectsStrategy) {
+            requireEqual(previous.strategyId(), next.strategyId(), "strategyId");
+        }
+    }
+
+    private static void validateToolInvocations(RunState previous, RunState next) {
+        if (next.toolInvocations().size() < previous.toolInvocations().size()) {
+            throw new IllegalStateException(
+                    "toolInvocations must preserve the previous list as an exact prefix"
+            );
+        }
+        for (int index = 0; index < previous.toolInvocations().size(); index++) {
+            if (!previous.toolInvocations().get(index).equals(next.toolInvocations().get(index))) {
+                throw new IllegalStateException(
+                        "toolInvocations must preserve the previous list as an exact prefix"
+                );
+            }
+        }
+        for (int index = previous.toolInvocations().size();
+             index < next.toolInvocations().size();
+             index++) {
+            if (next.toolInvocations().get(index).attempt() > next.attempt()) {
+                throw new IllegalStateException(
+                        "new ToolInvocation attempt must not exceed next RunState attempt"
+                );
+            }
+        }
+    }
+
+    private static void validateUsage(RunState previous, RunState next) {
+        for (var entry : previous.usage().entrySet()) {
+            Long nextValue = next.usage().get(entry.getKey());
+            if (nextValue == null || nextValue < entry.getValue()) {
+                throw new IllegalStateException(
+                        "usage values cannot be removed or decreased"
+                );
+            }
+        }
+    }
+
+    private static void requireEqual(Object previous, Object next, String field) {
+        if (!Objects.equals(previous, next)) {
+            throw new IllegalStateException(field + " cannot change across transitions");
         }
     }
 }

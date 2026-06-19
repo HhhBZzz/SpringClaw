@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RunStateContractTest {
@@ -168,6 +169,91 @@ class RunStateContractTest {
     }
 
     @Test
+    void runStateRejectsBackwardChronology() {
+        assertThatThrownBy(() -> runningAt(
+                T1, T1, T0, null, T3.plusSeconds(30), null
+        )).hasMessageContaining("acceptedAt");
+
+        assertThatThrownBy(() -> runningAt(
+                T0, T1, T3.plusSeconds(31), null, T3.plusSeconds(30), null
+        )).hasMessageContaining("deadlineAt");
+
+        assertThatThrownBy(() -> runningAt(
+                T1, T0, T2, null, T3.plusSeconds(30), null
+        )).hasMessageContaining("startedAt");
+
+        assertThatThrownBy(() -> runningAt(
+                T0, T3, T2, null, T3.plusSeconds(30), null
+        )).hasMessageContaining("startedAt");
+
+        assertThatThrownBy(() -> runningAt(
+                T1, null, T2, T0, T3.plusSeconds(30), null
+        )).hasMessageContaining("finishedAt");
+
+        assertThatThrownBy(() -> runningAt(
+                T0, T2, T3, T1, T3.plusSeconds(30), null
+        )).hasMessageContaining("finishedAt");
+
+        assertThatThrownBy(() -> runningAt(
+                T0, T1, T2, T3, T3.plusSeconds(30), null
+        )).hasMessageContaining("finishedAt");
+    }
+
+    @Test
+    void nonterminalStatesRejectFinishedAtAndFailure() {
+        assertThatThrownBy(() -> runningAt(
+                T0, T1, T2, T2, T3.plusSeconds(30), null
+        )).hasMessageContaining("finishedAt");
+
+        assertThatThrownBy(() -> runningAt(
+                T0, T1, T2, null, T3.plusSeconds(30), failure()
+        )).hasMessageContaining("failure");
+    }
+
+    @Test
+    void successfulTerminalStatesRejectFailure() {
+        assertThatThrownBy(() -> terminalState(
+                RunStatus.COMPLETED,
+                completion("run-1", CompletionDecision.Outcome.COMPLETE, 0),
+                result("run-1", RunStatus.COMPLETED),
+                failure()
+        )).hasMessageContaining("failure");
+
+        assertThatThrownBy(() -> terminalState(
+                RunStatus.DEGRADED,
+                completion("run-1", CompletionDecision.Outcome.DEGRADE, 0),
+                result("run-1", RunStatus.DEGRADED),
+                failure()
+        )).hasMessageContaining("failure");
+    }
+
+    @Test
+    void stateRejectsInvocationAttemptBeyondRunAttempt() {
+        assertThatThrownBy(() -> state(
+                "run-1", "run-1", 3, RunStatus.RUNNING, T3, null,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                List.of(invocation("inv-2", "run-1", 2)), null, null, null
+        )).hasMessageContaining("attempt");
+    }
+
+    @Test
+    void terminalResultMustShareCanonicalFinishedInstantAndFailureCode() {
+        assertThatThrownBy(() -> state(
+                "run-1", "run-1", 5, RunStatus.COMPLETED, T3, T3,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                List.of(), completion("run-1", CompletionDecision.Outcome.COMPLETE, 0),
+                result("run-1", RunStatus.COMPLETED, T2, ""), null
+        )).hasMessageContaining("completedAt");
+
+        assertThatThrownBy(() -> state(
+                "run-1", "run-1", 5, RunStatus.FAILED, T3, T3,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                List.of(), completion("run-1", CompletionDecision.Outcome.FAIL, 0),
+                result("run-1", RunStatus.FAILED, T3, "different-code"), failure()
+        )).hasMessageContaining("failureCode");
+    }
+
+    @Test
     void waitingConfirmationRequiresPendingProposalId() {
         assertThatThrownBy(() -> state(
                 "run-1", "run-1", 1, RunStatus.WAITING_CONFIRMATION, T1, null,
@@ -242,6 +328,227 @@ class RunStateContractTest {
     }
 
     @Test
+    void transitionsPreserveImmutableAcceptanceHistory() {
+        RunState valid = nextState(
+                createdState(), 1, RunStatus.CONTEXT_READY, T1, null,
+                snapshot("run-1"), null, "", 1, "", List.of(), null, null,
+                Map.of(), null
+        );
+
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                createdState(),
+                acceptanceVariant(valid, "session-2", valid.channel(), valid.userId(),
+                        valid.roleCodeAtAcceptance(), valid.originalMessage(), valid.responseMode(),
+                        valid.acceptedAt(), valid.deadlineAt())
+        )).hasMessageContaining("sessionKey");
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                createdState(),
+                acceptanceVariant(valid, valid.sessionKey(), "api", valid.userId(),
+                        valid.roleCodeAtAcceptance(), valid.originalMessage(), valid.responseMode(),
+                        valid.acceptedAt(), valid.deadlineAt())
+        )).hasMessageContaining("channel");
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                createdState(),
+                acceptanceVariant(valid, valid.sessionKey(), valid.channel(), "user-2",
+                        valid.roleCodeAtAcceptance(), valid.originalMessage(), valid.responseMode(),
+                        valid.acceptedAt(), valid.deadlineAt())
+        )).hasMessageContaining("userId");
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                createdState(),
+                acceptanceVariant(valid, valid.sessionKey(), valid.channel(), valid.userId(),
+                        "ADMIN", valid.originalMessage(), valid.responseMode(),
+                        valid.acceptedAt(), valid.deadlineAt())
+        )).hasMessageContaining("roleCodeAtAcceptance");
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                createdState(),
+                acceptanceVariant(valid, valid.sessionKey(), valid.channel(), valid.userId(),
+                        valid.roleCodeAtAcceptance(), "changed", valid.responseMode(),
+                        valid.acceptedAt(), valid.deadlineAt())
+        )).hasMessageContaining("originalMessage");
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                createdState(),
+                acceptanceVariant(valid, valid.sessionKey(), valid.channel(), valid.userId(),
+                        valid.roleCodeAtAcceptance(), valid.originalMessage(), "basic",
+                        valid.acceptedAt(), valid.deadlineAt())
+        )).hasMessageContaining("responseMode");
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                createdState(),
+                acceptanceVariant(valid, valid.sessionKey(), valid.channel(), valid.userId(),
+                        valid.roleCodeAtAcceptance(), valid.originalMessage(), valid.responseMode(),
+                        T0.minusSeconds(1), valid.deadlineAt())
+        )).hasMessageContaining("acceptedAt");
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                createdState(),
+                acceptanceVariant(valid, valid.sessionKey(), valid.channel(), valid.userId(),
+                        valid.roleCodeAtAcceptance(), valid.originalMessage(), valid.responseMode(),
+                        valid.acceptedAt(), valid.deadlineAt().plusSeconds(1))
+        )).hasMessageContaining("deadlineAt");
+    }
+
+    @Test
+    void transitionsPreserveContextSnapshotHistory() {
+        RunState created = createdState();
+        RunState failedWithPrematureSnapshot = nextState(
+                created, 1, RunStatus.FAILED, T1, T1,
+                snapshot("run-1"), null, "", 1, "", List.of(), null, null,
+                Map.of(), failure()
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                created,
+                failedWithPrematureSnapshot
+        )).hasMessageContaining("contextSnapshot");
+
+        RunState contextReady = contextReadyState();
+        RunState disappeared = nextState(
+                contextReady, 2, RunStatus.DECIDED, T2, null,
+                null, decision("run-1"), "", 1, "", List.of(), null, null,
+                Map.of(), null
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                contextReady,
+                disappeared
+        )).hasMessageContaining("contextSnapshot");
+
+        RunState replaced = nextState(
+                contextReady, 2, RunStatus.DECIDED, T2, null,
+                snapshot("run-1", "hash-2"), decision("run-1"), "", 1, "",
+                List.of(), null, null, Map.of(), null
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                contextReady,
+                replaced
+        )).hasMessageContaining("contextSnapshot");
+    }
+
+    @Test
+    void transitionsPreserveDecisionExceptDuringVerificationRetry() {
+        RunState decided = decidedState();
+        RunState disappeared = nextState(
+                decided, 3, RunStatus.RUNNING, T3, null,
+                snapshot("run-1"), null, "strategy-1", 1, "", List.of(), null, null,
+                Map.of(), null
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                decided,
+                disappeared
+        )).hasMessageContaining("executionDecision");
+
+        RunState running = runningState();
+        RunState replaced = nextState(
+                running, 4, RunStatus.VERIFYING, T3, null,
+                snapshot("run-1"), decision("run-1", "changed-goal"), "strategy-1", 1, "",
+                List.of(), null, null, Map.of(), null
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                running,
+                replaced
+        )).hasMessageContaining("executionDecision");
+    }
+
+    @Test
+    void transitionsPreserveStrategyUntilRetryClearsItForReselection() {
+        RunState running = runningState();
+        RunState disappeared = nextState(
+                running, 4, RunStatus.VERIFYING, T3, null,
+                snapshot("run-1"), decision("run-1"), "", 1, "", List.of(), null, null,
+                Map.of(), null
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                running,
+                disappeared
+        )).hasMessageContaining("strategyId");
+
+        RunState changed = nextState(
+                running, 4, RunStatus.VERIFYING, T3, null,
+                snapshot("run-1"), decision("run-1"), "strategy-2", 1, "",
+                List.of(), null, null, Map.of(), null
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                running,
+                changed
+        )).hasMessageContaining("strategyId");
+
+        RunState retryWithOldStrategy = nextState(
+                verifyingState(1, null), 5, RunStatus.DECIDED, T3, null,
+                snapshot("run-1"), decision("run-1", "retry-goal"), "strategy-1", 2, "",
+                List.of(), completion("run-1", CompletionDecision.Outcome.RETRY, 2),
+                null, Map.of(), null
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                verifyingState(1, null),
+                retryWithOldStrategy
+        )).hasMessageContaining("strategyId");
+    }
+
+    @Test
+    void transitionsPreserveToolInvocationPrefixAndUsageMonotonicity() {
+        ToolInvocation first = invocation("inv-1", "run-1", 1);
+        ToolInvocation second = invocation("inv-2", "run-1", 1);
+        RunState running = state(
+                "run-1", "run-1", 3, RunStatus.RUNNING, T3, null,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                List.of(first, second), null, null, Map.of("tokens", 10L), null
+        );
+
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                running,
+                nextState(
+                        running, 4, RunStatus.VERIFYING, T3, null,
+                        snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                        List.of(first), null, null, Map.of("tokens", 10L), null
+                )
+        )).hasMessageContaining("toolInvocations");
+
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                running,
+                nextState(
+                        running, 4, RunStatus.VERIFYING, T3, null,
+                        snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                        List.of(second, first), null, null, Map.of("tokens", 10L), null
+                )
+        )).hasMessageContaining("toolInvocations");
+
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                running,
+                nextState(
+                        running, 4, RunStatus.VERIFYING, T3, null,
+                        snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                        List.of(approvedInvocation("inv-1", "run-1", 1), second),
+                        null, null, Map.of("tokens", 10L), null
+                )
+        )).hasMessageContaining("toolInvocations");
+
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                running,
+                nextState(
+                        running, 4, RunStatus.VERIFYING, T3, null,
+                        snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                        List.of(first, second), null, null, Map.of(), null
+                )
+        )).hasMessageContaining("usage");
+
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                running,
+                nextState(
+                        running, 4, RunStatus.VERIFYING, T3, null,
+                        snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                        List.of(first, second), null, null, Map.of("tokens", 9L), null
+                )
+        )).hasMessageContaining("usage");
+
+        ToolInvocation third = invocation("inv-3", "run-1", 1);
+        RunTransitionPolicy.validate(
+                running,
+                nextState(
+                        running, 4, RunStatus.VERIFYING, T3, null,
+                        snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                        List.of(first, second, third), null, null,
+                        Map.of("tokens", 10L, "tools", 1L), null
+                )
+        );
+    }
+
+    @Test
     void transitionsPreserveAttemptExceptVerificationRetry() {
         RunState changedDuringContextAssembly = state(
                 "run-1", "run-1", 1, RunStatus.CONTEXT_READY, T1, null,
@@ -280,42 +587,57 @@ class RunStateContractTest {
 
     @Test
     void verifyingRetryRequiresRetryDecisionAndMatchingNextAttempt() {
-        RunState retrying = verifyingState(
-                1,
-                completion("run-1", CompletionDecision.Outcome.RETRY, 2)
-        );
+        RunState retrying = verifyingState(1, null);
         RunState nextAttempt = state(
                 "run-1", "run-1", 5, RunStatus.DECIDED, T3, null,
-                snapshot("run-1"), decision("run-1"), "strategy-1", 2, "",
+                snapshot("run-1"), decision("run-1", "retry-goal"), "", 2, "",
+                List.of(), completion("run-1", CompletionDecision.Outcome.RETRY, 2),
+                null, null
+        );
+        assertThatCode(() -> RunTransitionPolicy.validate(retrying, nextAttempt))
+                .doesNotThrowAnyException();
+
+        RunState missingDecision = state(
+                "run-1", "run-1", 5, RunStatus.DECIDED, T3, null,
+                snapshot("run-1"), decision("run-1", "retry-goal"), "", 2, "",
                 List.of(), null, null, null
         );
-        RunTransitionPolicy.validate(retrying, nextAttempt);
-
-        RunState noDecision = verifyingState(1, null);
-        assertThatThrownBy(() -> RunTransitionPolicy.validate(noDecision, nextAttempt))
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(retrying, missingDecision))
                 .hasMessageContaining("RETRY");
 
-        RunState wrongOutcome = verifyingState(
-                1,
-                completion("run-1", CompletionDecision.Outcome.COMPLETE, 0)
+        RunState wrongOutcome = state(
+                "run-1", "run-1", 5, RunStatus.DECIDED, T3, null,
+                snapshot("run-1"), decision("run-1", "retry-goal"), "", 2, "",
+                List.of(), completion("run-1", CompletionDecision.Outcome.COMPLETE, 0),
+                null, null
         );
-        assertThatThrownBy(() -> RunTransitionPolicy.validate(wrongOutcome, nextAttempt))
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(retrying, wrongOutcome))
                 .hasMessageContaining("RETRY");
 
         RunState skippedAttempt = state(
                 "run-1", "run-1", 5, RunStatus.DECIDED, T3, null,
-                snapshot("run-1"), decision("run-1"), "strategy-1", 3, "",
-                List.of(), null, null, null
+                snapshot("run-1"), decision("run-1", "retry-goal"), "", 3, "",
+                List.of(), completion("run-1", CompletionDecision.Outcome.RETRY, 3),
+                null, null
         );
         assertThatThrownBy(() -> RunTransitionPolicy.validate(retrying, skippedAttempt))
                 .hasMessageContaining("attempt");
 
-        RunState mismatchedDecisionAttempt = verifyingState(
-                1,
-                completion("run-1", CompletionDecision.Outcome.RETRY, 3)
+        RunState mismatchedDecisionAttempt = state(
+                "run-1", "run-1", 5, RunStatus.DECIDED, T3, null,
+                snapshot("run-1"), decision("run-1", "retry-goal"), "", 2, "",
+                List.of(), completion("run-1", CompletionDecision.Outcome.RETRY, 3),
+                null, null
         );
-        assertThatThrownBy(() -> RunTransitionPolicy.validate(mismatchedDecisionAttempt, nextAttempt))
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(retrying, mismatchedDecisionAttempt))
                 .hasMessageContaining("nextAttempt");
+
+        RunState replannedRunning = nextState(
+                nextAttempt, 6, RunStatus.RUNNING, T3, null,
+                snapshot("run-1"), nextAttempt.executionDecision(), "strategy-2", 2, "",
+                List.of(), nextAttempt.completionDecision(), null, Map.of(), null
+        );
+        RunTransitionPolicy.validate(nextAttempt, replannedRunning);
     }
 
     @Test
@@ -384,6 +706,29 @@ class RunStateContractTest {
         String json = mapper.writeValueAsString(completed);
         RunState deserialized = mapper.readValue(json, RunState.class);
         assertThat(deserialized).isEqualTo(completed);
+    }
+
+    @Test
+    void failedRunWithResultAndCompletedInvocationSurvivesJacksonRoundTrip() throws Exception {
+        ToolInvocation completedInvocation = completedInvocation(
+                "inv-1", "run-1", 1, T1, T2
+        );
+        RunState failed = state(
+                "run-1", "run-1", 5, RunStatus.FAILED, T3, T3,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                List.of(completedInvocation),
+                completion("run-1", CompletionDecision.Outcome.FAIL, 0),
+                result("run-1", RunStatus.FAILED, T3, "failed"),
+                Map.of("tokens", 12L),
+                failure()
+        );
+
+        String json = mapper.writeValueAsString(failed);
+        RunState deserialized = mapper.readValue(json, RunState.class);
+
+        assertThat(deserialized).isEqualTo(failed);
+        assertThat(deserialized.toolInvocations()).containsExactly(completedInvocation);
+        assertThat(deserialized.result().failureCode()).isEqualTo(failed.failure().code());
     }
 
     private static RunState createdState() {
@@ -463,6 +808,32 @@ class RunStateContractTest {
             RunResult result,
             RunState.Failure failure
     ) {
+        return state(
+                runId, requestId, revision, status, updatedAt, finishedAt,
+                contextSnapshot, executionDecision, strategyId, attempt,
+                pendingProposalId, toolInvocations, completionDecision, result,
+                Map.of(), failure
+        );
+    }
+
+    private static RunState state(
+            String runId,
+            String requestId,
+            long revision,
+            RunStatus status,
+            Instant updatedAt,
+            Instant finishedAt,
+            ContextSnapshot contextSnapshot,
+            ExecutionDecision executionDecision,
+            String strategyId,
+            int attempt,
+            String pendingProposalId,
+            List<ToolInvocation> toolInvocations,
+            CompletionDecision completionDecision,
+            RunResult result,
+            Map<String, Long> usage,
+            RunState.Failure failure
+    ) {
         return new RunState(
                 runId,
                 requestId,
@@ -487,34 +858,204 @@ class RunStateContractTest {
                 toolInvocations,
                 completionDecision,
                 result,
+                usage,
+                failure
+        );
+    }
+
+    private static RunState nextState(
+            RunState previous,
+            long revision,
+            RunStatus status,
+            Instant updatedAt,
+            Instant finishedAt,
+            ContextSnapshot contextSnapshot,
+            ExecutionDecision executionDecision,
+            String strategyId,
+            int attempt,
+            String pendingProposalId,
+            List<ToolInvocation> toolInvocations,
+            CompletionDecision completionDecision,
+            RunResult result,
+            Map<String, Long> usage,
+            RunState.Failure failure
+    ) {
+        Instant startedAt = previous.startedAt() == null && status != RunStatus.CREATED
+                ? updatedAt
+                : previous.startedAt();
+        return new RunState(
+                previous.runId(),
+                previous.requestId(),
+                revision,
+                status,
+                previous.sessionKey(),
+                previous.channel(),
+                previous.userId(),
+                previous.roleCodeAtAcceptance(),
+                previous.originalMessage(),
+                previous.responseMode(),
+                previous.acceptedAt(),
+                startedAt,
+                updatedAt,
+                finishedAt,
+                previous.deadlineAt(),
+                contextSnapshot,
+                executionDecision,
+                strategyId,
+                attempt,
+                pendingProposalId,
+                toolInvocations,
+                completionDecision,
+                result,
+                usage,
+                failure
+        );
+    }
+
+    private static RunState acceptanceVariant(
+            RunState source,
+            String sessionKey,
+            String channel,
+            String userId,
+            String roleCodeAtAcceptance,
+            String originalMessage,
+            String responseMode,
+            Instant acceptedAt,
+            Instant deadlineAt
+    ) {
+        return new RunState(
+                source.runId(),
+                source.requestId(),
+                source.revision(),
+                source.status(),
+                sessionKey,
+                channel,
+                userId,
+                roleCodeAtAcceptance,
+                originalMessage,
+                responseMode,
+                acceptedAt,
+                source.startedAt(),
+                source.updatedAt(),
+                source.finishedAt(),
+                deadlineAt,
+                source.contextSnapshot(),
+                source.executionDecision(),
+                source.strategyId(),
+                source.attempt(),
+                source.pendingProposalId(),
+                source.toolInvocations(),
+                source.completionDecision(),
+                source.result(),
+                source.usage(),
+                source.failure()
+        );
+    }
+
+    private static RunState runningAt(
+            Instant acceptedAt,
+            Instant startedAt,
+            Instant updatedAt,
+            Instant finishedAt,
+            Instant deadlineAt,
+            RunState.Failure failure
+    ) {
+        return new RunState(
+                "run-1",
+                "run-1",
+                3,
+                RunStatus.RUNNING,
+                "session-1",
+                "web",
+                "user-1",
+                "USER",
+                "hello",
+                "agent",
+                acceptedAt,
+                startedAt,
+                updatedAt,
+                finishedAt,
+                deadlineAt,
+                snapshot("run-1"),
+                decision("run-1"),
+                "strategy-1",
+                1,
+                "",
+                List.of(),
+                null,
+                null,
                 Map.of(),
                 failure
         );
     }
 
     private static ContextSnapshot snapshot(String runId) {
+        return snapshot(runId, "hash-1");
+    }
+
+    private static ContextSnapshot snapshot(String runId, String snapshotHash) {
         return new ContextSnapshot(
                 runId, "session-1", "user-1", "web", "user-1", "USER",
                 "original", "effective", "system", "memory",
                 List.of(), List.of(), List.of(), List.of("web.search"),
-                Map.of(), Map.of("schema", "v1"), T0, "hash-1"
+                Map.of(), Map.of("schema", "v1"), T0, snapshotHash
         );
     }
 
     private static ExecutionDecision decision(String runId) {
+        return decision(runId, "answer");
+    }
+
+    private static ExecutionDecision decision(String runId, String goal) {
         return new ExecutionDecision(
-                runId, "research", "answer", "agent", "read",
+                runId, "research", goal, "agent", "read",
                 List.of("web.search"), List.of(), Map.of(), List.of(),
                 0.8, "matched capability", "policy", T0
         );
     }
 
     private static ToolInvocation invocation(String runId) {
+        return invocation("inv-1", runId, 1);
+    }
+
+    private static ToolInvocation invocation(String invocationId, String runId, int attempt) {
         return new ToolInvocation(
-                "inv-1", runId, 1, "web.search", "search",
+                invocationId, runId, attempt, "web.search", "search",
                 "search", "web", "{}", "hash", ToolInvocation.RiskLevel.READ,
-                List.of(), List.of(), runId + ":1:inv-1",
+                List.of(), List.of(), runId + ":" + attempt + ":" + invocationId,
                 ToolInvocation.Status.REQUESTED, null, null, null, null
+        );
+    }
+
+    private static ToolInvocation approvedInvocation(
+            String invocationId,
+            String runId,
+            int attempt
+    ) {
+        return new ToolInvocation(
+                invocationId, runId, attempt, "web.search", "search",
+                "search", "web", "{}", "hash", ToolInvocation.RiskLevel.READ,
+                List.of(), List.of(), runId + ":" + attempt + ":" + invocationId,
+                ToolInvocation.Status.APPROVED, null, null, null, null
+        );
+    }
+
+    private static ToolInvocation completedInvocation(
+            String invocationId,
+            String runId,
+            int attempt,
+            Instant startedAt,
+            Instant finishedAt
+    ) {
+        return new ToolInvocation(
+                invocationId, runId, attempt, "web.search", "search",
+                "search", "web", "{}", "hash", ToolInvocation.RiskLevel.READ,
+                List.of(), List.of("search-result"),
+                runId + ":" + attempt + ":" + invocationId,
+                ToolInvocation.Status.SUCCEEDED, null, startedAt, finishedAt,
+                new ToolInvocation.Outcome(
+                        true, "ok", "completed", List.of("search-result"), finishedAt
+                )
         );
     }
 
@@ -531,6 +1072,20 @@ class RunStateContractTest {
     }
 
     private static RunResult result(String runId, RunStatus status) {
+        return result(
+                runId,
+                status,
+                T3,
+                status == RunStatus.FAILED ? "failed" : ""
+        );
+    }
+
+    private static RunResult result(
+            String runId,
+            RunStatus status,
+            Instant completedAt,
+            String failureCode
+    ) {
         RunResult.AnswerKind answerKind = switch (status) {
             case COMPLETED -> RunResult.AnswerKind.FINAL;
             case DEGRADED -> RunResult.AnswerKind.DEGRADED;
@@ -540,7 +1095,7 @@ class RunStateContractTest {
         return new RunResult(
                 runId, status, "answer", answerKind,
                 "provider", "model", List.of(), List.of(), 1.0,
-                Map.of(), status == RunStatus.FAILED ? "failed" : "", null, T3
+                Map.of(), failureCode, null, completedAt
         );
     }
 

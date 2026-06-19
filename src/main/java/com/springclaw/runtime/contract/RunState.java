@@ -101,6 +101,9 @@ public record RunState(
         if (status == RunStatus.WAITING_CONFIRMATION && pendingProposalId.isBlank()) {
             throw new IllegalArgumentException("pendingProposalId is required for WAITING_CONFIRMATION");
         }
+        if (!status.isTerminal() && result != null) {
+            throw new IllegalArgumentException("RunResult is not allowed for nonterminal status");
+        }
         if (status.isTerminal() && result != null && result.status() != status) {
             throw new IllegalArgumentException("RunResult status must equal RunState status");
         }

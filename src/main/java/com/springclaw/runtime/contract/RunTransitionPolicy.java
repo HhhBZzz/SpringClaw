@@ -135,6 +135,13 @@ public final class RunTransitionPolicy {
     ) {
         ExecutionDecision previousDecision = previous.executionDecision();
         if (previousDecision == null) {
+            if (next.executionDecision() != null
+                    && !(previous.status() == RunStatus.CONTEXT_READY
+                    && next.status() == RunStatus.DECIDED)) {
+                throw new IllegalStateException(
+                        "executionDecision may only be introduced by CONTEXT_READY -> DECIDED"
+                );
+            }
             return;
         }
         if (next.executionDecision() == null) {

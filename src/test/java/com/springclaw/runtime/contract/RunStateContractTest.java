@@ -121,6 +121,16 @@ class RunStateContractTest {
     }
 
     @Test
+    void nonterminalStateRejectsRunResult() {
+        assertThatThrownBy(() -> state(
+                "run-1", "run-1", 3, RunStatus.RUNNING, T3, null,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                List.of(), null, result("run-1", RunStatus.COMPLETED), null
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("nonterminal");
+    }
+
+    @Test
     void failedRequiresFailureAndFinishedAtButAllowsEarlyFailureWithoutResultOrDecision() {
         assertThatThrownBy(() -> state(
                 "run-1", "run-1", 1, RunStatus.FAILED, T1, T1,

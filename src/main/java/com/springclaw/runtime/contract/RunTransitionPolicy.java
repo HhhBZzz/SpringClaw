@@ -36,5 +36,47 @@ public final class RunTransitionPolicy {
         if (next.updatedAt().isBefore(previous.updatedAt())) {
             throw new IllegalStateException("updatedAt cannot move backwards");
         }
+        if (next.status() == RunStatus.FAILED && next.failure() == null) {
+            throw new IllegalStateException("failure is required for transition to FAILED");
+        }
+        if (previous.status() == RunStatus.CREATED
+                && next.status() == RunStatus.CONTEXT_READY
+                && next.contextSnapshot() == null) {
+            throw new IllegalStateException(
+                    "contextSnapshot is required for CREATED -> CONTEXT_READY"
+            );
+        }
+        if (previous.status() == RunStatus.CONTEXT_READY
+                && next.status() == RunStatus.DECIDED
+                && next.executionDecision() == null) {
+            throw new IllegalStateException(
+                    "executionDecision is required for CONTEXT_READY -> DECIDED"
+            );
+        }
+        if (previous.status() == RunStatus.DECIDED
+                && next.status() == RunStatus.RUNNING
+                && next.strategyId().isBlank()) {
+            throw new IllegalStateException("strategyId is required for DECIDED -> RUNNING");
+        }
+        if (previous.status() == RunStatus.VERIFYING
+                && next.status() == RunStatus.DECIDED) {
+            CompletionDecision completionDecision = previous.completionDecision();
+            if (completionDecision == null
+                    || completionDecision.outcome() != CompletionDecision.Outcome.RETRY) {
+                throw new IllegalStateException(
+                        "CompletionDecision RETRY is required for VERIFYING -> DECIDED"
+                );
+            }
+            if (next.attempt() != previous.attempt() + 1) {
+                throw new IllegalStateException(
+                        "attempt must increase by exactly one for VERIFYING -> DECIDED"
+                );
+            }
+            if (completionDecision.nextAttempt() != next.attempt()) {
+                throw new IllegalStateException(
+                        "CompletionDecision nextAttempt must equal next state attempt"
+                );
+            }
+        }
     }
 }

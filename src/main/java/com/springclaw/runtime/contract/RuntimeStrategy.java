@@ -51,7 +51,7 @@ public interface RuntimeStrategy {
     }
 
     record StrategyExecution(
-            List<RunEvent> events,
+            List<RunEvent.Draft> events,
             List<String> evidence,
             ToolInvocation requestedToolInvocation,
             Map<String, Long> modelUsage,

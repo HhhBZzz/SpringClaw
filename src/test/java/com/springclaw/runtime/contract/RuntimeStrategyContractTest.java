@@ -33,4 +33,16 @@ class RuntimeStrategyContractTest {
                 .map(java.lang.reflect.Method::getName))
                 .containsExactlyInAnyOrder("strategyId", "capabilities", "execute", "resume");
     }
+
+    @Test
+    void strategyExecutionsReturnUnpersistedEventDrafts() throws Exception {
+        String eventsType = RuntimeStrategy.StrategyExecution.class
+                .getDeclaredMethod("events")
+                .getGenericReturnType()
+                .getTypeName();
+
+        assertThat(eventsType)
+                .contains("RunEvent$Draft")
+                .doesNotContain("java.util.List<com.springclaw.runtime.contract.RunEvent>");
+    }
 }

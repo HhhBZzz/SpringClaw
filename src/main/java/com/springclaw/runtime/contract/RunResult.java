@@ -38,13 +38,23 @@ public record RunResult(
         if (!status.isTerminal()) {
             throw new IllegalArgumentException("RunResult status must be terminal");
         }
+        if (answerKind == null) {
+            throw new IllegalArgumentException("answerKind must not be null");
+        }
         if (status == RunStatus.FAILED && (failureCode == null || failureCode.isBlank())) {
             throw new IllegalArgumentException("failureCode is required for FAILED result");
         }
-        if (status != RunStatus.FAILED && answerKind == AnswerKind.FAILURE) {
-            throw new IllegalArgumentException("FAILURE answerKind requires FAILED status");
+        AnswerKind requiredAnswerKind = switch (status) {
+            case COMPLETED -> AnswerKind.FINAL;
+            case DEGRADED -> AnswerKind.DEGRADED;
+            case FAILED -> AnswerKind.FAILURE;
+            default -> throw new IllegalArgumentException("RunResult status must be terminal");
+        };
+        if (answerKind != requiredAnswerKind) {
+            throw new IllegalArgumentException(
+                    requiredAnswerKind + " answerKind is required for " + status + " status"
+            );
         }
-        answerKind = Objects.requireNonNull(answerKind, "answerKind");
         answer = answer == null ? "" : answer;
         modelProvider = modelProvider == null ? "" : modelProvider;
         modelId = modelId == null ? "" : modelId;
@@ -53,7 +63,7 @@ public record RunResult(
         usage = usage == null ? Map.of() : Map.copyOf(usage);
         failureCode = failureCode == null ? "" : failureCode;
         failureMessage = failureMessage == null ? "" : failureMessage;
-        if (quality < 0.0 || quality > 1.0) {
+        if (!Double.isFinite(quality) || quality < 0.0 || quality > 1.0) {
             throw new IllegalArgumentException("quality must be between 0 and 1");
         }
         completedAt = Objects.requireNonNull(completedAt, "completedAt");

@@ -57,7 +57,7 @@ public final class RunTransitionPolicy {
         validateContextSnapshot(previous, next);
         validateExecutionDecision(previous, next, verificationRetry);
         validateStrategy(previous, next, verificationRetry);
-        validateToolInvocations(previous, next);
+        validateToolInvocations(previous, next, verificationRetry);
         validateUsage(previous, next);
         if (next.status() == RunStatus.FAILED && next.failure() == null) {
             throw new IllegalStateException("failure is required for transition to FAILED");
@@ -173,7 +173,19 @@ public final class RunTransitionPolicy {
         }
     }
 
-    private static void validateToolInvocations(RunState previous, RunState next) {
+    private static void validateToolInvocations(
+            RunState previous,
+            RunState next,
+            boolean verificationRetry
+    ) {
+        if (verificationRetry) {
+            requireEqual(
+                    previous.toolInvocations(),
+                    next.toolInvocations(),
+                    "toolInvocations"
+            );
+            return;
+        }
         if (next.toolInvocations().size() < previous.toolInvocations().size()) {
             throw new IllegalStateException(
                     "toolInvocations cannot be removed"
@@ -188,9 +200,9 @@ public final class RunTransitionPolicy {
         for (int index = previous.toolInvocations().size();
              index < next.toolInvocations().size();
              index++) {
-            if (next.toolInvocations().get(index).attempt() > next.attempt()) {
+            if (next.toolInvocations().get(index).attempt() != next.attempt()) {
                 throw new IllegalStateException(
-                        "new ToolInvocation attempt must not exceed next RunState attempt"
+                        "new ToolInvocation attempt must equal next RunState attempt"
                 );
             }
         }

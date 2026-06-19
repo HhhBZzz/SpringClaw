@@ -1,9 +1,11 @@
 package com.springclaw.runtime.contract;
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Canonical aggregate for one user request from acceptance through a terminal
@@ -105,14 +107,23 @@ public record RunState(
 
         requireMatchingRunId(runId, contextSnapshot == null ? null : contextSnapshot.runId(), "ContextSnapshot");
         requireMatchingRunId(runId, executionDecision == null ? null : executionDecision.runId(), "ExecutionDecision");
+        Set<String> invocationIds = new HashSet<>();
+        Set<String> idempotencyKeys = new HashSet<>();
         for (ToolInvocation invocation : toolInvocations) {
-            if (invocation == null) {
-                throw new IllegalArgumentException("toolInvocations must not contain null");
-            }
             requireMatchingRunId(runId, invocation.runId(), "ToolInvocation");
             if (invocation.attempt() > attempt) {
                 throw new IllegalArgumentException(
                         "ToolInvocation attempt must not exceed RunState attempt"
+                );
+            }
+            if (!invocationIds.add(invocation.invocationId())) {
+                throw new IllegalArgumentException(
+                        "toolInvocations must not contain duplicate invocationId"
+                );
+            }
+            if (!idempotencyKeys.add(invocation.idempotencyKey())) {
+                throw new IllegalArgumentException(
+                        "toolInvocations must not contain duplicate idempotencyKey"
                 );
             }
         }

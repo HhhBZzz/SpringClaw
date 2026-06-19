@@ -75,6 +75,26 @@ public record RunState(
         acceptedAt = Objects.requireNonNull(acceptedAt, "acceptedAt");
         updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
         deadlineAt = Objects.requireNonNull(deadlineAt, "deadlineAt");
+        if (updatedAt.isBefore(acceptedAt)) {
+            throw new IllegalArgumentException("updatedAt must not be before acceptedAt");
+        }
+        if (updatedAt.isAfter(deadlineAt)) {
+            throw new IllegalArgumentException("updatedAt must not be after deadlineAt");
+        }
+        if (startedAt != null
+                && (startedAt.isBefore(acceptedAt) || startedAt.isAfter(updatedAt))) {
+            throw new IllegalArgumentException(
+                    "startedAt must be between acceptedAt and updatedAt"
+            );
+        }
+        if (finishedAt != null
+                && (finishedAt.isBefore(acceptedAt)
+                || (startedAt != null && finishedAt.isBefore(startedAt))
+                || finishedAt.isAfter(updatedAt))) {
+            throw new IllegalArgumentException(
+                    "finishedAt must be between acceptedAt and updatedAt and not before startedAt"
+            );
+        }
         if (attempt < 1) {
             throw new IllegalArgumentException("attempt must be >= 1");
         }
@@ -90,6 +110,11 @@ public record RunState(
                 throw new IllegalArgumentException("toolInvocations must not contain null");
             }
             requireMatchingRunId(runId, invocation.runId(), "ToolInvocation");
+            if (invocation.attempt() > attempt) {
+                throw new IllegalArgumentException(
+                        "ToolInvocation attempt must not exceed RunState attempt"
+                );
+            }
         }
         requireMatchingRunId(
                 runId,
@@ -100,6 +125,12 @@ public record RunState(
 
         if (status == RunStatus.WAITING_CONFIRMATION && pendingProposalId.isBlank()) {
             throw new IllegalArgumentException("pendingProposalId is required for WAITING_CONFIRMATION");
+        }
+        if (!status.isTerminal() && finishedAt != null) {
+            throw new IllegalArgumentException("finishedAt is not allowed for nonterminal status");
+        }
+        if (!status.isTerminal() && failure != null) {
+            throw new IllegalArgumentException("failure is not allowed for nonterminal status");
         }
         if (!status.isTerminal() && result != null) {
             throw new IllegalArgumentException("RunResult is not allowed for nonterminal status");
@@ -139,6 +170,24 @@ public record RunState(
             default -> {
                 // Non-terminal states carry partial evidence as the run progresses.
             }
+        }
+        if ((status == RunStatus.COMPLETED || status == RunStatus.DEGRADED)
+                && failure != null) {
+            throw new IllegalArgumentException("failure is not allowed for " + status);
+        }
+        if (result != null
+                && finishedAt != null
+                && !result.completedAt().equals(finishedAt)) {
+            throw new IllegalArgumentException(
+                    "RunResult completedAt must equal RunState finishedAt"
+            );
+        }
+        if (status == RunStatus.FAILED
+                && result != null
+                && !result.failureCode().equals(failure.code())) {
+            throw new IllegalArgumentException(
+                    "RunResult failureCode must equal RunState failure code"
+            );
         }
     }
 

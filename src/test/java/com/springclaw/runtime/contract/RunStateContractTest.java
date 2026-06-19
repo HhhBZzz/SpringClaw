@@ -84,6 +84,34 @@ class RunStateContractTest {
     }
 
     @Test
+    void toolInvocationListRejectsDuplicateInvocationIds() {
+        assertThatThrownBy(() -> state(
+                "run-1", "run-1", 3, RunStatus.RUNNING, T3, null,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                List.of(
+                        invocationWithIdempotencyKey("inv-1", "key-1", 1),
+                        invocationWithIdempotencyKey("inv-1", "key-2", 1)
+                ),
+                null, null, null
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("invocationId");
+    }
+
+    @Test
+    void toolInvocationListRejectsDuplicateIdempotencyKeys() {
+        assertThatThrownBy(() -> state(
+                "run-1", "run-1", 3, RunStatus.RUNNING, T3, null,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                List.of(
+                        invocationWithIdempotencyKey("inv-1", "shared-key", 1),
+                        invocationWithIdempotencyKey("inv-2", "shared-key", 1)
+                ),
+                null, null, null
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("idempotencyKey");
+    }
+
+    @Test
     void terminalStatesRequireMatchingResultStatusAndCompletionOutcome() {
         assertThatThrownBy(() -> terminalState(
                 RunStatus.COMPLETED,
@@ -658,6 +686,42 @@ class RunStateContractTest {
     }
 
     @Test
+    void verificationRetryPreservesInvocationListExactly() {
+        ToolInvocation requested = lifecycleInvocation(
+                ToolInvocation.Status.REQUESTED, "", null, null, null
+        );
+        RunState verifying = state(
+                "run-1", "run-1", 4, RunStatus.VERIFYING, T3, null,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
+                List.of(requested), null, null, Map.of(), null
+        );
+
+        ToolInvocation progressed = lifecycleInvocation(
+                ToolInvocation.Status.RUNNING, "", T1, null, null
+        );
+        RunState retryWithProgression = nextState(
+                verifying, 5, RunStatus.DECIDED, T3, null,
+                snapshot("run-1"), decision("run-1", "retry-goal"), "", 2, "",
+                List.of(progressed),
+                completion("run-1", CompletionDecision.Outcome.RETRY, 2),
+                null, Map.of(), null
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(verifying, retryWithProgression))
+                .hasMessageContaining("toolInvocations");
+
+        ToolInvocation newAttemptInvocation = invocation("inv-2", "run-1", 2);
+        RunState retryWithAppend = nextState(
+                verifying, 5, RunStatus.DECIDED, T3, null,
+                snapshot("run-1"), decision("run-1", "retry-goal"), "", 2, "",
+                List.of(requested, newAttemptInvocation),
+                completion("run-1", CompletionDecision.Outcome.RETRY, 2),
+                null, Map.of(), null
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(verifying, retryWithAppend))
+                .hasMessageContaining("toolInvocations");
+    }
+
+    @Test
     void transitionsRejectInvalidInvocationStatusProgression() {
         assertInvocationProgressionRejected(
                 lifecycleInvocation(ToolInvocation.Status.REQUESTED, "", null, null, null),
@@ -800,6 +864,26 @@ class RunStateContractTest {
                         Map.of("tokens", 10L, "tools", 1L), null
                 )
         );
+    }
+
+    @Test
+    void appendedInvocationMustBelongToCurrentAttempt() {
+        ToolInvocation previousAttempt = invocation("inv-1", "run-1", 1);
+        RunState running = state(
+                "run-1", "run-1", 6, RunStatus.RUNNING, T3, null,
+                snapshot("run-1"), decision("run-1"), "strategy-2", 2, "",
+                List.of(previousAttempt), null, null, Map.of(), null
+        );
+        ToolInvocation staleAppend = invocation("inv-2", "run-1", 1);
+
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                running,
+                nextState(
+                        running, 7, RunStatus.VERIFYING, T3, null,
+                        snapshot("run-1"), decision("run-1"), "strategy-2", 2, "",
+                        List.of(previousAttempt, staleAppend), null, null, Map.of(), null
+                )
+        )).hasMessageContaining("attempt");
     }
 
     @Test
@@ -1324,6 +1408,19 @@ class RunStateContractTest {
                 invocationId, runId, attempt, "web.search", "search",
                 "search", "web", "{}", "hash", ToolInvocation.RiskLevel.READ,
                 List.of(), List.of(), runId + ":" + attempt + ":" + invocationId,
+                ToolInvocation.Status.REQUESTED, null, null, null, null
+        );
+    }
+
+    private static ToolInvocation invocationWithIdempotencyKey(
+            String invocationId,
+            String idempotencyKey,
+            int attempt
+    ) {
+        return new ToolInvocation(
+                invocationId, "run-1", attempt, "web.search", "search",
+                "search", "web", "{}", "hash", ToolInvocation.RiskLevel.READ,
+                List.of(), List.of(), idempotencyKey,
                 ToolInvocation.Status.REQUESTED, null, null, null, null
         );
     }

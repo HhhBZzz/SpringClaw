@@ -479,6 +479,52 @@ class RunStateContractTest {
     }
 
     @Test
+    void executionDecisionMayFirstAppearOnlyOnContextReadyToDecided() {
+        RunState created = createdState();
+        RunState createdFailureWithDecision = nextState(
+                created, 1, RunStatus.FAILED, T1, T1,
+                null, decision("run-1"), "", 1, "", List.of(), null, null,
+                Map.of(), failure()
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                created,
+                createdFailureWithDecision
+        )).hasMessageContaining("executionDecision");
+
+        RunState contextReadyWithDecision = nextState(
+                created, 1, RunStatus.CONTEXT_READY, T1, null,
+                snapshot("run-1"), decision("run-1"), "", 1, "", List.of(), null, null,
+                Map.of(), null
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                created,
+                contextReadyWithDecision
+        )).hasMessageContaining("executionDecision");
+
+        RunState decisionlessDecided = state(
+                "run-1", "run-1", 2, RunStatus.DECIDED, T2, null,
+                snapshot("run-1"), null, "", 1, "", List.of(), null, null, null
+        );
+        RunState decidedFailureWithDecision = nextState(
+                decisionlessDecided, 3, RunStatus.FAILED, T3, T3,
+                snapshot("run-1"), decision("run-1"), "", 1, "", List.of(), null, null,
+                Map.of(), failure()
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                decisionlessDecided,
+                decidedFailureWithDecision
+        )).hasMessageContaining("executionDecision");
+
+        RunState contextReady = contextReadyState();
+        RunState decided = nextState(
+                contextReady, 2, RunStatus.DECIDED, T2, null,
+                snapshot("run-1"), decision("run-1"), "", 1, "", List.of(), null, null,
+                Map.of(), null
+        );
+        RunTransitionPolicy.validate(contextReady, decided);
+    }
+
+    @Test
     void transitionsPreserveStrategyUntilRetryClearsItForReselection() {
         RunState running = runningState();
         RunState disappeared = nextState(

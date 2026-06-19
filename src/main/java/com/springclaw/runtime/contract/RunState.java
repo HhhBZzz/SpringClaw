@@ -16,8 +16,9 @@ import java.util.Objects;
  *
  * <p>Invariants: {@code runId == requestId}; {@code revision} increases per
  * accepted transition; terminal states are immutable; {@code WAITING_CONFIRMATION}
- * requires a non-empty {@code pendingProposalId}; {@code COMPLETED}/{@code DEGRADED}
- * require a {@link RunResult}; {@code FAILED} requires a typed {@link Failure}.
+ * requires a non-empty {@code pendingProposalId}; terminal state, completion
+ * decision, and result values must agree; {@code FAILED} requires a typed
+ * {@link Failure}.
  */
 public record RunState(
         String runId,
@@ -77,29 +78,107 @@ public record RunState(
         if (attempt < 1) {
             throw new IllegalArgumentException("attempt must be >= 1");
         }
-        toolInvocations = toolInvocations == null ? List.of() : List.copyOf(toolInvocations);
+        toolInvocations = copyToolInvocations(toolInvocations);
         usage = usage == null ? Map.of() : Map.copyOf(usage);
         pendingProposalId = pendingProposalId == null ? "" : pendingProposalId;
         strategyId = strategyId == null ? "" : strategyId;
 
+        requireMatchingRunId(runId, contextSnapshot == null ? null : contextSnapshot.runId(), "ContextSnapshot");
+        requireMatchingRunId(runId, executionDecision == null ? null : executionDecision.runId(), "ExecutionDecision");
+        for (ToolInvocation invocation : toolInvocations) {
+            if (invocation == null) {
+                throw new IllegalArgumentException("toolInvocations must not contain null");
+            }
+            requireMatchingRunId(runId, invocation.runId(), "ToolInvocation");
+        }
+        requireMatchingRunId(
+                runId,
+                completionDecision == null ? null : completionDecision.runId(),
+                "CompletionDecision"
+        );
+        requireMatchingRunId(runId, result == null ? null : result.runId(), "RunResult");
+
         if (status == RunStatus.WAITING_CONFIRMATION && pendingProposalId.isBlank()) {
             throw new IllegalArgumentException("pendingProposalId is required for WAITING_CONFIRMATION");
         }
-        if ((status == RunStatus.COMPLETED || status == RunStatus.DEGRADED)) {
-            if (result == null) {
-                throw new IllegalArgumentException("RunResult is required for " + status);
+        if (status.isTerminal() && result != null && result.status() != status) {
+            throw new IllegalArgumentException("RunResult status must equal RunState status");
+        }
+        switch (status) {
+            case COMPLETED -> requireTerminalEvidence(
+                    status,
+                    finishedAt,
+                    completionDecision,
+                    CompletionDecision.Outcome.COMPLETE,
+                    result
+            );
+            case DEGRADED -> requireTerminalEvidence(
+                    status,
+                    finishedAt,
+                    completionDecision,
+                    CompletionDecision.Outcome.DEGRADE,
+                    result
+            );
+            case FAILED -> {
+                if (failure == null) {
+                    throw new IllegalArgumentException("failure is required for FAILED");
+                }
+                if (finishedAt == null) {
+                    throw new IllegalArgumentException("finishedAt is required for FAILED");
+                }
+                if (completionDecision != null
+                        && completionDecision.outcome() != CompletionDecision.Outcome.FAIL) {
+                    throw new IllegalArgumentException(
+                            "CompletionDecision FAIL is required when present for FAILED"
+                    );
+                }
             }
-            if (finishedAt == null) {
-                throw new IllegalArgumentException("finishedAt is required for " + status);
+            default -> {
+                // Non-terminal states carry partial evidence as the run progresses.
             }
         }
-        if (status == RunStatus.FAILED) {
-            if (failure == null) {
-                throw new IllegalArgumentException("failure is required for FAILED");
-            }
-            if (finishedAt == null) {
-                throw new IllegalArgumentException("finishedAt is required for FAILED");
-            }
+    }
+
+    private static void requireMatchingRunId(
+            String runId,
+            String nestedRunId,
+            String contractName
+    ) {
+        if (nestedRunId != null && !runId.equals(nestedRunId)) {
+            throw new IllegalArgumentException(contractName + " runId must match RunState runId");
+        }
+    }
+
+    private static List<ToolInvocation> copyToolInvocations(List<ToolInvocation> source) {
+        if (source == null) {
+            return List.of();
+        }
+        if (source.stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("toolInvocations must not contain null");
+        }
+        return List.copyOf(source);
+    }
+
+    private static void requireTerminalEvidence(
+            RunStatus status,
+            Instant finishedAt,
+            CompletionDecision completionDecision,
+            CompletionDecision.Outcome requiredOutcome,
+            RunResult result
+    ) {
+        if (result == null) {
+            throw new IllegalArgumentException("RunResult is required for " + status);
+        }
+        if (completionDecision == null) {
+            throw new IllegalArgumentException("CompletionDecision is required for " + status);
+        }
+        if (completionDecision.outcome() != requiredOutcome) {
+            throw new IllegalArgumentException(
+                    "CompletionDecision " + requiredOutcome + " is required for " + status
+            );
+        }
+        if (finishedAt == null) {
+            throw new IllegalArgumentException("finishedAt is required for " + status);
         }
     }
 
@@ -108,103 +187,5 @@ public record RunState(
             throw new IllegalArgumentException(field + " must not be blank");
         }
         return value;
-    }
-
-    /** Mutable builder for constructing RunState fixtures and transitions. */
-    public static Builder builder() {
-        return new Builder();
-    }
-
-    /** Returns a builder pre-populated with this state's values (for transitions). */
-    public Builder toBuilder() {
-        return new Builder()
-                .runId(runId)
-                .requestId(requestId)
-                .revision(revision)
-                .status(status)
-                .sessionKey(sessionKey)
-                .channel(channel)
-                .userId(userId)
-                .roleCodeAtAcceptance(roleCodeAtAcceptance)
-                .originalMessage(originalMessage)
-                .responseMode(responseMode)
-                .acceptedAt(acceptedAt)
-                .startedAt(startedAt)
-                .updatedAt(updatedAt)
-                .finishedAt(finishedAt)
-                .deadlineAt(deadlineAt)
-                .contextSnapshot(contextSnapshot)
-                .executionDecision(executionDecision)
-                .strategyId(strategyId)
-                .attempt(attempt)
-                .pendingProposalId(pendingProposalId)
-                .toolInvocations(toolInvocations)
-                .completionDecision(completionDecision)
-                .result(result)
-                .usage(usage)
-                .failure(failure);
-    }
-
-    public static final class Builder {
-        private String runId;
-        private String requestId;
-        private long revision;
-        private RunStatus status;
-        private String sessionKey;
-        private String channel;
-        private String userId;
-        private String roleCodeAtAcceptance;
-        private String originalMessage;
-        private String responseMode;
-        private Instant acceptedAt;
-        private Instant startedAt;
-        private Instant updatedAt;
-        private Instant finishedAt;
-        private Instant deadlineAt;
-        private ContextSnapshot contextSnapshot;
-        private ExecutionDecision executionDecision;
-        private String strategyId;
-        private int attempt;
-        private String pendingProposalId;
-        private List<ToolInvocation> toolInvocations = List.of();
-        private CompletionDecision completionDecision;
-        private RunResult result;
-        private Map<String, Long> usage = Map.of();
-        private Failure failure;
-
-        public Builder runId(String v) { this.runId = v; return this; }
-        public Builder requestId(String v) { this.requestId = v; return this; }
-        public Builder revision(long v) { this.revision = v; return this; }
-        public Builder status(RunStatus v) { this.status = v; return this; }
-        public Builder sessionKey(String v) { this.sessionKey = v; return this; }
-        public Builder channel(String v) { this.channel = v; return this; }
-        public Builder userId(String v) { this.userId = v; return this; }
-        public Builder roleCodeAtAcceptance(String v) { this.roleCodeAtAcceptance = v; return this; }
-        public Builder originalMessage(String v) { this.originalMessage = v; return this; }
-        public Builder responseMode(String v) { this.responseMode = v; return this; }
-        public Builder acceptedAt(Instant v) { this.acceptedAt = v; return this; }
-        public Builder startedAt(Instant v) { this.startedAt = v; return this; }
-        public Builder updatedAt(Instant v) { this.updatedAt = v; return this; }
-        public Builder finishedAt(Instant v) { this.finishedAt = v; return this; }
-        public Builder deadlineAt(Instant v) { this.deadlineAt = v; return this; }
-        public Builder contextSnapshot(ContextSnapshot v) { this.contextSnapshot = v; return this; }
-        public Builder executionDecision(ExecutionDecision v) { this.executionDecision = v; return this; }
-        public Builder strategyId(String v) { this.strategyId = v; return this; }
-        public Builder attempt(int v) { this.attempt = v; return this; }
-        public Builder pendingProposalId(String v) { this.pendingProposalId = v; return this; }
-        public Builder toolInvocations(List<ToolInvocation> v) { this.toolInvocations = v; return this; }
-        public Builder completionDecision(CompletionDecision v) { this.completionDecision = v; return this; }
-        public Builder result(RunResult v) { this.result = v; return this; }
-        public Builder usage(Map<String, Long> v) { this.usage = v; return this; }
-        public Builder failure(Failure v) { this.failure = v; return this; }
-
-        public RunState build() {
-            return new RunState(
-                    runId, requestId, revision, status, sessionKey, channel, userId,
-                    roleCodeAtAcceptance, originalMessage, responseMode, acceptedAt,
-                    startedAt, updatedAt, finishedAt, deadlineAt, contextSnapshot,
-                    executionDecision, strategyId, attempt, pendingProposalId,
-                    toolInvocations, completionDecision, result, usage, failure);
-        }
     }
 }

@@ -34,7 +34,7 @@ public record CompletionDecision(
         summary = summary == null ? "" : summary;
         evidenceRefs = evidenceRefs == null ? List.of() : List.copyOf(evidenceRefs);
         missingEvidence = missingEvidence == null ? List.of() : List.copyOf(missingEvidence);
-        if (quality < 0.0 || quality > 1.0) {
+        if (!Double.isFinite(quality) || quality < 0.0 || quality > 1.0) {
             throw new IllegalArgumentException("quality must be between 0 and 1");
         }
         decidedAt = Objects.requireNonNull(decidedAt, "decidedAt");

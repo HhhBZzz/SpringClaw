@@ -40,7 +40,7 @@ public record ExecutionDecision(
         requestedInvocations = copy(requestedInvocations);
         strategyRequirements = strategyRequirements == null ? Map.of() : Map.copyOf(strategyRequirements);
         missingInputs = copy(missingInputs);
-        if (confidence < 0.0 || confidence > 1.0) {
+        if (!Double.isFinite(confidence) || confidence < 0.0 || confidence > 1.0) {
             throw new IllegalArgumentException("confidence must be between 0 and 1");
         }
         reason = Objects.requireNonNullElse(reason, "");

@@ -80,9 +80,54 @@ public record ToolInvocation(
             throw new IllegalArgumentException("proposalId is required when status is WAITING_CONFIRMATION");
         }
         proposalId = proposalId == null ? "" : proposalId;
-        startedAt = startedAt; // nullable: set when execution starts
-        finishedAt = finishedAt; // nullable: set when execution finishes
-        outcome = outcome; // nullable: set when outcome is known
+
+        switch (status) {
+            case REQUESTED, WAITING_CONFIRMATION, APPROVED -> {
+                requireNoCompletionData(status, finishedAt, outcome);
+            }
+            case RUNNING -> {
+                if (startedAt == null) {
+                    throw new IllegalArgumentException("startedAt is required for RUNNING");
+                }
+                requireNoCompletionData(status, finishedAt, outcome);
+            }
+            case SUCCEEDED -> {
+                if (startedAt == null) {
+                    throw new IllegalArgumentException("startedAt is required for SUCCEEDED");
+                }
+                requireFinishedOutcome(status, finishedAt, outcome);
+                if (!outcome.success()) {
+                    throw new IllegalArgumentException("SUCCEEDED requires outcome.success=true");
+                }
+            }
+            case FAILED, DENIED -> {
+                requireFinishedOutcome(status, finishedAt, outcome);
+                if (outcome.success()) {
+                    throw new IllegalArgumentException(status + " requires outcome.success=false");
+                }
+            }
+        }
+        if (outcome != null && !outcome.completedAt().equals(finishedAt)) {
+            throw new IllegalArgumentException("outcome.completedAt must equal finishedAt");
+        }
+    }
+
+    private static void requireNoCompletionData(Status status, Instant finishedAt, Outcome outcome) {
+        if (finishedAt != null) {
+            throw new IllegalArgumentException("finishedAt is not allowed for " + status);
+        }
+        if (outcome != null) {
+            throw new IllegalArgumentException("outcome is not allowed for " + status);
+        }
+    }
+
+    private static void requireFinishedOutcome(Status status, Instant finishedAt, Outcome outcome) {
+        if (finishedAt == null) {
+            throw new IllegalArgumentException("finishedAt is required for " + status);
+        }
+        if (outcome == null) {
+            throw new IllegalArgumentException("outcome is required for " + status);
+        }
     }
 
     private static String requireText(String value, String field) {

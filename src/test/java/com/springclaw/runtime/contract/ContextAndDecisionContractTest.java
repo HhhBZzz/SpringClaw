@@ -44,4 +44,23 @@ class ContextAndDecisionContractTest {
         )).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("runId");
     }
+
+    @Test
+    void executionDecisionRejectsNonFiniteOrOutOfRangeConfidence() {
+        for (double invalid : List.of(
+                Double.NaN,
+                Double.NEGATIVE_INFINITY,
+                Double.POSITIVE_INFINITY,
+                -0.01,
+                1.01
+        )) {
+            assertThatThrownBy(() -> new ExecutionDecision(
+                    "run-1", "research", "answer", "agent", "read",
+                    List.of(), List.of(), Map.of(), List.of(), invalid,
+                    "matched capability", "policy", Instant.now()
+            )).as("confidence %s", invalid)
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("confidence");
+        }
+    }
 }

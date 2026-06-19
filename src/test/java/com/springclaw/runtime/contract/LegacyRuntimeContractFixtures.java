@@ -18,6 +18,9 @@ import java.util.Objects;
  */
 final class LegacyRuntimeContractFixtures {
 
+    private static final String MEMORY_BANK_HEADING = "# 项目记忆（Memory Bank）";
+    private static final String EVENT_CONTEXT_HEADING = "# 短期会话上下文（事件流）";
+
     private LegacyRuntimeContractFixtures() {
     }
 
@@ -38,13 +41,15 @@ final class LegacyRuntimeContractFixtures {
                 assembled.question(),
                 assembled.question(),
                 "",                              // systemPrompt: legacy AssembledContext does not carry it
-                "",                              // memoryBankText: embedded in observePrompt today
+                memoryBankText(assembled.observePrompt()),
                 assembled.eventContext() == null || assembled.eventContext().isBlank()
                         ? List.of() : List.of(assembled.eventContext()),
                 assembled.semanticContext() == null || assembled.semanticContext().isBlank()
                         ? List.of() : List.of(assembled.semanticContext()),
                 List.of(),                       // activeLearningRules: legacy does not expose separately
-                List.of(),                       // allowedCapabilities: filled by ExecutionDecision translation
+                // AssembledContext has no capability catalog; the production bridge
+                // must source allowed capabilities elsewhere instead of guessing.
+                List.of(),
                 Map.of(),
                 Map.of("schema", "springclaw.context-source.v1",
                         "learningActive", String.valueOf(assembled.memoryLearningActiveCount()),
@@ -79,6 +84,21 @@ final class LegacyRuntimeContractFixtures {
                 "legacy-agent-decision",
                 decidedAt
         );
+    }
+
+    private static String memoryBankText(String observePrompt) {
+        if (observePrompt == null || observePrompt.isBlank()) {
+            return "";
+        }
+        int headingStart = observePrompt.indexOf(MEMORY_BANK_HEADING);
+        if (headingStart < 0) {
+            return "";
+        }
+        int bodyStart = headingStart + MEMORY_BANK_HEADING.length();
+        int bodyEnd = observePrompt.indexOf(EVENT_CONTEXT_HEADING, bodyStart);
+        return (bodyEnd < 0
+                ? observePrompt.substring(bodyStart)
+                : observePrompt.substring(bodyStart, bodyEnd)).trim();
     }
 
     private static String snapshotHash(String runId, AssembledContext assembled, Instant capturedAt) {

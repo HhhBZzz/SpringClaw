@@ -83,6 +83,9 @@ public record ToolInvocation(
 
         switch (status) {
             case REQUESTED, WAITING_CONFIRMATION, APPROVED -> {
+                if (startedAt != null) {
+                    throw new IllegalArgumentException("startedAt is not allowed for " + status);
+                }
                 requireNoCompletionData(status, finishedAt, outcome);
             }
             case RUNNING -> {
@@ -106,6 +109,9 @@ public record ToolInvocation(
                     throw new IllegalArgumentException(status + " requires outcome.success=false");
                 }
             }
+        }
+        if (startedAt != null && finishedAt != null && finishedAt.isBefore(startedAt)) {
+            throw new IllegalArgumentException("finishedAt cannot precede startedAt");
         }
         if (outcome != null && !outcome.completedAt().equals(finishedAt)) {
             throw new IllegalArgumentException("outcome.completedAt must equal finishedAt");

@@ -5,10 +5,8 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
-import java.util.Arrays;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RunEventContractTest {
@@ -41,44 +39,48 @@ class RunEventContractTest {
 
     @Test
     void exposesSequenceFreeDraftThatConvertsWithStoreOwnedIdentityAndSequence() {
-        assertThat(Arrays.stream(RunEvent.class.getDeclaredClasses())
-                .map(Class::getSimpleName))
-                .contains("Draft");
+        Instant timestamp = Instant.parse("2026-06-19T00:00:00Z");
+        RunEvent.Draft draft = new RunEvent.Draft(
+                "run-1",
+                RunEventType.CONTEXT_READY,
+                "context",
+                RunStatus.CONTEXT_READY,
+                timestamp,
+                12L,
+                "springclaw.run-event.context-ready.v1",
+                "{\"hash\":\"h1\"}",
+                "cmd-1",
+                "run-1"
+        );
 
-        assertThatCode(() -> {
-            Class<?> draftType = Class.forName("com.springclaw.runtime.contract.RunEvent$Draft");
-            Object draft = draftType.getDeclaredConstructor(
-                    String.class,
-                    RunEventType.class,
-                    String.class,
-                    RunStatus.class,
-                    Instant.class,
-                    long.class,
-                    String.class,
-                    String.class,
-                    String.class,
-                    String.class
-            ).newInstance(
-                    "run-1",
-                    RunEventType.CONTEXT_READY,
-                    "context",
-                    RunStatus.CONTEXT_READY,
-                    Instant.parse("2026-06-19T00:00:00Z"),
-                    12L,
-                    "springclaw.run-event.context-ready.v1",
-                    "{\"hash\":\"h1\"}",
-                    "cmd-1",
-                    "run-1"
-            );
+        assertThat(draft.runId()).isEqualTo("run-1");
+        assertThat(draft.eventType()).isEqualTo(RunEventType.CONTEXT_READY);
+        assertThat(draft.stage()).isEqualTo("context");
+        assertThat(draft.status()).isEqualTo(RunStatus.CONTEXT_READY);
+        assertThat(draft.timestamp()).isEqualTo(timestamp);
+        assertThat(draft.durationMs()).isEqualTo(12L);
+        assertThat(draft.payloadSchema()).isEqualTo("springclaw.run-event.context-ready.v1");
+        assertThat(draft.payload()).isEqualTo("{\"hash\":\"h1\"}");
+        assertThat(draft.causationId()).isEqualTo("cmd-1");
+        assertThat(draft.correlationId()).isEqualTo("run-1");
 
-            RunEvent persisted = (RunEvent) draftType
-                    .getMethod("persisted", String.class, long.class)
-                    .invoke(draft, "evt-1", 7L);
+        RunEvent persisted = draft.persisted("evt-1", 7L);
 
-            assertThat(persisted.eventId()).isEqualTo("evt-1");
-            assertThat(persisted.sequence()).isEqualTo(7L);
-            assertThat(persisted.runId()).isEqualTo("run-1");
-            assertThat(persisted.eventType()).isEqualTo(RunEventType.CONTEXT_READY);
-        }).doesNotThrowAnyException();
+        assertThat(persisted.eventId()).isEqualTo("evt-1");
+        assertThat(persisted.sequence()).isEqualTo(7L);
+        assertThat(persisted.runId()).isEqualTo(draft.runId());
+        assertThat(persisted.eventType()).isEqualTo(draft.eventType());
+        assertThat(persisted.stage()).isEqualTo(draft.stage());
+        assertThat(persisted.status()).isEqualTo(draft.status());
+        assertThat(persisted.timestamp()).isEqualTo(draft.timestamp());
+        assertThat(persisted.durationMs()).isEqualTo(draft.durationMs());
+        assertThat(persisted.payloadSchema()).isEqualTo(draft.payloadSchema());
+        assertThat(persisted.payload()).isEqualTo(draft.payload());
+        assertThat(persisted.causationId()).isEqualTo(draft.causationId());
+        assertThat(persisted.correlationId()).isEqualTo(draft.correlationId());
+
+        assertThatThrownBy(() -> draft.persisted("evt-2", 0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("sequence");
     }
 }

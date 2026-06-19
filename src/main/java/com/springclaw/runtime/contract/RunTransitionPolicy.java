@@ -48,6 +48,7 @@ public final class RunTransitionPolicy {
         if (next.updatedAt().isBefore(previous.updatedAt())) {
             throw new IllegalStateException("updatedAt cannot move backwards");
         }
+        validateStartedAt(previous, next);
         boolean verificationRetry = previous.status() == RunStatus.VERIFYING
                 && next.status() == RunStatus.DECIDED;
         if (!verificationRetry && next.attempt() != previous.attempt()) {
@@ -168,15 +169,14 @@ public final class RunTransitionPolicy {
     private static void validateToolInvocations(RunState previous, RunState next) {
         if (next.toolInvocations().size() < previous.toolInvocations().size()) {
             throw new IllegalStateException(
-                    "toolInvocations must preserve the previous list as an exact prefix"
+                    "toolInvocations cannot be removed"
             );
         }
         for (int index = 0; index < previous.toolInvocations().size(); index++) {
-            if (!previous.toolInvocations().get(index).equals(next.toolInvocations().get(index))) {
-                throw new IllegalStateException(
-                        "toolInvocations must preserve the previous list as an exact prefix"
-                );
-            }
+            validateToolInvocationProgression(
+                    previous.toolInvocations().get(index),
+                    next.toolInvocations().get(index)
+            );
         }
         for (int index = previous.toolInvocations().size();
              index < next.toolInvocations().size();
@@ -186,6 +186,134 @@ public final class RunTransitionPolicy {
                         "new ToolInvocation attempt must not exceed next RunState attempt"
                 );
             }
+        }
+    }
+
+    private static void validateStartedAt(RunState previous, RunState next) {
+        if (previous.startedAt() != null
+                && !previous.startedAt().equals(next.startedAt())) {
+            throw new IllegalStateException("startedAt cannot change or disappear");
+        }
+    }
+
+    private static void validateToolInvocationProgression(
+            ToolInvocation previous,
+            ToolInvocation next
+    ) {
+        requireToolFieldEqual(previous.invocationId(), next.invocationId(), "invocationId");
+        requireToolFieldEqual(previous.runId(), next.runId(), "runId");
+        requireToolFieldEqual(previous.attempt(), next.attempt(), "attempt");
+        requireToolFieldEqual(previous.capabilityId(), next.capabilityId(), "capabilityId");
+        requireToolFieldEqual(previous.operationId(), next.operationId(), "operationId");
+        requireToolFieldEqual(previous.toolName(), next.toolName(), "toolName");
+        requireToolFieldEqual(previous.toolsetId(), next.toolsetId(), "toolsetId");
+        requireToolFieldEqual(
+                previous.canonicalArgumentsJson(),
+                next.canonicalArgumentsJson(),
+                "canonicalArgumentsJson"
+        );
+        requireToolFieldEqual(previous.argumentsHash(), next.argumentsHash(), "argumentsHash");
+        requireToolFieldEqual(previous.riskLevel(), next.riskLevel(), "riskLevel");
+        requireToolFieldEqual(previous.targetPaths(), next.targetPaths(), "targetPaths");
+        requireToolFieldEqual(
+                previous.expectedEvidence(),
+                next.expectedEvidence(),
+                "expectedEvidence"
+        );
+        requireToolFieldEqual(
+                previous.idempotencyKey(),
+                next.idempotencyKey(),
+                "idempotencyKey"
+        );
+        validateToolStatus(previous.status(), next.status());
+        validateProposalId(previous, next);
+        validateInvocationStartedAt(previous, next);
+        validateTerminalField(previous.finishedAt(), next.finishedAt(), next.status(), "finishedAt");
+        validateTerminalField(previous.outcome(), next.outcome(), next.status(), "outcome");
+    }
+
+    private static void validateToolStatus(
+            ToolInvocation.Status previous,
+            ToolInvocation.Status next
+    ) {
+        boolean allowed = switch (previous) {
+            case REQUESTED -> next == ToolInvocation.Status.REQUESTED
+                    || next == ToolInvocation.Status.WAITING_CONFIRMATION
+                    || next == ToolInvocation.Status.APPROVED
+                    || next == ToolInvocation.Status.RUNNING
+                    || next == ToolInvocation.Status.FAILED
+                    || next == ToolInvocation.Status.DENIED;
+            case WAITING_CONFIRMATION -> next == ToolInvocation.Status.WAITING_CONFIRMATION
+                    || next == ToolInvocation.Status.APPROVED
+                    || next == ToolInvocation.Status.FAILED
+                    || next == ToolInvocation.Status.DENIED;
+            case APPROVED -> next == ToolInvocation.Status.APPROVED
+                    || next == ToolInvocation.Status.RUNNING
+                    || next == ToolInvocation.Status.FAILED
+                    || next == ToolInvocation.Status.DENIED;
+            case RUNNING -> next == ToolInvocation.Status.RUNNING
+                    || next == ToolInvocation.Status.SUCCEEDED
+                    || next == ToolInvocation.Status.FAILED;
+            case SUCCEEDED, FAILED, DENIED -> next == previous;
+        };
+        if (!allowed) {
+            throw new IllegalStateException(
+                    "toolInvocations contain invalid status progression: "
+                            + previous + " -> " + next
+            );
+        }
+    }
+
+    private static void validateProposalId(
+            ToolInvocation previous,
+            ToolInvocation next
+    ) {
+        if (!previous.proposalId().isBlank()) {
+            requireToolFieldEqual(previous.proposalId(), next.proposalId(), "proposalId");
+            return;
+        }
+        if (!next.proposalId().isBlank()
+                && next.status() != ToolInvocation.Status.WAITING_CONFIRMATION) {
+            throw new IllegalStateException(
+                    "toolInvocations proposalId may first appear only when entering WAITING_CONFIRMATION"
+            );
+        }
+    }
+
+    private static void validateInvocationStartedAt(
+            ToolInvocation previous,
+            ToolInvocation next
+    ) {
+        if (previous.startedAt() != null) {
+            requireToolFieldEqual(previous.startedAt(), next.startedAt(), "startedAt");
+        }
+    }
+
+    private static void validateTerminalField(
+            Object previous,
+            Object next,
+            ToolInvocation.Status nextStatus,
+            String field
+    ) {
+        if (previous != null) {
+            requireToolFieldEqual(previous, next, field);
+            return;
+        }
+        if (next != null
+                && nextStatus != ToolInvocation.Status.SUCCEEDED
+                && nextStatus != ToolInvocation.Status.FAILED
+                && nextStatus != ToolInvocation.Status.DENIED) {
+            throw new IllegalStateException(
+                    "toolInvocations " + field + " may first appear only on terminal progression"
+            );
+        }
+    }
+
+    private static void requireToolFieldEqual(Object previous, Object next, String field) {
+        if (!Objects.equals(previous, next)) {
+            throw new IllegalStateException(
+                    "toolInvocations cannot change " + field
+            );
         }
     }
 

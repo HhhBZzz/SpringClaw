@@ -36,6 +36,11 @@ public final class RunTransitionPolicy {
         if (next.updatedAt().isBefore(previous.updatedAt())) {
             throw new IllegalStateException("updatedAt cannot move backwards");
         }
+        boolean verificationRetry = previous.status() == RunStatus.VERIFYING
+                && next.status() == RunStatus.DECIDED;
+        if (!verificationRetry && next.attempt() != previous.attempt()) {
+            throw new IllegalStateException("attempt cannot change outside verification retry");
+        }
         if (next.status() == RunStatus.FAILED && next.failure() == null) {
             throw new IllegalStateException("failure is required for transition to FAILED");
         }
@@ -58,8 +63,7 @@ public final class RunTransitionPolicy {
                 && next.strategyId().isBlank()) {
             throw new IllegalStateException("strategyId is required for DECIDED -> RUNNING");
         }
-        if (previous.status() == RunStatus.VERIFYING
-                && next.status() == RunStatus.DECIDED) {
+        if (verificationRetry) {
             CompletionDecision completionDecision = previous.completionDecision();
             if (completionDecision == null
                     || completionDecision.outcome() != CompletionDecision.Outcome.RETRY) {
@@ -75,6 +79,16 @@ public final class RunTransitionPolicy {
             if (completionDecision.nextAttempt() != next.attempt()) {
                 throw new IllegalStateException(
                         "CompletionDecision nextAttempt must equal next state attempt"
+                );
+            }
+        }
+        if (previous.status() == RunStatus.VERIFYING
+                && next.status() == RunStatus.FAILED) {
+            CompletionDecision completionDecision = next.completionDecision();
+            if (completionDecision == null
+                    || completionDecision.outcome() != CompletionDecision.Outcome.FAIL) {
+                throw new IllegalStateException(
+                        "CompletionDecision FAIL is required for VERIFYING -> FAILED"
                 );
             }
         }

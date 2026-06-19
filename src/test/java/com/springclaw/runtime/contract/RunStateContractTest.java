@@ -242,6 +242,43 @@ class RunStateContractTest {
     }
 
     @Test
+    void transitionsPreserveAttemptExceptVerificationRetry() {
+        RunState changedDuringContextAssembly = state(
+                "run-1", "run-1", 1, RunStatus.CONTEXT_READY, T1, null,
+                snapshot("run-1"), null, "", 2, "", List.of(), null, null, null
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                createdState(),
+                changedDuringContextAssembly
+        )).hasMessageContaining("attempt");
+
+        RunState changedDuringExecution = state(
+                "run-1", "run-1", 4, RunStatus.VERIFYING, T3, null,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 2, "",
+                List.of(), null, null, null
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                runningState(),
+                changedDuringExecution
+        )).hasMessageContaining("attempt");
+
+        RunState waiting = state(
+                "run-1", "run-1", 4, RunStatus.WAITING_CONFIRMATION, T3, null,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 1, "proposal-1",
+                List.of(), null, null, null
+        );
+        RunState resumedWithChangedAttempt = state(
+                "run-1", "run-1", 5, RunStatus.RUNNING, T3, null,
+                snapshot("run-1"), decision("run-1"), "strategy-1", 2, "",
+                List.of(), null, null, null
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                waiting,
+                resumedWithChangedAttempt
+        )).hasMessageContaining("attempt");
+    }
+
+    @Test
     void verifyingRetryRequiresRetryDecisionAndMatchingNextAttempt() {
         RunState retrying = verifyingState(
                 1,
@@ -279,6 +316,29 @@ class RunStateContractTest {
         );
         assertThatThrownBy(() -> RunTransitionPolicy.validate(mismatchedDecisionAttempt, nextAttempt))
                 .hasMessageContaining("nextAttempt");
+    }
+
+    @Test
+    void verifyingFailureRequiresFailCompletionDecision() {
+        RunState verifying = verifyingState(1, null);
+        RunState failedWithoutDecision = terminalState(
+                RunStatus.FAILED,
+                null,
+                null,
+                failure()
+        );
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                verifying,
+                failedWithoutDecision
+        )).hasMessageContaining("FAIL");
+
+        RunState failedWithDecision = terminalState(
+                RunStatus.FAILED,
+                completion("run-1", CompletionDecision.Outcome.FAIL, 0),
+                null,
+                failure()
+        );
+        RunTransitionPolicy.validate(verifying, failedWithDecision);
     }
 
     @Test

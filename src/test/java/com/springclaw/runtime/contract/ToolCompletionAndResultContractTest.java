@@ -67,6 +67,21 @@ class ToolCompletionAndResultContractTest {
     }
 
     @Test
+    void preExecutionStatusesCannotCarryStartedAt() {
+        for (ToolInvocation.Status status : List.of(
+                ToolInvocation.Status.REQUESTED,
+                ToolInvocation.Status.WAITING_CONFIRMATION,
+                ToolInvocation.Status.APPROVED
+        )) {
+            String proposalId = status == ToolInvocation.Status.WAITING_CONFIRMATION
+                    ? "proposal-1" : null;
+            assertThatThrownBy(() -> invocation(
+                    status, proposalId, STARTED, null, null
+            )).as(status.name()).hasMessageContaining("startedAt");
+        }
+    }
+
+    @Test
     void succeededRequiresStartedFinishedAndSuccessfulOutcome() {
         assertThatThrownBy(() -> invocation(
                 ToolInvocation.Status.SUCCEEDED, null, null, FINISHED, outcome(true, FINISHED)
@@ -113,6 +128,27 @@ class ToolCompletionAndResultContractTest {
                 FINISHED,
                 outcome(true, FINISHED.plusSeconds(1))
         )).hasMessageContaining("completedAt");
+    }
+
+    @Test
+    void finishedAtCannotPrecedeStartedAt() {
+        Instant earlierFinish = STARTED.minusSeconds(1);
+
+        assertThatThrownBy(() -> invocation(
+                ToolInvocation.Status.SUCCEEDED,
+                null,
+                STARTED,
+                earlierFinish,
+                outcome(true, earlierFinish)
+        )).hasMessageContaining("finishedAt");
+
+        assertThatThrownBy(() -> invocation(
+                ToolInvocation.Status.FAILED,
+                null,
+                STARTED,
+                earlierFinish,
+                outcome(false, earlierFinish)
+        )).hasMessageContaining("finishedAt");
     }
 
     @Test

@@ -6,7 +6,6 @@ import com.springclaw.service.agent.AgentRuntimeEngine;
 import com.springclaw.service.agent.CapabilityExecutorRegistry;
 import com.springclaw.service.agent.EngineSelector;
 import com.springclaw.service.ai.AiProviderService;
-import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.chat.impl.AutonomousLoopEngine;
 import com.springclaw.service.chat.impl.BasicStreamEngine;
 import com.springclaw.service.chat.impl.ChatContext;
@@ -15,12 +14,12 @@ import com.springclaw.service.chat.impl.ChatResultPersister;
 import com.springclaw.service.chat.impl.ChatRoutingPolicyService;
 import com.springclaw.service.chat.impl.ChatRoutingPolicyService.RoutingDecision;
 import com.springclaw.service.chat.impl.ConversationAdvisorSupport;
-import com.springclaw.service.chat.impl.LocalExecutionNarrator;
 import com.springclaw.service.chat.impl.LocalExecutionSupport;
 import com.springclaw.service.chat.impl.ModelCallExecutor;
 import com.springclaw.service.chat.impl.ModelLedStreamEngine;
 import com.springclaw.service.chat.impl.ModelTransportGuardService;
 import com.springclaw.service.chat.impl.OparLoopEngine;
+import com.springclaw.service.chat.impl.RuntimeEngineTestFactory;
 import com.springclaw.service.chat.impl.SimplifiedOparEngine;
 import com.springclaw.service.chat.impl.SseEventBridge;
 import com.springclaw.service.guard.ChatGuardService;
@@ -35,12 +34,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.mockito.Mockito;
 
-import java.lang.reflect.Constructor;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -309,22 +308,7 @@ class RuntimeRouteCharacterizationTest {
             );
             when(modelTransportGuardService.isModelCallEnabled(any())).thenReturn(true);
 
-            oparLoopEngine = instantiate(
-                    OparLoopEngine.class,
-                    mock(AiProviderService.class),
-                    mock(ToolOrchestrator.class),
-                    mock(LocalSkillFallbackService.class),
-                    mock(LocalExecutionNarrator.class),
-                    modelTransportGuardService,
-                    mock(ModelCallExecutor.class),
-                    mockByName("com.springclaw.service.chat.impl.OparContextAwareSupport"),
-                    mockByName("com.springclaw.service.chat.impl.OparPromptSupport"),
-                    mock(ConversationAdvisorSupport.class),
-                    mock(LocalExecutionSupport.class),
-                    true,
-                    true,
-                    3
-            );
+            oparLoopEngine = RuntimeEngineTestFactory.oparLoopEngine(modelTransportGuardService);
             basicStreamEngine = new BasicStreamEngine(
                     mock(ModelCallExecutor.class),
                     mock(ConversationAdvisorSupport.class),
@@ -370,19 +354,7 @@ class RuntimeRouteCharacterizationTest {
                     mock(ChatGuardService.class),
                     true
             );
-            simplifiedOparEngine = instantiate(
-                    SimplifiedOparEngine.class,
-                    mock(AiProviderService.class),
-                    mock(ToolOrchestrator.class),
-                    mock(LocalSkillFallbackService.class),
-                    mock(LocalExecutionNarrator.class),
-                    modelTransportGuardService,
-                    mock(ModelCallExecutor.class),
-                    mockByName("com.springclaw.service.chat.impl.OparContextAwareSupport"),
-                    mock(ConversationAdvisorSupport.class),
-                    mock(ChatResponsePolicyService.class),
-                    mock(LocalExecutionSupport.class)
-            );
+            simplifiedOparEngine = RuntimeEngineTestFactory.simplifiedOparEngine(modelTransportGuardService);
 
             selector = new EngineSelector(List.of(
                     simplifiedOparEngine,
@@ -395,21 +367,49 @@ class RuntimeRouteCharacterizationTest {
         }
 
         @Test
-        void selectorSortsAllSixActualInstancesByObservedPriorityOrder() {
+        void allSixActualInstancesExposeObservedPriorityValues() {
             assertThat(selector.listAll())
-                    .extracting(AgentEngine::name)
-                    .containsExactly(
-                            "basic-stream",
-                            "agent-runtime",
-                            "autonomous-loop",
-                            "opar-loop",
-                            "model-led-stream",
-                            "simplified"
+                    .extracting(AgentEngine::name, AgentEngine::priority)
+                    .containsExactlyInAnyOrder(
+                            tuple("basic-stream", 1),
+                            tuple("agent-runtime", 2),
+                            tuple("autonomous-loop", 2),
+                            tuple("opar-loop", 3),
+                            tuple("model-led-stream", 5),
+                            tuple("simplified", 10)
                     );
+            assertThat(selector.listAll())
+                    .extracting(AgentEngine::priority)
+                    .isSorted();
         }
 
         @Test
-        void representativeContextsSelectTheObservedProductionEngines() {
+        void equalPriorityOrderIsInjectionDependentNotDeclaredByEngineSelector() {
+            // EngineSelector performs a stable priority sort, so the two
+            // priority-2 engines retain whatever order Spring injects. These
+            // assertions characterize that dependency; they do not claim a
+            // particular Spring bean-discovery order.
+            EngineSelector runtimeFirst = new EngineSelector(List.of(
+                    agentRuntimeEngine,
+                    autonomousLoopEngine,
+                    simplifiedOparEngine
+            ));
+            EngineSelector autonomousFirst = new EngineSelector(List.of(
+                    autonomousLoopEngine,
+                    agentRuntimeEngine,
+                    simplifiedOparEngine
+            ));
+
+            assertThat(runtimeFirst.listAll())
+                    .extracting(AgentEngine::name)
+                    .containsExactly("agent-runtime", "autonomous-loop", "simplified");
+            assertThat(autonomousFirst.listAll())
+                    .extracting(AgentEngine::name)
+                    .containsExactly("autonomous-loop", "agent-runtime", "simplified");
+        }
+
+        @Test
+        void productionReachableContextsSelectObservedEnginesExceptModelLed() {
             assertThat(selector.select(context(
                     "simplified", "默认链路", "agent", "general",
                     AgentDecision.general("普通聊天"))).name())
@@ -431,27 +431,40 @@ class RuntimeRouteCharacterizationTest {
                     .isEqualTo("opar-loop");
 
             assertThat(selector.select(context(
-                    "simplified", "默认链路", "agent", "web_research", null)).name())
-                    .isEqualTo("model-led-stream");
-
-            assertThat(selector.select(context(
                     "simplified", "默认链路", "agent", "workspace_analysis",
                     decision("workspace_analysis", "agent_tools", "dangerous", true))).name())
                     .isEqualTo("simplified");
         }
 
         @Test
-        void modelLedDoesNotSupportGeneralDecisionEvenWhenContextIntentIsNonGeneral() {
-            ChatContext context = context(
+        @DisplayName("ModelLed is currently unreachable: AgentRuntime shadows a reachable non-general basic_model decision")
+        void modelLedIsShadowedForReachableNonGeneralBasicModelDecision() {
+            ChatContext modelClassifiedContext = context(
                     "simplified",
                     "默认链路",
                     "agent",
                     "web_research",
-                    AgentDecision.general("模型路由判定为普通问答")
+                    decision("web_research", "basic_model", "read", false)
             );
 
-            assertThat(modelLedStreamEngine.supports(context)).isFalse();
-            assertThat(selector.select(context).name()).isEqualTo("basic-stream");
+            assertThat(modelLedStreamEngine.supports(modelClassifiedContext)).isTrue();
+            assertThat(agentRuntimeEngine.supports(modelClassifiedContext)).isTrue();
+            assertThat(selector.select(modelClassifiedContext).name()).isEqualTo("agent-runtime");
+        }
+
+        @Test
+        @DisplayName("ModelLed is currently unreachable: its own supports blocks a reachable agent_tools decision")
+        void modelLedBlocksReachableAgentToolsDecisionBeforeSelectorCanChooseIt() {
+            ChatContext deterministicCapabilityContext = context(
+                    "simplified",
+                    "默认链路",
+                    "agent",
+                    "web_research",
+                    decision("web_research", "agent_tools", "read", false)
+            );
+
+            assertThat(modelLedStreamEngine.supports(deterministicCapabilityContext)).isFalse();
+            assertThat(selector.select(deterministicCapabilityContext).name()).isEqualTo("agent-runtime");
         }
 
         private AgentDecision decision(String intent,
@@ -492,47 +505,5 @@ class RuntimeRouteCharacterizationTest {
             );
         }
 
-        private Object mockByName(String className) {
-            try {
-                return mock(Class.forName(className));
-            } catch (ClassNotFoundException ex) {
-                throw new IllegalStateException(ex);
-            }
-        }
-
-        private <T> T instantiate(Class<T> type, Object... arguments) {
-            for (Constructor<?> constructor : type.getConstructors()) {
-                Class<?>[] parameterTypes = constructor.getParameterTypes();
-                if (parameterTypes.length != arguments.length) {
-                    continue;
-                }
-                boolean compatible = true;
-                for (int index = 0; index < parameterTypes.length; index++) {
-                    if (!isCompatible(parameterTypes[index], arguments[index])) {
-                        compatible = false;
-                        break;
-                    }
-                }
-                if (compatible) {
-                    try {
-                        return type.cast(constructor.newInstance(arguments));
-                    } catch (ReflectiveOperationException ex) {
-                        throw new IllegalStateException(ex);
-                    }
-                }
-            }
-            throw new IllegalStateException("No compatible constructor found for " + type.getName());
-        }
-
-        private boolean isCompatible(Class<?> parameterType, Object argument) {
-            if (argument == null) {
-                return !parameterType.isPrimitive();
-            }
-            if (!parameterType.isPrimitive()) {
-                return parameterType.isInstance(argument);
-            }
-            return (parameterType == boolean.class && argument instanceof Boolean)
-                    || (parameterType == int.class && argument instanceof Integer);
-        }
     }
 }

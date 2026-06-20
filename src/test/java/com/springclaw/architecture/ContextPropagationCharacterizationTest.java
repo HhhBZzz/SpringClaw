@@ -31,6 +31,7 @@ import com.springclaw.service.usage.LlmUsageRecordService;
 import com.springclaw.tool.runtime.CapabilityRegistry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
@@ -41,6 +42,9 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.document.Document;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -70,22 +74,30 @@ import static org.mockito.Mockito.when;
 @SuppressWarnings({"unchecked", "rawtypes"})
 class ContextPropagationCharacterizationTest {
 
+    private static final String MEMORY_BANK_MARKER = "MEMORY-BANK-CHARACTERIZATION-7F3A";
+
+    @TempDir
+    Path tempDir;
+
     @Test
     @DisplayName("ContextAssembler production call renders question, Memory Bank, event, and semantic sections")
-    void contextAssemblerBuildsObservedFourSectionPrompt() {
+    void contextAssemblerBuildsObservedFourSectionPrompt() throws IOException {
         AssembledContext context = assembleContext();
 
         assertThat(context.observePrompt())
                 .contains("# 当前问题", "为什么登录失败")
-                .contains("# 项目记忆（Memory Bank）")
+                .contains("# 项目记忆（Memory Bank）", MEMORY_BANK_MARKER)
                 .contains("# 短期会话上下文（事件流）", context.eventContext(), "上一轮问题")
                 .contains("# 长期语义记忆（同会话优先）", context.semanticContext(),
                         "previous error: NullPointerException");
+        assertThat(context.sourceSummary().memoryBankUsed()).isTrue();
+        assertThat(context.sourceSummary().memoryBankChars())
+                .isGreaterThanOrEqualTo(MEMORY_BANK_MARKER.length());
     }
 
     @Test
     @DisplayName("ChatContextFactory production call carries only assembled observePrompt in ContextInjection")
-    void chatContextFactoryBuildsCurrentInjectionShape() {
+    void chatContextFactoryBuildsCurrentInjectionShape() throws IOException {
         AiProviderService aiProviderService = mock(AiProviderService.class);
         SoulPromptService soulPromptService = mock(SoulPromptService.class);
         AgentSessionService agentSessionService = mock(AgentSessionService.class);
@@ -313,7 +325,7 @@ class ContextPropagationCharacterizationTest {
         ).build();
     }
 
-    private AssembledContext assembleContext() {
+    private AssembledContext assembleContext() throws IOException {
         MessageEventService messageEventService = mock(MessageEventService.class);
         MemoryService memoryService = mock(MemoryService.class);
         when(messageEventService.listRecent("session-A", 16)).thenReturn(List.of(
@@ -332,10 +344,16 @@ class ContextPropagationCharacterizationTest {
                 )
         ));
         when(memoryService.recallByUser("alice", "为什么登录失败", 4)).thenReturn(List.of());
+        Path memoryBankRoot = tempDir.resolve("docs").resolve("memory-bank");
+        Files.createDirectories(memoryBankRoot);
+        Files.writeString(
+                memoryBankRoot.resolve("current-state.md"),
+                "# Current State\n\n" + MEMORY_BANK_MARKER
+        );
         ContextAssembler assembler = new ContextAssembler(
                 messageEventService,
                 memoryService,
-                new MemoryBankService(false, ".", 400),
+                new MemoryBankService(true, memoryBankRoot.toString(), 800),
                 8,
                 8,
                 400

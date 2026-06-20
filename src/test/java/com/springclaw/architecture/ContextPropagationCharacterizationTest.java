@@ -1,182 +1,364 @@
 package com.springclaw.architecture;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.springclaw.domain.entity.AgentSession;
+import com.springclaw.domain.entity.MessageEvent;
+import com.springclaw.dto.chat.ChatRequest;
+import com.springclaw.service.agent.AgentDecision;
+import com.springclaw.service.agent.AgentDecisionRequest;
+import com.springclaw.service.agent.AgentDecisionRouter;
+import com.springclaw.service.agent.AgentDecisionService;
+import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.auth.AuthService;
+import com.springclaw.service.chat.impl.ChatContext;
+import com.springclaw.service.chat.impl.ChatContextFactory;
+import com.springclaw.service.chat.impl.ChatRoutingPolicyService;
+import com.springclaw.service.chat.impl.ChatRoutingStateService;
 import com.springclaw.service.chat.impl.ConversationAdvisorSupport;
+import com.springclaw.service.chat.impl.ModelCallExecutor;
+import com.springclaw.service.chat.impl.ModelTransportGuardService;
 import com.springclaw.service.chat.impl.SemanticMemoryAdvisor;
 import com.springclaw.service.context.AssembledContext;
-import com.springclaw.service.context.ContextInjection;
+import com.springclaw.service.context.ContextAssembler;
+import com.springclaw.service.event.MessageEventService;
+import com.springclaw.service.memory.MemoryBankService;
+import com.springclaw.service.memory.MemoryService;
+import com.springclaw.service.prompt.SoulPromptService;
+import com.springclaw.service.session.AgentSessionService;
+import com.springclaw.service.skill.SkillService;
+import com.springclaw.service.skill.impl.SkillRegistryService;
+import com.springclaw.service.usage.LlmUsageRecordService;
+import com.springclaw.tool.runtime.CapabilityRegistry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.api.Advisor;
-import org.springframework.ai.chat.client.advisor.api.CallAdvisor;
-import org.springframework.ai.chat.client.advisor.api.StreamAdvisor;
+import org.springframework.ai.chat.memory.MessageWindowChatMemory;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.model.Generation;
+import org.springframework.ai.document.Document;
 
-import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
- * Characterization test — pins how context flows from {@code ContextAssembler}
- * to model requests today. References findings from the runtime audit
- * doc § 4 ("Context construction and injection") and § 14 (responsibility
- * matrix entries for context).
+ * Characterization test — pins the production context assembly, injection, and
+ * advisor paths used by the current runtime.
  *
- * <p>Two duplications are explicitly captured:
- * <ol>
- *   <li>{@link AssembledContext#observePrompt} embeds the long-term semantic
- *       memory <em>and</em> {@link SemanticMemoryAdvisor} adds it again to
- *       the system message. With embedding disabled both blocks are empty;
- *       with embedding enabled the same recall appears twice.</li>
- *   <li>{@link ConversationAdvisorSupport} adds {@link MessageChatMemoryAdvisor}
- *       only when {@code springclaw.chat.spring-ai-chat-memory-enabled=true};
- *       {@link SemanticMemoryAdvisor} is registered unconditionally.</li>
- * </ol>
- *
- * <p>If the unified-runtime spec collapses these duplications, the assertions
- * here will need to be migrated together with the implementation — that is the
- * intended use of characterization tests.
+ * <p>{@link ContextAssembler} places event and semantic recall into the observe
+ * prompt. {@link ChatContextFactory} currently exposes that prompt through
+ * {@code ContextInjection} while leaving policy and pending-proposal prompts
+ * empty. {@link ConversationAdvisorSupport} conditionally adds Spring AI chat
+ * memory before semantic memory. The pre-engine model router in
+ * {@link AgentDecisionService} calls the ChatClient directly and bypasses that
+ * advisor support.
  */
+@SuppressWarnings({"unchecked", "rawtypes"})
 class ContextPropagationCharacterizationTest {
 
     @Test
-    @DisplayName("ContextInjection is a thin wrapper of observePrompt; engines that "
-            + "consume it cannot see policy / pendingProposal data today")
-    void contextInjectionTodayCarriesOnlyObservePromptText() {
-        ContextInjection injection = new ContextInjection(
-                "OBSERVE", "POLICY-IGNORED", "PENDING-IGNORED",
-                Map.of("k", "v"));
+    @DisplayName("ContextAssembler production call renders question, Memory Bank, event, and semantic sections")
+    void contextAssemblerBuildsObservedFourSectionPrompt() {
+        AssembledContext context = assembleContext();
 
-        // renderForPrompt joins all three text fields, but two are empty in production.
-        assertThat(injection.observePrompt()).isEqualTo("OBSERVE");
-        assertThat(injection.policyPrompt()).isEqualTo("POLICY-IGNORED");
-        assertThat(injection.pendingProposalPrompt()).isEqualTo("PENDING-IGNORED");
-        assertThat(injection.renderForPrompt()).contains("OBSERVE", "POLICY-IGNORED", "PENDING-IGNORED");
-
-        // Production today never populates policyPrompt or pendingProposalPrompt
-        // (see ChatContextFactory.build line 123-133): only observePrompt is set.
-        ContextInjection productionShape = new ContextInjection(
-                "OBSERVE", "", "", Map.of());
-        assertThat(productionShape.renderForPrompt()).isEqualTo("OBSERVE\n\n");
+        assertThat(context.observePrompt())
+                .contains("# 当前问题", "为什么登录失败")
+                .contains("# 项目记忆（Memory Bank）")
+                .contains("# 短期会话上下文（事件流）", context.eventContext(), "上一轮问题")
+                .contains("# 长期语义记忆（同会话优先）", context.semanticContext(),
+                        "previous error: NullPointerException");
     }
 
     @Test
-    @DisplayName("AssembledContext.observePrompt embeds 4 sections (current question, "
-            + "Memory Bank, event context, semantic memory)")
-    void assembledContextObservePromptCarriesFourSections() {
-        AssembledContext ctx = new AssembledContext(
-                "session-A", "api", "alice", "为什么登录失败",
-                "[event] alice -> bob: hello",
-                "[semantic recall] previous error: NullPointerException",
-                """
-                # 当前问题
-                为什么登录失败
+    @DisplayName("ChatContextFactory production call carries only assembled observePrompt in ContextInjection")
+    void chatContextFactoryBuildsCurrentInjectionShape() {
+        AiProviderService aiProviderService = mock(AiProviderService.class);
+        SoulPromptService soulPromptService = mock(SoulPromptService.class);
+        AgentSessionService agentSessionService = mock(AgentSessionService.class);
+        AuthService authService = mock(AuthService.class);
+        SkillService skillService = mock(SkillService.class);
+        SkillRegistryService skillRegistryService = mock(SkillRegistryService.class);
+        ContextAssembler contextAssembler = mock(ContextAssembler.class);
+        ChatRoutingStateService routingStateService = mock(ChatRoutingStateService.class);
+        ChatRoutingPolicyService routingPolicyService = mock(ChatRoutingPolicyService.class);
+        AgentDecisionService agentDecisionService = mock(AgentDecisionService.class);
+        AgentSession session = new AgentSession();
+        session.setId(1L);
+        session.setSessionKey("session-A");
+        session.setChannel("api");
+        session.setUserId("alice");
+        AssembledContext assembled = assembleContext();
+        AgentDecision decision = AgentDecision.general("普通聊天");
+        Set<String> allowedToolPacks = Set.of("workspace");
 
-                # 项目记忆（Memory Bank）
-                project context
+        when(agentSessionService.getOrCreate("session-A", "api", "alice")).thenReturn(session);
+        when(authService.resolveRoleByUserId("alice")).thenReturn("USER");
+        when(skillService.resolveAllowedToolPacks("api", "alice")).thenReturn(allowedToolPacks);
+        when(agentDecisionService.decide(any(AgentDecisionRequest.class))).thenReturn(decision);
+        when(routingStateService.resolveDefaultMode("simplified")).thenReturn("simplified");
+        when(routingStateService.resolveAutoUpgrade(true)).thenReturn(true);
+        when(routingPolicyService.decide(
+                "为什么登录失败",
+                "USER",
+                "simplified",
+                true,
+                allowedToolPacks,
+                "agent"
+        )).thenReturn(new ChatRoutingPolicyService.RoutingDecision(
+                "为什么登录失败",
+                "simplified",
+                false,
+                false,
+                "使用当前默认链路。",
+                "agent",
+                "general"
+        ));
+        when(skillRegistryService.matchAgentVisibleDefinitions(
+                "为什么登录失败", allowedToolPacks, 2)).thenReturn(List.of());
+        when(soulPromptService.buildSystemPrompt("api", "alice", List.of())).thenReturn("system");
+        when(contextAssembler.assemble(
+                "session-A", "api", "alice", "为什么登录失败")).thenReturn(assembled);
+        when(aiProviderService.activeClient()).thenReturn(activeClient(mock(ChatClient.class)));
+        ChatContextFactory factory = new ChatContextFactory(
+                aiProviderService,
+                soulPromptService,
+                agentSessionService,
+                authService,
+                skillService,
+                skillRegistryService,
+                contextAssembler,
+                routingStateService,
+                routingPolicyService,
+                agentDecisionService,
+                "simplified",
+                true
+        );
 
-                # 短期会话上下文（事件流）
-                [event] alice -> bob: hello
+        ChatContext context = factory.build(
+                new ChatRequest("session-A", "alice", "为什么登录失败", "api", "agent"),
+                true
+        );
 
-                # 长期语义记忆（同会话优先）
-                [semantic recall] previous error: NullPointerException
-                """);
-
-        // Each section is exposed both inside observePrompt AND as separate fields.
-        // This is one of the duplications the audit calls out:
-        //  - eventContext appears as a record field AND as a substring of observePrompt
-        //  - semanticContext appears as a record field AND as a substring of observePrompt
-        assertThat(ctx.observePrompt())
-                .contains("# 当前问题")
-                .contains("# 项目记忆")
-                .contains("# 短期会话上下文")
-                .contains("# 长期语义记忆")
-                .contains(ctx.eventContext())
-                .contains(ctx.semanticContext());
+        assertThat(context.contextInjection().observePrompt()).isEqualTo(assembled.observePrompt());
+        assertThat(context.contextInjection().policyPrompt()).isEmpty();
+        assertThat(context.contextInjection().pendingProposalPrompt()).isEmpty();
+        assertThat(context.contextInjection().renderForPrompt())
+                .isEqualTo(assembled.observePrompt() + "\n\n");
+        assertThat(context.contextInjection().metadata())
+                .containsEntry("contextSummary", assembled.sourceSummary());
     }
 
     @Test
-    @DisplayName("Empty ContextInjection produces empty prompt prefix (no spurious newlines)")
-    void emptyInjectionProducesEmptyPrefix() {
-        assertThat(ContextInjection.empty().renderForPrompt()).isEmpty();
+    @DisplayName("ConversationAdvisorSupport flag OFF applies semantic advisor only")
+    void advisorChainDefaultIncludesSemanticOnly() {
+        MessageChatMemoryAdvisor messageAdvisor = messageAdvisor();
+        SemanticMemoryAdvisor semanticAdvisor = mock(SemanticMemoryAdvisor.class);
+
+        AdvisorApplication application = applyAdvisors(
+                new ConversationAdvisorSupport(messageAdvisor, semanticAdvisor, false)
+        );
+
+        assertThat(application.advisors()).containsExactly(semanticAdvisor);
+        assertThat(application.params())
+                .containsEntry("chat_memory_conversation_id", "session-A")
+                .containsEntry(SemanticMemoryAdvisor.CONTEXT_USER_ID, "alice");
     }
 
     @Test
-    @DisplayName("ConversationAdvisorSupport with chat-memory flag OFF (production "
-            + "default) registers ONLY SemanticMemoryAdvisor")
-    void advisorChainDefaultIncludesSemanticOnly() throws Exception {
-        // We pass null for the advisors; ConversationAdvisorSupport stores the
-        // references at construction time but does not invoke them until apply()
-        // is called against a ChatClientRequestSpec. We never call apply() here —
-        // this test only pins which collaborators are stored.
-        ConversationAdvisorSupport support = new ConversationAdvisorSupport(
-                null, null, /* springAiChatMemoryEnabled */ false);
+    @DisplayName("ConversationAdvisorSupport flag ON applies chat memory before semantic memory")
+    void advisorChainWithFlagOnIncludesBothInProductionOrder() {
+        MessageChatMemoryAdvisor messageAdvisor = messageAdvisor();
+        SemanticMemoryAdvisor semanticAdvisor = mock(SemanticMemoryAdvisor.class);
 
-        assertThat(readField(support, "messageChatMemoryAdvisor")).isNull();
-        assertThat(readField(support, "semanticMemoryAdvisor")).isNull();
-        assertThat(readField(support, "springAiChatMemoryEnabled")).isEqualTo(false);
+        AdvisorApplication application = applyAdvisors(
+                new ConversationAdvisorSupport(messageAdvisor, semanticAdvisor, true)
+        );
+
+        assertThat(application.advisors()).containsExactly(messageAdvisor, semanticAdvisor);
+        assertThat(application.params())
+                .containsEntry("chat_memory_conversation_id", "session-A")
+                .containsEntry(SemanticMemoryAdvisor.CONTEXT_USER_ID, "alice");
     }
 
     @Test
-    @DisplayName("ConversationAdvisorSupport with chat-memory flag ON registers BOTH "
-            + "MessageChatMemoryAdvisor and SemanticMemoryAdvisor — short-term history "
-            + "is then sourced twice")
-    void advisorChainWithFlagOnIncludesBoth() throws Exception {
-        ConversationAdvisorSupport support = new ConversationAdvisorSupport(
-                null, null, /* springAiChatMemoryEnabled */ true);
+    @DisplayName("AgentDecisionService model router calls ChatClient directly without ConversationAdvisorSupport")
+    void agentDecisionModelRouterBypassesConversationAdvisorSupport() {
+        AgentDecisionRouter ruleRouter = mock(AgentDecisionRouter.class);
+        AiProviderService aiProviderService = mock(AiProviderService.class);
+        ModelTransportGuardService transportGuard = mock(ModelTransportGuardService.class);
+        LlmUsageRecordService usageRecordService = mock(LlmUsageRecordService.class);
+        CapabilityRegistry capabilityRegistry = mock(CapabilityRegistry.class);
+        ChatClient chatClient = mock(ChatClient.class);
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.CallResponseSpec responseSpec = mock(ChatClient.CallResponseSpec.class);
+        AiProviderService.ActiveChatClient activeClient = activeClient(chatClient);
+        ModelCallExecutor modelCallExecutor = new ModelCallExecutor(
+                aiProviderService,
+                transportGuard,
+                usageRecordService,
+                0,
+                0
+        );
+        AgentDecisionService service = new AgentDecisionService(
+                ruleRouter,
+                aiProviderService,
+                modelCallExecutor,
+                transportGuard,
+                capabilityRegistry,
+                new ObjectMapper(),
+                true
+        );
+        AgentDecision clarification = AgentDecision.clarify("需要模型分类");
+        when(ruleRouter.routeByRules(any(AgentDecisionRequest.class))).thenReturn(clarification);
+        when(aiProviderService.activeClient()).thenReturn(activeClient);
+        when(transportGuard.isModelCallEnabled(activeClient)).thenReturn(true);
+        when(chatClient.prompt()).thenReturn(requestSpec);
+        when(requestSpec.system(anyString())).thenReturn(requestSpec);
+        when(requestSpec.user(anyString())).thenReturn(requestSpec);
+        when(requestSpec.call()).thenReturn(responseSpec);
+        when(responseSpec.chatResponse()).thenReturn(new ChatResponse(List.of(
+                new Generation(new AssistantMessage("""
+                        {"intent":"general","executionPath":"basic_model","selectedCapabilities":[],
+                        "riskLevel":"read","requiresConfirmation":false,"reason":"普通问答"}
+                        """))
+        )));
 
-        assertThat(readField(support, "springAiChatMemoryEnabled")).isEqualTo(true);
-        // Documented duplication: when this flag is on, ContextAssembler.buildEventContext
-        // AND MessageChatMemoryAdvisor BOTH read message_event for the same window.
+        AgentDecision decision = service.decide(new AgentDecisionRequest(
+                "session-A",
+                "api",
+                "alice",
+                "USER",
+                "request-A",
+                "帮我处理",
+                "agent",
+                Set.of()
+        ));
+
+        assertThat(decision.intent()).isEqualTo("general");
+        var ordered = inOrder(chatClient, requestSpec, responseSpec);
+        ordered.verify(chatClient).prompt();
+        ordered.verify(requestSpec).system(anyString());
+        ordered.verify(requestSpec).user(anyString());
+        ordered.verify(requestSpec).call();
+        ordered.verify(responseSpec).chatResponse();
+        verify(requestSpec, never()).advisors(any(Consumer.class));
+        verify(requestSpec, never()).advisors(any(Advisor[].class));
+        verify(requestSpec, never()).advisors(any(List.class));
     }
 
-    @Test
-    @DisplayName("SemanticMemoryAdvisor implements both CallAdvisor and StreamAdvisor — "
-            + "every model call (sync or stream) goes through it")
-    void semanticAdvisorImplementsBothFlavours() {
-        // The audit doc § 4.2 records this as 'always-on'. The interface
-        // implementations below are the contract that makes that true.
-        assertThat(CallAdvisor.class.isAssignableFrom(SemanticMemoryAdvisor.class)).isTrue();
-        assertThat(StreamAdvisor.class.isAssignableFrom(SemanticMemoryAdvisor.class)).isTrue();
-        assertThat(Advisor.class.isAssignableFrom(SemanticMemoryAdvisor.class)).isTrue();
+    private AdvisorApplication applyAdvisors(ConversationAdvisorSupport support) {
+        ChatClient.ChatClientRequestSpec requestSpec = mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.AdvisorSpec advisorSpec = mock(ChatClient.AdvisorSpec.class);
+        ArgumentCaptor<Map<String, Object>> paramsCaptor = mapCaptor();
+        ArgumentCaptor<List<Advisor>> advisorsCaptor = advisorListCaptor();
+        when(advisorSpec.params(paramsCaptor.capture())).thenReturn(advisorSpec);
+        when(advisorSpec.advisors(advisorsCaptor.capture())).thenReturn(advisorSpec);
+        when(requestSpec.advisors(any(Consumer.class))).thenAnswer(invocation -> {
+            Consumer<ChatClient.AdvisorSpec> customizer = invocation.getArgument(0);
+            customizer.accept(advisorSpec);
+            return requestSpec;
+        });
+
+        ChatClient.ChatClientRequestSpec returned = support.apply(
+                requestSpec,
+                "session-A",
+                "alice"
+        );
+
+        assertThat(returned).isSameAs(requestSpec);
+        return new AdvisorApplication(
+                advisorsCaptor.getValue(),
+                paramsCaptor.getValue()
+        );
     }
 
-    @Test
-    @DisplayName("QuestionAnswerAdvisor (Spring AI built-in RAG advisor) is NOT registered "
-            + "in this codebase — RAG is hand-rolled inside ContextAssembler instead")
-    void questionAnswerAdvisorIsAbsent() {
-        // Spring AI's QuestionAnswerAdvisor is not registered as an advisor dependency.
-        // We cannot prove "no bean" without a Spring context, but we can prove the
-        // advisor inventory: ConversationAdvisorSupport only declares
-        // messageChatMemoryAdvisor and semanticMemoryAdvisor as injected advisor
-        // dependencies. Any future wiring of QuestionAnswerAdvisor would add a new
-        // Advisor-typed field here, which this assertion would catch.
-        Field[] declaredFields = ConversationAdvisorSupport.class.getDeclaredFields();
-        List<String> advisorFieldNames = java.util.Arrays.stream(declaredFields)
-                .filter(f -> Advisor.class.isAssignableFrom(f.getType()))
-                .map(Field::getName)
-                .toList();
-        assertThat(advisorFieldNames)
-                .containsExactlyInAnyOrder("messageChatMemoryAdvisor", "semanticMemoryAdvisor");
+    private ArgumentCaptor<Map<String, Object>> mapCaptor() {
+        return (ArgumentCaptor) ArgumentCaptor.forClass(Map.class);
     }
 
-    @Test
-    @DisplayName("Documented field shape of ConversationAdvisorSupport — pins the "
-            + "advisor inventory so re-architecture must update this test together")
-    void conversationAdvisorSupportFieldShape() throws Exception {
-        Field[] fields = ConversationAdvisorSupport.class.getDeclaredFields();
-        List<String> names = java.util.Arrays.stream(fields).map(Field::getName).toList();
-
-        assertThat(names).containsExactlyInAnyOrder(
-                "CHAT_MEMORY_CONVERSATION_ID",
-                "messageChatMemoryAdvisor",
-                "semanticMemoryAdvisor",
-                "springAiChatMemoryEnabled");
+    private ArgumentCaptor<List<Advisor>> advisorListCaptor() {
+        return (ArgumentCaptor) ArgumentCaptor.forClass(List.class);
     }
 
-    private static Object readField(Object target, String name) throws Exception {
-        Field field = target.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return field.get(target);
+    private AiProviderService.ActiveChatClient activeClient(ChatClient chatClient) {
+        return new AiProviderService.ActiveChatClient(
+                "test-provider",
+                "test-model",
+                "http://localhost",
+                chatClient,
+                true,
+                ""
+        );
+    }
+
+    private MessageChatMemoryAdvisor messageAdvisor() {
+        return MessageChatMemoryAdvisor.builder(
+                MessageWindowChatMemory.builder()
+                        .maxMessages(20)
+                        .build()
+        ).build();
+    }
+
+    private AssembledContext assembleContext() {
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        MemoryService memoryService = mock(MemoryService.class);
+        when(messageEventService.listRecent("session-A", 16)).thenReturn(List.of(
+                event("USER", "CHAT", "上一轮问题")
+        ));
+        when(memoryService.recallBySession("session-A", "为什么登录失败", 8)).thenReturn(List.of(
+                new Document(
+                        "memory-1",
+                        "previous error: NullPointerException",
+                        Map.of(
+                                "channel", "api",
+                                "sessionKey", "session-A",
+                                "userId", "alice",
+                                "role", "USER"
+                        )
+                )
+        ));
+        when(memoryService.recallByUser("alice", "为什么登录失败", 4)).thenReturn(List.of());
+        ContextAssembler assembler = new ContextAssembler(
+                messageEventService,
+                memoryService,
+                new MemoryBankService(false, ".", 400),
+                8,
+                8,
+                400
+        );
+        return assembler.assemble(
+                "session-A",
+                "api",
+                "alice",
+                "为什么登录失败"
+        );
+    }
+
+    private MessageEvent event(String role, String eventType, String content) {
+        MessageEvent event = new MessageEvent();
+        event.setRole(role);
+        event.setEventType(eventType);
+        event.setContent(content);
+        event.setChannel("api");
+        event.setSessionKey("session-A");
+        event.setUserId("alice");
+        return event;
+    }
+
+    private record AdvisorApplication(List<Advisor> advisors, Map<String, Object> params) {
     }
 }

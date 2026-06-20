@@ -285,7 +285,7 @@ bypasses MetaGuard at this boundary, including but not limited to
 
 ## 8. Persistence — 12 `persist()` callsites
 
-[`ChatResultPersister.persist`](../../src/main/java/com/springclaw/service/chat/impl/ChatResultPersister.java) normally writes **5** `message_event` rows per call: `recordTurn` emits separate `USER` and `ASSISTANT` rows, followed by `ROUTING`, `PLAN`, and `ACT`. Blank user/assistant content can suppress the corresponding `recordTurn` row. It is invoked from:
+[`ChatResultPersister.persist`](../../src/main/java/com/springclaw/service/chat/impl/ChatResultPersister.java) normally writes **5** `message_event` rows per call: `recordTurn` emits separate `USER` and `ASSISTANT` rows, followed by `ROUTING`, `PLAN`, and `ACT`. The `ASSISTANT` row is still written for a blank answer because the persisted content is formatted as the nonblank string `[REFLECT] `. It is invoked from:
 
 | # | Caller | File:line | Path class |
 |---|---|---|---|
@@ -346,8 +346,9 @@ is **source-audit-only**.
   to Redis when a `RedissonClient` is available.
 - Reads prefer Redis when available and fall back to local Caffeine when Redis
   is absent, fails, or has no usable payload.
-- The configured constructor TTL is used for both local Caffeine expiry and
-  the optional Redis projection; values below 1 are clamped to **1 hour**.
+- The constructor's **24-hour default**, use of the configured TTL for local
+  Caffeine expiry and the optional Redis projection, and clamping of values
+  below 1 to **1 hour** are characterization-tested.
 - [`ChatMessageConsumer`](../../src/main/java/com/springclaw/service/chat/async/ChatMessageConsumer.java)
   stores `COMPLETED` or `FAILED`, publishes the same payload to the Rabbit
   response path, and sends it by WebSocket/STOMP to
@@ -356,9 +357,9 @@ is **source-audit-only**.
   projections of the stored async result; neither is the sole async result
   path.
 
-**Source-audit-only:** the constructor property
-`springclaw.rabbitmq.async-result-ttl-hours` defaults to **24 hours**, and
-`application.yml` maps it from `SPRINGCLAW_CHAT_ASYNC_RESULT_TTL_HOURS`.
+**Source-audit-only:** `application.yml` maps
+`springclaw.rabbitmq.async-result-ttl-hours` from
+`SPRINGCLAW_CHAT_ASYNC_RESULT_TTL_HOURS`.
 
 ---
 

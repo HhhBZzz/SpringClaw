@@ -1,171 +1,191 @@
 package com.springclaw.architecture;
 
+import com.springclaw.service.auth.ToolPermissionService;
+import com.springclaw.service.proposal.PendingToolApprovalException;
+import com.springclaw.service.proposal.ToolInvocationProposal;
+import com.springclaw.service.proposal.ToolInvocationProposalService;
 import com.springclaw.service.proposal.ToolInvocationProposalStatus;
+import com.springclaw.service.proposal.ToolInvocationSnapshot;
+import com.springclaw.service.proposal.ToolInvocationSnapshotService;
+import com.springclaw.service.workspace.WorkspaceGitGuard;
+import com.springclaw.tool.pack.WorkspaceEditToolPack;
+import com.springclaw.tool.runtime.CapabilityRegistry;
+import com.springclaw.tool.runtime.ToolAuditService;
+import com.springclaw.tool.runtime.ToolGuardService;
 import com.springclaw.tool.runtime.ToolRuntimeAspect;
+import org.aspectj.lang.ProceedingJoinPoint;
+import org.aspectj.lang.reflect.MethodSignature;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.aop.framework.AopProxyUtils;
-import org.springframework.aop.support.AopUtils;
-import org.springframework.stereotype.Component;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 
-import java.lang.annotation.Annotation;
-import java.lang.reflect.Method;
-import java.util.Arrays;
-import java.util.EnumSet;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 /**
- * Characterization test — pins the safety boundary today: every actual
- * {@code @Tool} invocation must funnel through {@link ToolRuntimeAspect}, and
- * the proposal state machine must enforce the documented transitions.
- * Findings referenced from runtime audit doc § 3 ("Risk and confirmation"),
- * § 5 ("Capability / tool execution"), and § 11 ("Proposal confirm-resume").
+ * Characterizes the proposal boundary implemented by {@link ToolRuntimeAspect}.
  *
- * <p>This test does NOT exercise the aspect end-to-end (that is what
- * {@code ToolRuntimeAspectInterceptionIT} already does). It pins the static
- * structural invariants the unified-runtime spec must preserve:
- * <ol>
- *   <li>{@link ToolRuntimeAspect} carries the {@code @Around} pointcut bound
- *       to {@code @org.springframework.ai.tool.annotation.Tool}, so any
- *       Spring proxy invocation of a {@code @Tool} method must intercept.</li>
- *   <li>The aspect's risk-resolution accepts {@code write / dangerous /
- *       side_effect / execution} as the runtime "needs a proposal" set —
- *       see {@link ToolRuntimeAspect#aroundTool} line 91-94.</li>
- *   <li>{@link ToolInvocationProposalStatus} state machine has the documented
- *       8 states with the documented terminal set.</li>
- * </ol>
- *
- * <p>If a future refactor moves the safety boundary somewhere else — e.g., a
- * unified {@code ToolGateway} — these assertions need to be replaced together
- * with the implementation, not silently skipped.
+ * <p>The assertions invoke the production aspect instead of duplicating its
+ * risk predicate. This keeps the test sensitive to changes in write and
+ * dangerous proposal enforcement.
  */
 class ToolSafetyPathCharacterizationTest {
 
-    @Test
-    @DisplayName("ToolRuntimeAspect is annotated with @Aspect and @Component "
-            + "so Spring activates it as the @Tool interception point")
-    void toolRuntimeAspectIsActiveAspectComponent() {
-        // The class-level annotations together are what make the @Around
-        // pointcut fire on @Tool methods. Removing either kills the
-        // safety boundary.
-        boolean hasAspect = Arrays.stream(ToolRuntimeAspect.class.getAnnotations())
-                .anyMatch(a -> a.annotationType().getName()
-                        .equals("org.aspectj.lang.annotation.Aspect"));
-        boolean hasComponent = ToolRuntimeAspect.class.isAnnotationPresent(Component.class);
-        assertThat(hasAspect)
-                .as("ToolRuntimeAspect must be @Aspect")
-                .isTrue();
-        assertThat(hasComponent)
-                .as("ToolRuntimeAspect must be a Spring @Component")
-                .isTrue();
+    private static final String TOOL_NAME = "WorkspaceEditToolPack.workspaceWriteFile";
+    private static final Object[] TOOL_ARGS = {"docs/a.md", "content"};
+
+    @ParameterizedTest(name = "{0} requires a pending proposal")
+    @ValueSource(strings = {"write", "side_effect", "dangerous", "execution"})
+    @DisplayName("Current mutating and execution risks create a proposal instead of invoking the tool")
+    void proposalRisksCreatePendingProposal(String riskLevel) throws Throwable {
+        Fixture fixture = new Fixture(riskLevel);
+        ToolInvocationSnapshot snapshot = snapshot(riskLevel);
+        ToolInvocationProposal pending = pendingProposal(riskLevel);
+        when(fixture.snapshotService.capture(
+                eq(TOOL_NAME), eq("workspace"), any(), eq(riskLevel)))
+                .thenReturn(snapshot);
+        when(fixture.proposalService.createPending(eq(snapshot), any()))
+                .thenReturn(pending);
+
+        assertThatThrownBy(() -> fixture.aspect.aroundTool(fixture.joinPoint))
+                .isInstanceOf(PendingToolApprovalException.class)
+                .extracting(ex -> ((PendingToolApprovalException) ex).proposalId())
+                .isEqualTo("tip-characterization");
+
+        verify(fixture.joinPoint, never()).proceed();
+        verify(fixture.snapshotService).capture(
+                eq(TOOL_NAME), eq("workspace"), any(), eq(riskLevel));
+        verify(fixture.proposalService).createPending(eq(snapshot), any());
+        verify(fixture.auditService).recordInvoke(
+                eq(TOOL_NAME), eq("PENDING_APPROVAL"),
+                eq("proposalId=tip-characterization"), any());
+        verifyNoInteractions(fixture.workspaceGitGuard);
     }
 
     @Test
-    @DisplayName("ToolRuntimeAspect.aroundTool is bound by @Around to the "
-            + "Spring AI @Tool annotation — the only entry that gates @Tool calls")
-    void aroundToolPointcutTargetsSpringAiToolAnnotation() throws Exception {
-        Method method = ToolRuntimeAspect.class.getMethod(
-                "aroundTool", org.aspectj.lang.ProceedingJoinPoint.class);
+    @DisplayName("Read risk invokes the tool directly without proposal state")
+    void readRiskProceedsWithoutProposal() throws Throwable {
+        Fixture fixture = new Fixture("read");
+        when(fixture.joinPoint.proceed()).thenReturn("read-result");
 
-        // Read @Around dynamically to avoid a hard dep on the annotation class
-        // at compile time of this test.
-        Annotation[] annos = method.getAnnotations();
-        boolean hasAround = Arrays.stream(annos).anyMatch(a -> a.annotationType()
-                .getName().equals("org.aspectj.lang.annotation.Around"));
-        assertThat(hasAround)
-                .as("aroundTool must carry @Around")
-                .isTrue();
+        Object result = fixture.aspect.aroundTool(fixture.joinPoint);
 
-        // The pointcut text references @annotation(Tool) — pin the literal
-        // so a typo or annotation rename fails this test loudly.
-        Annotation around = Arrays.stream(annos).filter(a -> a.annotationType()
-                .getName().equals("org.aspectj.lang.annotation.Around"))
-                .findFirst().orElseThrow();
-        Method valueAccessor = around.annotationType().getMethod("value");
-        String pointcut = (String) valueAccessor.invoke(around);
-        assertThat(pointcut)
-                .as("Pointcut must target the Spring AI @Tool annotation")
-                .contains("org.springframework.ai.tool.annotation.Tool");
+        assertThat(result).isEqualTo("read-result");
+        verify(fixture.joinPoint).proceed();
+        verifyNoInteractions(fixture.snapshotService, fixture.proposalService, fixture.workspaceGitGuard);
     }
 
-    @Test
-    @DisplayName("ProposalStatus state machine has the documented 8 states "
-            + "and terminal set")
-    void proposalStatusEnumShape() {
-        // The audit doc § 11 + the P0 spec rely on this state inventory and
-        // terminal classification. Adding a new state silently breaks the
-        // unified-runtime spec's compatibility plan.
-        assertThat(EnumSet.allOf(ToolInvocationProposalStatus.class))
-                .containsExactlyInAnyOrder(
-                        ToolInvocationProposalStatus.PENDING,
-                        ToolInvocationProposalStatus.APPROVED,
-                        ToolInvocationProposalStatus.EXECUTING,
-                        ToolInvocationProposalStatus.EXECUTED,
-                        ToolInvocationProposalStatus.FAILED,
-                        ToolInvocationProposalStatus.REJECTED,
-                        ToolInvocationProposalStatus.EXPIRED,
-                        ToolInvocationProposalStatus.CANCELLED);
+    @ParameterizedTest(name = "unclassified risk [{0}] remains on the direct path")
+    @NullAndEmptySource
+    @DisplayName("Absent risk classification currently invokes the tool without a proposal")
+    void absentRiskProceedsWithoutProposal(String riskLevel) throws Throwable {
+        Fixture fixture = new Fixture(riskLevel);
+        when(fixture.joinPoint.proceed()).thenReturn("unclassified-result");
 
-        Set<ToolInvocationProposalStatus> terminal = Stream
-                .of(ToolInvocationProposalStatus.values())
-                .filter(ToolInvocationProposalStatus::isTerminal)
-                .collect(java.util.stream.Collectors.toSet());
+        Object result = fixture.aspect.aroundTool(fixture.joinPoint);
 
-        assertThat(terminal).containsExactlyInAnyOrder(
-                ToolInvocationProposalStatus.EXECUTED,
-                ToolInvocationProposalStatus.FAILED,
-                ToolInvocationProposalStatus.REJECTED,
-                ToolInvocationProposalStatus.EXPIRED,
-                ToolInvocationProposalStatus.CANCELLED);
-
-        // PENDING / APPROVED / EXECUTING are non-terminal by design — they
-        // are the live phases of the state machine.
-        assertThat(ToolInvocationProposalStatus.PENDING.isTerminal()).isFalse();
-        assertThat(ToolInvocationProposalStatus.APPROVED.isTerminal()).isFalse();
-        assertThat(ToolInvocationProposalStatus.EXECUTING.isTerminal()).isFalse();
+        assertThat(result).isEqualTo("unclassified-result");
+        verify(fixture.joinPoint).proceed();
+        verifyNoInteractions(fixture.snapshotService, fixture.proposalService, fixture.workspaceGitGuard);
     }
 
-    @Test
-    @DisplayName("Risk levels that REQUIRE a proposal today: write / dangerous "
-            + "/ side_effect / execution — pinned from ToolRuntimeAspect")
-    void requiresProposalRiskLevelsAreDocumented() {
-        // This is enforced inside ToolRuntimeAspect.aroundTool (line 91-94):
-        //   boolean requiresProposal =
-        //       "write".equalsIgnoreCase(riskLevel)
-        //    || "dangerous".equalsIgnoreCase(riskLevel)
-        //    || "side_effect".equalsIgnoreCase(riskLevel)
-        //    || "execution".equalsIgnoreCase(riskLevel);
-        // Reflective/integration testing of that logic lives in
-        // ToolRuntimeAspectGuardTest. Here we pin the documented set in a
-        // place easy to grep so the unified-runtime ToolGateway design has a
-        // canonical reference.
-        List<String> requiresProposal = List.of(
-                "write", "dangerous", "side_effect", "execution");
-        List<String> readOnly = Arrays.asList("read", "safe", null, "");
+    private static ToolInvocationSnapshot snapshot(String riskLevel) {
+        return new ToolInvocationSnapshot(
+                TOOL_NAME,
+                "workspace",
+                "[\"docs/a.md\",\"content\"]",
+                "args-hash",
+                riskLevel,
+                List.of("docs/a.md"),
+                "preview",
+                false,
+                Set.of(),
+                "head-sha"
+        );
+    }
 
-        for (String level : requiresProposal) {
-            assertThat(level).isIn("write", "dangerous", "side_effect", "execution");
+    private static ToolInvocationProposal pendingProposal(String riskLevel) {
+        LocalDateTime now = LocalDateTime.now();
+        return new ToolInvocationProposal(
+                1L,
+                "tip-characterization",
+                "request-1",
+                "run-1",
+                "session-1",
+                "user-1",
+                "USER",
+                TOOL_NAME,
+                "workspace",
+                "[\"docs/a.md\",\"content\"]",
+                "args-hash",
+                riskLevel,
+                List.of("docs/a.md"),
+                "preview",
+                false,
+                List.of(),
+                ToolInvocationProposalStatus.PENDING,
+                0,
+                null,
+                null,
+                null,
+                "head-sha",
+                null,
+                null,
+                List.of(),
+                null,
+                null,
+                now,
+                now,
+                now.plusMinutes(15)
+        );
+    }
+
+    private static final class Fixture {
+
+        private final ToolAuditService auditService = mock(ToolAuditService.class);
+        private final ToolInvocationSnapshotService snapshotService =
+                mock(ToolInvocationSnapshotService.class);
+        private final ToolInvocationProposalService proposalService =
+                mock(ToolInvocationProposalService.class);
+        private final WorkspaceGitGuard workspaceGitGuard = mock(WorkspaceGitGuard.class);
+        private final CapabilityRegistry capabilityRegistry = mock(CapabilityRegistry.class);
+        private final ProceedingJoinPoint joinPoint = mock(ProceedingJoinPoint.class);
+        private final ToolRuntimeAspect aspect;
+
+        private Fixture(String riskLevel) {
+            ToolGuardService guardService = mock(ToolGuardService.class);
+            ToolPermissionService permissionService = mock(ToolPermissionService.class);
+            MethodSignature signature = mock(MethodSignature.class);
+            when(joinPoint.getSignature()).thenReturn(signature);
+            when(joinPoint.getArgs()).thenReturn(TOOL_ARGS);
+            when(signature.getDeclaringType()).thenReturn(WorkspaceEditToolPack.class);
+            when(signature.getName()).thenReturn("workspaceWriteFile");
+            when(capabilityRegistry.findRiskLevelByClassName("WorkspaceEditToolPack"))
+                    .thenReturn(riskLevel);
+            when(capabilityRegistry.findToolsetByClassName("WorkspaceEditToolPack"))
+                    .thenReturn("workspace");
+            aspect = new ToolRuntimeAspect(
+                    guardService,
+                    auditService,
+                    permissionService,
+                    capabilityRegistry,
+                    snapshotService,
+                    proposalService,
+                    workspaceGitGuard
+            );
         }
-        for (String level : readOnly) {
-            assertThat(level == null
-                    || !List.of("write", "dangerous", "side_effect", "execution")
-                            .contains(level.toLowerCase()))
-                    .as("read-only level [%s] must not be in requires-proposal set", level)
-                    .isTrue();
-        }
-    }
-
-    @Test
-    @DisplayName("Spring AOP utilities are available at test runtime — sanity "
-            + "check that proxy interception infra is on the classpath")
-    void springAopProxyInfrastructureAvailable() {
-        // Used by the production aspect; if this dependency disappears, the
-        // safety boundary stops working entirely.
-        assertThat(AopUtils.class).isNotNull();
-        assertThat(AopProxyUtils.class).isNotNull();
     }
 }

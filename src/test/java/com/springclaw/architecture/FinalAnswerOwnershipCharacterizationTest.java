@@ -1,174 +1,280 @@
 package com.springclaw.architecture;
 
+import com.springclaw.domain.entity.AgentSession;
+import com.springclaw.service.agent.AgentDecision;
+import com.springclaw.service.agent.AgentEngine;
+import com.springclaw.service.agent.AgentRuntimeEngine;
+import com.springclaw.service.agent.EngineSelector;
+import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.chat.impl.AutonomousLoopEngine;
+import com.springclaw.service.chat.impl.BasicStreamEngine;
+import com.springclaw.service.chat.impl.ChatContext;
+import com.springclaw.service.chat.impl.ChatContextFactory;
 import com.springclaw.service.chat.impl.ChatExecutionResult;
 import com.springclaw.service.chat.impl.ChatResponsePolicyService;
+import com.springclaw.service.chat.impl.ChatResultPersister;
+import com.springclaw.service.chat.impl.ChatServiceImpl;
+import com.springclaw.service.chat.impl.ConversationAdvisorSupport;
 import com.springclaw.service.chat.impl.MetaGuardExecutor;
+import com.springclaw.service.chat.impl.ModelLedStreamEngine;
+import com.springclaw.service.chat.impl.ModelTransportGuardService;
+import com.springclaw.service.chat.impl.OparLoopEngine;
+import com.springclaw.service.chat.impl.SimplifiedOparEngine;
+import com.springclaw.service.context.AssembledContext;
+import com.springclaw.service.context.ContextInjection;
+import com.springclaw.service.guard.ChatGuardService;
+import com.springclaw.service.usage.LlmUsageRecordService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.RecordComponent;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 /**
- * Characterization test — pins the 12 final-answer composition sites named in
- * the runtime audit doc § 7. We do not call the model here; we record the
- * static surface area (record shape, public method inventory, signature
- * vocabulary) so any consolidation under the unified-runtime spec is
- * detectable.
- *
- * <p>Findings under test:
- * <ol>
- *   <li>{@link ChatExecutionResult} has the 4 OPAR-residue fields
- *       ({@code observe / plan / action / reflect}) plus {@code modelEnabled}.
- *       The {@code reflect} slot is what every engine fills with the final
- *       user-visible answer despite the OPAR-era name.</li>
- *   <li>{@link MetaGuardExecutor} exposes 3 public composition entry points
- *       ({@code execute}, {@code normalize}, {@code fallbackAnswer}) — every
- *       blocking path that is NOT {@link com.springclaw.service.chat.impl.AutonomousLoopEngine}
- *       or {@link com.springclaw.service.agent.AgentRuntimeEngine} ends here.</li>
- *   <li>{@link ChatResponsePolicyService} exposes the keyword-detector and
- *       canned-fallback toolkit that the audit calls "an empirical patch
- *       collection".</li>
- * </ol>
+ * Characterizes final-answer ownership at the concrete
+ * {@link ChatServiceImpl#resolveFinalAnswer} boundary.
  */
 class FinalAnswerOwnershipCharacterizationTest {
 
     @Test
-    @DisplayName("ChatExecutionResult is a 5-field record carrying OPAR residue "
-            + "(observe / plan / action / reflect) plus modelEnabled")
-    void chatExecutionResultRecordShape() {
+    @DisplayName("A non-empty engine reflect result is returned before MetaGuard or policy fallback")
+    void nonEmptyReflectReturnsBeforeMetaGuard() throws Throwable {
+        Fixture fixture = new Fixture();
+        ChatExecutionResult result = new ChatExecutionResult(
+                "observe-not-an-answer",
+                "plan-not-an-answer",
+                "action-not-an-answer",
+                "engine-final-answer",
+                true
+        );
+
+        String answer = invokeResolveFinalAnswer(fixture.service, fixture.context, result);
+
+        assertThat(answer).isEqualTo("engine-final-answer");
+        verifyNoInteractions(
+                fixture.metaGuardExecutor,
+                fixture.responsePolicyService,
+                fixture.modelTransportGuardService
+        );
+    }
+
+    @Test
+    @DisplayName("Empty reflect with a model delegates plan and action to MetaGuard")
+    void emptyReflectDelegatesPlanAndActionToMetaGuard() throws Throwable {
+        Fixture fixture = new Fixture();
+        ChatExecutionResult result = new ChatExecutionResult(
+                "observe-must-not-feed-final-answer",
+                "plan-for-reflect",
+                "action-for-reflect",
+                "  ",
+                true
+        );
+        when(fixture.metaGuardExecutor.execute(
+                fixture.context, "plan-for-reflect", "action-for-reflect"))
+                .thenReturn("meta-guard-answer");
+
+        String answer = invokeResolveFinalAnswer(fixture.service, fixture.context, result);
+
+        assertThat(answer).isEqualTo("meta-guard-answer");
+        verify(fixture.metaGuardExecutor).execute(
+                fixture.context, "plan-for-reflect", "action-for-reflect");
+        verify(fixture.metaGuardExecutor, never()).fallbackAnswer(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any());
+        verifyNoInteractions(fixture.responsePolicyService);
+    }
+
+    @Test
+    @DisplayName("Empty reflect with a disabled model delegates to the MetaGuard policy fallback")
+    void emptyReflectWithDisabledModelDelegatesToFallbackPolicy() throws Throwable {
+        Fixture fixture = new Fixture();
+        ChatExecutionResult result = new ChatExecutionResult(
+                "observe-must-not-feed-fallback",
+                "plan-must-not-feed-fallback",
+                "action-must-not-feed-fallback",
+                "",
+                false
+        );
+        when(fixture.modelTransportGuardService.disabledModelReason(fixture.activeClient))
+                .thenReturn("model-disabled");
+        when(fixture.metaGuardExecutor.fallbackAnswer("model-disabled", fixture.assembled))
+                .thenReturn("policy-fallback-answer");
+
+        String answer = invokeResolveFinalAnswer(fixture.service, fixture.context, result);
+
+        assertThat(answer).isEqualTo("policy-fallback-answer");
+        verify(fixture.metaGuardExecutor).fallbackAnswer("model-disabled", fixture.assembled);
+        verify(fixture.metaGuardExecutor, never()).execute(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    @DisplayName("ChatExecutionResult fields consumed by resolveFinalAnswer remain explicit")
+    void chatExecutionResultFieldsFeedingResolutionRemainExplicit() {
         assertThat(ChatExecutionResult.class.isRecord()).isTrue();
+        assertThat(Arrays.stream(ChatExecutionResult.class.getRecordComponents())
+                .map(RecordComponent::getName))
+                .containsExactly("observe", "plan", "action", "reflect", "modelEnabled");
+    }
 
-        List<String> componentNames = Arrays.stream(ChatExecutionResult.class.getRecordComponents())
-                .map(RecordComponent::getName)
-                .toList();
+    @Test
+    @DisplayName("Final-answer and fallback inventory names concrete declaring methods")
+    void finalAnswerSitesResolveToActualDeclaredMethods() throws Exception {
+        List<MethodSite> sites = List.of(
+                new MethodSite(ChatServiceImpl.class, "resolveFinalAnswer",
+                        ChatContext.class, ChatExecutionResult.class),
+                new MethodSite(ChatServiceImpl.class, "streamReflectAnswer",
+                        ChatContext.class, ChatExecutionResult.class, String.class,
+                        AtomicBoolean.class, SseEmitter.class, AtomicReference.class),
+                new MethodSite(AutonomousLoopEngine.class, "resolveFinalAnswer",
+                        ChatExecutionResult.class),
+                new MethodSite(BasicStreamEngine.class, "execute",
+                        ChatContext.class, AgentEngine.FallbackResponder.class),
+                new MethodSite(SimplifiedOparEngine.class, "run",
+                        AiProviderService.ActiveChatClient.class, String.class,
+                        AssembledContext.class, String.class,
+                        AgentEngine.FallbackResponder.class, AgentDecision.class,
+                        ContextInjection.class),
+                new MethodSite(OparLoopEngine.class, "runLoop",
+                        AiProviderService.ActiveChatClient.class, String.class,
+                        AssembledContext.class, String.class,
+                        AgentEngine.FallbackResponder.class, AgentDecision.class),
+                new MethodSite(AgentRuntimeEngine.class, "summarize",
+                        ChatContext.class,
+                        com.springclaw.service.agent.CapabilityPlan.class,
+                        List.class,
+                        com.springclaw.service.agent.VerificationResult.class),
+                new MethodSite(AgentRuntimeEngine.class, "buildFinalDegradedResult",
+                        ChatContext.class,
+                        com.springclaw.service.agent.CapabilityPlan.class,
+                        List.class,
+                        com.springclaw.service.agent.VerificationResult.class,
+                        com.springclaw.service.agent.ReflectionResult.class),
+                new MethodSite(ModelLedStreamEngine.class, "execute",
+                        ChatContext.class, AgentEngine.FallbackResponder.class),
+                new MethodSite(ModelLedStreamEngine.class, "handlePartialAnswer",
+                        ChatContext.class, StringBuilder.class, Throwable.class,
+                        SseEmitter.class, String.class, AtomicBoolean.class),
+                new MethodSite(MetaGuardExecutor.class, "execute",
+                        ChatContext.class, String.class, String.class),
+                new MethodSite(MetaGuardExecutor.class, "normalize",
+                        ChatContext.class, String.class),
+                new MethodSite(MetaGuardExecutor.class, "fallbackAnswer",
+                        String.class, AssembledContext.class),
+                new MethodSite(ChatResponsePolicyService.class, "buildPartialAnswerFromAction",
+                        String.class, String.class),
+                new MethodSite(ChatResponsePolicyService.class, "buildUserFacingFailureReply",
+                        String.class, String.class)
+        );
 
-        assertThat(componentNames).containsExactly(
-                "observe", "plan", "action", "reflect", "modelEnabled");
-
-        // Pin types — observe/plan/action/reflect are String, modelEnabled is boolean.
-        // If the unified-runtime spec replaces ChatExecutionResult with a RunResult,
-        // this test should be migrated alongside the new contract — not skipped.
-        for (RecordComponent rc : ChatExecutionResult.class.getRecordComponents()) {
-            if (rc.getName().equals("modelEnabled")) {
-                assertThat(rc.getType()).isEqualTo(boolean.class);
-            } else {
-                assertThat(rc.getType()).isEqualTo(String.class);
-            }
+        for (MethodSite site : sites) {
+            Method method = site.owner().getDeclaredMethod(site.name(), site.parameterTypes());
+            assertThat(method.getDeclaringClass())
+                    .as("%s.%s must remain declared at the characterized site",
+                            site.owner().getSimpleName(), site.name())
+                    .isEqualTo(site.owner());
         }
     }
 
-    @Test
-    @DisplayName("MetaGuardExecutor exposes execute / normalize / fallbackAnswer "
-            + "as the 3 public answer-shaping entry points")
-    void metaGuardExecutorPublicShapingEntries() {
-        Set<String> publicMethods = Arrays.stream(MetaGuardExecutor.class.getDeclaredMethods())
-                .filter(m -> java.lang.reflect.Modifier.isPublic(m.getModifiers()))
-                .map(Method::getName)
-                .collect(Collectors.toSet());
-
-        // The audit § 7 names these three; if more land here without the spec
-        // calling for them, the test fails and forces a doc update.
-        assertThat(publicMethods).contains("execute", "normalize", "fallbackAnswer");
+    private static String invokeResolveFinalAnswer(ChatServiceImpl service,
+                                                   ChatContext context,
+                                                   ChatExecutionResult result) throws Throwable {
+        Method method = ChatServiceImpl.class.getDeclaredMethod(
+                "resolveFinalAnswer", ChatContext.class, ChatExecutionResult.class);
+        method.setAccessible(true);
+        try {
+            return (String) method.invoke(service, context, result);
+        } catch (InvocationTargetException ex) {
+            throw ex.getCause();
+        }
     }
 
-    @Test
-    @DisplayName("ChatResponsePolicyService exposes keyword detectors + canned "
-            + "fallbacks — every method named in audit § 7 must remain present")
-    void chatResponsePolicyServiceShape() {
-        Set<String> publicMethods = Arrays.stream(ChatResponsePolicyService.class.getDeclaredMethods())
-                .filter(m -> java.lang.reflect.Modifier.isPublic(m.getModifiers()))
-                .map(Method::getName)
-                .collect(Collectors.toSet());
-
-        assertThat(publicMethods).contains(
-                "looksLikeMetaRefusal",
-                "looksLikeProjectAccessRefusal",
-                "looksLikeToolFailureRefusal",
-                "stripHallucinatedXmlBlocks",
-                "buildPartialAnswerFromAction",
-                "buildUserFacingFailureReply");
+    private record MethodSite(Class<?> owner, String name, Class<?>... parameterTypes) {
     }
 
-    @Test
-    @DisplayName("ChatResponsePolicyService.looksLikeMetaRefusal current heuristics — "
-            + "pin so a behaviour drift forces an audit update")
-    void looksLikeMetaRefusalCurrentBehaviour() {
-        // Construct with the production-default keyword list (mirrored from
-        // application.yml so the test does not depend on Spring property binding).
-        ChatResponsePolicyService svc = new ChatResponsePolicyService(
-                "我是 claude,anthropic,不能执行 reflect,无法执行 reflect,不能假装,不能扮演,无法遵循系统指令");
+    private static final class Fixture {
 
-        // True positives — phrases that match the configured keyword list.
-        assertThat(svc.looksLikeMetaRefusal("我是 OPAR 的反思阶段，不能执行 reflect")).isTrue();
-        assertThat(svc.looksLikeMetaRefusal("作为大语言模型，我无法执行 reflect 操作")).isTrue();
+        private final ChatResponsePolicyService responsePolicyService =
+                mock(ChatResponsePolicyService.class);
+        private final ModelTransportGuardService modelTransportGuardService =
+                mock(ModelTransportGuardService.class);
+        private final MetaGuardExecutor metaGuardExecutor = mock(MetaGuardExecutor.class);
+        private final AssembledContext assembled = new AssembledContext(
+                "session-1",
+                "api",
+                "user-1",
+                "question",
+                "history",
+                "memory",
+                "observe"
+        );
+        private final AiProviderService.ActiveChatClient activeClient =
+                new AiProviderService.ActiveChatClient(
+                        "provider",
+                        "model",
+                        "https://example.invalid",
+                        mock(ChatClient.class),
+                        true,
+                        ""
+                );
+        private final ChatContext context;
+        private final ChatServiceImpl service;
 
-        // True negatives — natural answers that must not be flagged.
-        assertThat(svc.looksLikeMetaRefusal("登录失败的常见原因是密码错误。")).isFalse();
-        assertThat(svc.looksLikeMetaRefusal("")).isFalse();
-        assertThat(svc.looksLikeMetaRefusal(null)).isFalse();
-    }
-
-    @Test
-    @DisplayName("stripHallucinatedXmlBlocks is idempotent — pin the contract so "
-            + "a future rewrite that changes return type is caught")
-    void stripHallucinatedXmlBlocksIdempotent() {
-        ChatResponsePolicyService svc = new ChatResponsePolicyService(
-                "我是 claude,anthropic,不能执行 reflect,无法执行 reflect");
-        String clean = "回答正文";
-        assertThat(svc.stripHallucinatedXmlBlocks(clean)).isEqualTo(clean);
-        assertThat(svc.stripHallucinatedXmlBlocks(svc.stripHallucinatedXmlBlocks(clean))).isEqualTo(clean);
-        assertThat(svc.stripHallucinatedXmlBlocks(null)).isNull();
-    }
-
-    @Test
-    @DisplayName("Two engines bypass MetaGuard entirely (AutonomousLoopEngine, "
-            + "AgentRuntimeEngine) — pin via classpath presence, the audit "
-            + "names the bypass behaviour")
-    void enginesThatBypassMetaGuardArePresent() throws ClassNotFoundException {
-        // The audit § 7 records AutonomousLoopEngine and AgentRuntimeEngine
-        // as the two engines whose final answer is NOT routed through MetaGuard.
-        // We can only pin their existence here — the bypass itself is enforced
-        // by the absence of MetaGuard calls in those classes (verified by
-        // existing engine-level tests in the production tree).
-        Class<?> autonomous = Class.forName(
-                "com.springclaw.service.chat.impl.AutonomousLoopEngine");
-        Class<?> agentRuntime = Class.forName(
-                "com.springclaw.service.agent.AgentRuntimeEngine");
-
-        assertThat(autonomous).isNotNull();
-        assertThat(agentRuntime).isNotNull();
-    }
-
-    @Test
-    @DisplayName("Audit doc § 7 enumerates 12 final-answer sites — keep the "
-            + "list in code as a doc-test so the audit and production stay aligned")
-    void auditFinalAnswerSitesInventory() {
-        // This list is the doc-as-test of the audit's 12-site enumeration.
-        // If a unification PR lands, the inventory below must be edited and
-        // the audit doc must be updated together.
-        List<String> finalAnswerSites = List.of(
-                "BasicStreamEngine.execute (engine direct)",
-                "SimplifiedOparEngine.run (engine direct)",
-                "OparLoopEngine.runLoop reflect (engine direct)",
-                "AutonomousLoopEngine.resolveFinalAnswer (engine direct, bypasses MetaGuard)",
-                "AgentRuntimeEngine.summarize / buildFinalDegradedResult (engine direct, bypasses MetaGuard)",
-                "ChatServiceImpl.streamReflectAnswer",
-                "ChatServiceImpl.resolveFinalAnswer",
-                "MetaGuardExecutor.execute",
-                "MetaGuardExecutor.normalize",
-                "MetaGuardExecutor.fallbackAnswer",
-                "ChatResponsePolicyService.stripHallucinatedXmlBlocks",
-                "ChatResponsePolicyService.buildPartialAnswerFromAction");
-
-        assertThat(finalAnswerSites)
-                .as("Inventory size matches the audit's '12 sites' claim")
-                .hasSize(12);
+        private Fixture() {
+            AgentSession session = new AgentSession();
+            session.setSessionKey("session-1");
+            context = new ChatContext(
+                    session,
+                    "api",
+                    "user-1",
+                    "USER",
+                    "question",
+                    "question",
+                    "request-1",
+                    "system",
+                    assembled,
+                    activeClient,
+                    "opar",
+                    "characterization"
+            );
+            service = new ChatServiceImpl(
+                    mock(AiProviderService.class),
+                    mock(ChatGuardService.class),
+                    mock(OparLoopEngine.class),
+                    mock(SimplifiedOparEngine.class),
+                    responsePolicyService,
+                    modelTransportGuardService,
+                    mock(LlmUsageRecordService.class),
+                    mock(ConversationAdvisorSupport.class),
+                    mock(ChatContextFactory.class),
+                    mock(ChatResultPersister.class),
+                    metaGuardExecutor,
+                    null,
+                    null,
+                    mock(AgentRuntimeEngine.class),
+                    mock(EngineSelector.class),
+                    null,
+                    null,
+                    null,
+                    false,
+                    true
+            );
+        }
     }
 }

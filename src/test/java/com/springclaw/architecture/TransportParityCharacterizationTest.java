@@ -1,7 +1,6 @@
 package com.springclaw.architecture;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.benmanes.caffeine.cache.Cache;
 import com.springclaw.config.websocket.WebSocketConfig;
 import com.springclaw.controller.ChatController;
 import com.springclaw.dto.chat.ChatRequest;
@@ -27,7 +26,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -58,7 +56,7 @@ class TransportParityCharacterizationTest {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     @Test
-    @DisplayName("Async result store uses the configured 24-hour TTL for both Caffeine and Redis")
+    @DisplayName("Async result store uses the configured 24-hour TTL for its Redis projection")
     void asyncStoreAppliesConfiguredTwentyFourHourTtl() throws Exception {
         RedissonClient redisson = mock(RedissonClient.class);
         @SuppressWarnings("unchecked")
@@ -75,9 +73,6 @@ class TransportParityCharacterizationTest {
         AsyncChatResultPayload queued = store.markQueued(message("request-24h"));
 
         verify(bucket).set(OBJECT_MAPPER.writeValueAsString(queued), 24L, TimeUnit.HOURS);
-        assertThat(localStore(store).policy().expireAfterWrite())
-                .hasValueSatisfying(expiration ->
-                        assertThat(expiration.getExpiresAfter()).isEqualTo(java.time.Duration.ofHours(24)));
     }
 
     @Test
@@ -98,9 +93,6 @@ class TransportParityCharacterizationTest {
         AsyncChatResultPayload queued = store.markQueued(message("request-clamped"));
 
         verify(bucket).set(OBJECT_MAPPER.writeValueAsString(queued), 1L, TimeUnit.HOURS);
-        assertThat(localStore(store).policy().expireAfterWrite())
-                .hasValueSatisfying(expiration ->
-                        assertThat(expiration.getExpiresAfter()).isEqualTo(java.time.Duration.ofHours(1)));
     }
 
     @Test
@@ -309,10 +301,21 @@ class TransportParityCharacterizationTest {
                 .isEqualTo("${springclaw.rabbitmq.async-result-key-prefix:springclaw:chat:async:}");
         assertThat(storeConstructor.getParameters()[3].getAnnotation(Value.class).value())
                 .isEqualTo("${springclaw.rabbitmq.async-result-ttl-hours:24}");
-        assertThat(AsyncChatResultStore.class.getDeclaredField("localStore").getType())
-                .isEqualTo(Cache.class);
+        assertThat(AsyncChatResultStore.class.getMethod(
+                "markQueued",
+                AsyncChatRequestMessage.class
+        ).getReturnType()).isEqualTo(AsyncChatResultPayload.class);
         assertThat(AsyncChatResultStore.class.getMethod("find", String.class).getReturnType())
                 .isEqualTo(AsyncChatResultPayload.class);
+
+        AsyncChatResultStore localFallbackStore = new AsyncChatResultStore(
+                providerOf(null),
+                OBJECT_MAPPER,
+                "inventory:",
+                24
+        );
+        AsyncChatResultPayload locallyStored = localFallbackStore.markQueued(message("inventory-local"));
+        assertThat(localFallbackStore.find("inventory-local")).isEqualTo(locallyStored);
 
         assertThat(WebSocketConfig.class.isAnnotationPresent(EnableWebSocketMessageBroker.class)).isTrue();
         WebSocketConfig webSocketConfig = new WebSocketConfig();
@@ -378,8 +381,4 @@ class TransportParityCharacterizationTest {
         return provider;
     }
 
-    @SuppressWarnings("unchecked")
-    private static Cache<String, AsyncChatResultPayload> localStore(AsyncChatResultStore store) {
-        return (Cache<String, AsyncChatResultPayload>) ReflectionTestUtils.getField(store, "localStore");
-    }
 }

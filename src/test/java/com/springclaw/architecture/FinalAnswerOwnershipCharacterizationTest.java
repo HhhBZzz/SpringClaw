@@ -5,7 +5,9 @@ import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
 import com.springclaw.service.agent.AgentRuntimeEngine;
 import com.springclaw.service.agent.EngineSelector;
+import com.springclaw.service.agent.VerificationResult;
 import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.chat.impl.AutonomousLoopEngine;
 import com.springclaw.service.chat.impl.BasicStreamEngine;
 import com.springclaw.service.chat.impl.ChatContext;
@@ -15,6 +17,8 @@ import com.springclaw.service.chat.impl.ChatResponsePolicyService;
 import com.springclaw.service.chat.impl.ChatResultPersister;
 import com.springclaw.service.chat.impl.ChatServiceImpl;
 import com.springclaw.service.chat.impl.ConversationAdvisorSupport;
+import com.springclaw.service.chat.impl.LocalExecutionNarrator;
+import com.springclaw.service.chat.impl.LocalExecutionSupport;
 import com.springclaw.service.chat.impl.MetaGuardExecutor;
 import com.springclaw.service.chat.impl.ModelLedStreamEngine;
 import com.springclaw.service.chat.impl.ModelTransportGuardService;
@@ -134,27 +138,98 @@ class FinalAnswerOwnershipCharacterizationTest {
     }
 
     @Test
-    @DisplayName("Final-answer and fallback inventory names concrete declaring methods")
+    @DisplayName("Every retained final-answer composer resolves to its actual declaring method")
     void finalAnswerSitesResolveToActualDeclaredMethods() throws Exception {
         List<MethodSite> sites = List.of(
                 new MethodSite(ChatServiceImpl.class, "resolveFinalAnswer",
                         ChatContext.class, ChatExecutionResult.class),
+                new MethodSite(ChatServiceImpl.class, "streamImmediateAnswer",
+                        ChatContext.class, ChatExecutionResult.class, SseEmitter.class),
+                new MethodSite(ChatServiceImpl.class, "streamAgentRuntimeAnswer",
+                        ChatContext.class, String.class, AtomicBoolean.class, SseEmitter.class),
+                new MethodSite(ChatServiceImpl.class, "streamBlockingFallback",
+                        ChatContext.class, Throwable.class, String.class,
+                        AtomicBoolean.class, SseEmitter.class),
                 new MethodSite(ChatServiceImpl.class, "streamReflectAnswer",
                         ChatContext.class, ChatExecutionResult.class, String.class,
                         AtomicBoolean.class, SseEmitter.class, AtomicReference.class),
+
                 new MethodSite(AutonomousLoopEngine.class, "resolveFinalAnswer",
                         ChatExecutionResult.class),
+                new MethodSite(AutonomousLoopEngine.class, "runAutonomousLoop",
+                        ChatContext.class, SseEmitter.class, String.class),
+                new MethodSite(AutonomousLoopEngine.class, "stream",
+                        ChatContext.class, SseEmitter.class, String.class,
+                        AtomicBoolean.class, AtomicReference.class,
+                        AgentEngine.OnStreamFailure.class),
+
                 new MethodSite(BasicStreamEngine.class, "execute",
+                        ChatContext.class, AgentEngine.FallbackResponder.class),
+                new MethodSite(BasicStreamEngine.class, "stream",
+                        ChatContext.class, SseEmitter.class, String.class,
+                        AtomicBoolean.class, AtomicReference.class,
+                        AgentEngine.OnStreamFailure.class),
+                new MethodSite(BasicStreamEngine.class, "handlePartialAnswer",
+                        ChatContext.class, StringBuilder.class, Throwable.class,
+                        SseEmitter.class, String.class, AtomicBoolean.class),
+
+                new MethodSite(ModelLedStreamEngine.class, "execute",
+                        ChatContext.class, AgentEngine.FallbackResponder.class),
+                new MethodSite(ModelLedStreamEngine.class, "stream",
+                        ChatContext.class, SseEmitter.class, String.class,
+                        AtomicBoolean.class, AtomicReference.class,
+                        AgentEngine.OnStreamFailure.class),
+                new MethodSite(ModelLedStreamEngine.class, "handlePartialAnswer",
+                        ChatContext.class, StringBuilder.class, Throwable.class,
+                        SseEmitter.class, String.class, AtomicBoolean.class),
+
+                new MethodSite(SimplifiedOparEngine.class, "execute",
                         ChatContext.class, AgentEngine.FallbackResponder.class),
                 new MethodSite(SimplifiedOparEngine.class, "run",
                         AiProviderService.ActiveChatClient.class, String.class,
                         AssembledContext.class, String.class,
                         AgentEngine.FallbackResponder.class, AgentDecision.class,
                         ContextInjection.class),
+                new MethodSite(SimplifiedOparEngine.class, "buildLocalResult",
+                        String.class, AssembledContext.class,
+                        LocalSkillFallbackService.LocalSkillResult.class, String.class),
+                new MethodSite(SimplifiedOparEngine.class, "buildDisabledResult",
+                        String.class, AiProviderService.ActiveChatClient.class,
+                        AssembledContext.class, AgentEngine.FallbackResponder.class),
+
+                new MethodSite(OparLoopEngine.class, "execute",
+                        ChatContext.class, AgentEngine.FallbackResponder.class),
                 new MethodSite(OparLoopEngine.class, "runLoop",
                         AiProviderService.ActiveChatClient.class, String.class,
                         AssembledContext.class, String.class,
                         AgentEngine.FallbackResponder.class, AgentDecision.class),
+                new MethodSite(OparLoopEngine.class, "buildDegradedResult",
+                        String.class, AiProviderService.ActiveChatClient.class,
+                        AssembledContext.class, String.class, String.class,
+                        AgentEngine.FallbackResponder.class),
+                new MethodSite(OparLoopEngine.class, "buildLocalExecutionResult",
+                        String.class, AssembledContext.class,
+                        LocalSkillFallbackService.LocalSkillResult.class,
+                        String.class, String.class),
+                new MethodSite(OparLoopEngine.class, "narrateLocalExecution",
+                        String.class, AssembledContext.class,
+                        LocalSkillFallbackService.LocalSkillResult.class),
+                new MethodSite(OparLoopEngine.class, "renderMetaRepairPrompt",
+                        AssembledContext.class, String.class, String.class, String.class),
+                new MethodSite(loadClass("com.springclaw.service.chat.impl.OparPromptSupport"),
+                        "renderMetaRepairPrompt",
+                        AssembledContext.class, String.class, String.class, String.class),
+
+                new MethodSite(LocalExecutionSupport.class, "narrate",
+                        String.class, AssembledContext.class,
+                        LocalSkillFallbackService.LocalSkillResult.class),
+                new MethodSite(LocalExecutionNarrator.class, "narrate",
+                        String.class, AssembledContext.class,
+                        LocalSkillFallbackService.LocalSkillResult.class,
+                        AiProviderService.ActiveChatClient.class, boolean.class),
+                new MethodSite(LocalSkillFallbackService.LocalSkillResult.class,
+                        "fallbackAnswer"),
+
                 new MethodSite(AgentRuntimeEngine.class, "summarize",
                         ChatContext.class,
                         com.springclaw.service.agent.CapabilityPlan.class,
@@ -166,19 +241,46 @@ class FinalAnswerOwnershipCharacterizationTest {
                         List.class,
                         com.springclaw.service.agent.VerificationResult.class,
                         com.springclaw.service.agent.ReflectionResult.class),
-                new MethodSite(ModelLedStreamEngine.class, "execute",
-                        ChatContext.class, AgentEngine.FallbackResponder.class),
-                new MethodSite(ModelLedStreamEngine.class, "handlePartialAnswer",
-                        ChatContext.class, StringBuilder.class, Throwable.class,
-                        SseEmitter.class, String.class, AtomicBoolean.class),
+                new MethodSite(AgentRuntimeEngine.class, "deterministicAnswer",
+                        ChatContext.class, List.class, VerificationResult.class, String.class),
+                new MethodSite(loadClass("com.springclaw.service.agent.AgentAnswerFormatter"),
+                        "formatRuntimeAnswer",
+                        String.class, List.class, VerificationResult.class,
+                        String.class, String.class),
+                new MethodSite(loadClass("com.springclaw.service.agent.AgentAnswerFormatter"),
+                        "appendAnswerFromResults",
+                        StringBuilder.class, String.class, List.class),
+                new MethodSite(loadClass("com.springclaw.service.agent.AgentAnswerFormatter"),
+                        "appendFailureAnswer",
+                        StringBuilder.class, String.class, List.class),
+                new MethodSite(loadClass("com.springclaw.service.agent.AgentAnswerFormatter"),
+                        "appendPartialAnswer",
+                        StringBuilder.class, String.class, List.class,
+                        VerificationResult.class),
+                new MethodSite(loadClass("com.springclaw.service.agent.AgentAnswerFormatter"),
+                        "extractUsefulLines", String.class),
+                new MethodSite(loadClass("com.springclaw.service.agent.AgentAnswerFormatter"),
+                        "formatDataLine", String.class),
+                new MethodSite(loadClass("com.springclaw.service.agent.AgentAnswerFormatter"),
+                        "extractFailureReason", String.class),
+
                 new MethodSite(MetaGuardExecutor.class, "execute",
                         ChatContext.class, String.class, String.class),
                 new MethodSite(MetaGuardExecutor.class, "normalize",
                         ChatContext.class, String.class),
                 new MethodSite(MetaGuardExecutor.class, "fallbackAnswer",
                         String.class, AssembledContext.class),
+
+                new MethodSite(ChatResponsePolicyService.class, "stripHallucinatedXmlBlocks",
+                        String.class),
+                new MethodSite(ChatResponsePolicyService.class, "buildFallbackAdvice",
+                        String.class),
+                new MethodSite(ChatResponsePolicyService.class, "simplifyFailureReason",
+                        String.class),
                 new MethodSite(ChatResponsePolicyService.class, "buildPartialAnswerFromAction",
                         String.class, String.class),
+                new MethodSite(ChatResponsePolicyService.class, "sanitizeActionTrace",
+                        String.class),
                 new MethodSite(ChatResponsePolicyService.class, "buildUserFacingFailureReply",
                         String.class, String.class)
         );
@@ -190,6 +292,10 @@ class FinalAnswerOwnershipCharacterizationTest {
                             site.owner().getSimpleName(), site.name())
                     .isEqualTo(site.owner());
         }
+    }
+
+    private static Class<?> loadClass(String className) throws ClassNotFoundException {
+        return Class.forName(className);
     }
 
     private static String invokeResolveFinalAnswer(ChatServiceImpl service,

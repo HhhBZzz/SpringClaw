@@ -1,183 +1,385 @@
 package com.springclaw.architecture;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.springclaw.config.websocket.WebSocketConfig;
+import com.springclaw.controller.ChatController;
+import com.springclaw.dto.chat.ChatRequest;
+import com.springclaw.dto.chat.ChatResponse;
+import com.springclaw.service.agent.AgentRunTraceService;
+import com.springclaw.service.chat.ChatService;
 import com.springclaw.service.chat.async.AsyncChatRequestMessage;
 import com.springclaw.service.chat.async.AsyncChatResultPayload;
+import com.springclaw.service.chat.async.AsyncChatResultStore;
+import com.springclaw.service.chat.async.ChatMessageConsumer;
+import com.springclaw.service.chat.async.ChatMessageProducer;
+import com.springclaw.service.chat.impl.ChatContext;
+import com.springclaw.service.chat.impl.ChatExecutionResult;
+import com.springclaw.service.chat.impl.ChatResultPersister;
+import com.springclaw.service.chat.impl.SseEventBridge;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.redisson.api.RBucket;
+import org.redisson.api.RedissonClient;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.messaging.simp.config.MessageBrokerRegistry;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
+import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
+import org.springframework.web.socket.config.annotation.StompWebSocketEndpointRegistration;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
-import java.lang.reflect.RecordComponent;
 import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
- * Characterization test — pins the differences between sync, SSE, and
- * RabbitMQ async transports today. Findings referenced from the runtime audit
- * doc § 8 ("Persistence — 12 callsites"), § 10 ("Stream lifecycle — 4 owners"),
- * and § 11 ("Proposal confirm-resume — disconnected from originating SSE").
- *
- * <p>The audit's transport-parity invariant from the collaboration plan
- * (Phase 1 invariant 7) is: <em>REST, SSE, RabbitMQ, persistence, trace, and
- * audit must project the same Run.</em> Today they do not. This test pins the
- * structural difference so any unification PR demonstrates progress against a
- * baseline.
+ * Characterizes the currently distinct transport and projector paths without
+ * treating an in-test inventory as evidence.
  */
 class TransportParityCharacterizationTest {
 
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
     @Test
-    @DisplayName("AsyncChatRequestMessage carries 7 fields — request envelope today "
-            + "is independent of ChatRequest used by sync/SSE")
-    void asyncRequestMessageRecordShape() {
-        assertThat(AsyncChatRequestMessage.class.isRecord()).isTrue();
+    @DisplayName("Async result store uses the configured 24-hour TTL for both Caffeine and Redis")
+    void asyncStoreAppliesConfiguredTwentyFourHourTtl() throws Exception {
+        RedissonClient redisson = mock(RedissonClient.class);
+        @SuppressWarnings("unchecked")
+        RBucket<String> bucket = mock(RBucket.class);
+        when(redisson.<String>getBucket("custom:request-24h")).thenReturn(bucket);
 
-        List<String> components = Arrays.stream(AsyncChatRequestMessage.class.getRecordComponents())
-                .map(RecordComponent::getName)
-                .toList();
+        AsyncChatResultStore store = new AsyncChatResultStore(
+                providerOf(redisson),
+                OBJECT_MAPPER,
+                " custom: ",
+                24
+        );
 
-        assertThat(components).containsExactly(
-                "requestId", "sessionKey", "userId", "message",
-                "channel", "createdAt", "responseMode");
+        AsyncChatResultPayload queued = store.markQueued(message("request-24h"));
 
-        // Documented gap with sync transport: there is no `roleCode`,
-        // `extraContext`, or any field the unified-runtime spec would call
-        // a `RunEvent`. The async path is "send a flat envelope, do
-        // synchronous chat() inside the consumer, and persist via the same
-        // ChatResultPersister.persist callsite #1 (audit § 8 line 1)."
-        assertThat(components).doesNotContain("roleCode", "runId");
+        verify(bucket).set(OBJECT_MAPPER.writeValueAsString(queued), 24L, TimeUnit.HOURS);
+        assertThat(localStore(store).policy().expireAfterWrite())
+                .hasValueSatisfying(expiration ->
+                        assertThat(expiration.getExpiresAfter()).isEqualTo(java.time.Duration.ofHours(24)));
     }
 
     @Test
-    @DisplayName("AsyncChatResultPayload carries 9 fields — result envelope is "
-            + "STORED in Redis with TTL but is NOT projected into SSE or DB trace")
-    void asyncResultPayloadRecordShape() {
-        assertThat(AsyncChatResultPayload.class.isRecord()).isTrue();
+    @DisplayName("Async result store clamps TTL and defaults a blank Redis prefix")
+    void asyncStoreClampsTtlAndDefaultsBlankPrefix() throws Exception {
+        RedissonClient redisson = mock(RedissonClient.class);
+        @SuppressWarnings("unchecked")
+        RBucket<String> bucket = mock(RBucket.class);
+        when(redisson.<String>getBucket("springclaw:chat:async:request-clamped")).thenReturn(bucket);
 
-        List<String> components = Arrays.stream(AsyncChatResultPayload.class.getRecordComponents())
-                .map(RecordComponent::getName)
-                .toList();
+        AsyncChatResultStore store = new AsyncChatResultStore(
+                providerOf(redisson),
+                OBJECT_MAPPER,
+                "  ",
+                0
+        );
 
-        assertThat(components).containsExactly(
-                "requestId", "status", "sessionKey", "channel",
-                "answer", "model", "createdAt", "completedAt", "errorMessage");
+        AsyncChatResultPayload queued = store.markQueued(message("request-clamped"));
 
-        // The audit § 8 records that the async path reuses persistence
-        // callsite #1 (sync ChatServiceImpl.executeInternal). It does not
-        // emit SSE events. The payload above is the ONLY view the polling
-        // client sees — sync trace rows are unavailable here.
-        assertThat(components).doesNotContain("traceEvents", "runEvents", "sseEvents");
+        verify(bucket).set(OBJECT_MAPPER.writeValueAsString(queued), 1L, TimeUnit.HOURS);
+        assertThat(localStore(store).policy().expireAfterWrite())
+                .hasValueSatisfying(expiration ->
+                        assertThat(expiration.getExpiresAfter()).isEqualTo(java.time.Duration.ofHours(1)));
     }
 
     @Test
-    @DisplayName("AsyncChatResultStore TTL default — pins 24h Redis retention so "
-            + "any change to async result lifecycle is detected")
-    void asyncStoreTtlDefault() throws Exception {
-        // Documented in audit § 12 config table — 24h default. The unified
-        // RunResult lifecycle should pick a single retention policy, not
-        // three different ones (sync = none / SSE = none / async = 24h).
-        java.lang.reflect.Field ttlField =
-                Class.forName("com.springclaw.service.chat.async.AsyncChatResultStore",
-                        false, getClass().getClassLoader())
-                        .getDeclaredField("ttlHours");
-        assertThat(ttlField.getType()).isEqualTo(long.class);
+    @DisplayName("Caffeine remains the readable store when Redis is absent")
+    void asyncStoreWritesAndReadsLocallyWithoutRedis() {
+        AsyncChatResultStore store = new AsyncChatResultStore(
+                providerOf(null),
+                OBJECT_MAPPER,
+                "results:",
+                24
+        );
+
+        AsyncChatResultPayload completed = store.markCompleted(message(" local-only "), "answer", "model");
+
+        assertThat(completed.requestId()).isEqualTo(" local-only ");
+        assertThat(store.find("local-only"))
+                .isEqualTo(new AsyncChatResultPayload(
+                        "local-only",
+                        completed.status(),
+                        completed.sessionKey(),
+                        completed.channel(),
+                        completed.answer(),
+                        completed.model(),
+                        completed.createdAt(),
+                        completed.completedAt(),
+                        completed.errorMessage()
+                ));
     }
 
     @Test
-    @DisplayName("RabbitMQ consumer reuses sync chat() — async transport reroutes "
-            + "into ChatResultPersister.persist callsite #1, no separate persist site")
-    void asyncConsumerReusesSyncChat() throws ClassNotFoundException {
-        Class<?> consumer = Class.forName("com.springclaw.service.chat.async.ChatMessageConsumer");
-        // The audit § 8 names the 12 ChatResultPersister.persist callsites
-        // and explicitly notes that async (#5 transport in spec) does NOT
-        // appear in that list — the persistence happens transitively via
-        // synchronous chat(). Pin via the consumer holding a ChatService dep.
-        java.lang.reflect.Field[] fields = consumer.getDeclaredFields();
-        boolean holdsChatService = Arrays.stream(fields)
-                .anyMatch(f -> f.getType().getSimpleName().equals("ChatService"));
-        assertThat(holdsChatService)
-                .as("ChatMessageConsumer should reuse ChatService (sync chat path)")
-                .isTrue();
+    @DisplayName("Redis is an optional projection and failures fall back to the local Caffeine result")
+    void asyncStoreFallsBackToLocalWhenRedisWriteAndReadFail() {
+        RedissonClient redisson = mock(RedissonClient.class);
+        @SuppressWarnings("unchecked")
+        RBucket<String> bucket = mock(RBucket.class);
+        when(redisson.<String>getBucket("results:request-fallback")).thenReturn(bucket);
+        doThrow(new IllegalStateException("redis write unavailable"))
+                .when(bucket).set(anyString(), eq(24L), eq(TimeUnit.HOURS));
+        when(bucket.get()).thenThrow(new IllegalStateException("redis read unavailable"));
+        AsyncChatResultStore store = new AsyncChatResultStore(
+                providerOf(redisson),
+                OBJECT_MAPPER,
+                "results:",
+                24
+        );
+
+        AsyncChatResultPayload failed = store.markFailed(message("request-fallback"), "boom");
+
+        assertThat(store.find(" request-fallback ")).isEqualTo(failed);
     }
 
     @Test
-    @DisplayName("Three transports have different completion semantics today — "
-            + "pin the divergence as a baseline for future unification")
-    void transportCompletionSemanticsAreDifferent() {
-        // This is a doc-as-test of the audit § 10. Each row pins the
-        // current 'who decides this transport is done' answer.
-        Map<String, String> completionOwners = Map.of(
-                "sync POST /api/chat/send",
-                    "ChatServiceImpl.executeInternal returns; finally{} releases lock",
-                "SSE POST /api/chat/stream",
-                    "engine.doOnComplete OR ChatServiceImpl.stream.onTimeout — race possible",
-                "async POST /api/chat/async",
-                    "ChatMessageConsumer.consume returns; AsyncChatResultStore.markCompleted; "
-                        + "no SSE projection back to original request");
+    @DisplayName("Redis projection is read when available")
+    void asyncStoreReadsOptionalRedisProjection() throws Exception {
+        RedissonClient redisson = mock(RedissonClient.class);
+        @SuppressWarnings("unchecked")
+        RBucket<String> bucket = mock(RBucket.class);
+        when(redisson.<String>getBucket("results:request-redis")).thenReturn(bucket);
+        AsyncChatResultPayload projected = new AsyncChatResultPayload(
+                "request-redis",
+                "COMPLETED",
+                "session",
+                "api",
+                "projected answer",
+                "projected model",
+                100L,
+                200L,
+                ""
+        );
+        when(bucket.get()).thenReturn(OBJECT_MAPPER.writeValueAsString(projected));
+        AsyncChatResultStore store = new AsyncChatResultStore(
+                providerOf(redisson),
+                OBJECT_MAPPER,
+                "results:",
+                24
+        );
 
-        assertThat(completionOwners).hasSize(3);
-        assertThat(completionOwners.values())
-                .allMatch(s -> s != null && !s.isBlank());
-
-        // The unified-runtime spec must collapse this to a single
-        // completion contract; the test will need to be migrated together
-        // with the implementation.
+        assertThat(store.find("request-redis")).isEqualTo(projected);
     }
 
     @Test
-    @DisplayName("Proposal confirm-resume produces NO projection back into the "
-            + "originating SSE — pin via the absence of any cross-link field")
-    void proposalConfirmHasNoSseProjection() throws ClassNotFoundException {
-        Class<?> proposalRecord = Class.forName(
-                "com.springclaw.service.proposal.ToolInvocationProposal");
+    @DisplayName("Rabbit consumer stores the polling result and projects the same payload over Rabbit and STOMP")
+    void asyncConsumerProjectsCompletedResultToPollingRabbitAndStomp() {
+        ChatService chatService = mock(ChatService.class);
+        AsyncChatResultStore resultStore = mock(AsyncChatResultStore.class);
+        ChatMessageProducer producer = mock(ChatMessageProducer.class);
+        SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
+        ChatMessageConsumer consumer = new ChatMessageConsumer(
+                chatService,
+                resultStore,
+                producer,
+                messagingTemplate
+        );
+        AsyncChatRequestMessage message = message("request-completed");
+        ChatRequest expectedRequest = new ChatRequest(
+                message.sessionKey(),
+                message.userId(),
+                message.message(),
+                message.channel(),
+                message.responseMode()
+        );
+        ChatResponse response = new ChatResponse(message.sessionKey(), "answer", "model", 123L);
+        AsyncChatResultPayload payload = new AsyncChatResultPayload(
+                message.requestId(),
+                "COMPLETED",
+                message.sessionKey(),
+                message.channel(),
+                response.answer(),
+                response.model(),
+                message.createdAt(),
+                456L,
+                ""
+        );
+        when(chatService.chat(expectedRequest)).thenReturn(response);
+        when(resultStore.markCompleted(message, response.answer(), response.model())).thenReturn(payload);
 
-        List<String> componentNames = Arrays.stream(proposalRecord.getRecordComponents())
-                .map(RecordComponent::getName)
-                .toList();
+        consumer.consume(message);
 
-        // The proposal record carries requestId / runId / sessionKey for
-        // tracing but has NO field that an SSE projector would consume to
-        // re-emit on the original chat stream. The audit § 11 records this
-        // as 'no result projection back into the original chat stream'.
-        assertThat(componentNames)
-                .contains("requestId", "runId", "sessionKey")
-                .doesNotContain("originSseEmitterId", "resumeChannel", "projectionTarget");
+        verify(chatService).chat(expectedRequest);
+        verify(resultStore).markCompleted(message, response.answer(), response.model());
+        verify(producer).sendResponse(payload);
+        verify(messagingTemplate).convertAndSend("/topic/chat/request-completed", payload);
     }
 
     @Test
-    @DisplayName("Documented transport inventory — pinning the 4 paths the "
-            + "collaboration plan required Phase 1 to characterize")
-    void fourTransportLifecyclesAuditedHere() {
-        // Phase 1 deliverable from the collaboration plan §10 enumerates:
-        //   sync, SSE, RabbitMQ async, proposal-confirm-resume.
-        // We pin the inventory so a future PR adding a fifth transport
-        // (e.g., WebSocket, gRPC) is forced to declare it.
-        List<String> auditedTransports = List.of(
-                "POST /api/chat/send (sync)",
-                "POST /api/chat/stream (SSE)",
-                "POST /api/chat/async (RabbitMQ + Redis result store)",
-                "POST /api/tool-proposals/{id}/confirm (resume via async event)");
+    @DisplayName("Rabbit consumer stores and projects the same failed payload when chat execution fails")
+    void asyncConsumerProjectsFailedResultToPollingRabbitAndStomp() {
+        ChatService chatService = mock(ChatService.class);
+        AsyncChatResultStore resultStore = mock(AsyncChatResultStore.class);
+        ChatMessageProducer producer = mock(ChatMessageProducer.class);
+        SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
+        ChatMessageConsumer consumer = new ChatMessageConsumer(
+                chatService,
+                resultStore,
+                producer,
+                messagingTemplate
+        );
+        AsyncChatRequestMessage message = message("request-failed");
+        ChatRequest expectedRequest = new ChatRequest(
+                message.sessionKey(),
+                message.userId(),
+                message.message(),
+                message.channel(),
+                message.responseMode()
+        );
+        AsyncChatResultPayload payload = new AsyncChatResultPayload(
+                message.requestId(),
+                "FAILED",
+                message.sessionKey(),
+                message.channel(),
+                "",
+                "",
+                message.createdAt(),
+                456L,
+                "chat unavailable"
+        );
+        when(chatService.chat(expectedRequest)).thenThrow(new IllegalStateException("chat unavailable"));
+        when(resultStore.markFailed(message, "chat unavailable")).thenReturn(payload);
 
-        assertThat(auditedTransports).hasSize(4);
+        consumer.consume(message);
+
+        verify(resultStore).markFailed(message, "chat unavailable");
+        verify(producer).sendResponse(payload);
+        verify(messagingTemplate).convertAndSend("/topic/chat/request-failed", payload);
     }
 
     @Test
-    @DisplayName("Pin: SseEventBridge has both sendEvent helper AND completeEmitter "
-            + "helper — stream termination is a 4-owner shared responsibility")
-    void sseEventBridgeShape() throws ClassNotFoundException {
-        Class<?> bridge = Class.forName("com.springclaw.service.chat.impl.SseEventBridge");
-        java.util.Set<String> publicMethods = Arrays.stream(bridge.getDeclaredMethods())
-                .filter(m -> java.lang.reflect.Modifier.isPublic(m.getModifiers()))
-                .map(Method::getName)
-                .collect(java.util.stream.Collectors.toSet());
+    @DisplayName("REST sync, SSE, async submission, and polling paths are bound to actual controller methods")
+    void controllerTransportInventoryIsBoundToProductionMethods() throws Exception {
+        assertThat(ChatController.class.getAnnotation(RequestMapping.class).value())
+                .containsExactly("/api/chat");
 
-        // Both helpers exist as part of the audit § 10 'helper called by all
-        // four owners' record. If either disappears without a unified-runtime
-        // spec entry, regression.
-        assertThat(publicMethods).contains("completeEmitter");
-        assertThat(publicMethods)
-                .as("Bridge should expose at least one event-emitting helper")
-                .anyMatch(name -> name.startsWith("send"));
+        Method sync = ChatController.class.getMethod("send", ChatRequest.class);
+        assertThat(sync.getAnnotation(PostMapping.class).value()).containsExactly("/send");
+        assertThat(sync.getReturnType().getSimpleName()).isEqualTo("ApiResponse");
+
+        Method sse = ChatController.class.getMethod("stream", ChatRequest.class);
+        PostMapping sseMapping = sse.getAnnotation(PostMapping.class);
+        assertThat(sseMapping.value()).containsExactly("/stream");
+        assertThat(sseMapping.produces()).containsExactly(MediaType.TEXT_EVENT_STREAM_VALUE);
+        assertThat(sse.getReturnType()).isEqualTo(SseEmitter.class);
+
+        Method submitAsync = ChatController.class.getMethod("sendAsync", ChatRequest.class);
+        assertThat(submitAsync.getAnnotation(PostMapping.class).value()).containsExactly("/async");
+
+        Method pollAsync = ChatController.class.getMethod("asyncResult", String.class);
+        assertThat(pollAsync.getAnnotation(GetMapping.class).value()).containsExactly("/async/{requestId}");
+        assertThat(pollAsync.getReturnType().getSimpleName()).isEqualTo("ApiResponse");
+    }
+
+    @Test
+    @DisplayName("Rabbit, local Caffeine, optional Redis, and WebSocket/STOMP projectors are actual production members")
+    void asyncTransportAndProjectorInventoryIsBoundToProductionMembers() throws Exception {
+        Method consume = ChatMessageConsumer.class.getMethod("consume", AsyncChatRequestMessage.class);
+        assertThat(consume.getAnnotation(RabbitListener.class).queues())
+                .containsExactly("${springclaw.rabbitmq.chat-request-queue:chat.request.queue}");
+
+        Constructor<AsyncChatResultStore> storeConstructor = AsyncChatResultStore.class.getConstructor(
+                ObjectProvider.class,
+                ObjectMapper.class,
+                String.class,
+                long.class
+        );
+        assertThat(storeConstructor.getParameterTypes()[0]).isEqualTo(ObjectProvider.class);
+        assertThat(storeConstructor.getParameters()[2].getAnnotation(Value.class).value())
+                .isEqualTo("${springclaw.rabbitmq.async-result-key-prefix:springclaw:chat:async:}");
+        assertThat(storeConstructor.getParameters()[3].getAnnotation(Value.class).value())
+                .isEqualTo("${springclaw.rabbitmq.async-result-ttl-hours:24}");
+        assertThat(AsyncChatResultStore.class.getDeclaredField("localStore").getType())
+                .isEqualTo(Cache.class);
+        assertThat(AsyncChatResultStore.class.getMethod("find", String.class).getReturnType())
+                .isEqualTo(AsyncChatResultPayload.class);
+
+        assertThat(WebSocketConfig.class.isAnnotationPresent(EnableWebSocketMessageBroker.class)).isTrue();
+        WebSocketConfig webSocketConfig = new WebSocketConfig();
+        MessageBrokerRegistry brokerRegistry = mock(MessageBrokerRegistry.class);
+        webSocketConfig.configureMessageBroker(brokerRegistry);
+        verify(brokerRegistry).enableSimpleBroker("/topic");
+        verify(brokerRegistry).setApplicationDestinationPrefixes("/app");
+
+        StompEndpointRegistry endpointRegistry = mock(StompEndpointRegistry.class);
+        StompWebSocketEndpointRegistration endpointRegistration =
+                mock(StompWebSocketEndpointRegistration.class);
+        when(endpointRegistry.addEndpoint("/ws/chat")).thenReturn(endpointRegistration);
+        webSocketConfig.registerStompEndpoints(endpointRegistry);
+        verify(endpointRegistration).setAllowedOriginPatterns("*");
+    }
+
+    @Test
+    @DisplayName("Conversation persistence and SSE trace projection remain distinct production collaborators")
+    void persistenceAndTraceInventoryIsBoundToProductionMembers() throws Exception {
+        assertThat(ChatResultPersister.class.getMethod(
+                "persist",
+                ChatContext.class,
+                String.class,
+                ChatExecutionResult.class
+        )).isNotNull();
+
+        assertThat(SseEventBridge.class.getMethod(
+                "sendTrace",
+                SseEmitter.class,
+                ChatContext.class,
+                String.class,
+                String.class,
+                String.class,
+                String.class,
+                long.class
+        )).isNotNull();
+        assertThat(SseEventBridge.class.getMethod(
+                "recordRunTrace",
+                ChatContext.class,
+                com.springclaw.service.agent.AgentRun.class
+        )).isNotNull();
+        assertThat(Arrays.stream(SseEventBridge.class.getDeclaredConstructors())
+                .flatMap(constructor -> Arrays.stream(constructor.getParameterTypes()))
+                .anyMatch(AgentRunTraceService.class::equals)).isTrue();
+    }
+
+    private static AsyncChatRequestMessage message(String requestId) {
+        return new AsyncChatRequestMessage(
+                requestId,
+                "session",
+                "user",
+                "hello",
+                "api",
+                100L,
+                "standard"
+        );
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ObjectProvider<RedissonClient> providerOf(RedissonClient client) {
+        ObjectProvider<RedissonClient> provider = mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(client);
+        return provider;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Cache<String, AsyncChatResultPayload> localStore(AsyncChatResultStore store) {
+        return (Cache<String, AsyncChatResultPayload>) ReflectionTestUtils.getField(store, "localStore");
     }
 }

@@ -1,9 +1,11 @@
 # Runtime Current-State Audit
 
 > Phase 1 / Workstream B characterization output, corrected and integrated on
-> `codex/unified-agent-runtime` at `16f736f`.
+> `codex/unified-agent-runtime`.
 > Original provenance: Claude-authored audit commit `dab2dbc` on
 > `claude/runtime-characterization`, based on `36ca396`.
+> Corrected audit provenance: `c6fa025`; the strengthened-test integration
+> baseline before the audit corrections was `16f736f`.
 > Status: current-state audit aligned with production and the strengthened
 > characterization tests; this document is no longer a Claude-only/read-only
 > branch artifact.
@@ -132,11 +134,11 @@ guard tests elsewhere).
 
 | Producer | File | Output |
 |---|---|---|
-| [`ContextAssembler.assemble`](../../src/main/java/com/springclaw/service/context/ContextAssembler.java) | `AssembledContext { observePrompt, eventContext, semanticContext, question, ... }` | `observePrompt` is the concatenation of (1) current question, (2) Memory Bank snapshot, (3) recent `message_event` rows, (4) vector recall. |
+| [`ContextAssembler.assemble`](../../src/main/java/com/springclaw/service/context/ContextAssembler.java) | `AssembledContext { observePrompt, eventContext, semanticContext, question, ... }` | `observePrompt` is the concatenation of (1) current question, (2) Memory Bank snapshot, (3) recent `message_event` rows, (4) semantic recall from the optional vector store or local fallback. |
 | [`ChatContextFactory.build`](../../src/main/java/com/springclaw/service/chat/impl/ChatContextFactory.java:123-133) | `ContextInjection { observePrompt, … }` | Pass-through wrapper of `AssembledContext.observePrompt` plus reserved fields `decisionContext / risk` (currently empty). |
 | [`MemoryBankService.renderSnapshot`](../../src/main/java/com/springclaw/service/memory/MemoryBankService.java) | Markdown rendering of `docs/memory-bank/*.md` | Read by `ContextAssembler.assemble` only. |
 | [`MessageEventChatMemory`](../../src/main/java/com/springclaw/config/ai/ChatMemoryConfig.java:57-83) | Spring AI `ChatMemory` adapter | Reads recent CHAT events from `message_event`. |
-| Vector store (when `springclaw.embedding.enabled=true`) | `VectorMemoryService.recallBySession / recallByUser` | Currently default-off; `EmbeddingModel` and `VectorStore` beans are not created. |
+| [`VectorMemoryService`](../../src/main/java/com/springclaw/service/memory/impl/VectorMemoryService.java) | `recallBySession / recallByUser` over optional `VectorStore`, then in-process local fallback | `springclaw.embedding.enabled=false` prevents the embedding/vector-store beans, but does not disable `VectorMemoryService`; conversation turns are still written to and recalled from its bounded local fallback when vector storage is unavailable. |
 
 ### 4.2 Injectors (advisors that mutate the model request)
 
@@ -178,7 +180,7 @@ than invoking every engine call site.
 
 ### 4.4 Observed duplication
 
-1. **Long-term semantic memory is materialised twice for model calls that use `ConversationAdvisorSupport`.** `ContextAssembler.buildSemanticContext` reads `memoryService.recallBySession + recallByUser` and embeds them inside `observePrompt`; `SemanticMemoryAdvisor.augment` reads the same methods again at the engine/answer-call boundary and adds `LONG_TERM_MEMORY:` to the system message. With embedding disabled both retrievals return empty. The pre-engine `AgentDecisionService` model-router call bypasses advisor support, so it does not perform this second advisor retrieval.
+1. **Long-term semantic memory is materialised twice for model calls that use `ConversationAdvisorSupport`.** `ContextAssembler.buildSemanticContext` reads `memoryService.recallBySession + recallByUser` and embeds them inside `observePrompt`; `SemanticMemoryAdvisor.augment` reads the same methods again at the engine/answer-call boundary and adds `LONG_TERM_MEMORY:` to the system message. With embeddings disabled, `VectorMemoryService` skips vector search but still reads its in-process local fallback, which `ChatResultPersister` can populate through `storeConversationTurn`; the duplicate retrieval can therefore be visible under default embedding configuration. The pre-engine `AgentDecisionService` model-router call bypasses advisor support, so it does not perform this second advisor retrieval.
 2. **Short-term event history is materialised twice on advisor-wrapped model calls when the Spring-AI ChatMemory flag is on.** `ContextAssembler.buildEventContext` and `MessageChatMemoryAdvisor` (via `MessageEventChatMemory`) both read `message_event`. With the default flag off, assembly still reads event history but the advisor chain omits chat memory.
 3. **`ContextInjection` is a wrapper of `observePrompt`, but `OparLoopEngine` reads from `assembled.observePrompt()` directly while the other engines read through `ContextInjection`** — the data is identical, but the access path is not uniform.
 
@@ -251,18 +253,23 @@ actual declared methods. They span:
 - OPAR meta-repair prompt builders.
 
 The inventory is a method-ownership list, not a claim that all 47 execute in
-one request. A representative blocking fallback order is:
+one request. The blocking `ChatServiceImpl.resolveFinalAnswer` flow is:
 
 ```
-model raw output
-  → [SimplifiedOparEngine] stripHallucinatedXmlBlocks
-  → [MetaGuardExecutor.normalize] empty / XML / refusal scrub
-  → [MetaGuardExecutor.execute] meta-refusal detect + retry
-  → [MetaGuardExecutor.fallbackAnswer] canned tail
-  → [ChatResponsePolicyService.buildPartialAnswerFromAction] partial result fallback
-  → [ChatResponsePolicyService.buildUserFacingFailureReply] failure-class canned reply
-  → [LocalExecutionNarrator] local-skill model translation
-  → [LocalSkillFallbackService.fallbackAnswer] deterministic text
+non-empty reflect
+  → return reflect directly (MetaGuard bypass)
+
+empty reflect
+  → model disabled
+      → MetaGuardExecutor.fallbackAnswer
+          → ChatResponsePolicyService.buildUserFacingFailureReply
+  → model enabled
+      → MetaGuardExecutor.execute(plan, action)
+      → if that call throws:
+          1. ChatResponsePolicyService.buildPartialAnswerFromAction
+          2. if empty, local fallback + LocalExecutionSupport.narrate
+          3. if unavailable, MetaGuardExecutor.fallbackAnswer
+               → ChatResponsePolicyService.buildUserFacingFailureReply
 ```
 
 The key bypass is broader than two named engines:
@@ -278,7 +285,7 @@ bypasses MetaGuard at this boundary, including but not limited to
 
 ## 8. Persistence — 12 `persist()` callsites
 
-[`ChatResultPersister.persist`](../../src/main/java/com/springclaw/service/chat/impl/ChatResultPersister.java) writes 4 `message_event` rows per call (`USER+ASSISTANT`, `ROUTING`, `PLAN`, `ACT`). It is invoked from:
+[`ChatResultPersister.persist`](../../src/main/java/com/springclaw/service/chat/impl/ChatResultPersister.java) normally writes **5** `message_event` rows per call: `recordTurn` emits separate `USER` and `ASSISTANT` rows, followed by `ROUTING`, `PLAN`, and `ACT`. Blank user/assistant content can suppress the corresponding `recordTurn` row. It is invoked from:
 
 | # | Caller | File:line | Path class |
 |---|---|---|---|
@@ -339,10 +346,8 @@ is **source-audit-only**.
   to Redis when a `RedissonClient` is available.
 - Reads prefer Redis when available and fall back to local Caffeine when Redis
   is absent, fails, or has no usable payload.
-- Both stores use `springclaw.rabbitmq.async-result-ttl-hours`, default
-  **24 hours**; constructor values below 1 are clamped to **1 hour**.
-- Production configuration maps that property from
-  `SPRINGCLAW_CHAT_ASYNC_RESULT_TTL_HOURS`.
+- The configured constructor TTL is used for both local Caffeine expiry and
+  the optional Redis projection; values below 1 are clamped to **1 hour**.
 - [`ChatMessageConsumer`](../../src/main/java/com/springclaw/service/chat/async/ChatMessageConsumer.java)
   stores `COMPLETED` or `FAILED`, publishes the same payload to the Rabbit
   response path, and sends it by WebSocket/STOMP to
@@ -350,6 +355,10 @@ is **source-audit-only**.
 - `GET /api/chat/async/{requestId}` polling and the STOMP topic are both
   projections of the stored async result; neither is the sole async result
   path.
+
+**Source-audit-only:** the constructor property
+`springclaw.rabbitmq.async-result-ttl-hours` defaults to **24 hours**, and
+`application.yml` maps it from `SPRINGCLAW_CHAT_ASYNC_RESULT_TTL_HOURS`.
 
 ---
 
@@ -369,7 +378,13 @@ This is a complete cross-link gap: confirmed-tool-call execution does not appear
 
 ## 12. Configuration and environment variables
 
-Real keys discovered in `application.yml` and config classes (no `OPENCLAW_*` form found in code; all are `SPRINGCLAW_*`):
+Primary runtime configuration uses `SPRINGCLAW_*` names. `application.yml`
+also retains compatibility fallbacks for several `OPENCLAW_*` names:
+`OPENCLAW_AI_ACTIVE_PROVIDER`, the DeepSeek enabled/API-key/base-URL/model
+variables, `OPENCLAW_LOCAL_FILES_ROOTS`, and
+`OPENCLAW_PERSISTENCE_DB_ENABLED`. Script execution also exports
+`OPENCLAW_WORKSPACE_ROOT`, `OPENCLAW_SCRIPT_ROOT`, `OPENCLAW_SKILL_ROOT`, and
+`OPENCLAW_SKILL_NAME`.
 
 | Key | Default | Env var | Consumer |
 |---|---|---|---|
@@ -388,7 +403,7 @@ Real keys discovered in `application.yml` and config classes (no `OPENCLAW_*` fo
 | `springclaw.ai.same-model-retry-attempts` | `0` | `SPRINGCLAW_AI_SAME_MODEL_RETRY_ATTEMPTS` | `ModelCallExecutor` |
 | `springclaw.agent.decision.model-router-enabled` | `true` | `SPRINGCLAW_AGENT_DECISION_MODEL_ROUTER_ENABLED` | `AgentDecisionService` |
 | `springclaw.embedding.enabled` | `false` | `SPRINGCLAW_EMBEDDING_ENABLED` | `EmbeddingConfig` |
-| `springclaw.chat.memory-window-size` | `8` | `SPRINGCLAW_CHAT_MEMORY_WINDOW_SIZE` | `MessageEventChatMemory` |
+| `springclaw.chat.memory-window-size` | `8` | `SPRINGCLAW_CHAT_MEMORY_WINDOW_SIZE` | `ContextAssembler`, `MessageEventChatMemory` |
 | `springclaw.chat.model-transport-cooldown-seconds` | `30` | `SPRINGCLAW_MODEL_TRANSPORT_COOLDOWN_SECONDS` | `ModelTransportGuardService` |
 | `springclaw.chat.provider-failure-cooldown-threshold` | `2` | `SPRINGCLAW_PROVIDER_FAILURE_COOLDOWN_THRESHOLD` | `ModelTransportGuardService` |
 | `springclaw.rabbitmq.async-result-ttl-hours` | `24` (minimum effective value `1`) | `SPRINGCLAW_CHAT_ASYNC_RESULT_TTL_HOURS` | `AsyncChatResultStore` |
@@ -448,15 +463,18 @@ The same domain type is overloaded six different ways. Trace, persistence (`PLAN
 
 ## 15. Honest scope notes
 
-- The `OPENCLAW_*` environment-variable spelling referenced in some legacy docs (and in [`CLAUDE.md`](../../CLAUDE.md)) does not exist in current source. Only `SPRINGCLAW_*` keys are read.
+- `SPRINGCLAW_*` names are primary, but selected `OPENCLAW_*` compatibility
+  aliases are still read from `application.yml`, and script-skill execution
+  exports several `OPENCLAW_*` variables.
 - `AgentRuntimeEngine` (priority 2) was not in the original 5-engine narrative; it is the sixth engine and the only path that runs `CapabilityExecutorRegistry`.
 - Any engine-supplied non-empty `reflect` bypasses MetaGuard in
   `ChatServiceImpl.resolveFinalAnswer`; this is not limited to two engines.
 - Default config (`springclaw.embedding.enabled=false`,
-  `spring-ai-chat-memory-enabled=false`) means semantic retrieval is empty and
-  the chat-memory advisor is absent. Enabling embeddings exposes duplicate
-  semantic retrieval on advisor-wrapped model calls; enabling Spring AI chat
-  memory exposes duplicate event-history retrieval on those calls.
+  `spring-ai-chat-memory-enabled=false`) means vector-backed retrieval is
+  unavailable and the chat-memory advisor is absent. `VectorMemoryService`
+  still stores and recalls its local fallback, so duplicate semantic retrieval
+  can already occur on advisor-wrapped model calls; enabling Spring AI chat
+  memory additionally exposes duplicate event-history retrieval.
 - The audit covers runtime control flow and characterizes the existing P0 tool
   boundary without proposing changes to `ToolRuntimeAspect`,
   `WorkspaceGitGuard`, or `ToolInvocationProposal`.

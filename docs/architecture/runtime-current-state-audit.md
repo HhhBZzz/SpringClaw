@@ -346,9 +346,9 @@ is **source-audit-only**.
   to Redis when a `RedissonClient` is available.
 - Reads prefer Redis when available and fall back to local Caffeine when Redis
   is absent, fails, or has no usable payload.
-- The constructor's **24-hour default**, use of the configured TTL for local
-  Caffeine expiry and the optional Redis projection, and clamping of values
-  below 1 to **1 hour** are characterization-tested.
+- Immediate local Caffeine put/get, Redis projection/read/fallback behavior,
+  the constructor's **24-hour default**, and clamping values below 1 to
+  **1 hour** are characterization-tested as applicable.
 - [`ChatMessageConsumer`](../../src/main/java/com/springclaw/service/chat/async/ChatMessageConsumer.java)
   stores `COMPLETED` or `FAILED`, publishes the same payload to the Rabbit
   response path, and sends it by WebSocket/STOMP to
@@ -357,7 +357,9 @@ is **source-audit-only**.
   projections of the stored async result; neither is the sole async result
   path.
 
-**Source-audit-only:** `application.yml` maps
+**Source-audit-only:** the local Caffeine cache is configured with
+`expireAfterWrite(ttlHours, HOURS)`; the characterization suite does not wait
+for an entry to expire. `application.yml` maps
 `springclaw.rabbitmq.async-result-ttl-hours` from
 `SPRINGCLAW_CHAT_ASYNC_RESULT_TTL_HOURS`.
 

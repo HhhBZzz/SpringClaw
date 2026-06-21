@@ -593,3 +593,55 @@ Dependency:
   - remaining ingress, projection, trace, and proposal integration waits for the
     Codex lifecycle core and handoff commit.
 ```
+
+## Update: Phase 2B lifecycle core ready for integration
+
+```text
+Owner: Codex
+Branch: codex/unified-agent-runtime
+Commits:
+  3c8d245 docs: correct phase 2b lifecycle bridge design
+  e13f182 docs: plan phase 2b core and Claude handoff
+  75bc07e feat: add atomic canonical lifecycle store
+  b8aac16 feat: coordinate canonical run lifecycle
+  86340a1 feat: freeze legacy lifecycle bridge boundary
+  0cffc04 test: verify concurrent lifecycle commit fencing
+  802b094 fix: close lifecycle idempotency and failure gaps
+Frozen core APIs:
+  - RunStateRepository: query-only state view
+  - RunEventStore: query-only ordered event view
+  - RunLifecycleStore: atomic create/commit write port
+  - RunCoordinator: only canonical lifecycle writer
+  - LegacyRuntimeBridge: transport-neutral legacy observation boundary
+Verified invariants:
+  - state revision and lifecycle event commit under one per-run critical section
+  - stale concurrent writers add neither state nor event
+  - duplicate acceptance remains idempotent after the run advances when immutable
+    acceptance fields match
+  - conflicting acceptance fails
+  - terminal state is immutable
+  - VERIFYING -> FAILED requires and preserves CompletionDecision.FAIL
+  - event identity and sequence are store-owned
+  - bridge is not RuntimeStrategy and has no transport, engine, persistence, lock,
+    or tool-execution dependency
+Tests:
+  - 131 contract, lifecycle-core, characterization, identity, and ownership
+    testcase elements pass
+  - 0 failures, 0 errors, 0 skips
+Durability limit:
+  - current lifecycle store is process-local and does not claim restart durability
+    or exactly-once execution
+Rollback:
+  - revert integration wiring first
+  - revert 802b094, 0cffc04, 86340a1, b8aac16, and 75bc07e
+  - retain Phase 2A identity propagation
+Claude next:
+  - complete early Task 4A engine ordering if not already complete
+  - then execute Tasks 5-8 from
+    docs/superpowers/plans/2026-06-21-unified-runtime-phase-2b-core-and-handoff.md
+  - do not modify runtime/lifecycle/** or runtime/bridge/**
+  - report any required core API change instead of editing the frozen core
+```
+
+Claude may now begin Phase 2B integration Tasks 5–8 after basing work on commit
+`802b094` or a later ledger-only handoff commit.

@@ -104,7 +104,9 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
                 ctx.channel(),
                 ctx.userId(),
                 ctx.requestId(),
-                "ACT-BLOCKING"
+                "ACT-BLOCKING",
+                ctx.requestId(),
+                ctx.roleCode()
         );
         try (ToolExecutionContextHolder.Scope ignored = ToolExecutionContextHolder.open(toolContext)) {
             AiProviderService.ActiveChatClient client = ctx.activeClient();
@@ -214,7 +216,9 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
                     context.channel(),
                     context.userId(),
                     context.requestId(),
-                    "ACT-STREAM"
+                    "ACT-STREAM",
+                    context.requestId(),
+                    context.roleCode()
             );
             Disposable disposable = conversationAdvisorSupport.apply(
                             requestSpec,

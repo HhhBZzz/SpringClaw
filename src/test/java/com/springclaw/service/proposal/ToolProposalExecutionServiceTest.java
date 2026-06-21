@@ -30,7 +30,8 @@ class ToolProposalExecutionServiceTest {
 
     @Test
     void onExecutionRequested_setsBothContextsBeforeInvokingTool() {
-        ToolInvocationProposal proposal = sampleExecutingProposal("tip-1");
+        String canonicalId = "66666666666666666666666666666666";
+        ToolInvocationProposal proposal = sampleExecutingProposal("tip-1", canonicalId);
         when(proposalService.findByProposalId("tip-1")).thenReturn(Optional.of(proposal));
 
         AtomicReference<ToolExecutionContext> ctxDuringInvoke = new AtomicReference<>();
@@ -47,13 +48,15 @@ class ToolProposalExecutionServiceTest {
         assertThat(ctxDuringInvoke.get()).isNotNull();
         assertThat(ctxDuringInvoke.get().userId()).isEqualTo("u1");
         assertThat(ctxDuringInvoke.get().sessionKey()).isEqualTo("session-A");
-        assertThat(ctxDuringInvoke.get().requestId()).isEqualTo("req-1");
-        assertThat(ctxDuringInvoke.get().runId()).isEqualTo("run-1");
+        assertThat(ctxDuringInvoke.get().requestId()).isEqualTo(canonicalId);
+        assertThat(ctxDuringInvoke.get().runId()).isEqualTo(canonicalId);
         assertThat(ctxDuringInvoke.get().phase()).isEqualTo("proposal-execution");
 
         // 调用期间 ApprovedProposalContext 也必须就位
         assertThat(approvedDuringInvoke.get()).isNotNull();
         assertThat(approvedDuringInvoke.get().proposalId()).isEqualTo("tip-1");
+        assertThat(approvedDuringInvoke.get().requestId()).isEqualTo(canonicalId);
+        assertThat(approvedDuringInvoke.get().runId()).isEqualTo(canonicalId);
 
         // 调用结束后两个 ThreadLocal 都被清空
         assertThat(ToolExecutionContextHolder.get()).isNull();
@@ -62,7 +65,7 @@ class ToolProposalExecutionServiceTest {
 
     @Test
     void onExecutionRequested_clearsContextsEvenWhenInvokerThrows() {
-        ToolInvocationProposal proposal = sampleExecutingProposal("tip-2");
+        ToolInvocationProposal proposal = sampleExecutingProposal("tip-2", "req-2");
         when(proposalService.findByProposalId("tip-2")).thenReturn(Optional.of(proposal));
         when(toolInvoker.invoke(Mockito.anyString(), Mockito.anyString()))
                 .thenThrow(new RuntimeException("tool boom"));
@@ -86,7 +89,7 @@ class ToolProposalExecutionServiceTest {
 
     @Test
     void onExecutionRequested_statusNotExecuting_skips() {
-        ToolInvocationProposal pending = sampleExecutingProposal("tip-3");
+        ToolInvocationProposal pending = sampleExecutingProposal("tip-3", "req-3");
         ToolInvocationProposal modified = new ToolInvocationProposal(
                 pending.id(), pending.proposalId(), pending.requestId(), pending.runId(),
                 pending.sessionKey(), pending.userId(), pending.roleCode(),
@@ -107,10 +110,10 @@ class ToolProposalExecutionServiceTest {
         verify(toolInvoker, Mockito.never()).invoke(Mockito.anyString(), Mockito.anyString());
     }
 
-    private ToolInvocationProposal sampleExecutingProposal(String proposalId) {
+    private ToolInvocationProposal sampleExecutingProposal(String proposalId, String canonicalId) {
         LocalDateTime now = LocalDateTime.now();
         return new ToolInvocationProposal(
-                null, proposalId, "req-1", "run-1",
+                null, proposalId, canonicalId, canonicalId,
                 "session-A", "u1", "USER",
                 "WorkspaceEditToolPack.workspaceWriteFile", "workspace",
                 "[\"src/A.java\",\"hello\"]", "abcd",

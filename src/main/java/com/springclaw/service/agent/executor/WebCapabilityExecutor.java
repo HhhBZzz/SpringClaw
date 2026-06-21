@@ -41,7 +41,15 @@ public class WebCapabilityExecutor extends AbstractCapabilityExecutor implements
 
     @Override
     public List<CapabilityResult> execute(AgentDecision decision, AssembledContext assembled, String requestId) {
-        ToolExecutionContext context = new ToolExecutionContext(assembled.sessionKey(), assembled.channel(), assembled.userId(), requestId, "AGENT-RUNTIME");
+        ToolExecutionContext context = new ToolExecutionContext(
+                assembled.sessionKey(),
+                assembled.channel(),
+                assembled.userId(),
+                requestId,
+                "AGENT-RUNTIME",
+                requestId,
+                null
+        );
         try (ToolExecutionContextHolder.Scope ignored = ToolExecutionContextHolder.open(context)) {
             if (shouldUseCrawler(assembled.question())) {
                 return List.of(run("web.crawler", toolset(), "read", "使用 web_crawler skill 抓取网页", () -> scriptSkillToolPack.executeSkillByGoal("web_crawler", assembled.question())));

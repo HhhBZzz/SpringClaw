@@ -645,3 +645,41 @@ Claude next:
 
 Claude may now begin Phase 2B integration Tasks 5–8 after basing work on commit
 `802b094` or a later ledger-only handoff commit.
+
+## Update: Phase 2B Task 5 ingress wiring
+
+```text
+Task: Phase 2B Task 5 ingress wiring
+Owner: Claude
+Base: b7bb77f
+Commits:
+  4403717 feat: create canonical runs at chat ingress
+  710c6a8 feat: require canonical run for async delivery
+  3a66621 feat: create canonical runs at webhook ingress
+  d203e08 feat: create canonical runs for scheduled tasks
+Decisions:
+  - Rabbit requires a matching process-local run and never reconstructs role.
+  - Async acceptedAt equals message.createdAt.
+  - deadlineAt is acceptedAt + 30 minutes.
+  - webhook and scheduled roles come from AuthService.
+  - acceptance failures stop legacy execution.
+  - ChatMessageConsumerTest is a new claim/fail-closed suite.
+Limitations:
+  - no restart durability
+  - no exactly-once execution
+  - no duplicate-execution suppression
+Environmental warnings: none
+Tests:
+  - 67 contract tests pass
+  - 53 characterization/Phase 2A tests pass
+  - 29 baseline tests pass (EngineSelectorTest, ChatContextFactoryTest,
+    PromptInjectionTest, AgentRuntimeEngineTest, ToolRuntimeAspectInterceptionIT,
+    ToolInvocationProposalServiceConfirmTest)
+  - 29 Task 5 focused tests pass
+Prohibited-file check: clean (runtime/lifecycle, runtime/bridge, runtime/contract,
+  dto/chat, AsyncChatRequestMessage, AsyncChatResultPayload, ChatServiceImpl,
+  tool/runtime, service/workspace, resources, .env.example untouched)
+Whitespace check: clean
+Next dependency:
+  Phase 2B Task 6 legacy observation wiring
+```

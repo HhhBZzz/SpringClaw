@@ -1163,7 +1163,8 @@ Deliverable:
 - `RunCoordinator`;
 - `RunStateRepository`;
 - core `RunEventStore`;
-- `LegacyRuntimeStrategy`;
+- atomic `RunLifecycleStore` write boundary;
+- transitional `LegacyRuntimeBridge`;
 - compatibility adapter from `RunResult` to current `ChatResponse`.
 
 Migrated responsibility:
@@ -1178,9 +1179,29 @@ Old owner disabled in the same phase:
 Bridge ownership rule:
 
 - legacy trace may remain diagnostic, but only `RunCoordinator` changes canonical `RunStatus`;
-- `LegacyRuntimeStrategy` remains the sole owner of legacy routing, answer, persistence, and stream behavior until each later migration phase;
+- `LegacyRuntimeBridge` is a transitional integration boundary and does not implement
+  `RuntimeStrategy`; the Phase 1 `RuntimeStrategy` contract continues to forbid
+  persistence, answer composition, transport termination, and lock ownership;
+- existing legacy execution remains the sole owner of routing, answer, persistence,
+  locks, and stream behavior until each later migration phase;
 - `RunCoordinator` owns canonical revision and lifecycle boundary state;
 - bridge translation cannot independently repair or replace a legacy answer.
+- `RunStateRepository` and `RunEventStore` expose query views; writes occur only
+  through one `RunLifecycleStore` commit so a state revision and its lifecycle
+  event cannot be partially accepted.
+
+Confirmation boundary:
+
+- persisted tool-proposal creation transitions the same run to
+  `WAITING_CONFIRMATION`;
+- approval records `confirmation.approved` and may transition the run back to
+  `RUNNING` immediately before the frozen tool invocation;
+- rejection and observable per-proposal expiry transition the same run to `FAILED`;
+- Phase 2B does not claim durable continuation of the original model/strategy after
+  the frozen tool result; that continuation belongs to Phase 4A;
+- the current count-only bulk expiry operation cannot emit per-run expiry facts and
+  must be changed to return affected proposals before Phase 2B can claim expiry
+  coverage.
 
 Legacy routing-order freeze:
 
@@ -1194,8 +1215,11 @@ Compatibility acceptance:
 
 - current answers, engine selection, and transport payloads remain characterized;
 - every accepted request has a canonical `RunState`;
-- one lifecycle boundary event exists for create, confirmation suspension, and terminal outcome;
+- one lifecycle boundary event exists for create, confirmation suspension,
+  approval/rejection, and each terminal outcome observable in Phase 2B;
 - legacy trace cannot overwrite a terminal canonical status.
+- no Phase 2B component claims durable same-run strategy continuation or
+  exactly-once processing across process restart.
 
 Rollback unit:
 

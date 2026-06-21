@@ -42,7 +42,15 @@ public class SystemHealthCapabilityExecutor extends AbstractCapabilityExecutor i
     @Override
     public List<CapabilityResult> execute(AgentDecision decision, AssembledContext assembled, String requestId) {
         List<CapabilityResult> results = new ArrayList<>();
-        ToolExecutionContext context = new ToolExecutionContext(assembled.sessionKey(), assembled.channel(), assembled.userId(), requestId, "AGENT-RUNTIME");
+        ToolExecutionContext context = new ToolExecutionContext(
+                assembled.sessionKey(),
+                assembled.channel(),
+                assembled.userId(),
+                requestId,
+                "AGENT-RUNTIME",
+                requestId,
+                null
+        );
         try (ToolExecutionContextHolder.Scope ignored = ToolExecutionContextHolder.open(context)) {
             results.add(run("system-health", toolset(), "read", "检查 Spring Boot 运行健康状态", systemHealthToolPack::runtimeHealth));
             results.add(run("model-status", toolset(), "read", "读取当前模型状态", this::modelStatus));

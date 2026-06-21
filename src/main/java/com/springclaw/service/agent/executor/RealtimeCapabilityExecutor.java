@@ -50,7 +50,15 @@ public class RealtimeCapabilityExecutor extends AbstractCapabilityExecutor imple
 
     @Override
     public List<CapabilityResult> execute(AgentDecision decision, AssembledContext assembled, String requestId) {
-        ToolExecutionContext context = new ToolExecutionContext(assembled.sessionKey(), assembled.channel(), assembled.userId(), requestId, "AGENT-RUNTIME");
+        ToolExecutionContext context = new ToolExecutionContext(
+                assembled.sessionKey(),
+                assembled.channel(),
+                assembled.userId(),
+                requestId,
+                "AGENT-RUNTIME",
+                requestId,
+                null
+        );
         List<CapabilityResult> results = new ArrayList<>();
         try (ToolExecutionContextHolder.Scope ignored = ToolExecutionContextHolder.open(context)) {
             if (selected(decision, "weather")) {

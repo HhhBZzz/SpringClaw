@@ -46,7 +46,15 @@ public class SkillCapabilityExecutor extends AbstractCapabilityExecutor implemen
 
     @Override
     public List<CapabilityResult> execute(AgentDecision decision, AssembledContext assembled, String requestId) {
-        ToolExecutionContext context = new ToolExecutionContext(assembled.sessionKey(), assembled.channel(), assembled.userId(), requestId, "AGENT-RUNTIME");
+        ToolExecutionContext context = new ToolExecutionContext(
+                assembled.sessionKey(),
+                assembled.channel(),
+                assembled.userId(),
+                requestId,
+                "AGENT-RUNTIME",
+                requestId,
+                null
+        );
         try (ToolExecutionContextHolder.Scope ignored = ToolExecutionContextHolder.open(context)) {
             String skillId = decision.selectedCapabilities().stream()
                     .map(TextUtils::normalize)

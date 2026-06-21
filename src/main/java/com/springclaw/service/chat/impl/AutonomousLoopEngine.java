@@ -190,7 +190,14 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
         AutonomousExecutionTracker tracker = new AutonomousExecutionTracker();
 
         ToolExecutionContext toolContext = new ToolExecutionContext(
-                assembled.sessionKey(), assembled.channel(), assembled.userId(), requestId, "AUTONOMOUS");
+                assembled.sessionKey(),
+                assembled.channel(),
+                assembled.userId(),
+                requestId,
+                "AUTONOMOUS",
+                requestId,
+                ctx.roleCode()
+        );
 
         try (ToolExecutionContextHolder.Scope scope = ToolExecutionContextHolder.open(toolContext)) {
             // 将 tracker 注册到线程上下文，让 WorkspaceEditToolPack 的 @Tool 方法可以记录

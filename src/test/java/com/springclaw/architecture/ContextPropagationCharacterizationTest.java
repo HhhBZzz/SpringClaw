@@ -160,11 +160,14 @@ class ContextPropagationCharacterizationTest {
                 true
         );
 
+        String acceptedRunId = "11111111111111111111111111111111";
         ChatContext context = factory.build(
                 new ChatRequest("session-A", "alice", "为什么登录失败", "api", "agent"),
-                true
+                true,
+                acceptedRunId
         );
 
+        assertThat(context.requestId()).isEqualTo(acceptedRunId);
         assertThat(context.contextInjection().observePrompt()).isEqualTo(assembled.observePrompt());
         assertThat(context.contextInjection().policyPrompt()).isEmpty();
         assertThat(context.contextInjection().pendingProposalPrompt()).isEmpty();

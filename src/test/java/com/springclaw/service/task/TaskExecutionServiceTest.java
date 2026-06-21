@@ -2,6 +2,8 @@ package com.springclaw.service.task;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.domain.entity.ScheduledTask;
+import com.springclaw.domain.entity.ScheduledTaskExecution;
+import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.service.chat.impl.ChatServiceImpl;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.memory.MemoryService;
@@ -12,6 +14,7 @@ import com.springclaw.service.skill.runtime.SkillRuntimeService;
 import com.springclaw.service.task.executor.TaskExecutionService;
 import com.springclaw.strategy.channel.outbound.ChannelOutboundDispatcher;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
 import java.util.Set;
@@ -20,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -81,7 +85,15 @@ class TaskExecutionServiceTest {
 
         assertThat(outcome.resultPayload()).isEqualTo("抓取成功");
         verify(skillRuntimeService).executeBySkillId("web_crawler", "读取这个网页 https://example.com", Set.of("script"));
-        verify(chatService, never()).executeTaskMessage(any(), anyBoolean());
+        verify(chatService, never()).executeTaskMessage(
+                any(ChatRequest.class),
+                anyBoolean()
+        );
+        verify(chatService, never()).executeTaskMessage(
+                any(ChatRequest.class),
+                anyBoolean(),
+                anyString()
+        );
         verify(executionService).complete(anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), any());
     }
 
@@ -139,7 +151,15 @@ class TaskExecutionServiceTest {
 
         assertThat(outcome.resultPayload()).isEqualTo("结构分析完成");
         verify(skillRuntimeService).executeBySkillId("repo_inspector", "分析项目结构", Set.of("script"));
-        verify(chatService, never()).executeTaskMessage(any(), anyBoolean());
+        verify(chatService, never()).executeTaskMessage(
+                any(ChatRequest.class),
+                anyBoolean()
+        );
+        verify(chatService, never()).executeTaskMessage(
+                any(ChatRequest.class),
+                anyBoolean(),
+                anyString()
+        );
     }
 
     @Test
@@ -183,17 +203,36 @@ class TaskExecutionServiceTest {
         task.setNextRunAt(LocalDateTime.now().plusMinutes(10));
 
         when(executionService.start(anyString(), anyString(), anyString())).thenAnswer(invocation -> {
-            var record = new com.springclaw.domain.entity.ScheduledTaskExecution();
+            var record = new ScheduledTaskExecution();
             record.setExecutionId("exec_2");
             return record;
         });
-        when(chatService.executeTaskMessage(any(), anyBoolean())).thenReturn(
-                new ChatServiceImpl.TaskChatExecutionResult("task:shadow:task_2", "今日进展：xxx", "req_1", "simplified", "task")
-        );
+        when(chatService.executeTaskMessage(
+                any(ChatRequest.class),
+                anyBoolean(),
+                anyString()
+        )).thenAnswer(invocation -> new ChatServiceImpl.TaskChatExecutionResult(
+                "task:shadow:task_2",
+                "今日进展：xxx",
+                invocation.getArgument(2),
+                "simplified",
+                "task"
+        ));
 
         TaskExecutionOutcome outcome = service.runTask(task, "MANUAL");
 
+        ArgumentCaptor<String> startedRunId = ArgumentCaptor.forClass(String.class);
+        verify(executionService).start(
+                eq("task_2"),
+                eq("MANUAL"),
+                startedRunId.capture()
+        );
+        verify(chatService).executeTaskMessage(
+                any(ChatRequest.class),
+                eq(false),
+                eq(startedRunId.getValue())
+        );
         assertThat(outcome.resultPayload()).contains("今日进展");
-        verify(chatService).executeTaskMessage(any(), anyBoolean());
+        assertThat(outcome.requestId()).isEqualTo(startedRunId.getValue());
     }
 }

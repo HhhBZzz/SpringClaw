@@ -1,6 +1,7 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.dto.chat.ChatRequest;
+import com.springclaw.runtime.identity.DefaultRunIdentityFactory;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentActionProposalService;
 import com.springclaw.service.agent.AgentRuntimeEngine;
@@ -109,6 +110,7 @@ class ChatServiceImplPendingApprovalTest {
                 localExecutionSupport,
                 sseEventBridge,
                 proposalService,
+                new DefaultRunIdentityFactory(),
                 false,
                 true
         );

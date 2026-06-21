@@ -3,6 +3,8 @@ package com.springclaw.service.chat.impl;
 import com.springclaw.common.util.TextUtils;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
+import com.springclaw.runtime.identity.DefaultRunIdentityFactory;
+import com.springclaw.runtime.identity.RunIdentityFactory;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentActionProposal;
 import com.springclaw.service.agent.AgentActionProposalService;
@@ -12,6 +14,7 @@ import com.springclaw.service.agent.AgentRun;
 import com.springclaw.service.agent.AgentRuntimeEngine;
 import com.springclaw.service.agent.EngineSelector;
 import com.springclaw.service.chat.ChatService;
+import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
@@ -60,6 +63,7 @@ public class ChatServiceImpl implements ChatService {
     private final LocalExecutionSupport localExecutionSupport;
     private final SseEventBridge sseEventBridge;
     private final ToolInvocationProposalService proposalService;
+    private final RunIdentityFactory runIdentityFactory;
     private final boolean modelLedStreamingEnabled;
     private final boolean basicStreamingEnabled;
 
@@ -82,6 +86,7 @@ public class ChatServiceImpl implements ChatService {
                            LocalExecutionSupport localExecutionSupport,
                            SseEventBridge sseEventBridge,
                            ToolInvocationProposalService proposalService,
+                           RunIdentityFactory runIdentityFactory,
                            @Value("${springclaw.chat.model-led-streaming-enabled:false}") boolean modelLedStreamingEnabled,
                            @Value("${springclaw.chat.basic-streaming-enabled:true}") boolean basicStreamingEnabled) {
         this.aiProviderService = aiProviderService;
@@ -102,6 +107,7 @@ public class ChatServiceImpl implements ChatService {
         this.localExecutionSupport = localExecutionSupport;
         this.sseEventBridge = sseEventBridge;
         this.proposalService = proposalService;
+        this.runIdentityFactory = runIdentityFactory;
         this.modelLedStreamingEnabled = modelLedStreamingEnabled;
         this.basicStreamingEnabled = basicStreamingEnabled;
     }
@@ -123,12 +129,24 @@ public class ChatServiceImpl implements ChatService {
         this(aiProviderService, chatGuardService, oparLoopEngine, simplifiedOparEngine,
                 chatResponsePolicyService, modelTransportGuardService, llmUsageRecordService,
                 conversationAdvisorSupport, chatContextFactory, chatResultPersister,
-                metaGuardExecutor, null, null, null, null, null, null, null, false, true);
+                metaGuardExecutor, null, null, null, null, null, null, null,
+                new DefaultRunIdentityFactory(), false, true);
     }
 
     @Override
     public ChatResponse chat(ChatRequest request) {
-        TaskChatExecutionResult result = executeInternal(request, true, true);
+        return chat(new AcceptedChatCommand(runIdentityFactory.create(), request));
+    }
+
+    @Override
+    public ChatResponse chat(AcceptedChatCommand command) {
+        String acceptedRunId = runIdentityFactory.accept(command.runId());
+        TaskChatExecutionResult result = executeInternal(
+                command.request(),
+                true,
+                true,
+                acceptedRunId
+        );
         return new ChatResponse(
                 result.sessionKey(),
                 result.answer(),
@@ -139,6 +157,13 @@ public class ChatServiceImpl implements ChatService {
 
     @Override
     public SseEmitter stream(ChatRequest request) {
+        return stream(new AcceptedChatCommand(runIdentityFactory.create(), request));
+    }
+
+    @Override
+    public SseEmitter stream(AcceptedChatCommand command) {
+        String acceptedRunId = runIdentityFactory.accept(command.runId());
+        ChatRequest request = command.request();
         chatGuardService.checkRateLimit(request.sessionKey());
         String lockToken = chatGuardService.acquireSessionLock(request.sessionKey());
         AtomicBoolean lockReleased = new AtomicBoolean(false);
@@ -160,20 +185,32 @@ public class ChatServiceImpl implements ChatService {
             releaseSessionLockOnce(request.sessionKey(), lockToken, lockReleased);
             emitter.complete();
         });
-        CompletableFuture.runAsync(() -> executeStream(request, lockToken, lockReleased, emitter, disposableRef));
+        CompletableFuture.runAsync(() -> executeStream(
+                request,
+                acceptedRunId,
+                lockToken,
+                lockReleased,
+                emitter,
+                disposableRef
+        ));
         return emitter;
     }
 
     private void executeStream(ChatRequest request,
+                               String acceptedRunId,
                                String lockToken,
                                AtomicBoolean lockReleased,
                                SseEmitter emitter,
                                AtomicReference<Disposable> disposableRef) {
         try {
             long requestStartedAt = System.currentTimeMillis();
-            sseEventBridge.sendTrace(emitter, "", "接收请求", "request", "started", "已收到用户输入，准备组装上下文。", 0L);
+            sseEventBridge.sendTrace(emitter, acceptedRunId, "接收请求", "request", "started", "已收到用户输入，准备组装上下文。", 0L);
             sseEventBridge.sendStatus(emitter, "正在组织上下文");
-            ChatContext context = chatContextFactory.build(request, true);
+            ChatContext context = chatContextFactory.build(
+                    request,
+                    true,
+                    acceptedRunId
+            );
             sseEventBridge.sendMeta(emitter, context);
             sseEventBridge.sendDecision(emitter, context);
             String decisionPath = context.decision() == null ? "" : context.decision().executionPath();
@@ -504,18 +541,40 @@ public class ChatServiceImpl implements ChatService {
     }
 
     public TaskChatExecutionResult executeTaskMessage(ChatRequest request, boolean persistResult) {
-        return executeInternal(request, false, persistResult);
+        return executeTaskMessage(
+                request,
+                persistResult,
+                runIdentityFactory.create()
+        );
+    }
+
+    public TaskChatExecutionResult executeTaskMessage(
+            ChatRequest request,
+            boolean persistResult,
+            String runId
+    ) {
+        return executeInternal(
+                request,
+                false,
+                persistResult,
+                runIdentityFactory.accept(runId)
+        );
     }
 
     private TaskChatExecutionResult executeInternal(ChatRequest request,
                                                     boolean enforceRateLimit,
-                                                    boolean persistResult) {
+                                                    boolean persistResult,
+                                                    String acceptedRunId) {
         if (enforceRateLimit) {
             chatGuardService.checkRateLimit(request.sessionKey());
         }
         String lockToken = chatGuardService.acquireSessionLock(request.sessionKey());
         try {
-            ChatContext context = chatContextFactory.build(request, persistResult);
+            ChatContext context = chatContextFactory.build(
+                    request,
+                    persistResult,
+                    acceptedRunId
+            );
             ChatExecutionResult executionResult = runAgentExecution(context);
             String finalAnswer = resolveFinalAnswer(context, executionResult);
             if (persistResult) {

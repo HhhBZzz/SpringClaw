@@ -16,6 +16,7 @@ import com.springclaw.service.chat.impl.ChatExecutionResult;
 import com.springclaw.service.chat.impl.ChatResponsePolicyService;
 import com.springclaw.service.chat.impl.ChatResultPersister;
 import com.springclaw.service.chat.impl.ChatServiceImpl;
+import com.springclaw.runtime.identity.DefaultRunIdentityFactory;
 import com.springclaw.service.chat.impl.ConversationAdvisorSupport;
 import com.springclaw.service.chat.impl.LocalExecutionNarrator;
 import com.springclaw.service.chat.impl.LocalExecutionSupport;
@@ -378,6 +379,7 @@ class FinalAnswerOwnershipCharacterizationTest {
                     null,
                     null,
                     null,
+                    new DefaultRunIdentityFactory(),
                     false,
                     true
             );

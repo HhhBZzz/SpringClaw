@@ -7,10 +7,14 @@ import com.springclaw.dto.chat.AsyncChatAcceptedResponse;
 import com.springclaw.dto.chat.ChatHistoryResponse;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
+import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
+import com.springclaw.runtime.identity.DefaultRunIdentityFactory;
 import com.springclaw.runtime.identity.RunIdentityFactory;
+import com.springclaw.runtime.lifecycle.RunAcceptance;
 import com.springclaw.service.agent.AgentActionProposalService;
 import com.springclaw.service.agent.AgentRunTraceService;
 import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
 import com.springclaw.service.chat.async.AsyncChatRequestMessage;
@@ -26,6 +30,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.time.Duration;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -53,6 +58,8 @@ class ChatControllerAuthTest {
             context.registerBean(AgentActionProposalService.class, () -> mock(AgentActionProposalService.class));
             context.registerBean(AgentRunTraceService.class, () -> mock(AgentRunTraceService.class));
             context.registerBean(RunIdentityFactory.class, () -> mock(RunIdentityFactory.class));
+            context.registerBean(AuthService.class, () -> mock(AuthService.class));
+            context.registerBean(LegacyRuntimeBridge.class, () -> mock(LegacyRuntimeBridge.class));
             context.register(ChatController.class);
 
             context.refresh();
@@ -66,7 +73,16 @@ class ChatControllerAuthTest {
         ChatService chatService = mock(ChatService.class);
         ChatMessageProducer producer = mock(ChatMessageProducer.class);
         AsyncChatResultStore resultStore = mock(AsyncChatResultStore.class);
-        ChatController controller = new ChatController(chatService, producer, resultStore, mock(MessageEventService.class), mock(AiProviderService.class));
+        ChatController controller = new ChatController(
+                chatService,
+                producer,
+                resultStore,
+                mock(MessageEventService.class),
+                mock(AiProviderService.class),
+                new DefaultRunIdentityFactory(),
+                mock(AuthService.class),
+                mock(LegacyRuntimeBridge.class)
+        );
         when(chatService.chat(any(AcceptedChatCommand.class)))
                 .thenReturn(new ChatResponse("s1", "ok", "m1", 1L));
         RequestUserContextHolder.set(new RequestUserContext("user_local", "USER", System.currentTimeMillis() + 60_000));
@@ -82,9 +98,11 @@ class ChatControllerAuthTest {
     }
 
     @Test
-    void syncAndStreamEachCreateOneAcceptedIdentityAtTheController() {
+    void syncAndStreamCreateCanonicalRunsBeforeLegacyExecution() {
         ChatService chatService = mock(ChatService.class);
         RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
+        AuthService authService = mock(AuthService.class);
+        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
         when(identityFactory.create())
                 .thenReturn("11111111111111111111111111111111")
                 .thenReturn("22222222222222222222222222222222");
@@ -98,16 +116,39 @@ class ChatControllerAuthTest {
                 mock(AsyncChatResultStore.class),
                 mock(MessageEventService.class),
                 mock(AiProviderService.class),
-                identityFactory
+                identityFactory,
+                authService,
+                runtimeBridge
         );
         RequestUserContextHolder.set(new RequestUserContext(
                 "user_local",
-                "USER",
+                "ADMIN",
                 System.currentTimeMillis() + 60_000
         ));
 
         controller.send(new ChatRequest("s1", null, "你好", "api", "agent"));
         controller.stream(new ChatRequest("s1", null, "继续", "api", "agent"));
+
+        ArgumentCaptor<RunAcceptance> acceptances =
+                ArgumentCaptor.forClass(RunAcceptance.class);
+        verify(runtimeBridge, org.mockito.Mockito.times(2))
+                .accepted(acceptances.capture());
+        assertThat(acceptances.getAllValues())
+                .extracting(RunAcceptance::runId)
+                .containsExactly(
+                        "11111111111111111111111111111111",
+                        "22222222222222222222222222222222"
+                );
+        assertThat(acceptances.getAllValues())
+                .allSatisfy(acceptance -> {
+                    assertThat(acceptance.roleCodeAtAcceptance()).isEqualTo("ADMIN");
+                    assertThat(acceptance.channel()).isEqualTo("api");
+                    assertThat(acceptance.responseMode()).isEqualTo("agent");
+                    assertThat(Duration.between(
+                            acceptance.acceptedAt(),
+                            acceptance.deadlineAt()
+                    )).isEqualTo(Duration.ofMinutes(30));
+                });
 
         ArgumentCaptor<AcceptedChatCommand> commands =
                 ArgumentCaptor.forClass(AcceptedChatCommand.class);
@@ -122,11 +163,13 @@ class ChatControllerAuthTest {
     }
 
     @Test
-    void asyncAcceptanceUsesOneIdentityForQueueMessageAndResponse() {
+    void asyncAcceptanceUsesMessageCreatedAtForCanonicalRunAndQueueProjection() {
         ChatService chatService = mock(ChatService.class);
         ChatMessageProducer producer = mock(ChatMessageProducer.class);
         AsyncChatResultStore resultStore = mock(AsyncChatResultStore.class);
         RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
+        AuthService authService = mock(AuthService.class);
+        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
         when(identityFactory.create())
                 .thenReturn("33333333333333333333333333333333");
         ChatController controller = new ChatController(
@@ -135,7 +178,9 @@ class ChatControllerAuthTest {
                 resultStore,
                 mock(MessageEventService.class),
                 mock(AiProviderService.class),
-                identityFactory
+                identityFactory,
+                authService,
+                runtimeBridge
         );
         RequestUserContextHolder.set(new RequestUserContext(
                 "user_local",
@@ -149,17 +194,73 @@ class ChatControllerAuthTest {
 
         ArgumentCaptor<AsyncChatRequestMessage> message =
                 ArgumentCaptor.forClass(AsyncChatRequestMessage.class);
+        ArgumentCaptor<RunAcceptance> acceptance =
+                ArgumentCaptor.forClass(RunAcceptance.class);
+        verify(runtimeBridge).accepted(acceptance.capture());
         verify(resultStore).markQueued(message.capture());
         verify(producer).sendRequest(message.getValue());
+
         assertThat(response.getData().requestId())
                 .isEqualTo("33333333333333333333333333333333");
         assertThat(message.getValue().requestId())
                 .isEqualTo(response.getData().requestId());
+        assertThat(acceptance.getValue().runId()).isEqualTo(message.getValue().requestId());
+        assertThat(acceptance.getValue().acceptedAt().toEpochMilli())
+                .isEqualTo(message.getValue().createdAt());
+        assertThat(acceptance.getValue().deadlineAt())
+                .isEqualTo(acceptance.getValue().acceptedAt().plus(Duration.ofMinutes(30)));
+    }
+
+    @Test
+    void lifecycleAcceptanceFailureStopsAsyncQueueing() {
+        ChatMessageProducer producer = mock(ChatMessageProducer.class);
+        AsyncChatResultStore resultStore = mock(AsyncChatResultStore.class);
+        RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
+        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        when(identityFactory.create()).thenReturn("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        when(runtimeBridge.accepted(any(RunAcceptance.class)))
+                .thenThrow(new IllegalStateException("lifecycle unavailable"));
+        ChatController controller = new ChatController(
+                mock(ChatService.class),
+                producer,
+                resultStore,
+                mock(MessageEventService.class),
+                mock(AiProviderService.class),
+                identityFactory,
+                mock(AuthService.class),
+                runtimeBridge
+        );
+        RequestUserContextHolder.set(new RequestUserContext(
+                "user_local",
+                "USER",
+                System.currentTimeMillis() + 60_000
+        ));
+
+        Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> controller.sendAsync(
+                        new ChatRequest("s1", null, "异步处理", "api", "agent")
+                )
+        );
+
+        verify(resultStore, org.mockito.Mockito.never())
+                .markQueued(any(AsyncChatRequestMessage.class));
+        verify(producer, org.mockito.Mockito.never())
+                .sendRequest(any(AsyncChatRequestMessage.class));
     }
 
     @Test
     void shouldRejectMismatchedUserIdFromRequestBody() {
-        ChatController controller = new ChatController(mock(ChatService.class), mock(ChatMessageProducer.class), mock(AsyncChatResultStore.class), mock(MessageEventService.class), mock(AiProviderService.class));
+        ChatController controller = new ChatController(
+                mock(ChatService.class),
+                mock(ChatMessageProducer.class),
+                mock(AsyncChatResultStore.class),
+                mock(MessageEventService.class),
+                mock(AiProviderService.class),
+                new DefaultRunIdentityFactory(),
+                mock(AuthService.class),
+                mock(LegacyRuntimeBridge.class)
+        );
         RequestUserContextHolder.set(new RequestUserContext("user_local", "USER", System.currentTimeMillis() + 60_000));
 
         BusinessException ex = Assertions.assertThrows(BusinessException.class,
@@ -171,7 +272,16 @@ class ChatControllerAuthTest {
     @Test
     void shouldReturnChatHistoryForCurrentUserOnly() {
         MessageEventService messageEventService = mock(MessageEventService.class);
-        ChatController controller = new ChatController(mock(ChatService.class), mock(ChatMessageProducer.class), mock(AsyncChatResultStore.class), messageEventService, mock(AiProviderService.class));
+        ChatController controller = new ChatController(
+                mock(ChatService.class),
+                mock(ChatMessageProducer.class),
+                mock(AsyncChatResultStore.class),
+                messageEventService,
+                mock(AiProviderService.class),
+                new DefaultRunIdentityFactory(),
+                mock(AuthService.class),
+                mock(LegacyRuntimeBridge.class)
+        );
         RequestUserContextHolder.set(new RequestUserContext("user_local", "USER", System.currentTimeMillis() + 60_000));
         when(messageEventService.countSessionEvents(eq("s1"), eq(null), eq(null), eq("CHAT")))
                 .thenReturn(3L);
@@ -197,7 +307,16 @@ class ChatControllerAuthTest {
     @Test
     void shouldRejectChatHistoryWhenSessionBelongsToAnotherUser() {
         MessageEventService messageEventService = mock(MessageEventService.class);
-        ChatController controller = new ChatController(mock(ChatService.class), mock(ChatMessageProducer.class), mock(AsyncChatResultStore.class), messageEventService, mock(AiProviderService.class));
+        ChatController controller = new ChatController(
+                mock(ChatService.class),
+                mock(ChatMessageProducer.class),
+                mock(AsyncChatResultStore.class),
+                messageEventService,
+                mock(AiProviderService.class),
+                new DefaultRunIdentityFactory(),
+                mock(AuthService.class),
+                mock(LegacyRuntimeBridge.class)
+        );
         RequestUserContextHolder.set(new RequestUserContext("user_local", "USER", System.currentTimeMillis() + 60_000));
         when(messageEventService.countSessionEvents(eq("s1"), eq(null), eq(null), eq("CHAT")))
                 .thenReturn(2L);

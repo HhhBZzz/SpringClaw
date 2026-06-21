@@ -373,31 +373,6 @@ Each plan must deliver working, testable software and identify its own rollback 
 | Documentation and mechanical cleanup | Claude | Only after Codex publishes deletion list |
 | Final integration and safety verification | Codex | Full cross-transport acceptance |
 
-### Revised ownership after user direction on 2026-06-21
-
-The user explicitly requested that Claude take a larger implementation share because
-Claude has more available execution quota. This section supersedes conflicting Phase 2
-ownership rows above for the listed files and tasks.
-
-| Work | Owner | Exact boundary |
-|---|---|---|
-| Phase 2A review and completion | Claude | Review commit `9660548`, fix P0/P1 issues, implement canonical ID propagation into existing tool/proposal ownership, run acceptance, and record evidence |
-| Phase 2A ingress files | Claude | `ChatController`, `ChatService`, `ChatContextFactory`, `ChatServiceImpl`, `ChatMessageConsumer`, `WebhookRouterService`, `TaskExecutionService`, and directly affected tests |
-| Phase 2A tool ownership files | Claude | Existing engine/capability-executor `ToolExecutionContext` construction sites and proposal ownership tests; no authorization or risk-policy changes |
-| Phase 2B state/event storage | Claude | `src/main/java/com/springclaw/runtime/store/**` and `src/test/java/com/springclaw/runtime/store/**` |
-| Phase 2B coordinator and legacy strategy core | Codex | `RunCoordinator`, `LegacyRuntimeStrategy`, bridge interfaces/adapters, activation boundary, and canonical transition ownership |
-| Output projectors and transport tests | Claude | REST/SSE/async/WebSocket projectors only after Codex freezes interfaces |
-| Context/decision migration support | Claude | Characterization, adapters, and tests; Codex retains activation and old-owner removal |
-| ToolGateway/CompletionVerifier core | Codex | P0-sensitive implementation and final authorization semantics |
-| Final P0 and cross-transport acceptance | Codex | Independent review of Claude commits before integration |
-
-Immediate concurrency rule:
-
-- Claude owns all remaining Phase 2A files until the Phase 2A acceptance commit is reported.
-- Codex must not modify those files concurrently.
-- Codex may work only on read-only review or the future Phase 2B coordinator design while Claude completes Phase 2A.
-- Claude must not start `RunCoordinator` or `LegacyRuntimeStrategy` implementation before Codex publishes their frozen interfaces.
-
 ## 9. Update Protocol
 
 After every completed task, record:

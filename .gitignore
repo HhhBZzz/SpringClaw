@@ -28,7 +28,6 @@ skills/.usage.json
 
 # Isolated development worktrees
 .worktrees/
-.claude/worktrees/
 
 # Frontend workspace
 frontend/node_modules/

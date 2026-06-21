@@ -8,13 +8,15 @@ import com.springclaw.dto.chat.ChatHistoryMessage;
 import com.springclaw.dto.chat.ChatHistoryResponse;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
-import com.springclaw.runtime.identity.DefaultRunIdentityFactory;
+import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
 import com.springclaw.runtime.identity.RunIdentityFactory;
+import com.springclaw.runtime.lifecycle.RunAcceptance;
 import com.springclaw.service.agent.AgentActionProposalResult;
 import com.springclaw.service.agent.AgentActionProposalService;
 import com.springclaw.service.agent.AgentRunTraceEvent;
 import com.springclaw.service.agent.AgentRunTraceService;
 import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
 import com.springclaw.service.chat.async.AsyncChatRequestMessage;
@@ -39,8 +41,11 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import com.springclaw.web.auth.RequestUserContext;
 import com.springclaw.web.auth.RequestUserContextHolder;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.time.ZoneId;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -54,6 +59,8 @@ import java.util.Map;
 @RequestMapping("/api/chat")
 public class ChatController {
 
+    private static final Duration RUN_DEADLINE = Duration.ofMinutes(30);
+
     private final ChatService chatService;
     private final ChatMessageProducer chatMessageProducer;
     private final AsyncChatResultStore asyncChatResultStore;
@@ -62,6 +69,8 @@ public class ChatController {
     private final AgentActionProposalService actionProposalService;
     private final AgentRunTraceService agentRunTraceService;
     private final RunIdentityFactory runIdentityFactory;
+    private final AuthService authService;
+    private final LegacyRuntimeBridge runtimeBridge;
 
     @Autowired
     public ChatController(ChatService chatService,
@@ -71,7 +80,9 @@ public class ChatController {
                           AiProviderService aiProviderService,
                           AgentActionProposalService actionProposalService,
                           AgentRunTraceService agentRunTraceService,
-                          RunIdentityFactory runIdentityFactory) {
+                          RunIdentityFactory runIdentityFactory,
+                          AuthService authService,
+                          LegacyRuntimeBridge runtimeBridge) {
         this.chatService = chatService;
         this.chatMessageProducer = chatMessageProducer;
         this.asyncChatResultStore = asyncChatResultStore;
@@ -80,23 +91,8 @@ public class ChatController {
         this.actionProposalService = actionProposalService;
         this.agentRunTraceService = agentRunTraceService;
         this.runIdentityFactory = runIdentityFactory;
-    }
-
-    ChatController(ChatService chatService,
-                   ChatMessageProducer chatMessageProducer,
-                   AsyncChatResultStore asyncChatResultStore,
-                   MessageEventService messageEventService,
-                   AiProviderService aiProviderService) {
-        this(
-                chatService,
-                chatMessageProducer,
-                asyncChatResultStore,
-                messageEventService,
-                aiProviderService,
-                null,
-                null,
-                new DefaultRunIdentityFactory()
-        );
+        this.authService = authService;
+        this.runtimeBridge = runtimeBridge;
     }
 
     ChatController(ChatService chatService,
@@ -104,7 +100,9 @@ public class ChatController {
                    AsyncChatResultStore asyncChatResultStore,
                    MessageEventService messageEventService,
                    AiProviderService aiProviderService,
-                   RunIdentityFactory runIdentityFactory) {
+                   RunIdentityFactory runIdentityFactory,
+                   AuthService authService,
+                   LegacyRuntimeBridge runtimeBridge) {
         this(
                 chatService,
                 chatMessageProducer,
@@ -113,7 +111,9 @@ public class ChatController {
                 aiProviderService,
                 null,
                 null,
-                runIdentityFactory
+                runIdentityFactory,
+                authService,
+                runtimeBridge
         );
     }
 
@@ -121,6 +121,8 @@ public class ChatController {
     public ApiResponse<ChatResponse> send(@Valid @RequestBody ChatRequest request) {
         ChatRequest normalizedRequest = normalizeRequest(request);
         String acceptedRunId = runIdentityFactory.create();
+        Instant acceptedAt = Instant.now();
+        acceptRun(acceptedRunId, normalizedRequest, acceptedAt);
         return ApiResponse.success(chatService.chat(
                 new AcceptedChatCommand(acceptedRunId, normalizedRequest)
         ));
@@ -130,16 +132,20 @@ public class ChatController {
     public SseEmitter stream(@Valid @RequestBody ChatRequest request) {
         ChatRequest normalizedRequest = normalizeRequest(request);
         String acceptedRunId = runIdentityFactory.create();
+        Instant acceptedAt = Instant.now();
+        acceptRun(acceptedRunId, normalizedRequest, acceptedAt);
         return chatService.stream(
                 new AcceptedChatCommand(acceptedRunId, normalizedRequest)
         );
     }
 
     @PostMapping("/async")
-    public ApiResponse<AsyncChatAcceptedResponse> sendAsync(@Valid @RequestBody ChatRequest request) {
+    public ApiResponse<AsyncChatAcceptedResponse> sendAsync(
+            @Valid @RequestBody ChatRequest request
+    ) {
         ChatRequest normalizedRequest = normalizeRequest(request);
         String requestId = runIdentityFactory.create();
-        String channel = StringUtils.hasText(normalizedRequest.channel()) ? normalizedRequest.channel() : "api";
+        String channel = normalizedChannel(normalizedRequest.channel());
         AsyncChatRequestMessage message = new AsyncChatRequestMessage(
                 requestId,
                 normalizedRequest.sessionKey(),
@@ -149,6 +155,8 @@ public class ChatController {
                 System.currentTimeMillis(),
                 normalizedRequest.responseMode()
         );
+        Instant acceptedAt = Instant.ofEpochMilli(message.createdAt());
+        acceptRun(requestId, normalizedRequest, acceptedAt);
         asyncChatResultStore.markQueued(message);
         chatMessageProducer.sendRequest(message);
         return ApiResponse.success(new AsyncChatAcceptedResponse(
@@ -249,6 +257,43 @@ public class ChatController {
                 request.channel(),
                 request.responseMode()
         );
+    }
+
+    private void acceptRun(
+            String runId,
+            ChatRequest request,
+            Instant acceptedAt
+    ) {
+        runtimeBridge.accepted(new RunAcceptance(
+                runId,
+                request.sessionKey(),
+                normalizedChannel(request.channel()),
+                request.userId(),
+                resolveRoleCode(request.userId()),
+                request.message(),
+                normalizedResponseMode(request.responseMode()),
+                acceptedAt,
+                acceptedAt.plus(RUN_DEADLINE)
+        ));
+    }
+
+    private String resolveRoleCode(String userId) {
+        RequestUserContext context = RequestUserContextHolder.get();
+        String roleCode = context != null && StringUtils.hasText(context.roleCode())
+                ? context.roleCode()
+                : authService.resolveRoleByUserId(userId);
+        if (!StringUtils.hasText(roleCode)) {
+            throw new IllegalStateException("roleCode unavailable for accepted run");
+        }
+        return roleCode.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizedChannel(String channel) {
+        return StringUtils.hasText(channel) ? channel.trim() : "api";
+    }
+
+    private String normalizedResponseMode(String responseMode) {
+        return StringUtils.hasText(responseMode) ? responseMode.trim() : "agent";
     }
 
     private RequestUserContext requireUserContext() {

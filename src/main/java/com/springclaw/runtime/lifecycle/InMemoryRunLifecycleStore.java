@@ -84,6 +84,32 @@ public final class InMemoryRunLifecycleStore implements RunLifecycleStore {
         }
     }
 
+    @Override
+    public RunEvent append(long expectedRevision, RunEvent.Draft event) {
+        Object lock = lockFor(event.runId());
+        synchronized (lock) {
+            RunState current = states.get(event.runId());
+            if (current == null) {
+                throw new IllegalStateException("run not found: " + event.runId());
+            }
+            if (current.revision() != expectedRevision) {
+                throw new IllegalStateException(
+                        "stale run revision: expected " + expectedRevision
+                                + " but was " + current.revision()
+                );
+            }
+            if (event.status() != current.status()) {
+                throw new IllegalArgumentException(
+                        "observation event status must match current state status"
+                );
+            }
+            List<RunEvent> runEvents = events.get(event.runId());
+            RunEvent persisted = persist(event, runEvents.size() + 1L);
+            runEvents.add(persisted);
+            return persisted;
+        }
+    }
+
     private Object lockFor(String runId) {
         return locks.computeIfAbsent(runId, ignored -> new Object());
     }

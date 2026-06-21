@@ -92,8 +92,9 @@ unchanged, and `persistResult=false` still reaches a terminal lifecycle state.
   `executionStarted(context, engine.name(), now)`.
 - [ ] If `streamActionRequired` creates an `AgentActionProposal`, call
   `confirmationRequired(runId, proposalId, now)` before emitter completion.
-- [ ] In the `PendingToolApprovalException` catch, call
-  `confirmationRequired(acceptedRunId, pending.proposalId(), now)` before
+- [ ] In the `PendingToolApprovalException` catch, do not call
+  `confirmationRequired`; persisted tool-proposal creation is the unique owner of
+  that transition in Task 7. Continue to render the existing pending UI through
   `handlePendingApproval`.
 - [ ] Do not call `resultReturned` for confirmation messages.
 - [ ] If stream startup fails and no fallback succeeds, call

@@ -24,7 +24,8 @@ docs/superpowers/specs/2026-06-21-unified-runtime-phase-2b-core-design.md
 docs/superpowers/plans/2026-06-18-unified-agent-runtime-collaboration.md
 ```
 
-Claude may modify only after Task 4:
+Claude may modify only after Task 4, except `EngineSelector.java` and its directly
+affected tests, which may be completed immediately as the isolated early Task 4A:
 
 ```text
 src/main/java/com/springclaw/controller/ChatController.java
@@ -276,6 +277,38 @@ and Claude file ownership in the collaboration ledger.
 git add docs/superpowers/plans/2026-06-18-unified-agent-runtime-collaboration.md
 git commit -m "docs: hand off phase 2b integration to Claude"
 ```
+
+### Task 4A: Freeze legacy engine order early
+
+**Owner:** Claude
+
+This task may run in parallel with Codex Tasks 2–4 because it does not depend on
+the lifecycle APIs.
+
+Change only the `EngineSelector` constructor comparator and directly affected tests.
+Sort by `(priority, legacyRank)` with:
+
+```text
+basic-stream=10
+agent-runtime=20
+autonomous-loop=30
+opar-loop=40
+model-led-stream=50
+simplified=60
+```
+
+A missing name must fail initialization. Do not change any engine `priority()` or
+`supports()` method.
+
+Verification:
+
+```bash
+mvn -q -Dtest=EngineSelectorTest,RuntimeRouteCharacterizationTest test
+mvn -q -Dtest=EngineSelectorTest,ChatContextFactoryTest,PromptInjectionTest,AgentRuntimeEngineTest test
+git diff --check
+```
+
+Commit: `fix: freeze legacy engine ordering`
 
 ### Task 5: Wire all accepted ingress paths
 

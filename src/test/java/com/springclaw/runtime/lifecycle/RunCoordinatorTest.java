@@ -158,6 +158,25 @@ class RunCoordinatorTest {
                 .endsWith(RunEventType.CONFIRMATION_REJECTED);
     }
 
+    @Test
+    void confirmationRejectionCannotTerminateRunThatIsNotWaiting() {
+        coordinator.accept(acceptance());
+        coordinator.contextReady(RUN_ID, snapshot(), T0.plusSeconds(1));
+        coordinator.decided(RUN_ID, decision(), T0.plusSeconds(2));
+        coordinator.running(RUN_ID, "agent-runtime", T0.plusSeconds(3));
+
+        assertThatThrownBy(() -> coordinator.confirmationRejected(
+                RUN_ID,
+                new RunState.Failure(
+                        "CONFIRMATION_REJECTED", "stale rejection", false
+                ),
+                T0.plusSeconds(4)
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("WAITING_CONFIRMATION");
+        assertThat(store.requireByRunId(RUN_ID).status())
+                .isEqualTo(RunStatus.RUNNING);
+    }
+
     private void prepareVerifyingRun() {
         coordinator.accept(acceptance());
         coordinator.contextReady(RUN_ID, snapshot(), T0.plusSeconds(1));

@@ -54,8 +54,18 @@ public final class LegacyRunContextAdapter {
                 assembled.observePrompt(),
                 assembled.eventContext(),
                 assembled.semanticContext(),
-                provider.toString(),
-                sources.toString(),
+                provider.getOrDefault("providerId", ""),
+                provider.getOrDefault("model", ""),
+                provider.getOrDefault("baseUrl", ""),
+                provider.getOrDefault("available", ""),
+                summary.schema(),
+                Boolean.toString(summary.memoryBankUsed()),
+                Integer.toString(summary.memoryBankChars()),
+                Integer.toString(summary.shortTermChars()),
+                Integer.toString(summary.semanticMemoryChars()),
+                Integer.toString(summary.observePromptChars()),
+                Integer.toString(summary.memoryLearningActiveCount()),
+                Integer.toString(summary.memoryLearningFilteredCount()),
                 allowedCapabilities.toString()
         );
         return new ContextSnapshot(

@@ -4,7 +4,7 @@
 
 **Goal:** Implement Phase 2A only: create or accept one normalized 32-character lowercase hexadecimal identity at the external ingress boundary and propagate that same value as `requestId == runId` through sync REST, SSE REST, async REST/Rabbit delivery, trace, tool execution, and proposal ownership.
 
-**Architecture:** `ChatController` is the explicit owner for all three REST acceptance points and creates exactly one ID before calling `ChatService` or publishing an async message. The existing `ChatService.chat(ChatRequest)` and `stream(ChatRequest)` APIs remain available for non-controller callers; each creates one ID through `RunIdentityFactory` and delegates to an internal `AcceptedChatCommand` overload. `ChatContextFactory` receives the already-accepted ID and never generates one. Rabbit redelivery reconstructs the same command from `AsyncChatRequestMessage.requestId`; Phase 2A deliberately does not suppress duplicate execution or add durable lifecycle state.
+**Architecture:** Each real ingress owns one normalized identity: `ChatController` creates IDs for REST, `WebhookRouterService` keeps and validates the request ID it already creates, `TaskExecutionService` keeps the scheduled execution ID it already creates, and `ChatMessageConsumer` reuses the Rabbit message ID. The existing `ChatService.chat(ChatRequest)` and `stream(ChatRequest)` compatibility APIs remain available and create once before delegating to `AcceptedChatCommand`; accepted-command and accepted-task overloads validate but never create. `ChatContextFactory` receives the accepted ID and never generates one. The context factory signature, service overloads, all production callers, direct constructors, and affected mocks/tests are migrated in one atomic task so every committed state compiles. Phase 2A deliberately does not suppress duplicate async execution or change lifecycle, trace authority, or routing.
 
 **Tech Stack:** Java 17 records, Spring Boot 3.5 constructor injection, JUnit 5, AssertJ, Mockito, Maven Surefire.
 
@@ -28,9 +28,11 @@ The concrete ingress behavior is:
 | `POST /api/chat/async` | `ChatController.sendAsync` | Create once, put the same value in accepted response, queued result key, and `AsyncChatRequestMessage.requestId` |
 | Rabbit first delivery | `ChatMessageConsumer` | Reuse `message.requestId`; do not create |
 | Rabbit redelivery | `ChatMessageConsumer` | Reuse the same `message.requestId`; execution may run again |
+| Webhook dispatch | `WebhookRouterService` | Keep the normalized ID it already creates, validate it with `RunIdentityFactory.accept`, and call `chat(AcceptedChatCommand)` |
+| Scheduled agent execution | `TaskExecutionService` | Keep the execution ID created before `ScheduledTaskExecutionService.start`, pass it to `executeTaskMessage(..., runId)`, and do not change `TaskChatExecutionResult` |
 | Legacy `ChatService.chat(ChatRequest)` | `ChatServiceImpl` compatibility method | Create once, delegate |
 | Legacy `ChatService.stream(ChatRequest)` | `ChatServiceImpl` compatibility method | Create once, delegate |
-| Scheduled task helper | `ChatServiceImpl.executeTaskMessage` | Create once without changing `TaskChatExecutionResult` |
+| Legacy `ChatServiceImpl.executeTaskMessage(ChatRequest, boolean)` | `ChatServiceImpl` compatibility method | Create once, delegate to the accepted-ID overload |
 | Confirmation/resume | Existing proposal services | Reuse proposal `requestId`/`runId`; do not create |
 
 Create:
@@ -42,6 +44,7 @@ src/main/java/com/springclaw/service/chat/AcceptedChatCommand.java
 src/test/java/com/springclaw/runtime/identity/DefaultRunIdentityFactoryTest.java
 src/test/java/com/springclaw/architecture/CanonicalTransportIdentityTest.java
 src/test/java/com/springclaw/architecture/CanonicalToolOwnershipTest.java
+src/test/java/com/springclaw/service/webhook/WebhookRouterServiceTest.java
 ```
 
 Modify:
@@ -52,6 +55,8 @@ src/main/java/com/springclaw/service/chat/ChatService.java
 src/main/java/com/springclaw/service/chat/impl/ChatContextFactory.java
 src/main/java/com/springclaw/service/chat/impl/ChatServiceImpl.java
 src/main/java/com/springclaw/service/chat/async/ChatMessageConsumer.java
+src/main/java/com/springclaw/service/webhook/WebhookRouterService.java
+src/main/java/com/springclaw/service/task/executor/TaskExecutionService.java
 src/main/java/com/springclaw/service/chat/impl/SimplifiedOparEngine.java
 src/main/java/com/springclaw/service/chat/impl/OparLoopEngine.java
 src/main/java/com/springclaw/service/chat/impl/AutonomousLoopEngine.java
@@ -64,8 +69,12 @@ src/main/java/com/springclaw/service/agent/executor/SkillCapabilityExecutor.java
 src/main/java/com/springclaw/service/agent/executor/RealtimeCapabilityExecutor.java
 src/test/java/com/springclaw/service/chat/impl/ChatContextFactoryTest.java
 src/test/java/com/springclaw/service/chat/impl/ChatServiceImplModeTest.java
+src/test/java/com/springclaw/service/chat/impl/ChatServiceImplPersistenceTest.java
+src/test/java/com/springclaw/service/chat/impl/ChatServiceImplPendingApprovalTest.java
 src/test/java/com/springclaw/controller/ChatControllerAuthTest.java
+src/test/java/com/springclaw/service/task/TaskExecutionServiceTest.java
 src/test/java/com/springclaw/architecture/ContextPropagationCharacterizationTest.java
+src/test/java/com/springclaw/architecture/FinalAnswerOwnershipCharacterizationTest.java
 src/test/java/com/springclaw/architecture/TransportParityCharacterizationTest.java
 src/test/java/com/springclaw/service/proposal/ToolInvocationProposalServiceConfirmTest.java
 src/test/java/com/springclaw/service/proposal/ToolProposalExecutionServiceTest.java
@@ -230,9 +239,11 @@ Run:
 
 ```bash
 mvn -q -Dtest=DefaultRunIdentityFactoryTest test
+mvn -q -DskipTests compile
+mvn -q -DskipTests test-compile
 ```
 
-Expected: 3 tests, 0 failures, 0 errors, 0 skips.
+Expected: 3 tests, 0 failures, 0 errors, 0 skips; both compile commands exit `0`. The first implementation commit is independently buildable.
 
 - [ ] **Step 5: Commit the identity primitive**
 
@@ -245,16 +256,81 @@ git add \
 git commit -m "feat: add canonical run identity"
 ```
 
-### Task 2: Make `ChatContextFactory` consume an accepted ID
+### Task 2: Atomically migrate context construction and every chat ingress/caller
+
+This is one commit. Do not split it. Removing `ChatContextFactory.build(ChatRequest, boolean)` before the service, production callers, tests, stubs, and direct constructors are migrated leaves a non-compiling intermediate commit.
 
 **Files:**
+- Modify: `src/main/java/com/springclaw/service/chat/ChatService.java`
 - Modify: `src/main/java/com/springclaw/service/chat/impl/ChatContextFactory.java`
+- Modify: `src/main/java/com/springclaw/service/chat/impl/ChatServiceImpl.java`
+- Modify: `src/main/java/com/springclaw/controller/ChatController.java`
+- Modify: `src/main/java/com/springclaw/service/chat/async/ChatMessageConsumer.java`
+- Modify: `src/main/java/com/springclaw/service/webhook/WebhookRouterService.java`
+- Modify: `src/main/java/com/springclaw/service/task/executor/TaskExecutionService.java`
+- Create: `src/test/java/com/springclaw/architecture/CanonicalTransportIdentityTest.java`
+- Create: `src/test/java/com/springclaw/service/webhook/WebhookRouterServiceTest.java`
 - Modify: `src/test/java/com/springclaw/service/chat/impl/ChatContextFactoryTest.java`
+- Modify: `src/test/java/com/springclaw/service/chat/impl/ChatServiceImplModeTest.java`
+- Modify: `src/test/java/com/springclaw/service/chat/impl/ChatServiceImplPersistenceTest.java`
+- Modify: `src/test/java/com/springclaw/service/chat/impl/ChatServiceImplPendingApprovalTest.java`
+- Modify: `src/test/java/com/springclaw/controller/ChatControllerAuthTest.java`
+- Modify: `src/test/java/com/springclaw/service/task/TaskExecutionServiceTest.java`
 - Modify: `src/test/java/com/springclaw/architecture/ContextPropagationCharacterizationTest.java`
+- Modify: `src/test/java/com/springclaw/architecture/FinalAnswerOwnershipCharacterizationTest.java`
+- Modify: `src/test/java/com/springclaw/architecture/TransportParityCharacterizationTest.java`
 
-- [ ] **Step 1: Change tests first to require an accepted ID**
+#### Verified migration inventory
 
-In `ChatContextFactoryTest`, change the existing build call and add the identity assertion:
+Every current `ChatContextFactory.build` production call, direct test call, and Mockito stub is migrated in this task:
+
+| File | Current site(s) | Exact migration |
+|---|---:|---|
+| `ChatServiceImpl.java` | 176, 518 | `build(request, true, acceptedRunId)` and `build(request, persistResult, acceptedRunId)` |
+| `ChatContextFactoryTest.java` | direct `factory.build(...)` | Add the fixed accepted ID as argument three and assert `context.requestId()` |
+| `ContextPropagationCharacterizationTest.java` | direct `factory.build(...)` | Add the fixed accepted ID as argument three and assert it |
+| `ChatServiceImplModeTest.java` | stubs at 46, 62, 78, 94, 130, 258, 289 | Use `build(any(ChatRequest.class), anyBoolean(), anyString())` |
+| `ChatServiceImplPersistenceTest.java` | stubs at 88, 187 | Use the typed matcher `build(any(ChatRequest.class), anyBoolean(), anyString())` |
+
+Every current `ChatService.chat` or `stream` production call/stub is handled:
+
+| File | Current site(s) | Exact migration |
+|---|---:|---|
+| `ChatController.java` | `send`, `stream` | Create one ID and call `chat/stream(AcceptedChatCommand)` |
+| `ChatMessageConsumer.java` | `consume` | Call `chat(AcceptedChatCommand)` with `message.requestId()` |
+| `WebhookRouterService.java` | `dispatch` | Keep its existing normalized UUID, validate it, call `chat(AcceptedChatCommand)` |
+| `TransportParityCharacterizationTest.java` | success/failure stubs and verifications | Replace `ChatRequest` with the exact `AcceptedChatCommand` built from the message |
+| `ChatControllerAuthTest.java` | existing broad `any()` stub | Use `any(AcceptedChatCommand.class)`; capture `AcceptedChatCommand` and inspect `request()` |
+| `ChatServiceImplModeTest.java` | five direct legacy `chat/stream(ChatRequest)` calls | Keep unchanged to prove compatibility methods still work |
+| `ChatServiceImplPersistenceTest.java` | one direct legacy `chat(ChatRequest)` call | Keep unchanged to prove compatibility; only its context-factory stubs and constructors change |
+
+Every direct full `new ChatServiceImpl(...)` call is migrated in the same commit:
+
+```text
+src/test/java/com/springclaw/service/chat/impl/ChatServiceImplModeTest.java (2)
+src/test/java/com/springclaw/service/chat/impl/ChatServiceImplPersistenceTest.java (2)
+src/test/java/com/springclaw/service/chat/impl/ChatServiceImplPendingApprovalTest.java (1)
+src/test/java/com/springclaw/architecture/FinalAnswerOwnershipCharacterizationTest.java (1)
+```
+
+Every scheduled-task helper call/stub is migrated in the same commit:
+
+```text
+src/main/java/com/springclaw/service/task/executor/TaskExecutionService.java (1)
+src/test/java/com/springclaw/service/task/TaskExecutionServiceTest.java (2 existing compatibility negative verifications, 2 new accepted-overload negative verifications, 1 accepted-overload stub, 1 accepted-overload verification)
+src/test/java/com/springclaw/service/chat/impl/ChatServiceImplPersistenceTest.java (1 direct compatibility call)
+```
+
+- [ ] **Step 1: Write the failing context and service identity tests**
+
+Add to `ChatServiceImplModeTest`:
+
+```java
+import com.springclaw.runtime.identity.RunIdentityFactory;
+import com.springclaw.service.chat.AcceptedChatCommand;
+```
+
+In `ChatContextFactoryTest`, use:
 
 ```java
 String acceptedRunId = "0123456789abcdef0123456789abcdef";
@@ -264,18 +340,10 @@ ChatContext context = factory.build(
         acceptedRunId
 );
 
-ArgumentCaptor<AgentDecisionRequest> decisionRequestCaptor =
-        ArgumentCaptor.forClass(AgentDecisionRequest.class);
-verify(agentDecisionService).decide(decisionRequestCaptor.capture());
 assertThat(context.requestId()).isEqualTo(acceptedRunId);
-assertThat(decisionRequestCaptor.getValue().question()).isEqualTo("北京呢");
-verify(contextAssembler).assemble("s1", "api", "u1", "北京呢");
-assertThat(context.userMessage()).isEqualTo("北京呢");
-assertThat(context.effectiveUserMessage()).isEqualTo("北京呢");
-assertThat(context.decision()).isEqualTo(decision);
 ```
 
-In `ContextPropagationCharacterizationTest.chatContextFactoryBuildsCurrentInjectionShape`, replace the production call with:
+In `ContextPropagationCharacterizationTest.chatContextFactoryBuildsCurrentInjectionShape`, use:
 
 ```java
 String acceptedRunId = "11111111111111111111111111111111";
@@ -296,175 +364,13 @@ assertThat(context.contextInjection().metadata())
         .containsEntry("contextSummary", assembled.sourceSummary());
 ```
 
-- [ ] **Step 2: Run the tests and verify RED**
-
-Run:
-
-```bash
-mvn -q -Dtest=ChatContextFactoryTest,ContextPropagationCharacterizationTest test
-```
-
-Expected: test compilation fails because `build(ChatRequest, boolean, String)` does not exist.
-
-- [ ] **Step 3: Replace UUID ownership with the accepted parameter**
-
-Remove:
-
-```java
-import java.util.UUID;
-```
-
-Replace the public method signature and the UUID assignment with:
-
-```java
-public ChatContext build(ChatRequest request,
-                         boolean persistSession,
-                         String acceptedRunId) {
-    if (!StringUtils.hasText(acceptedRunId)) {
-        throw new IllegalArgumentException("acceptedRunId must not be blank");
-    }
-    String requestId = acceptedRunId;
-    String channel = StringUtils.hasText(request.channel()) ? request.channel() : "api";
-    AgentSession session = persistSession
-            ? agentSessionService.getOrCreate(request.sessionKey(), channel, request.userId())
-            : buildEphemeralSession(request.sessionKey(), channel, request.userId());
-    String roleCode = authService.resolveRoleByUserId(request.userId());
-    var allowedToolPacks = skillService.resolveAllowedToolPacks(channel, request.userId());
-    String routingQuestion = resolveRoutingQuestion(
-            session.getSessionKey(),
-            channel,
-            request.userId(),
-            requestId,
-            request.message(),
-            request.responseMode()
-    );
-    AgentDecision decision = agentDecisionService.decide(new AgentDecisionRequest(
-            session.getSessionKey(),
-            channel,
-            request.userId(),
-            roleCode,
-            requestId,
-            routingQuestion,
-            request.responseMode(),
-            allowedToolPacks
-    ));
-    String effectiveDefaultMode = chatRoutingStateService.resolveDefaultMode(configuredAgentMode);
-    boolean effectiveAutoUpgrade = chatRoutingStateService.resolveAutoUpgrade(routingAutoUpgradeEnabled);
-    ChatRoutingPolicyService.RoutingDecision routingDecision = chatRoutingPolicyService.decide(
-            routingQuestion,
-            roleCode,
-            effectiveDefaultMode,
-            effectiveAutoUpgrade,
-            allowedToolPacks,
-            request.responseMode()
-    );
-    if (routingDecision == null) {
-        routingDecision = new ChatRoutingPolicyService.RoutingDecision(
-                request.message(),
-                effectiveDefaultMode,
-                false,
-                false,
-                "路由策略未返回结果，回退到当前默认链路。"
-        );
-    }
-    List<SkillDefinition> matchedSkills = skillRegistryService.matchAgentVisibleDefinitions(
-            routingDecision.effectiveQuestion(),
-            allowedToolPacks,
-            2
-    );
-    String systemPrompt = soulPromptService.buildSystemPrompt(
-            channel,
-            request.userId(),
-            matchedSkills
-    );
-    AssembledContext assembled = contextAssembler.assemble(
-            session.getSessionKey(),
-            channel,
-            request.userId(),
-            routingDecision.effectiveQuestion()
-    );
-    AiProviderService.ActiveChatClient activeClient = aiProviderService.activeClient();
-    ContextInjection injection = new ContextInjection(
-            assembled == null ? "" : assembled.observePrompt(),
-            "",
-            "",
-            Map.of(
-                    "contextSummary",
-                    assembled == null
-                            ? AssembledContext.ContextSourceSummary.empty()
-                            : assembled.sourceSummary()
-            )
-    );
-    return new ChatContext(
-            session,
-            channel,
-            request.userId(),
-            roleCode,
-            request.message(),
-            routingDecision.effectiveQuestion(),
-            requestId,
-            systemPrompt,
-            assembled,
-            activeClient,
-            routingDecision.executionMode(),
-            routingDecision.reason(),
-            routingDecision.responseMode(),
-            decision.intent(),
-            decision,
-            injection
-    );
-}
-```
-
-Do not retain a two-argument `build(ChatRequest, boolean)` overload. That would preserve a second hidden identity owner inside `ChatContextFactory`.
-
-- [ ] **Step 4: Run the tests and verify GREEN**
-
-Run:
-
-```bash
-mvn -q -Dtest=ChatContextFactoryTest,ContextPropagationCharacterizationTest test
-```
-
-Expected: 6 tests, 0 failures, 0 errors, 0 skips.
-
-- [ ] **Step 5: Commit the context ownership change**
-
-```bash
-git add \
-  src/main/java/com/springclaw/service/chat/impl/ChatContextFactory.java \
-  src/test/java/com/springclaw/service/chat/impl/ChatContextFactoryTest.java \
-  src/test/java/com/springclaw/architecture/ContextPropagationCharacterizationTest.java
-git commit -m "refactor: accept canonical chat context identity"
-```
-
-### Task 3: Preserve the old `ChatService` API and delegate through one accepted identity
-
-**Files:**
-- Modify: `src/main/java/com/springclaw/service/chat/ChatService.java`
-- Modify: `src/main/java/com/springclaw/service/chat/impl/ChatServiceImpl.java`
-- Modify: `src/test/java/com/springclaw/service/chat/impl/ChatServiceImplModeTest.java`
-- Modify constructor calls in:
-  - `src/test/java/com/springclaw/service/chat/impl/ChatServiceImplPersistenceTest.java`
-  - `src/test/java/com/springclaw/service/chat/impl/ChatServiceImplPendingApprovalTest.java`
-  - `src/test/java/com/springclaw/architecture/FinalAnswerOwnershipCharacterizationTest.java`
-
-- [ ] **Step 1: Write sync and SSE delegation tests**
-
-Add imports:
-
-```java
-import com.springclaw.runtime.identity.RunIdentityFactory;
-import com.springclaw.service.chat.AcceptedChatCommand;
-```
-
-Add this mock to `ChatServiceImplModeTest.Fixture`:
+In `ChatServiceImplModeTest.Fixture`, add:
 
 ```java
 private final RunIdentityFactory runIdentityFactory = mock(RunIdentityFactory.class);
 ```
 
-Add to the fixture constructor:
+and initialize it with:
 
 ```java
 when(runIdentityFactory.create())
@@ -473,51 +379,35 @@ when(runIdentityFactory.accept(anyString()))
         .thenAnswer(invocation -> invocation.getArgument(0));
 ```
 
-Add these tests:
+Add:
 
 ```java
 @Test
-void legacyChatCreatesOnceAndDelegatesTheSameIdentityToContextFactory() {
+void acceptedChatAndStreamReuseTheSuppliedIdentity() {
     Fixture fixture = new Fixture();
     fixture.useEngine(fixture.simplifiedOparEngine);
     ChatRequest request = new ChatRequest("s1", "u1", "你好", "api");
     ChatContext context = fixture.buildChatContext("你好", "simplified", "默认");
     when(fixture.chatContextFactory.build(
-            request,
-            true,
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            eq(request),
+            eq(true),
+            anyString()
     )).thenReturn(context);
     when(fixture.simplifiedOparEngine.execute(any(), any()))
-            .thenReturn(new ChatExecutionResult("observe", "SIMPLIFIED", "ACTION", "answer", true));
-
-    fixture.build().chat(request);
-
-    verify(fixture.runIdentityFactory, times(1)).create();
-    verify(fixture.runIdentityFactory, times(1))
-            .accept("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-    verify(fixture.chatContextFactory).build(
-            request,
-            true,
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    );
-}
-
-@Test
-void acceptedChatNeverCreatesAnotherIdentity() {
-    Fixture fixture = new Fixture();
-    fixture.useEngine(fixture.simplifiedOparEngine);
-    ChatRequest request = new ChatRequest("s1", "u1", "你好", "api");
-    ChatContext context = fixture.buildChatContext("你好", "simplified", "默认");
-    when(fixture.chatContextFactory.build(
-            request,
-            true,
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    )).thenReturn(context);
-    when(fixture.simplifiedOparEngine.execute(any(), any()))
-            .thenReturn(new ChatExecutionResult("observe", "SIMPLIFIED", "ACTION", "answer", true));
+            .thenReturn(new ChatExecutionResult(
+                    "observe",
+                    "SIMPLIFIED",
+                    "ACTION",
+                    "answer",
+                    true
+            ));
 
     fixture.build().chat(new AcceptedChatCommand(
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            request
+    ));
+    SseEmitter emitter = fixture.build().stream(new AcceptedChatCommand(
+            "cccccccccccccccccccccccccccccccc",
             request
     ));
 
@@ -525,33 +415,14 @@ void acceptedChatNeverCreatesAnotherIdentity() {
     verify(fixture.runIdentityFactory).accept(
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     );
+    verify(fixture.runIdentityFactory).accept(
+            "cccccccccccccccccccccccccccccccc"
+    );
     verify(fixture.chatContextFactory).build(
             request,
             true,
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     );
-}
-
-@Test
-void acceptedStreamUsesTheIdentityForInitialTraceAndContextBuild() {
-    Fixture fixture = new Fixture();
-    fixture.useEngine(fixture.simplifiedOparEngine);
-    ChatRequest request = new ChatRequest("s1", "u1", "你好", "api");
-    ChatContext context = fixture.buildChatContext("你好", "simplified", "默认");
-    when(fixture.chatContextFactory.build(
-            request,
-            true,
-            "cccccccccccccccccccccccccccccccc"
-    )).thenReturn(context);
-    when(fixture.simplifiedOparEngine.execute(any(), any()))
-            .thenReturn(new ChatExecutionResult("observe", "SIMPLIFIED", "ACTION", "answer", true));
-
-    SseEmitter emitter = fixture.build().stream(new AcceptedChatCommand(
-            "cccccccccccccccccccccccccccccccc",
-            request
-    ));
-
-    verify(fixture.runIdentityFactory, never()).create();
     verify(fixture.sseEventBridge, timeout(1000)).sendTrace(
             eq(emitter),
             eq("cccccccccccccccccccccccccccccccc"),
@@ -570,298 +441,44 @@ void acceptedStreamUsesTheIdentityForInitialTraceAndContextBuild() {
 }
 ```
 
-Change existing stubs from:
+Change all seven `ChatServiceImplModeTest` context stubs and both `ChatServiceImplPersistenceTest` context stubs to:
 
 ```java
-when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean()))
-```
-
-to:
-
-```java
-when(fixture.chatContextFactory.build(
+when(chatContextFactory.build(
         any(ChatRequest.class),
         anyBoolean(),
         anyString()
-))
+)).thenReturn(context);
 ```
 
-- [ ] **Step 2: Run the focused service test and verify RED**
+The first matcher must remain `any(ChatRequest.class)` in `ChatServiceImplPersistenceTest`; do not use raw `any()`.
 
-Run:
+- [ ] **Step 2: Write failing ingress, redelivery, webhook, scheduled-task, and DTO-shape tests**
 
-```bash
-mvn -q -Dtest=ChatServiceImplModeTest test
-```
-
-Expected: test compilation fails because the accepted-command overloads, factory constructor dependency, and three-argument context build call do not exist.
-
-- [ ] **Step 3: Add accepted-command overloads without removing old signatures**
-
-Replace `ChatService` with:
+Add to `ChatControllerAuthTest`:
 
 ```java
-package com.springclaw.service.chat;
-
-import com.springclaw.dto.chat.ChatRequest;
-import com.springclaw.dto.chat.ChatResponse;
-import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-
-public interface ChatService {
-
-    ChatResponse chat(ChatRequest request);
-
-    ChatResponse chat(AcceptedChatCommand command);
-
-    SseEmitter stream(ChatRequest request);
-
-    SseEmitter stream(AcceptedChatCommand command);
-}
-```
-
-In `ChatServiceImpl`, add imports:
-
-```java
-import com.springclaw.runtime.identity.DefaultRunIdentityFactory;
 import com.springclaw.runtime.identity.RunIdentityFactory;
 import com.springclaw.service.chat.AcceptedChatCommand;
-```
-
-Add the field:
-
-```java
-private final RunIdentityFactory runIdentityFactory;
-```
-
-Add `RunIdentityFactory runIdentityFactory` immediately before the two `@Value` parameters in the `@Autowired` constructor and assign it:
-
-```java
-this.runIdentityFactory = runIdentityFactory;
-```
-
-Keep the package-visible eleven-argument test constructor and change its delegation tail to:
-
-```java
-metaGuardExecutor, null, null, null, null, null, null, null,
-new DefaultRunIdentityFactory(), false, true);
-```
-
-Replace the sync methods with:
-
-```java
-@Override
-public ChatResponse chat(ChatRequest request) {
-    return chat(new AcceptedChatCommand(runIdentityFactory.create(), request));
-}
-
-@Override
-public ChatResponse chat(AcceptedChatCommand command) {
-    String acceptedRunId = runIdentityFactory.accept(command.runId());
-    TaskChatExecutionResult result = executeInternal(
-            command.request(),
-            true,
-            true,
-            acceptedRunId
-    );
-    return new ChatResponse(
-            result.sessionKey(),
-            result.answer(),
-            aiProviderService.activeClient().displayName(),
-            System.currentTimeMillis()
-    );
-}
-```
-
-Replace the stream entry methods with:
-
-```java
-@Override
-public SseEmitter stream(ChatRequest request) {
-    return stream(new AcceptedChatCommand(runIdentityFactory.create(), request));
-}
-
-@Override
-public SseEmitter stream(AcceptedChatCommand command) {
-    String acceptedRunId = runIdentityFactory.accept(command.runId());
-    ChatRequest request = command.request();
-    chatGuardService.checkRateLimit(request.sessionKey());
-    String lockToken = chatGuardService.acquireSessionLock(request.sessionKey());
-    AtomicBoolean lockReleased = new AtomicBoolean(false);
-    SseEmitter emitter = new SseEmitter(1_800_000L);
-    AtomicReference<Disposable> disposableRef = new AtomicReference<>();
-
-    emitter.onCompletion(() -> {
-        Disposable disposable = disposableRef.get();
-        if (disposable != null) {
-            disposable.dispose();
-        }
-        releaseSessionLockOnce(request.sessionKey(), lockToken, lockReleased);
-    });
-    emitter.onTimeout(() -> {
-        Disposable disposable = disposableRef.get();
-        if (disposable != null) {
-            disposable.dispose();
-        }
-        releaseSessionLockOnce(request.sessionKey(), lockToken, lockReleased);
-        emitter.complete();
-    });
-    CompletableFuture.runAsync(() -> executeStream(
-            request,
-            acceptedRunId,
-            lockToken,
-            lockReleased,
-            emitter,
-            disposableRef
-    ));
-    return emitter;
-}
-```
-
-Change the stream worker signature to:
-
-```java
-private void executeStream(ChatRequest request,
-                           String acceptedRunId,
-                           String lockToken,
-                           AtomicBoolean lockReleased,
-                           SseEmitter emitter,
-                           AtomicReference<Disposable> disposableRef)
-```
-
-Change its first trace and context build to:
-
-```java
-sseEventBridge.sendTrace(
-        emitter,
-        acceptedRunId,
-        "接收请求",
-        "request",
-        "started",
-        "已收到用户输入，准备组装上下文。",
-        0L
-);
-sseEventBridge.sendStatus(emitter, "正在组织上下文");
-ChatContext context = chatContextFactory.build(request, true, acceptedRunId);
-```
-
-Change task execution and the internal signature to:
-
-```java
-public TaskChatExecutionResult executeTaskMessage(ChatRequest request, boolean persistResult) {
-    return executeInternal(
-            request,
-            false,
-            persistResult,
-            runIdentityFactory.create()
-    );
-}
-
-private TaskChatExecutionResult executeInternal(ChatRequest request,
-                                                boolean enforceRateLimit,
-                                                boolean persistResult,
-                                                String acceptedRunId) {
-    if (enforceRateLimit) {
-        chatGuardService.checkRateLimit(request.sessionKey());
-    }
-    String lockToken = chatGuardService.acquireSessionLock(request.sessionKey());
-    try {
-        ChatContext context = chatContextFactory.build(
-                request,
-                persistResult,
-                acceptedRunId
-        );
-        ChatExecutionResult executionResult = runAgentExecution(context);
-        String finalAnswer = resolveFinalAnswer(context, executionResult);
-        if (persistResult) {
-            chatResultPersister.persist(context, finalAnswer, executionResult);
-        }
-        return new TaskChatExecutionResult(
-                context.session().getSessionKey(),
-                finalAnswer,
-                context.requestId(),
-                context.executionMode(),
-                context.routingReason()
-        );
-    } finally {
-        chatGuardService.releaseSessionLock(request.sessionKey(), lockToken);
-    }
-}
-```
-
-Do not change the `TaskChatExecutionResult` record.
-
-- [ ] **Step 4: Update exact constructor call sites**
-
-For every direct call to the full `ChatServiceImpl` constructor in the four named test classes, insert:
-
-```java
-runIdentityFactory
-```
-
-immediately before the final two boolean arguments. Where the test has no fixture field, use:
-
-```java
-new DefaultRunIdentityFactory()
-```
-
-In `ChatServiceImplModeTest.Fixture.build()` and `buildWithRuntime()`, pass:
-
-```java
-runIdentityFactory,
-false,
-true
-```
-
-as the final three arguments.
-
-- [ ] **Step 5: Run service and characterization tests and verify GREEN**
-
-Run:
-
-```bash
-mvn -q \
-  -Dtest=ChatServiceImplModeTest,ChatServiceImplPersistenceTest,ChatServiceImplPendingApprovalTest,FinalAnswerOwnershipCharacterizationTest \
-  test
-```
-
-Expected: all selected tests pass; old service methods create once, accepted overloads never create, and the accepted ID reaches `ChatContextFactory`.
-
-- [ ] **Step 6: Commit the service delegation**
-
-```bash
-git add \
-  src/main/java/com/springclaw/service/chat/ChatService.java \
-  src/main/java/com/springclaw/service/chat/impl/ChatServiceImpl.java \
-  src/test/java/com/springclaw/service/chat/impl/ChatServiceImplModeTest.java \
-  src/test/java/com/springclaw/service/chat/impl/ChatServiceImplPersistenceTest.java \
-  src/test/java/com/springclaw/service/chat/impl/ChatServiceImplPendingApprovalTest.java \
-  src/test/java/com/springclaw/architecture/FinalAnswerOwnershipCharacterizationTest.java
-git commit -m "refactor: delegate chat through accepted identity"
-```
-
-### Task 4: Make all REST endpoints explicit identity owners without changing DTO shapes
-
-**Files:**
-- Modify: `src/main/java/com/springclaw/controller/ChatController.java`
-- Modify: `src/test/java/com/springclaw/controller/ChatControllerAuthTest.java`
-- Create: `src/test/java/com/springclaw/architecture/CanonicalTransportIdentityTest.java`
-
-- [ ] **Step 1: Write controller identity and DTO-shape tests**
-
-Add these imports to `ChatControllerAuthTest`:
-
-```java
-import com.springclaw.dto.chat.AsyncChatAcceptedResponse;
-import com.springclaw.runtime.identity.RunIdentityFactory;
-import com.springclaw.service.chat.AcceptedChatCommand;
-import com.springclaw.service.chat.async.AsyncChatRequestMessage;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.times;
 ```
 
-In `ChatControllerAuthTest`, add a `RunIdentityFactory` mock and construct the controller with the package-visible constructor that accepts it. Add:
+In `ChatControllerAuthTest`, replace the existing broad stub and capture with typed accepted-command forms:
+
+```java
+when(chatService.chat(any(AcceptedChatCommand.class)))
+        .thenReturn(new ChatResponse("s1", "ok", "m1", 1L));
+
+ArgumentCaptor<AcceptedChatCommand> captor =
+        ArgumentCaptor.forClass(AcceptedChatCommand.class);
+verify(chatService).chat(captor.capture());
+Assertions.assertEquals("user_local", captor.getValue().request().userId());
+Assertions.assertEquals("agent", captor.getValue().request().responseMode());
+```
+
+Do not use `when(chatService.chat(any()))`: once `ChatService` has two overloads it is ambiguous. Add:
 
 ```java
 @Test
@@ -902,11 +519,14 @@ void syncAndStreamEachCreateOneAcceptedIdentityAtTheController() {
                     "11111111111111111111111111111111",
                     "22222222222222222222222222222222"
             );
-    verify(identityFactory, times(2)).create();
 }
+```
 
+Add the async acceptance assertion:
+
+```java
 @Test
-void asyncAcceptanceUsesOneIdentityForMessageQueueAndResponse() {
+void asyncAcceptanceUsesOneIdentityForQueueMessageAndResponse() {
     ChatService chatService = mock(ChatService.class);
     ChatMessageProducer producer = mock(ChatMessageProducer.class);
     AsyncChatResultStore resultStore = mock(AsyncChatResultStore.class);
@@ -939,31 +559,211 @@ void asyncAcceptanceUsesOneIdentityForMessageQueueAndResponse() {
             .isEqualTo("33333333333333333333333333333333");
     assertThat(message.getValue().requestId())
             .isEqualTo(response.getData().requestId());
-    verify(identityFactory, times(1)).create();
 }
 ```
 
-Create `CanonicalTransportIdentityTest.java`:
+Add its imports:
+
+```java
+import com.springclaw.dto.chat.AsyncChatAcceptedResponse;
+import com.springclaw.service.chat.async.AsyncChatRequestMessage;
+```
+
+In `TransportParityCharacterizationTest`, replace each success/failure `expectedRequest` with:
+
+```java
+AcceptedChatCommand expectedCommand = new AcceptedChatCommand(
+        message.requestId(),
+        new ChatRequest(
+                message.sessionKey(),
+                message.userId(),
+                message.message(),
+                message.channel(),
+                message.responseMode()
+        )
+);
+```
+
+The success path uses:
+
+```java
+when(chatService.chat(expectedCommand)).thenReturn(response);
+verify(chatService).chat(expectedCommand);
+```
+
+The failure path uses:
+
+```java
+when(chatService.chat(expectedCommand))
+        .thenThrow(new IllegalStateException("chat unavailable"));
+verify(chatService).chat(expectedCommand);
+```
+
+Create `WebhookRouterServiceTest.java`:
+
+```java
+package com.springclaw.service.webhook;
+
+import com.springclaw.dto.chat.ChatResponse;
+import com.springclaw.runtime.identity.RunIdentityFactory;
+import com.springclaw.service.chat.AcceptedChatCommand;
+import com.springclaw.service.chat.ChatService;
+import com.springclaw.service.event.MessageEventService;
+import com.springclaw.strategy.channel.ChannelAdapter;
+import com.springclaw.strategy.channel.factory.ChannelAdapterFactory;
+import com.springclaw.strategy.channel.model.UnifiedInboundMessage;
+import com.springclaw.strategy.channel.outbound.ChannelOutboundDispatcher;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+class WebhookRouterServiceTest {
+
+    @Test
+    void dispatchValidatesItsExistingRequestIdAndPassesItToChat() {
+        ChannelAdapterFactory adapterFactory = mock(ChannelAdapterFactory.class);
+        ChatService chatService = mock(ChatService.class);
+        MessageEventService eventService = mock(MessageEventService.class);
+        ChannelOutboundDispatcher dispatcher = mock(ChannelOutboundDispatcher.class);
+        RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
+        ChannelAdapter adapter = mock(ChannelAdapter.class);
+        UnifiedInboundMessage inbound = new UnifiedInboundMessage(
+                "feishu",
+                "session-A",
+                "user-A",
+                "hello"
+        );
+        when(adapterFactory.getRequired("feishu")).thenReturn(adapter);
+        when(adapter.adapt(Map.of("event", "message"))).thenReturn(inbound);
+        when(identityFactory.accept(anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(chatService.chat(org.mockito.ArgumentMatchers.any(
+                AcceptedChatCommand.class
+        ))).thenReturn(new ChatResponse("session-A", "answer", "model", 1L));
+        WebhookRouterService service = new WebhookRouterService(
+                adapterFactory,
+                chatService,
+                eventService,
+                dispatcher,
+                identityFactory
+        );
+
+        service.dispatch("feishu", Map.of("event", "message"));
+
+        ArgumentCaptor<String> acceptedId = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AcceptedChatCommand> command =
+                ArgumentCaptor.forClass(AcceptedChatCommand.class);
+        verify(identityFactory).accept(acceptedId.capture());
+        verify(chatService).chat(command.capture());
+        assertThat(acceptedId.getValue()).matches("[0-9a-f]{32}");
+        assertThat(command.getValue().runId()).isEqualTo(acceptedId.getValue());
+        assertThat(command.getValue().request().sessionKey()).isEqualTo("session-A");
+    }
+}
+```
+
+In `TaskExecutionServiceTest.shouldExecuteAgentTaskThroughChatService`, capture the ID passed to `ScheduledTaskExecutionService.start` and require the same value in the new overload:
+
+```java
+import com.springclaw.domain.entity.ScheduledTaskExecution;
+import org.mockito.ArgumentCaptor;
+
+import static org.mockito.ArgumentMatchers.eq;
+```
+
+```java
+when(executionService.start(anyString(), anyString(), anyString()))
+        .thenAnswer(invocation -> {
+            var record = new ScheduledTaskExecution();
+            record.setExecutionId("exec_2");
+            return record;
+        });
+when(chatService.executeTaskMessage(
+        any(ChatRequest.class),
+        anyBoolean(),
+        anyString()
+)).thenAnswer(invocation -> new ChatServiceImpl.TaskChatExecutionResult(
+        "task:shadow:task_2",
+        "今日进展：xxx",
+        invocation.getArgument(2),
+        "simplified",
+        "task"
+));
+
+TaskExecutionOutcome outcome = service.runTask(task, "MANUAL");
+
+ArgumentCaptor<String> startedRunId = ArgumentCaptor.forClass(String.class);
+verify(executionService).start(
+        eq("task_2"),
+        eq("MANUAL"),
+        startedRunId.capture()
+);
+verify(chatService).executeTaskMessage(
+        any(ChatRequest.class),
+        eq(false),
+        eq(startedRunId.getValue())
+);
+assertThat(outcome.requestId()).isEqualTo(startedRunId.getValue());
+```
+
+Keep the two skill-task compatibility negative verifications, but type their first matcher:
+
+```java
+verify(chatService, never()).executeTaskMessage(
+        any(ChatRequest.class),
+        anyBoolean()
+);
+```
+
+Immediately add the accepted-ID negative verification in both skill-task tests:
+
+```java
+verify(chatService, never()).executeTaskMessage(
+        any(ChatRequest.class),
+        anyBoolean(),
+        anyString()
+);
+```
+
+Create `CanonicalTransportIdentityTest.java` with both DTO-shape and redelivery coverage:
 
 ```java
 package com.springclaw.architecture;
 
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
+import com.springclaw.service.chat.AcceptedChatCommand;
+import com.springclaw.service.chat.ChatService;
 import com.springclaw.service.chat.async.AsyncChatRequestMessage;
-import org.junit.jupiter.api.DisplayName;
+import com.springclaw.service.chat.async.AsyncChatResultPayload;
+import com.springclaw.service.chat.async.AsyncChatResultStore;
+import com.springclaw.service.chat.async.ChatMessageConsumer;
+import com.springclaw.service.chat.async.ChatMessageProducer;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import java.util.Arrays;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class CanonicalTransportIdentityTest {
 
     @Test
-    @DisplayName("Public chat and async transport DTO record shapes remain unchanged")
-    void publicChatDtoShapesRemainUnchanged() {
+    void publicTransportDtoShapesRemainUnchanged() {
         assertThat(recordShape(ChatRequest.class)).containsExactly(
                 "sessionKey:String",
                 "userId:String",
@@ -988,6 +788,57 @@ class CanonicalTransportIdentityTest {
         );
     }
 
+    @Test
+    void rabbitRedeliveryReusesIdentityButExecutesAgain() {
+        ChatService chatService = mock(ChatService.class);
+        AsyncChatResultStore resultStore = mock(AsyncChatResultStore.class);
+        ChatMessageConsumer consumer = new ChatMessageConsumer(
+                chatService,
+                resultStore,
+                mock(ChatMessageProducer.class),
+                mock(SimpMessagingTemplate.class)
+        );
+        AsyncChatRequestMessage message = new AsyncChatRequestMessage(
+                "44444444444444444444444444444444",
+                "session",
+                "user",
+                "hello",
+                "api",
+                100L,
+                "agent"
+        );
+        ChatResponse response = new ChatResponse(
+                "session",
+                "answer",
+                "model",
+                123L
+        );
+        when(chatService.chat(any(AcceptedChatCommand.class)))
+                .thenReturn(response);
+        when(resultStore.markCompleted(message, "answer", "model"))
+                .thenReturn(new AsyncChatResultPayload(
+                        message.requestId(),
+                        "COMPLETED",
+                        message.sessionKey(),
+                        message.channel(),
+                        response.answer(),
+                        response.model(),
+                        message.createdAt(),
+                        456L,
+                        ""
+                ));
+
+        consumer.consume(message);
+        consumer.consume(message);
+
+        ArgumentCaptor<AcceptedChatCommand> commands =
+                ArgumentCaptor.forClass(AcceptedChatCommand.class);
+        verify(chatService, times(2)).chat(commands.capture());
+        assertThat(commands.getAllValues())
+                .extracting(AcceptedChatCommand::runId)
+                .containsExactly(message.requestId(), message.requestId());
+    }
+
     private static List<String> recordShape(Class<?> type) {
         return Arrays.stream(type.getRecordComponents())
                 .map(component -> component.getName()
@@ -998,43 +849,234 @@ class CanonicalTransportIdentityTest {
 }
 ```
 
-- [ ] **Step 2: Run the tests and verify RED**
-
-Run:
+- [ ] **Step 3: Run the atomic task tests and verify RED**
 
 ```bash
-mvn -q -Dtest=ChatControllerAuthTest,CanonicalTransportIdentityTest test
+mvn -q \
+  -Dtest=ChatContextFactoryTest,ChatServiceImplModeTest,ChatControllerAuthTest,TransportParityCharacterizationTest,CanonicalTransportIdentityTest,WebhookRouterServiceTest,TaskExecutionServiceTest,ContextPropagationCharacterizationTest \
+  test
 ```
 
-Expected: controller tests fail to compile because the identity-aware constructor and accepted-command calls do not exist. The DTO shape test passes.
+Expected: test compilation fails because the accepted-command service overloads, three-argument context build, accepted-ID task overload, and identity-aware constructors do not exist.
 
-- [ ] **Step 3: Inject the factory and remove direct UUID generation**
+- [ ] **Step 4: Add service overloads and replace context-factory ownership**
 
-In `ChatController`, remove:
-
-```java
-import java.util.UUID;
-```
-
-Add imports:
+Add these production imports:
 
 ```java
+// ChatServiceImpl.java
 import com.springclaw.runtime.identity.DefaultRunIdentityFactory;
+import com.springclaw.runtime.identity.RunIdentityFactory;
+import com.springclaw.service.chat.AcceptedChatCommand;
+
+// ChatController.java
+import com.springclaw.runtime.identity.DefaultRunIdentityFactory;
+import com.springclaw.runtime.identity.RunIdentityFactory;
+import com.springclaw.service.chat.AcceptedChatCommand;
+
+// ChatMessageConsumer.java
+import com.springclaw.service.chat.AcceptedChatCommand;
+
+// WebhookRouterService.java
 import com.springclaw.runtime.identity.RunIdentityFactory;
 import com.springclaw.service.chat.AcceptedChatCommand;
 ```
 
-Add the field:
+Replace `ChatService` with:
+
+```java
+package com.springclaw.service.chat;
+
+import com.springclaw.dto.chat.ChatRequest;
+import com.springclaw.dto.chat.ChatResponse;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
+public interface ChatService {
+
+    ChatResponse chat(ChatRequest request);
+
+    ChatResponse chat(AcceptedChatCommand command);
+
+    SseEmitter stream(ChatRequest request);
+
+    SseEmitter stream(AcceptedChatCommand command);
+}
+```
+
+In `ChatContextFactory`, remove `java.util.UUID`, replace the two-argument method with:
+
+```java
+public ChatContext build(ChatRequest request,
+                         boolean persistSession,
+                         String acceptedRunId) {
+    if (!StringUtils.hasText(acceptedRunId)) {
+        throw new IllegalArgumentException("acceptedRunId must not be blank");
+    }
+    String requestId = acceptedRunId;
+```
+
+and leave the remainder of the existing method unchanged. Do not retain `build(ChatRequest, boolean)`.
+
+In `ChatServiceImpl`, inject and assign:
 
 ```java
 private final RunIdentityFactory runIdentityFactory;
 ```
 
-Add `RunIdentityFactory runIdentityFactory` as the final parameter of the `@Autowired` constructor and assign it.
-
-Replace the package-visible five-argument constructor with:
+Add `RunIdentityFactory runIdentityFactory` immediately before the final two `@Value` constructor parameters. The package-visible compatibility constructor delegates with:
 
 ```java
+new DefaultRunIdentityFactory(),
+false,
+true
+```
+
+Use these entry methods:
+
+```java
+@Override
+public ChatResponse chat(ChatRequest request) {
+    return chat(new AcceptedChatCommand(runIdentityFactory.create(), request));
+}
+
+@Override
+public ChatResponse chat(AcceptedChatCommand command) {
+    String acceptedRunId = runIdentityFactory.accept(command.runId());
+    TaskChatExecutionResult result = executeInternal(
+            command.request(),
+            true,
+            true,
+            acceptedRunId
+    );
+    return new ChatResponse(
+            result.sessionKey(),
+            result.answer(),
+            aiProviderService.activeClient().displayName(),
+            System.currentTimeMillis()
+    );
+}
+
+@Override
+public SseEmitter stream(ChatRequest request) {
+    return stream(new AcceptedChatCommand(runIdentityFactory.create(), request));
+}
+
+@Override
+public SseEmitter stream(AcceptedChatCommand command) {
+    String acceptedRunId = runIdentityFactory.accept(command.runId());
+    ChatRequest request = command.request();
+    chatGuardService.checkRateLimit(request.sessionKey());
+    String lockToken = chatGuardService.acquireSessionLock(request.sessionKey());
+    AtomicBoolean lockReleased = new AtomicBoolean(false);
+    SseEmitter emitter = new SseEmitter(1_800_000L);
+    AtomicReference<Disposable> disposableRef = new AtomicReference<>();
+    emitter.onCompletion(() -> {
+        Disposable disposable = disposableRef.get();
+        if (disposable != null) {
+            disposable.dispose();
+        }
+        releaseSessionLockOnce(request.sessionKey(), lockToken, lockReleased);
+    });
+    emitter.onTimeout(() -> {
+        Disposable disposable = disposableRef.get();
+        if (disposable != null) {
+            disposable.dispose();
+        }
+        releaseSessionLockOnce(request.sessionKey(), lockToken, lockReleased);
+        emitter.complete();
+    });
+    CompletableFuture.runAsync(() -> executeStream(
+            request,
+            acceptedRunId,
+            lockToken,
+            lockReleased,
+            emitter,
+            disposableRef
+    ));
+    return emitter;
+}
+```
+
+Change `executeStream` to accept `String acceptedRunId`, use that value in the initial `sendTrace`, and call:
+
+```java
+ChatContext context = chatContextFactory.build(
+        request,
+        true,
+        acceptedRunId
+);
+```
+
+Replace scheduled-task entry code with:
+
+```java
+public TaskChatExecutionResult executeTaskMessage(
+        ChatRequest request,
+        boolean persistResult
+) {
+    return executeTaskMessage(
+            request,
+            persistResult,
+            runIdentityFactory.create()
+    );
+}
+
+public TaskChatExecutionResult executeTaskMessage(
+        ChatRequest request,
+        boolean persistResult,
+        String runId
+) {
+    return executeInternal(
+            request,
+            false,
+            persistResult,
+            runIdentityFactory.accept(runId)
+    );
+}
+```
+
+Change `executeInternal` to receive `String acceptedRunId` and call:
+
+```java
+ChatContext context = chatContextFactory.build(
+        request,
+        persistResult,
+        acceptedRunId
+);
+```
+
+Do not change any field, component, constructor, or accessor of `TaskChatExecutionResult`.
+
+- [ ] **Step 5: Migrate every ingress without adding new identity owners**
+
+In `ChatController`, add:
+
+```java
+private final RunIdentityFactory runIdentityFactory;
+```
+
+Use these constructors:
+
+```java
+@Autowired
+public ChatController(ChatService chatService,
+                      ChatMessageProducer chatMessageProducer,
+                      AsyncChatResultStore asyncChatResultStore,
+                      MessageEventService messageEventService,
+                      AiProviderService aiProviderService,
+                      AgentActionProposalService actionProposalService,
+                      AgentRunTraceService agentRunTraceService,
+                      RunIdentityFactory runIdentityFactory) {
+    this.chatService = chatService;
+    this.chatMessageProducer = chatMessageProducer;
+    this.asyncChatResultStore = asyncChatResultStore;
+    this.messageEventService = messageEventService;
+    this.aiProviderService = aiProviderService;
+    this.actionProposalService = actionProposalService;
+    this.agentRunTraceService = agentRunTraceService;
+    this.runIdentityFactory = runIdentityFactory;
+}
+
 ChatController(ChatService chatService,
                ChatMessageProducer chatMessageProducer,
                AsyncChatResultStore asyncChatResultStore,
@@ -1071,251 +1113,52 @@ ChatController(ChatService chatService,
 }
 ```
 
-Replace the three acceptance methods with:
+The three endpoints use:
 
 ```java
-@PostMapping("/send")
-public ApiResponse<ChatResponse> send(@Valid @RequestBody ChatRequest request) {
-    ChatRequest normalizedRequest = normalizeRequest(request);
-    String acceptedRunId = runIdentityFactory.create();
-    return ApiResponse.success(chatService.chat(
-            new AcceptedChatCommand(acceptedRunId, normalizedRequest)
-    ));
-}
-
-@PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-public SseEmitter stream(@Valid @RequestBody ChatRequest request) {
-    ChatRequest normalizedRequest = normalizeRequest(request);
-    String acceptedRunId = runIdentityFactory.create();
-    return chatService.stream(
-            new AcceptedChatCommand(acceptedRunId, normalizedRequest)
-    );
-}
-
-@PostMapping("/async")
-public ApiResponse<AsyncChatAcceptedResponse> sendAsync(
-        @Valid @RequestBody ChatRequest request
-) {
-    ChatRequest normalizedRequest = normalizeRequest(request);
-    String requestId = runIdentityFactory.create();
-    String channel = StringUtils.hasText(normalizedRequest.channel())
-            ? normalizedRequest.channel()
-            : "api";
-    AsyncChatRequestMessage message = new AsyncChatRequestMessage(
-            requestId,
-            normalizedRequest.sessionKey(),
-            normalizedRequest.userId(),
-            normalizedRequest.message(),
-            channel,
-            System.currentTimeMillis(),
-            normalizedRequest.responseMode()
-    );
-    asyncChatResultStore.markQueued(message);
-    chatMessageProducer.sendRequest(message);
-    return ApiResponse.success(new AsyncChatAcceptedResponse(
-            requestId,
-            "QUEUED",
-            channel,
-            System.currentTimeMillis()
-    ));
-}
+ChatRequest normalizedRequest = normalizeRequest(request);
+String acceptedRunId = runIdentityFactory.create();
+return ApiResponse.success(chatService.chat(
+        new AcceptedChatCommand(acceptedRunId, normalizedRequest)
+));
 ```
 
-Update `shouldCreateChatControllerBeanWhenSpringResolvesConstructors` to register:
-
 ```java
-context.registerBean(
-        RunIdentityFactory.class,
-        () -> mock(RunIdentityFactory.class)
+ChatRequest normalizedRequest = normalizeRequest(request);
+String acceptedRunId = runIdentityFactory.create();
+return chatService.stream(
+        new AcceptedChatCommand(acceptedRunId, normalizedRequest)
 );
 ```
 
-Update existing controller verifications from `ChatRequest` capture to `AcceptedChatCommand` capture and assert against `command.request()`.
-
-Specifically, replace:
-
 ```java
-when(chatService.chat(any()))
-        .thenReturn(new ChatResponse("s1", "ok", "m1", 1L));
-ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
-verify(chatService).chat(captor.capture());
-Assertions.assertEquals("user_local", captor.getValue().userId());
-Assertions.assertEquals("agent", captor.getValue().responseMode());
-```
-
-with:
-
-```java
-when(chatService.chat(any(AcceptedChatCommand.class)))
-        .thenReturn(new ChatResponse("s1", "ok", "m1", 1L));
-ArgumentCaptor<AcceptedChatCommand> captor =
-        ArgumentCaptor.forClass(AcceptedChatCommand.class);
-verify(chatService).chat(captor.capture());
-Assertions.assertEquals("user_local", captor.getValue().request().userId());
-Assertions.assertEquals("agent", captor.getValue().request().responseMode());
-```
-
-- [ ] **Step 4: Run controller and transport tests and verify GREEN**
-
-Run:
-
-```bash
-mvn -q -Dtest=ChatControllerAuthTest,CanonicalTransportIdentityTest test
-```
-
-Expected: all selected tests pass; each REST acceptance creates exactly one ID, and record component lists are unchanged.
-
-- [ ] **Step 5: Commit REST ingress ownership**
-
-```bash
-git add \
-  src/main/java/com/springclaw/controller/ChatController.java \
-  src/test/java/com/springclaw/controller/ChatControllerAuthTest.java \
-  src/test/java/com/springclaw/architecture/CanonicalTransportIdentityTest.java
-git commit -m "feat: own canonical identity at chat ingress"
-```
-
-### Task 5: Reuse the async message ID on first delivery and redelivery
-
-**Files:**
-- Modify: `src/main/java/com/springclaw/service/chat/async/ChatMessageConsumer.java`
-- Modify: `src/test/java/com/springclaw/architecture/TransportParityCharacterizationTest.java`
-- Modify: `src/test/java/com/springclaw/architecture/CanonicalTransportIdentityTest.java`
-
-- [ ] **Step 1: Change the consumer characterization test first**
-
-Add to `TransportParityCharacterizationTest`:
-
-```java
-import com.springclaw.service.chat.AcceptedChatCommand;
-```
-
-In `asyncConsumerProjectsCompletedResultToPollingRabbitAndStomp`, replace `expectedRequest` with:
-
-```java
-AcceptedChatCommand expectedCommand = new AcceptedChatCommand(
-        message.requestId(),
-        new ChatRequest(
-                message.sessionKey(),
-                message.userId(),
-                message.message(),
-                message.channel(),
-                message.responseMode()
-        )
+ChatRequest normalizedRequest = normalizeRequest(request);
+String requestId = runIdentityFactory.create();
+String channel = StringUtils.hasText(normalizedRequest.channel())
+        ? normalizedRequest.channel()
+        : "api";
+AsyncChatRequestMessage message = new AsyncChatRequestMessage(
+        requestId,
+        normalizedRequest.sessionKey(),
+        normalizedRequest.userId(),
+        normalizedRequest.message(),
+        channel,
+        System.currentTimeMillis(),
+        normalizedRequest.responseMode()
 );
+asyncChatResultStore.markQueued(message);
+chatMessageProducer.sendRequest(message);
+return ApiResponse.success(new AsyncChatAcceptedResponse(
+        requestId,
+        "QUEUED",
+        channel,
+        System.currentTimeMillis()
+));
 ```
 
-Stub and verify:
+Register `RunIdentityFactory` in `shouldCreateChatControllerBeanWhenSpringResolvesConstructors`.
 
-```java
-when(chatService.chat(expectedCommand)).thenReturn(response);
-verify(chatService).chat(expectedCommand);
-```
-
-Add these imports to `CanonicalTransportIdentityTest`:
-
-```java
-import com.springclaw.service.chat.AcceptedChatCommand;
-import com.springclaw.service.chat.ChatService;
-import com.springclaw.service.chat.async.AsyncChatResultPayload;
-import com.springclaw.service.chat.async.AsyncChatResultStore;
-import com.springclaw.service.chat.async.ChatMessageConsumer;
-import com.springclaw.service.chat.async.ChatMessageProducer;
-import org.mockito.ArgumentCaptor;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
-
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-```
-
-Add this explicit redelivery test inside `CanonicalTransportIdentityTest`:
-
-```java
-@Test
-@DisplayName("Rabbit redelivery reuses the message identity and does not promise execution suppression")
-void asyncConsumerRedeliveryReusesIdentityButExecutesAgain() {
-    ChatService chatService = mock(ChatService.class);
-    AsyncChatResultStore resultStore = mock(AsyncChatResultStore.class);
-    ChatMessageProducer producer = mock(ChatMessageProducer.class);
-    SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
-    ChatMessageConsumer consumer = new ChatMessageConsumer(
-            chatService,
-            resultStore,
-            producer,
-            messagingTemplate
-    );
-    AsyncChatRequestMessage message = message(
-            "44444444444444444444444444444444"
-    );
-    ChatResponse response = new ChatResponse(
-            message.sessionKey(),
-            "answer",
-            "model",
-            123L
-    );
-    AsyncChatResultPayload payload = new AsyncChatResultPayload(
-            message.requestId(),
-            "COMPLETED",
-            message.sessionKey(),
-            message.channel(),
-            response.answer(),
-            response.model(),
-            message.createdAt(),
-            456L,
-            ""
-    );
-    when(chatService.chat(any(AcceptedChatCommand.class))).thenReturn(response);
-    when(resultStore.markCompleted(
-            message,
-            response.answer(),
-            response.model()
-    )).thenReturn(payload);
-
-    consumer.consume(message);
-    consumer.consume(message);
-
-    ArgumentCaptor<AcceptedChatCommand> commands =
-            ArgumentCaptor.forClass(AcceptedChatCommand.class);
-    verify(chatService, times(2)).chat(commands.capture());
-    assertThat(commands.getAllValues())
-            .extracting(AcceptedChatCommand::runId)
-            .containsExactly(
-                    message.requestId(),
-                    message.requestId()
-            );
-}
-
-private static AsyncChatRequestMessage message(String requestId) {
-    return new AsyncChatRequestMessage(
-            requestId,
-            "session",
-            "user",
-            "hello",
-            "api",
-            100L,
-            "agent"
-    );
-}
-```
-
-Change the failure-path stub to throw from `chat(AcceptedChatCommand)`.
-
-- [ ] **Step 2: Run the transport test and verify RED**
-
-Run:
-
-```bash
-mvn -q -Dtest=TransportParityCharacterizationTest,CanonicalTransportIdentityTest test
-```
-
-Expected: the completed consumer test fails because production still calls `chat(ChatRequest)`.
-
-- [ ] **Step 3: Pass the existing message ID to the accepted service overload**
-
-Replace the consumer call with:
+In `ChatMessageConsumer`, replace the service call with:
 
 ```java
 ChatResponse response = chatService.chat(new AcceptedChatCommand(
@@ -1330,35 +1173,141 @@ ChatResponse response = chatService.chat(new AcceptedChatCommand(
 ));
 ```
 
-Add:
+Do not inject a factory into the consumer and do not add a result-store pre-check. Redelivery reuses the ID and may execute again.
+
+In `WebhookRouterService`, inject `RunIdentityFactory` as the final constructor dependency. Keep its existing ID creation, validate that exact value, and pass it onward:
 
 ```java
-import com.springclaw.service.chat.AcceptedChatCommand;
+String requestId = runIdentityFactory.accept(
+        UUID.randomUUID().toString().replace("-", "")
+);
 ```
 
-Do not add a `RunIdentityFactory` dependency to `ChatMessageConsumer`. Do not inspect the result store to skip work. A redelivered Rabbit message is allowed to execute again in Phase 2A; the invariant is identity reuse, not duplicate suppression.
+```java
+response = chatService.chat(new AcceptedChatCommand(
+        requestId,
+        new ChatRequest(
+                inboundMessage.sessionKey(),
+                inboundMessage.userId(),
+                inboundMessage.text(),
+                inboundMessage.channel()
+        )
+));
+```
 
-- [ ] **Step 4: Run the transport test and verify GREEN**
+Do not replace webhook ownership with `runIdentityFactory.create()`: the point of this migration is to preserve and validate the ID this ingress already owns.
 
-Run:
+In `TaskExecutionService`, pass the existing `requestId` into agent execution:
+
+```java
+case "agent" -> executeAgentTask(task, requestId);
+```
+
+Replace the helper with:
+
+```java
+private TaskExecutionOutcome executeAgentTask(
+        ScheduledTask task,
+        String runId
+) {
+    String prompt = resolveAgentPrompt(task.getInputPayload());
+    ChatServiceImpl.TaskChatExecutionResult result =
+            chatService.executeTaskMessage(
+                    new ChatRequest(
+                            resolveTaskSessionKey(task),
+                            task.getOwnerUserId(),
+                            prompt,
+                            task.getChannel()
+                    ),
+                    shouldPersistToSession(task),
+                    runId
+            );
+    return new TaskExecutionOutcome(
+            buildSummary(task, result.answer()),
+            result.answer(),
+            result.requestId(),
+            result.sessionKey()
+    );
+}
+```
+
+The same `requestId` must be used by `ScheduledTaskExecutionService.start`, agent chat execution, success completion, and failure completion.
+
+- [ ] **Step 6: Update every test stub and direct constructor before compiling**
+
+For the six full `ChatServiceImpl` constructor calls listed in the inventory, insert the fixture `runIdentityFactory` or:
+
+```java
+new DefaultRunIdentityFactory()
+```
+
+immediately before the final two boolean arguments.
+
+In `ChatServiceImplModeTest.Fixture.build()` and `buildWithRuntime()`, the final arguments are:
+
+```java
+runIdentityFactory,
+false,
+true
+```
+
+Update all nine context-factory stubs exactly as listed in the inventory. Update `ChatControllerAuthTest` to use only `any(AcceptedChatCommand.class)` for accepted chat/stream overloads. In `TaskExecutionServiceTest`, type both existing two-argument negative verifications, add both three-argument negative verifications, and migrate the agent-task stub/verification to the three-argument overload. Keep the one direct two-argument `executeTaskMessage` call in `ChatServiceImplPersistenceTest` to characterize compatibility.
+
+- [ ] **Step 7: Run focused tests, compile all tests, and verify GREEN**
 
 ```bash
-mvn -q -Dtest=TransportParityCharacterizationTest,CanonicalTransportIdentityTest test
+mvn -q \
+  -Dtest=ChatContextFactoryTest,ChatServiceImplModeTest,ChatServiceImplPersistenceTest,ChatServiceImplPendingApprovalTest,ChatControllerAuthTest,WebhookRouterServiceTest,TaskExecutionServiceTest,ContextPropagationCharacterizationTest,FinalAnswerOwnershipCharacterizationTest,TransportParityCharacterizationTest,CanonicalTransportIdentityTest \
+  test
+mvn -q -DskipTests compile
+mvn -q -DskipTests test-compile
 ```
 
-Expected: all transport characterization tests pass; both deliveries carry the same message ID and invoke chat twice.
+Expected: every command exits `0`. The committed tree has no two-argument `ChatContextFactory.build`, no ambiguous Mockito `chat(any())`, webhook and scheduled execution reuse their ingress-owned IDs, and Rabbit redelivery invokes chat twice with one repeated ID.
 
-- [ ] **Step 5: Commit async identity reuse**
+- [ ] **Step 8: Prove the migration inventory is complete**
+
+```bash
+rg -n --glob '*.java' 'chatContextFactory\.build\(' src/main src/test
+rg -n --glob '*.java' '\b(chatService|service)\.(chat|stream)\(' src/main src/test
+rg -n --glob '*.java' 'executeTaskMessage\(' src/main src/test
+rg -n --glob '*.java' 'chatService\.chat\(any\(\)\)' src/test
+```
+
+Expected:
+
+- Every `chatContextFactory.build` result has three arguments.
+- Production accepted-ingress calls are controller sync/SSE, consumer, and webhook.
+- Legacy direct service calls remain only in `ChatServiceImplModeTest` and `ChatServiceImplPersistenceTest`.
+- Scheduled production execution uses the three-argument overload; the two-argument overload remains only as compatibility coverage.
+- The final broad-matcher scan prints no matches.
+
+- [ ] **Step 9: Commit the atomic migration**
 
 ```bash
 git add \
+  src/main/java/com/springclaw/service/chat/ChatService.java \
+  src/main/java/com/springclaw/service/chat/impl/ChatContextFactory.java \
+  src/main/java/com/springclaw/service/chat/impl/ChatServiceImpl.java \
+  src/main/java/com/springclaw/controller/ChatController.java \
   src/main/java/com/springclaw/service/chat/async/ChatMessageConsumer.java \
-  src/test/java/com/springclaw/architecture/TransportParityCharacterizationTest.java \
-  src/test/java/com/springclaw/architecture/CanonicalTransportIdentityTest.java
-git commit -m "fix: reuse async chat request identity"
+  src/main/java/com/springclaw/service/webhook/WebhookRouterService.java \
+  src/main/java/com/springclaw/service/task/executor/TaskExecutionService.java \
+  src/test/java/com/springclaw/architecture/CanonicalTransportIdentityTest.java \
+  src/test/java/com/springclaw/service/webhook/WebhookRouterServiceTest.java \
+  src/test/java/com/springclaw/service/chat/impl/ChatContextFactoryTest.java \
+  src/test/java/com/springclaw/service/chat/impl/ChatServiceImplModeTest.java \
+  src/test/java/com/springclaw/service/chat/impl/ChatServiceImplPersistenceTest.java \
+  src/test/java/com/springclaw/service/chat/impl/ChatServiceImplPendingApprovalTest.java \
+  src/test/java/com/springclaw/controller/ChatControllerAuthTest.java \
+  src/test/java/com/springclaw/service/task/TaskExecutionServiceTest.java \
+  src/test/java/com/springclaw/architecture/ContextPropagationCharacterizationTest.java \
+  src/test/java/com/springclaw/architecture/FinalAnswerOwnershipCharacterizationTest.java \
+  src/test/java/com/springclaw/architecture/TransportParityCharacterizationTest.java
+git commit -m "refactor: migrate canonical chat identity atomically"
 ```
 
-### Task 6: Put the canonical ID into tool execution and proposal ownership
+### Task 3: Put the canonical ID into tool execution and proposal ownership
 
 **Files:**
 - Modify the 13 verified five-argument construction sites in:
@@ -1689,9 +1638,11 @@ Run:
 mvn -q \
   -Dtest=CanonicalToolOwnershipTest,ToolRuntimeAspectInterceptionIT,ToolInvocationProposalServiceConfirmTest,ToolProposalExecutionServiceTest,ToolSafetyPathCharacterizationTest \
   test
+mvn -q -DskipTests compile
+mvn -q -DskipTests test-compile
 ```
 
-Expected: all selected tests pass; proposal rows and resumed execution preserve the same canonical request/run identity. No assertion changes proposal authorization rules.
+Expected: all selected tests pass and both compile commands exit `0`; proposal rows and resumed execution preserve the same canonical request/run identity. No assertion changes proposal authorization rules. The second implementation commit is independently buildable.
 
 - [ ] **Step 6: Commit tool ownership propagation**
 
@@ -1713,7 +1664,7 @@ git add \
 git commit -m "fix: propagate canonical tool ownership"
 ```
 
-### Task 7: Run Phase 2A acceptance and verify rollback boundaries
+### Task 4: Run Phase 2A acceptance and verify rollback boundaries
 
 **Files:**
 - Verification only; no production file is expected to change.
@@ -1761,11 +1712,11 @@ Expected: 27 tests, 0 failures, 0 errors, 0 skips. The known local MySQL `Public
 
 ```bash
 mvn -q \
-  -Dtest=DefaultRunIdentityFactoryTest,ChatContextFactoryTest,ChatServiceImplModeTest,ChatControllerAuthTest,CanonicalTransportIdentityTest,CanonicalToolOwnershipTest,ToolInvocationProposalServiceConfirmTest,ToolProposalExecutionServiceTest \
+  -Dtest=DefaultRunIdentityFactoryTest,ChatContextFactoryTest,ChatServiceImplModeTest,ChatServiceImplPersistenceTest,ChatControllerAuthTest,WebhookRouterServiceTest,TaskExecutionServiceTest,TransportParityCharacterizationTest,CanonicalTransportIdentityTest,CanonicalToolOwnershipTest,ToolInvocationProposalServiceConfirmTest,ToolProposalExecutionServiceTest \
   test
 ```
 
-Expected: all selected tests pass.
+Expected: all selected tests pass, including webhook ingress ownership, scheduled execution ID reuse, typed Mockito overload selection, Rabbit redelivery reuse, and unchanged task result shape.
 
 - [ ] **Step 5: Prove prohibited files and DTO shapes were not edited**
 
@@ -1808,12 +1759,13 @@ Expected: exit code `0`; no test requires a real model call. The known local MyS
 
 Rollback Phase 2A as one unit:
 
-1. Revert the controller/service/consumer accepted-identity changes together.
+1. Revert the atomic context/service migration together: controller, consumer, webhook router, scheduled task execution, service overloads, context factory signature, constructors, and all affected tests/stubs.
 2. Revert the 13 `ToolExecutionContext` run ownership changes together.
 3. Remove `RunIdentityFactory`, `DefaultRunIdentityFactory`, and `AcceptedChatCommand`.
 4. Restore `ChatContextFactory.build(ChatRequest, boolean)` and its previous UUID generation.
+5. Restore `WebhookRouterService` and `TaskExecutionService` to their prior service calls only as part of item 1; never roll either ingress back independently.
 
-Do not partially roll back only the controller or only `ChatContextFactory`; that would recreate multiple identity owners or leave accepted commands without a consumer.
+Do not partially roll back only the controller, webhook router, scheduled task path, consumer, service, or `ChatContextFactory`; that would recreate multiple identity owners, introduce a second generated ID, or leave accepted commands without a consumer.
 
 ## Acceptance invariants
 
@@ -1824,7 +1776,10 @@ Do not partially roll back only the controller or only `ChatContextFactory`; tha
 - Async REST creates one ID in `ChatController.sendAsync`; accepted response, queued result, Rabbit message, polling key, completion/failure result, and STOMP topic use that ID.
 - `ChatMessageConsumer` creates no ID. First delivery and redelivery both reuse `AsyncChatRequestMessage.requestId`.
 - Redelivery may execute the legacy behavior again. Phase 2A does not claim duplicate execution suppression, durable lifecycle, or exactly-once processing.
+- `WebhookRouterService` keeps the normalized request ID it already creates, validates it through `RunIdentityFactory.accept`, and calls `chat(AcceptedChatCommand)` without a second ID.
+- `TaskExecutionService` keeps the ID created before `ScheduledTaskExecutionService.start` and passes that same value to `executeTaskMessage(ChatRequest, boolean, String)`.
 - Legacy `ChatService.chat(ChatRequest)` and `stream(ChatRequest)` signatures remain available and each creates once before delegating.
+- Legacy `ChatServiceImpl.executeTaskMessage(ChatRequest, boolean)` remains available and creates once before delegating; scheduled production execution uses the accepted-ID overload.
 - `ChatContextFactory` contains no UUID generation and receives an accepted ID.
 - `ChatContext.requestId`, trace calls, model-call request context, `AgentRun`, `ToolExecutionContext.requestId`, `ToolExecutionContext.runId`, and tool proposal rows use the same ID.
 - Existing action confirmation uses `ChatContext.requestId`; existing tool proposal resume uses stored `requestId` and `runId`.
@@ -1858,4 +1813,4 @@ git diff --check
 git status --short
 ```
 
-Expected: the red-flag scan prints no matches, `git diff --check` exits `0`, and only the superseded legacy plan plus this canonical identity plan are modified before the documentation commit.
+Expected: the red-flag scan prints no matches, `git diff --check` exits `0`, and only `docs/superpowers/plans/2026-06-21-unified-runtime-canonical-identity.md` is modified before the documentation commit.

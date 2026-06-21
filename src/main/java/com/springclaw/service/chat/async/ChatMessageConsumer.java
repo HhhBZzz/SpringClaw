@@ -2,6 +2,7 @@ package com.springclaw.service.chat.async;
 
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
+import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,12 +33,15 @@ public class ChatMessageConsumer {
     @RabbitListener(queues = "${springclaw.rabbitmq.chat-request-queue:chat.request.queue}")
     public void consume(AsyncChatRequestMessage message) {
         try {
-            ChatResponse response = chatService.chat(new ChatRequest(
-                    message.sessionKey(),
-                    message.userId(),
-                    message.message(),
-                    message.channel(),
-                    message.responseMode()
+            ChatResponse response = chatService.chat(new AcceptedChatCommand(
+                    message.requestId(),
+                    new ChatRequest(
+                            message.sessionKey(),
+                            message.userId(),
+                            message.message(),
+                            message.channel(),
+                            message.responseMode()
+                    )
             ));
             AsyncChatResultPayload payload = asyncChatResultStore.markCompleted(
                     message,

@@ -3,13 +3,17 @@ package com.springclaw.controller;
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.common.response.ApiResponse;
 import com.springclaw.domain.entity.MessageEvent;
+import com.springclaw.dto.chat.AsyncChatAcceptedResponse;
 import com.springclaw.dto.chat.ChatHistoryResponse;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
+import com.springclaw.runtime.identity.RunIdentityFactory;
 import com.springclaw.service.agent.AgentActionProposalService;
 import com.springclaw.service.agent.AgentRunTraceService;
 import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
+import com.springclaw.service.chat.async.AsyncChatRequestMessage;
 import com.springclaw.service.chat.async.AsyncChatResultStore;
 import com.springclaw.service.chat.async.ChatMessageProducer;
 import com.springclaw.service.event.MessageEventService;
@@ -20,9 +24,11 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -46,6 +52,7 @@ class ChatControllerAuthTest {
             context.registerBean(AiProviderService.class, () -> mock(AiProviderService.class));
             context.registerBean(AgentActionProposalService.class, () -> mock(AgentActionProposalService.class));
             context.registerBean(AgentRunTraceService.class, () -> mock(AgentRunTraceService.class));
+            context.registerBean(RunIdentityFactory.class, () -> mock(RunIdentityFactory.class));
             context.register(ChatController.class);
 
             context.refresh();
@@ -60,16 +67,94 @@ class ChatControllerAuthTest {
         ChatMessageProducer producer = mock(ChatMessageProducer.class);
         AsyncChatResultStore resultStore = mock(AsyncChatResultStore.class);
         ChatController controller = new ChatController(chatService, producer, resultStore, mock(MessageEventService.class), mock(AiProviderService.class));
-        when(chatService.chat(any())).thenReturn(new ChatResponse("s1", "ok", "m1", 1L));
+        when(chatService.chat(any(AcceptedChatCommand.class)))
+                .thenReturn(new ChatResponse("s1", "ok", "m1", 1L));
         RequestUserContextHolder.set(new RequestUserContext("user_local", "USER", System.currentTimeMillis() + 60_000));
 
         ApiResponse<ChatResponse> response = controller.send(new ChatRequest("s1", null, "你好", "api", "agent"));
 
         Assertions.assertEquals(0, response.getCode());
-        ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
+        ArgumentCaptor<AcceptedChatCommand> captor =
+                ArgumentCaptor.forClass(AcceptedChatCommand.class);
         verify(chatService).chat(captor.capture());
-        Assertions.assertEquals("user_local", captor.getValue().userId());
-        Assertions.assertEquals("agent", captor.getValue().responseMode());
+        Assertions.assertEquals("user_local", captor.getValue().request().userId());
+        Assertions.assertEquals("agent", captor.getValue().request().responseMode());
+    }
+
+    @Test
+    void syncAndStreamEachCreateOneAcceptedIdentityAtTheController() {
+        ChatService chatService = mock(ChatService.class);
+        RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
+        when(identityFactory.create())
+                .thenReturn("11111111111111111111111111111111")
+                .thenReturn("22222222222222222222222222222222");
+        when(chatService.chat(any(AcceptedChatCommand.class)))
+                .thenReturn(new ChatResponse("s1", "ok", "m1", 1L));
+        when(chatService.stream(any(AcceptedChatCommand.class)))
+                .thenReturn(new SseEmitter());
+        ChatController controller = new ChatController(
+                chatService,
+                mock(ChatMessageProducer.class),
+                mock(AsyncChatResultStore.class),
+                mock(MessageEventService.class),
+                mock(AiProviderService.class),
+                identityFactory
+        );
+        RequestUserContextHolder.set(new RequestUserContext(
+                "user_local",
+                "USER",
+                System.currentTimeMillis() + 60_000
+        ));
+
+        controller.send(new ChatRequest("s1", null, "你好", "api", "agent"));
+        controller.stream(new ChatRequest("s1", null, "继续", "api", "agent"));
+
+        ArgumentCaptor<AcceptedChatCommand> commands =
+                ArgumentCaptor.forClass(AcceptedChatCommand.class);
+        verify(chatService).chat(commands.capture());
+        verify(chatService).stream(commands.capture());
+        assertThat(commands.getAllValues())
+                .extracting(AcceptedChatCommand::runId)
+                .containsExactly(
+                        "11111111111111111111111111111111",
+                        "22222222222222222222222222222222"
+                );
+    }
+
+    @Test
+    void asyncAcceptanceUsesOneIdentityForQueueMessageAndResponse() {
+        ChatService chatService = mock(ChatService.class);
+        ChatMessageProducer producer = mock(ChatMessageProducer.class);
+        AsyncChatResultStore resultStore = mock(AsyncChatResultStore.class);
+        RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
+        when(identityFactory.create())
+                .thenReturn("33333333333333333333333333333333");
+        ChatController controller = new ChatController(
+                chatService,
+                producer,
+                resultStore,
+                mock(MessageEventService.class),
+                mock(AiProviderService.class),
+                identityFactory
+        );
+        RequestUserContextHolder.set(new RequestUserContext(
+                "user_local",
+                "USER",
+                System.currentTimeMillis() + 60_000
+        ));
+
+        ApiResponse<AsyncChatAcceptedResponse> response = controller.sendAsync(
+                new ChatRequest("s1", null, "异步处理", "api", "agent")
+        );
+
+        ArgumentCaptor<AsyncChatRequestMessage> message =
+                ArgumentCaptor.forClass(AsyncChatRequestMessage.class);
+        verify(resultStore).markQueued(message.capture());
+        verify(producer).sendRequest(message.getValue());
+        assertThat(response.getData().requestId())
+                .isEqualTo("33333333333333333333333333333333");
+        assertThat(message.getValue().requestId())
+                .isEqualTo(response.getData().requestId());
     }
 
     @Test

@@ -4,6 +4,8 @@ import com.springclaw.common.exception.BusinessException;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
 import com.springclaw.dto.webhook.WebhookDispatchResponse;
+import com.springclaw.runtime.identity.RunIdentityFactory;
+import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.strategy.channel.ChannelAdapter;
@@ -34,15 +36,18 @@ public class WebhookRouterService {
     private final ChatService chatService;
     private final MessageEventService messageEventService;
     private final ChannelOutboundDispatcher channelOutboundDispatcher;
+    private final RunIdentityFactory runIdentityFactory;
 
     public WebhookRouterService(ChannelAdapterFactory channelAdapterFactory,
                                 ChatService chatService,
                                 MessageEventService messageEventService,
-                                ChannelOutboundDispatcher channelOutboundDispatcher) {
+                                ChannelOutboundDispatcher channelOutboundDispatcher,
+                                RunIdentityFactory runIdentityFactory) {
         this.channelAdapterFactory = channelAdapterFactory;
         this.chatService = chatService;
         this.messageEventService = messageEventService;
         this.channelOutboundDispatcher = channelOutboundDispatcher;
+        this.runIdentityFactory = runIdentityFactory;
     }
 
     public WebhookDispatchResponse dispatch(String channel, Map<String, Object> payload) {
@@ -50,17 +55,22 @@ public class WebhookRouterService {
             return new WebhookDispatchResponse(channel, "feishu-self-message", "ignored");
         }
 
-        String requestId = UUID.randomUUID().toString().replace("-", "");
+        String requestId = runIdentityFactory.accept(
+                UUID.randomUUID().toString().replace("-", "")
+        );
         UnifiedInboundMessage inboundMessage = null;
         ChatResponse response = null;
         try {
             ChannelAdapter adapter = channelAdapterFactory.getRequired(channel);
             inboundMessage = adapter.adapt(payload);
-            response = chatService.chat(new ChatRequest(
-                    inboundMessage.sessionKey(),
-                    inboundMessage.userId(),
-                    inboundMessage.text(),
-                    inboundMessage.channel()
+            response = chatService.chat(new AcceptedChatCommand(
+                    requestId,
+                    new ChatRequest(
+                            inboundMessage.sessionKey(),
+                            inboundMessage.userId(),
+                            inboundMessage.text(),
+                            inboundMessage.channel()
+                    )
             ));
         } catch (Exception ex) {
             log.warn("Webhook 处理失败，channel={}, requestId={}", channel, requestId, ex);

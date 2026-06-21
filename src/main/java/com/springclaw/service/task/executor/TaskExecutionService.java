@@ -93,7 +93,7 @@ public class TaskExecutionService {
         try {
             TaskExecutionOutcome outcome = switch (TextUtils.normalize(task.getTargetType())) {
                 case "skill" -> executeSkillTask(task, requestId);
-                case "agent" -> executeAgentTask(task);
+                case "agent" -> executeAgentTask(task, requestId);
                 default -> throw new BusinessException(40079, "不支持的任务目标类型: " + task.getTargetType());
             };
             if (shouldPersistToSession(task) && !"agent".equalsIgnoreCase(task.getTargetType())) {
@@ -153,13 +153,28 @@ public class TaskExecutionService {
         return new TaskExecutionOutcome(buildSummary(task, answer), answer, requestId, resolveTaskSessionKey(task));
     }
 
-    private TaskExecutionOutcome executeAgentTask(ScheduledTask task) {
+    private TaskExecutionOutcome executeAgentTask(
+            ScheduledTask task,
+            String runId
+    ) {
         String prompt = resolveAgentPrompt(task.getInputPayload());
-        ChatServiceImpl.TaskChatExecutionResult result = chatService.executeTaskMessage(
-                new ChatRequest(resolveTaskSessionKey(task), task.getOwnerUserId(), prompt, task.getChannel()),
-                shouldPersistToSession(task)
+        ChatServiceImpl.TaskChatExecutionResult result =
+                chatService.executeTaskMessage(
+                        new ChatRequest(
+                                resolveTaskSessionKey(task),
+                                task.getOwnerUserId(),
+                                prompt,
+                                task.getChannel()
+                        ),
+                        shouldPersistToSession(task),
+                        runId
+                );
+        return new TaskExecutionOutcome(
+                buildSummary(task, result.answer()),
+                result.answer(),
+                result.requestId(),
+                result.sessionKey()
         );
-        return new TaskExecutionOutcome(buildSummary(task, result.answer()), result.answer(), result.requestId(), result.sessionKey());
     }
 
     private void persistTaskTurn(ScheduledTask task, String requestId, String sessionKey, String userMessage, String assistantMessage) {

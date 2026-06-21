@@ -8,5 +8,9 @@ public interface ChatService {
 
     ChatResponse chat(ChatRequest request);
 
+    ChatResponse chat(AcceptedChatCommand command);
+
     SseEmitter stream(ChatRequest request);
+
+    SseEmitter stream(AcceptedChatCommand command);
 }

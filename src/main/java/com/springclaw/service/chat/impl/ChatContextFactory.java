@@ -21,7 +21,6 @@ import org.springframework.util.StringUtils;
 
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * 聊天上下文工厂，负责构建 ChatContext。
@@ -69,12 +68,17 @@ public class ChatContextFactory {
         this.routingAutoUpgradeEnabled = routingAutoUpgradeEnabled;
     }
 
-    public ChatContext build(ChatRequest request, boolean persistSession) {
+    public ChatContext build(ChatRequest request,
+                             boolean persistSession,
+                             String acceptedRunId) {
+        if (!StringUtils.hasText(acceptedRunId)) {
+            throw new IllegalArgumentException("acceptedRunId must not be blank");
+        }
         String channel = StringUtils.hasText(request.channel()) ? request.channel() : "api";
         AgentSession session = persistSession
                 ? agentSessionService.getOrCreate(request.sessionKey(), channel, request.userId())
                 : buildEphemeralSession(request.sessionKey(), channel, request.userId());
-        String requestId = UUID.randomUUID().toString().replace("-", "");
+        String requestId = acceptedRunId;
         String roleCode = authService.resolveRoleByUserId(request.userId());
         var allowedToolPacks = skillService.resolveAllowedToolPacks(channel, request.userId());
         String routingQuestion = resolveRoutingQuestion(session.getSessionKey(), channel, request.userId(), requestId, request.message(), request.responseMode());

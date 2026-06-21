@@ -6,6 +6,7 @@ import com.springclaw.controller.ChatController;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
 import com.springclaw.service.agent.AgentRunTraceService;
+import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
 import com.springclaw.service.chat.async.AsyncChatRequestMessage;
 import com.springclaw.service.chat.async.AsyncChatResultPayload;
@@ -187,12 +188,15 @@ class TransportParityCharacterizationTest {
                 messagingTemplate
         );
         AsyncChatRequestMessage message = message("request-completed");
-        ChatRequest expectedRequest = new ChatRequest(
-                message.sessionKey(),
-                message.userId(),
-                message.message(),
-                message.channel(),
-                message.responseMode()
+        AcceptedChatCommand expectedCommand = new AcceptedChatCommand(
+                message.requestId(),
+                new ChatRequest(
+                        message.sessionKey(),
+                        message.userId(),
+                        message.message(),
+                        message.channel(),
+                        message.responseMode()
+                )
         );
         ChatResponse response = new ChatResponse(message.sessionKey(), "answer", "model", 123L);
         AsyncChatResultPayload payload = new AsyncChatResultPayload(
@@ -206,12 +210,12 @@ class TransportParityCharacterizationTest {
                 456L,
                 ""
         );
-        when(chatService.chat(expectedRequest)).thenReturn(response);
+        when(chatService.chat(expectedCommand)).thenReturn(response);
         when(resultStore.markCompleted(message, response.answer(), response.model())).thenReturn(payload);
 
         consumer.consume(message);
 
-        verify(chatService).chat(expectedRequest);
+        verify(chatService).chat(expectedCommand);
         verify(resultStore).markCompleted(message, response.answer(), response.model());
         verify(producer).sendResponse(payload);
         verify(messagingTemplate).convertAndSend("/topic/chat/request-completed", payload);
@@ -231,12 +235,15 @@ class TransportParityCharacterizationTest {
                 messagingTemplate
         );
         AsyncChatRequestMessage message = message("request-failed");
-        ChatRequest expectedRequest = new ChatRequest(
-                message.sessionKey(),
-                message.userId(),
-                message.message(),
-                message.channel(),
-                message.responseMode()
+        AcceptedChatCommand expectedCommand = new AcceptedChatCommand(
+                message.requestId(),
+                new ChatRequest(
+                        message.sessionKey(),
+                        message.userId(),
+                        message.message(),
+                        message.channel(),
+                        message.responseMode()
+                )
         );
         AsyncChatResultPayload payload = new AsyncChatResultPayload(
                 message.requestId(),
@@ -249,11 +256,13 @@ class TransportParityCharacterizationTest {
                 456L,
                 "chat unavailable"
         );
-        when(chatService.chat(expectedRequest)).thenThrow(new IllegalStateException("chat unavailable"));
+        when(chatService.chat(expectedCommand))
+                .thenThrow(new IllegalStateException("chat unavailable"));
         when(resultStore.markFailed(message, "chat unavailable")).thenReturn(payload);
 
         consumer.consume(message);
 
+        verify(chatService).chat(expectedCommand);
         verify(resultStore).markFailed(message, "chat unavailable");
         verify(producer).sendResponse(payload);
         verify(messagingTemplate).convertAndSend("/topic/chat/request-failed", payload);

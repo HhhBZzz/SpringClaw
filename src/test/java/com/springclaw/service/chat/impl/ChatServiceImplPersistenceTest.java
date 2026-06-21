@@ -2,6 +2,7 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.dto.chat.ChatRequest;
+import com.springclaw.runtime.identity.DefaultRunIdentityFactory;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentRuntimeEngine;
 import com.springclaw.service.agent.EngineSelector;
@@ -85,7 +86,7 @@ class ChatServiceImplPersistenceTest {
 
         when(chatGuardService.acquireSessionLock("s1")).thenReturn("lock");
         when(aiProviderService.activeClient()).thenReturn(activeClient);
-        when(chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(chatContextFactory.build(any(ChatRequest.class), anyBoolean(), anyString())).thenReturn(context);
         when(engineSelector.select(any(ChatContext.class))).thenReturn(oparLoopEngine);
         when(oparLoopEngine.execute(any(), any()))
                 .thenReturn(new ChatExecutionResult(
@@ -115,6 +116,7 @@ class ChatServiceImplPersistenceTest {
                 null,
                 sseEventBridge,
                 null,
+                new DefaultRunIdentityFactory(),
                 false,
                 true
         );
@@ -184,7 +186,7 @@ class ChatServiceImplPersistenceTest {
 
         when(chatGuardService.acquireSessionLock("task:shadow:t1")).thenReturn("lock");
         when(aiProviderService.activeClient()).thenReturn(activeClient);
-        when(chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(chatContextFactory.build(any(ChatRequest.class), anyBoolean(), anyString())).thenReturn(context);
         when(engineSelector.select(any(ChatContext.class))).thenReturn(simplifiedOparEngine);
         when(simplifiedOparEngine.execute(any(), any()))
                 .thenReturn(new ChatExecutionResult(
@@ -214,6 +216,7 @@ class ChatServiceImplPersistenceTest {
                 null,
                 sseEventBridge,
                 null,
+                new DefaultRunIdentityFactory(),
                 false,
                 true
         );

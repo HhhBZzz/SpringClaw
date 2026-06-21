@@ -8,11 +8,14 @@ import com.springclaw.dto.chat.ChatHistoryMessage;
 import com.springclaw.dto.chat.ChatHistoryResponse;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
+import com.springclaw.runtime.identity.DefaultRunIdentityFactory;
+import com.springclaw.runtime.identity.RunIdentityFactory;
 import com.springclaw.service.agent.AgentActionProposalResult;
 import com.springclaw.service.agent.AgentActionProposalService;
 import com.springclaw.service.agent.AgentRunTraceEvent;
 import com.springclaw.service.agent.AgentRunTraceService;
 import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
 import com.springclaw.service.chat.async.AsyncChatRequestMessage;
 import com.springclaw.service.chat.async.AsyncChatResultPayload;
@@ -39,7 +42,6 @@ import com.springclaw.web.auth.RequestUserContextHolder;
 import java.time.ZoneId;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * 对话控制器。
@@ -59,6 +61,7 @@ public class ChatController {
     private final AiProviderService aiProviderService;
     private final AgentActionProposalService actionProposalService;
     private final AgentRunTraceService agentRunTraceService;
+    private final RunIdentityFactory runIdentityFactory;
 
     @Autowired
     public ChatController(ChatService chatService,
@@ -67,7 +70,8 @@ public class ChatController {
                           MessageEventService messageEventService,
                           AiProviderService aiProviderService,
                           AgentActionProposalService actionProposalService,
-                          AgentRunTraceService agentRunTraceService) {
+                          AgentRunTraceService agentRunTraceService,
+                          RunIdentityFactory runIdentityFactory) {
         this.chatService = chatService;
         this.chatMessageProducer = chatMessageProducer;
         this.asyncChatResultStore = asyncChatResultStore;
@@ -75,6 +79,7 @@ public class ChatController {
         this.aiProviderService = aiProviderService;
         this.actionProposalService = actionProposalService;
         this.agentRunTraceService = agentRunTraceService;
+        this.runIdentityFactory = runIdentityFactory;
     }
 
     ChatController(ChatService chatService,
@@ -82,23 +87,58 @@ public class ChatController {
                    AsyncChatResultStore asyncChatResultStore,
                    MessageEventService messageEventService,
                    AiProviderService aiProviderService) {
-        this(chatService, chatMessageProducer, asyncChatResultStore, messageEventService, aiProviderService, null, null);
+        this(
+                chatService,
+                chatMessageProducer,
+                asyncChatResultStore,
+                messageEventService,
+                aiProviderService,
+                null,
+                null,
+                new DefaultRunIdentityFactory()
+        );
+    }
+
+    ChatController(ChatService chatService,
+                   ChatMessageProducer chatMessageProducer,
+                   AsyncChatResultStore asyncChatResultStore,
+                   MessageEventService messageEventService,
+                   AiProviderService aiProviderService,
+                   RunIdentityFactory runIdentityFactory) {
+        this(
+                chatService,
+                chatMessageProducer,
+                asyncChatResultStore,
+                messageEventService,
+                aiProviderService,
+                null,
+                null,
+                runIdentityFactory
+        );
     }
 
     @PostMapping("/send")
     public ApiResponse<ChatResponse> send(@Valid @RequestBody ChatRequest request) {
-        return ApiResponse.success(chatService.chat(normalizeRequest(request)));
+        ChatRequest normalizedRequest = normalizeRequest(request);
+        String acceptedRunId = runIdentityFactory.create();
+        return ApiResponse.success(chatService.chat(
+                new AcceptedChatCommand(acceptedRunId, normalizedRequest)
+        ));
     }
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter stream(@Valid @RequestBody ChatRequest request) {
-        return chatService.stream(normalizeRequest(request));
+        ChatRequest normalizedRequest = normalizeRequest(request);
+        String acceptedRunId = runIdentityFactory.create();
+        return chatService.stream(
+                new AcceptedChatCommand(acceptedRunId, normalizedRequest)
+        );
     }
 
     @PostMapping("/async")
     public ApiResponse<AsyncChatAcceptedResponse> sendAsync(@Valid @RequestBody ChatRequest request) {
         ChatRequest normalizedRequest = normalizeRequest(request);
-        String requestId = UUID.randomUUID().toString().replace("-", "");
+        String requestId = runIdentityFactory.create();
         String channel = StringUtils.hasText(normalizedRequest.channel()) ? normalizedRequest.channel() : "api";
         AsyncChatRequestMessage message = new AsyncChatRequestMessage(
                 requestId,

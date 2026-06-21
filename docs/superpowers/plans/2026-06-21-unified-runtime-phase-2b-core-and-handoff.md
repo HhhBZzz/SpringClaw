@@ -314,26 +314,33 @@ Commit: `fix: freeze legacy engine ordering`
 
 **Owner:** Claude
 
-Create or claim canonical runs at sync, SSE, async enqueue/Rabbit, webhook, and
-scheduled-task boundaries. Async enqueue creates; Rabbit delivery claims. No path
-creates a second ID or a second state.
+Execute the detailed plan:
+
+```text
+docs/superpowers/plans/2026-06-22-unified-runtime-phase-2b-task5-ingress-wiring.md
+```
+
+The detailed plan resolves Q1–Q7, gives exact production edits for
+`ChatController`, `ChatMessageConsumer`, `WebhookRouterService`, and
+`TaskExecutionService`, enumerates all 13 existing test construction sites, and
+creates the missing `ChatMessageConsumerTest`.
 
 Verification:
 
 ```bash
-mvn -q -Dtest=ChatControllerAuthTest,ChatServiceImplModeTest,ChatMessageConsumerTest,WebhookRouterServiceTest,TaskExecutionServiceTest,CanonicalTransportIdentityTest test
+mvn -q -Dtest=ChatControllerAuthTest,ChatMessageConsumerTest,WebhookRouterServiceTest,TaskExecutionServiceTest,CanonicalTransportIdentityTest,TransportParityCharacterizationTest test
 ```
 
 Commit: `feat: wire canonical lifecycle ingress`
 
-### Task 6: Wire legacy observations and freeze engine order
+### Task 6: Wire legacy observations
 
 **Owner:** Claude
 
 Translate already-produced context, decision, selected engine, verification, and
-terminal results into bridge calls. Change only the `EngineSelector` constructor
-comparator to `(priority, legacyRank)` with ranks `10/20/30/40/50/60`; missing rank
-fails initialization. Do not change `supports()` or `priority()`.
+terminal results into bridge calls. Engine ordering was already frozen by Task 4A
+in commit `b7bb77f`; Task 6 must not modify `EngineSelector`, engine `supports()`,
+or engine `priority()`.
 
 Verification:
 

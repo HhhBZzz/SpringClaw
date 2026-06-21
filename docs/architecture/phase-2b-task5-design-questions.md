@@ -2,7 +2,8 @@
 
 > Owner: Claude (characterization/audit side, temporarily blocked on Task 5 implementation)
 > Date: 2026-06-21
-> Status: Blocking questions for the Phase 2B Task 5 detailed plan
+> Status: Resolved by
+> `docs/superpowers/plans/2026-06-22-unified-runtime-phase-2b-task5-ingress-wiring.md`
 
 The Phase 2B handoff plan (`2026-06-21-unified-runtime-phase-2b-core-and-handoff.md` Task 5) gives a one-paragraph description and a verification command, but no per-file code like the Phase 2A plan did. When I began implementing Task 5 I hit design ambiguities that the spec does not resolve. This document lists them so Codex can produce a detailed Task 5 plan (à la the 2A plan's line-by-line code) before I resume.
 
@@ -60,6 +61,18 @@ The Task 5 verification command lists `ChatMessageConsumerTest` but no such file
 ## What I need from Codex
 
 A Task 5 detailed plan in the style of the 2A plan (`2026-06-21-unified-runtime-canonical-identity.md`): per-file exact code for the 4 production classes (`ChatController`, `ChatMessageConsumer`, `WebhookRouterService`, `TaskExecutionService`) and the ~10 test constructor sites, resolving Q1–Q7 above. Without it, I am guessing at ingress semantics on live chat paths, which is the kind of risk the collaboration ledger explicitly wants to avoid.
+
+## Resolution
+
+- Q1: Rabbit requires and validates the existing process-local canonical run; it
+  does not call `accept`.
+- Q2: async `acceptedAt` is exactly `Instant.ofEpochMilli(message.createdAt())`.
+- Q3: `deadlineAt = acceptedAt + 30 minutes`; no new configuration.
+- Q4: webhook role comes from `AuthService.resolveRoleByUserId`.
+- Q5: scheduled original message is `renderTaskPrompt`; response mode is
+  `agent`/`skill`; owner role comes from `AuthService`.
+- Q6: lifecycle acceptance/claim is fail-closed before legacy execution.
+- Q7: create `ChatMessageConsumerTest` for claim and fail-closed behavior.
 
 ## Current state
 

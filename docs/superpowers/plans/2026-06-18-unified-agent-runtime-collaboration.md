@@ -29,7 +29,7 @@ This file is the authoritative task ledger for the Unified Agent Runtime work.
 | Codex worktree | `/Users/hanbingzheng/springclaw/.worktrees/unified-agent-runtime` |
 | Deprecated Claude branch | `worktree-claude-engine-modernization` |
 | Deprecated spec marker | `f6a775f` |
-| Production implementation authorized | No |
+| Production implementation authorized | Phase 2A completed; Phase 2B requires a rewritten approved plan |
 
 ## 2. Non-Negotiable Invariants
 
@@ -486,4 +486,53 @@ Findings:
 Next dependency: unified-runtime-legacy-bridge plan
 ```
 
-Production implementation remains unauthorized beyond this isolated contract package until the separate unified-runtime-legacy-bridge plan is written and accepted. No existing API, engine selection, tool authorization, persistence, or transport behavior changed.
+## Update: unified-runtime-canonical-identity (Phase 2A)
+
+```text
+Task: unified-runtime-canonical-identity
+Owner: Codex
+Branch: codex/unified-agent-runtime
+Plan commits:
+  2dd2b4f docs: split canonical identity from legacy bridge
+  48c8861 docs: correct canonical identity migration plan
+Implementation commits:
+  c624e75 feat: add canonical run identity primitive
+  9660548 refactor: migrate canonical chat identity atomically
+  ac0c3b7 fix: propagate canonical tool ownership
+Files:
+  - canonical identity factory and AcceptedChatCommand
+  - REST, Rabbit, webhook, scheduled-task, service, and context identity propagation
+  - engine and capability-executor tool ownership propagation
+  - direct identity and ownership tests plus affected characterization tests
+Tests:
+  - 67 domain contract tests pass
+  - 47 production-backed characterization tests pass
+  - 27 focused baseline tests pass
+  - 58 direct canonical identity and tool ownership tests pass
+  - full suite: 610 tests, 0 failures, 8 errors, 0 skips
+  - all 8 full-suite errors are ToolInvocationProposalRepositoryTest transaction setup
+    errors caused by the environment's MySQL authentication setting:
+    "Public Key Retrieval is not allowed"
+Findings:
+  - Sync REST, SSE REST, async REST/Rabbit, webhook, and scheduled-task paths
+    preserve one accepted normalized identity as requestId == runId.
+  - Rabbit redelivery reuses message.requestId but may execute again; Phase 2A
+    does not claim exactly-once processing or duplicate suppression.
+  - ChatContextFactory no longer creates UUIDs.
+  - All 14 production ToolExecutionContext construction sites use the canonical
+    request identity for both requestId and runId.
+  - Phase 2A did not modify transport DTOs, ToolRuntimeAspect, proposal execution,
+    workspace guards, EngineSelector, runtime contracts, or configuration.
+  - The temporary handoff and .gitignore commits were fully reverted; their net
+    tree effect is zero.
+Rollback:
+  - Revert ac0c3b7.
+  - Revert 9660548 atomically; never partially roll back controller, consumer,
+    webhook, scheduled task, service, or context-factory identity wiring.
+  - Revert c624e75.
+Next dependency:
+  - Replace the superseded unified-runtime-legacy-bridge plan with a bounded
+    Phase 2B canonical lifecycle bridge plan before further production changes.
+```
+
+Production implementation beyond Phase 2A remains unauthorized until the rewritten Phase 2B lifecycle bridge plan is reviewed and accepted.

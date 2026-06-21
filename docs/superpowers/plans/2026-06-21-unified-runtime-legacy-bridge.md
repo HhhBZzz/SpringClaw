@@ -1,5 +1,7 @@
 # Unified Runtime Legacy Bridge Implementation Plan
 
+> **SUPERSEDED — DO NOT IMPLEMENT.** This plan incorrectly mixed Phase 2A canonical identity with Phase 2B lifecycle work, missed lifecycle coverage for every accepted ingress, proposed premature trace-authority changes, and relied on invalid routing-freeze and API assumptions. Implement Phase 2A from [`2026-06-21-unified-runtime-canonical-identity.md`](./2026-06-21-unified-runtime-canonical-identity.md) instead. The Phase 2B lifecycle/legacy-bridge plan will be rewritten only after Phase 2A acceptance.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Propagate one accepted 32-character `runId == requestId` through synchronous REST, SSE, RabbitMQ async, trace, audit, and confirmation ownership while a feature-flagged in-memory canonical lifecycle wraps the existing blocking `ChatServiceImpl` behavior without changing routing, answers, persistence, tool safety, SSE ownership, or transport payloads.

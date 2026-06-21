@@ -646,6 +646,31 @@ Claude next:
 Claude may now begin Phase 2B integration Tasks 5–8 after basing work on commit
 `802b094` or a later ledger-only handoff commit.
 
+## Update: Phase 2B Task 6 adapter core and wiring handoff
+
+```text
+Owner: Codex
+Reviewed Claude work:
+  - b7bb77f engine ordering: APPROVED
+  - 4403717, 710c6a8, 3a66621, d203e08 ingress wiring: APPROVED
+Fresh verification:
+  - 174 testcase elements
+  - 0 failures, 0 errors, 0 skips
+  - known MySQL authentication warnings only
+Codex commits:
+  6a55600 feat: adapt legacy execution facts to runtime contracts
+  8ae12ee feat: orchestrate legacy lifecycle observations
+Frozen semantics:
+  - adapters translate existing facts only; no context retrieval or rerouting
+  - successful legacy returns map to DEGRADED / LEGACY_UNVERIFIED_RESULT
+  - no synthetic COMPLETED status or quality=1
+  - LegacyLifecycleObserver owns transition ordering for integration callers
+Claude authorized next:
+  - execute docs/superpowers/plans/
+    2026-06-22-unified-runtime-phase-2b-task6-observation-wiring.md
+  - do not modify runtime/** or other prohibited paths
+```
+
 ## Update: Phase 2B Task 5 ingress wiring
 
 ```text

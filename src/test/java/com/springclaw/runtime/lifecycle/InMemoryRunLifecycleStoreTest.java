@@ -1,0 +1,110 @@
+package com.springclaw.runtime.lifecycle;
+
+import com.springclaw.runtime.contract.RunEvent;
+import com.springclaw.runtime.contract.RunEventType;
+import com.springclaw.runtime.contract.RunState;
+import com.springclaw.runtime.contract.RunStatus;
+import org.junit.jupiter.api.Test;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class InMemoryRunLifecycleStoreTest {
+
+    private static final String RUN_ID = "0123456789abcdef0123456789abcdef";
+    private static final Instant T0 = Instant.parse("2026-06-21T00:00:00Z");
+    private static final Instant T1 = Instant.parse("2026-06-21T00:00:01Z");
+
+    private final InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+
+    @Test
+    void createsStateAndFirstEventAtomically() {
+        assertThat(store.findByRunId(RUN_ID)).isEmpty();
+
+        RunState created = createdState("hello");
+        store.create(created, event(RunEventType.RUN_CREATED, RunStatus.CREATED, T0));
+
+        assertThat(store.requireByRunId(RUN_ID)).isEqualTo(created);
+        assertThat(store.findEventsByRunId(RUN_ID))
+                .extracting(RunEvent::sequence)
+                .containsExactly(1L);
+    }
+
+    @Test
+    void identicalCreationIsIdempotentButConflictingCreationFails() {
+        RunState created = createdState("hello");
+        store.create(created, event(RunEventType.RUN_CREATED, RunStatus.CREATED, T0));
+
+        assertThat(store.create(
+                created,
+                event(RunEventType.RUN_CREATED, RunStatus.CREATED, T0)
+        )).isEqualTo(created);
+        assertThat(store.findEventsByRunId(RUN_ID)).hasSize(1);
+
+        assertThatThrownBy(() -> store.create(
+                createdState("different"),
+                event(RunEventType.RUN_CREATED, RunStatus.CREATED, T0)
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("conflicting");
+    }
+
+    @Test
+    void staleRevisionWritesNeitherStateNorEvent() {
+        store.create(
+                createdState("hello"),
+                event(RunEventType.RUN_CREATED, RunStatus.CREATED, T0)
+        );
+        RunState failed = failedState();
+
+        store.commit(
+                0,
+                failed,
+                event(RunEventType.RUN_FAILED, RunStatus.FAILED, T1)
+        );
+
+        assertThatThrownBy(() -> store.commit(
+                0,
+                failed,
+                event(RunEventType.RUN_FAILED, RunStatus.FAILED, T1)
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("stale");
+        assertThat(store.requireByRunId(RUN_ID).revision()).isEqualTo(1);
+        assertThat(store.findEventsByRunId(RUN_ID))
+                .extracting(RunEvent::sequence)
+                .containsExactly(1L, 2L);
+    }
+
+    private static RunState createdState(String message) {
+        return new RunState(
+                RUN_ID, RUN_ID, 0, RunStatus.CREATED,
+                "session-1", "api", "user-1", "USER", message, "agent",
+                T0, null, T0, null, T0.plusSeconds(300),
+                null, null, "", 1, "", List.of(), null, null, Map.of(), null
+        );
+    }
+
+    private static RunState failedState() {
+        return new RunState(
+                RUN_ID, RUN_ID, 1, RunStatus.FAILED,
+                "session-1", "api", "user-1", "USER", "hello", "agent",
+                T0, null, T1, T1, T0.plusSeconds(300),
+                null, null, "", 1, "", List.of(), null, null, Map.of(),
+                new RunState.Failure("LEGACY_FAILED", "failed", false)
+        );
+    }
+
+    private static RunEvent.Draft event(
+            RunEventType type,
+            RunStatus status,
+            Instant timestamp
+    ) {
+        return new RunEvent.Draft(
+                RUN_ID, type, "lifecycle", status, timestamp, 0,
+                "springclaw.runtime.lifecycle.v1", "{}", null, RUN_ID
+        );
+    }
+}

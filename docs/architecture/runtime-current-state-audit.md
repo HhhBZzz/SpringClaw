@@ -317,7 +317,7 @@ Engines and `ChatServiceImpl` both decide independently when to persist. Asynchr
 | [`MessageEventToolAuditService`](../../src/main/java/com/springclaw/service/chat/impl/MessageEventToolAuditService.java) | Tool audit events |
 | [`AgentActionProposalService.recordProposalTrace`](../../src/main/java/com/springclaw/service/agent/AgentActionProposalService.java:200-213) | Proposal confirm/cancel trace (this is the legacy `AgentActionProposal`, **not** the P0 `ToolInvocationProposal`) |
 
-The `agent_run` row's `status` ends up at whatever the **last** `final` trace event sets it to. If a `final` trace is dropped (network partition, exception in the engine's `doOnComplete`), the row remains `RUNNING`. Three engines emit `final` from `doOnComplete/doOnError` independently; recovery semantics differ per engine.
+The `agent_run` row's `status` ends up at whatever the **last** `final` trace event sets it to. If a `final` trace is dropped (network partition or an exception before terminal trace emission), the row remains `RUNNING`. `BasicStreamEngine` and `ModelLedStreamEngine` emit terminal signals from reactive callbacks; `AutonomousLoopEngine.stream` completes synchronously inside `try/catch` and delegates failures through `fallbackHandler`. Recovery semantics therefore differ per engine.
 
 ---
 
@@ -329,7 +329,7 @@ The `agent_run` row's `status` ends up at whatever the **last** `final` trace ev
 | 2 | `ChatServiceImpl` | `executeStream` catch block (line 218-223) | Top-level error path |
 | 3 | `BasicStreamEngine.stream` | `doOnComplete` / `doOnError` | Engine business completion / error |
 | 4 | `ModelLedStreamEngine.stream` | `doOnComplete` / `doOnError` | Same |
-| 5 | `AutonomousLoopEngine.stream` | `doOnComplete` / `fallbackHandler.handle` | Same, with degraded delegate |
+| 5 | `AutonomousLoopEngine.stream` | synchronous `try/catch` / `fallbackHandler.handle` | Engine completion in the calling thread, with degraded delegate on failure |
 | 6 | `SseEventBridge.completeEmitter` | line 266-269 (`sendEvent("done") + emitter.complete()`) | Helper called from all the above |
 
 The table contains **six sites across five classes/components**. `SseEventBridge`

@@ -384,11 +384,11 @@ class RuntimeRouteCharacterizationTest {
         }
 
         @Test
-        void equalPriorityOrderIsInjectionDependentNotDeclaredByEngineSelector() {
-            // EngineSelector performs a stable priority sort, so the two
-            // priority-2 engines retain whatever order Spring injects. These
-            // assertions characterize that dependency; they do not claim a
-            // particular Spring bean-discovery order.
+        void equalPriorityOrderIsDeclaredByLegacyRankNotInjectionDependent() {
+            // Phase 2B Task 4A: EngineSelector now sorts by (priority, legacyRank),
+            // so the two priority-2 engines have a declared order regardless of the
+            // order Spring injects them. agent-runtime (legacyRank 20) precedes
+            // autonomous-loop (legacyRank 30) in both injection orders.
             EngineSelector runtimeFirst = new EngineSelector(List.of(
                     agentRuntimeEngine,
                     autonomousLoopEngine,
@@ -405,7 +405,7 @@ class RuntimeRouteCharacterizationTest {
                     .containsExactly("agent-runtime", "autonomous-loop", "simplified");
             assertThat(autonomousFirst.listAll())
                     .extracting(AgentEngine::name)
-                    .containsExactly("autonomous-loop", "agent-runtime", "simplified");
+                    .containsExactly("agent-runtime", "autonomous-loop", "simplified");
         }
 
         @Test

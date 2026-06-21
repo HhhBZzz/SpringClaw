@@ -430,9 +430,12 @@ Return commit SHAs, files changed, tests run, environmental blockers, and all du
 
 ```text
 Task: unified-runtime-domain-contracts
-Owner: Claude (completed; Codex owner of record per §8 planned Phase 2 ownership, executed by Claude after Codex quota exhausted)
+Owner: Codex
+Assistance: Claude temporarily executed the first contract implementation while Codex quota was unavailable; Codex retained ownership, reviewed the handoff, and completed the corrective implementation and acceptance.
 Branch: codex/unified-agent-runtime
 Commits:
+  b86035a merge: integrate runtime characterization baseline
+  73e3987 test: fix characterization quality review findings
   44ca5e4 feat: define canonical run lifecycle states
   817fa8e feat: add runtime context and decision contracts
   c96b9f9 feat: define runtime safety and result contracts
@@ -440,20 +443,47 @@ Commits:
   6fda7b3 feat: add canonical run state aggregate
   75ca615 feat: define canonical runtime strategy boundary
   3d3332d test: verify unified runtime contract compatibility
-Files: isolated com.springclaw.runtime.contract package (7 records + enums + nested records) and 7 contract test classes + 1 test-only legacy fixture translator
+  e297bce docs: record runtime domain contract evidence
+  620b9a6 fix: enforce unified runtime contract invariants
+  774d77d fix: reject results on nonterminal run states
+  4318e1a fix: enforce runtime transition and invocation timelines
+  cbb66cf fix: preserve canonical run history across transitions
+  a1418c8 fix: allow canonical invocation lifecycle progression
+  7c5d2f0 fix: enforce runtime decision stage ordering
+  788b355 fix: isolate runtime invocation attempts
+  87694ee test: strengthen runtime routing and context characterization
+  a444806 test: correct routing reachability and context fixtures
+  c5a8012 test: strengthen tool safety and final answer characterization
+  5c62ed4 test: complete final answer ownership inventory
+  2a900f1 test: strengthen async transport parity characterization
+  16f736f test: remove field-only async transport assertion
+  c6fa025 docs: correct unified runtime current-state audit
+  01f7568 docs: align runtime audit with production evidence
+  d8d7c72 docs: finalize runtime audit evidence labels
+  b5379c7 docs: distinguish local cache expiry evidence
+Files:
+  - isolated src/main/java/com/springclaw/runtime/contract/**
+  - src/test/java/com/springclaw/runtime/contract/**
+  - strengthened src/test/java/com/springclaw/architecture/**
+  - corrected docs/architecture/runtime-current-state-audit.md
 Tests:
-  - 25 domain contract tests pass (RunStatus, ContextAndDecision, ToolCompletionAndResult, RunEvent, RunState, RuntimeStrategy, LegacyFixtures)
-  - 41 characterization tests still pass (baseline unchanged)
-  - 27 focused baseline tests still pass (EngineSelectorTest et al.)
-  - total 93, 0 failures, 0 errors, 0 skips
+  - 67 domain contract tests pass
+  - 47 production-backed characterization tests pass:
+    - RuntimeRouteCharacterizationTest: 20
+    - ContextPropagationCharacterizationTest: 5
+    - ToolSafetyPathCharacterizationTest: 7
+    - FinalAnswerOwnershipCharacterizationTest: 5
+    - TransportParityCharacterizationTest: 10
+  - 27 focused baseline tests pass
+  - focused acceptance total: 141 tests, 0 failures, 0 errors, 0 skips
 Findings:
-  - No existing production routing, safety, persistence, or transport file changed (git diff src/main/java outside runtime/contract/ = empty)
-  - Plan's ContextAndDecisionContractTest used non-existent AssertJ MapAssert.containsOnlyEntry(); corrected to containsOnly(Map.entry(...)) — same invariant
-  - Plan's characterization prose said "9 states" for an 8-state enum; corrected to "8 states" in Task 1 quality review
-  - Task 4 original 3 tests left 3 enforced constraints uncovered (WAITING_CONFIRMATION→proposalId, status≠FAILED rejects FAILURE, RETRY retryAllowed=false); added 3 covering tests and amended the commit
-  - RunState needed a Builder/toBuilder() (not in plan) to keep transition fixtures readable across 25 fields; pure construction helper, no responsibility added
-  - Spec reviewers (independent subagents) confirmed Task 4 and Task 6 spec-compliant field-for-field
+  - No existing production routing, safety, persistence, controller, engine, or transport file changed.
+  - The unapproved RunState Builder/toBuilder API from the temporary handoff was removed.
+  - Contracts now enforce finite quality/confidence values, cross-run ownership, terminal evidence, stage ordering, immutable acceptance/context history, retry isolation, invocation identity/idempotency uniqueness, legal invocation lifecycle progression, and EventStore-owned event identity/sequence.
+  - Characterization tests now execute production routing, context, ToolRuntimeAspect, final-answer, async store, and WebSocket/STOMP behavior instead of validating local constants.
+  - Current production behavior records ModelLedStreamEngine as shadowed for reachable non-null decisions, category scoring as one point per category, any non-empty engine reflect as bypassing MetaGuard, and async results as local Caffeine plus optional Redis plus WebSocket/STOMP projection.
+  - Known environment warning remains: MySQL authentication logs `Public Key Retrieval is not allowed`; the focused baseline exits 0.
 Next dependency: unified-runtime-legacy-bridge plan
 ```
 
-Production implementation remains unauthorized beyond this isolated contract package. No existing API, engine selection, tool authorization, persistence, or transport behavior changed.
+Production implementation remains unauthorized beyond this isolated contract package until the separate unified-runtime-legacy-bridge plan is written and accepted. No existing API, engine selection, tool authorization, persistence, or transport behavior changed.

@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 class EngineSelectorTest {
@@ -35,6 +36,36 @@ class EngineSelectorTest {
         AgentEngine selected = selector.select(context("simplified", "复杂任务自动升级到 OPAR", decision));
 
         assertThat(selected.name()).isEqualTo("opar-loop");
+    }
+
+    @Test
+    void shouldFailInitializationWhenEngineNameHasNoLegacyRank() {
+        AgentEngine unknown = new AgentEngine() {
+            @Override
+            public String name() {
+                return "brand-new-engine";
+            }
+
+            @Override
+            public int priority() {
+                return 1;
+            }
+
+            @Override
+            public boolean supports(ChatContext ctx) {
+                return false;
+            }
+
+            @Override
+            public com.springclaw.service.chat.impl.ChatExecutionResult execute(
+                    ChatContext ctx, AgentEngine.FallbackResponder fallbackResponder) {
+                throw new UnsupportedOperationException();
+            }
+        };
+
+        assertThatThrownBy(() -> new EngineSelector(List.of(unknown)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("brand-new-engine");
     }
 
     private AgentRuntimeEngine runtimeEngine() {

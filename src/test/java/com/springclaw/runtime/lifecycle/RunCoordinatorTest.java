@@ -80,6 +80,26 @@ class RunCoordinatorTest {
     }
 
     @Test
+    void verifyingFailureRequiresAndPersistsFailCompletionDecision() {
+        prepareVerifyingRun();
+        CompletionDecision failureDecision = completion(
+                CompletionDecision.Outcome.FAIL,
+                T0.plusSeconds(5)
+        );
+
+        coordinator.failed(
+                RUN_ID,
+                failureDecision,
+                new RunState.Failure("VERIFICATION_FAILED", "insufficient evidence", false),
+                T0.plusSeconds(5)
+        );
+
+        RunState failed = store.requireByRunId(RUN_ID);
+        assertThat(failed.status()).isEqualTo(RunStatus.FAILED);
+        assertThat(failed.completionDecision()).isEqualTo(failureDecision);
+    }
+
+    @Test
     void rejectsMutationAfterTerminalState() {
         String runId = "22222222222222222222222222222222";
         coordinator.accept(acceptance(runId));

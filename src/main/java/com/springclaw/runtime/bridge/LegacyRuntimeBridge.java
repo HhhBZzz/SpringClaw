@@ -40,4 +40,11 @@ public interface LegacyRuntimeBridge {
     );
 
     RunState failed(String runId, RunState.Failure failure, Instant at);
+
+    RunState failed(
+            String runId,
+            CompletionDecision decision,
+            RunState.Failure failure,
+            Instant at
+    );
 }

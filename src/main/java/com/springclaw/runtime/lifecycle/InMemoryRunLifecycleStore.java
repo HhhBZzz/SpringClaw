@@ -40,7 +40,7 @@ public final class InMemoryRunLifecycleStore implements RunLifecycleStore {
         synchronized (lock) {
             RunState existing = states.get(initialState.runId());
             if (existing != null) {
-                if (existing.equals(initialState)) {
+                if (sameAcceptance(existing, initialState)) {
                     return existing;
                 }
                 throw new IllegalStateException(
@@ -117,5 +117,18 @@ public final class InMemoryRunLifecycleStore implements RunLifecycleStore {
                 UUID.randomUUID().toString().replace("-", ""),
                 sequence
         );
+    }
+
+    private static boolean sameAcceptance(RunState existing, RunState candidate) {
+        return existing.runId().equals(candidate.runId())
+                && existing.requestId().equals(candidate.requestId())
+                && existing.sessionKey().equals(candidate.sessionKey())
+                && existing.channel().equals(candidate.channel())
+                && existing.userId().equals(candidate.userId())
+                && existing.roleCodeAtAcceptance().equals(candidate.roleCodeAtAcceptance())
+                && existing.originalMessage().equals(candidate.originalMessage())
+                && existing.responseMode().equals(candidate.responseMode())
+                && existing.acceptedAt().equals(candidate.acceptedAt())
+                && existing.deadlineAt().equals(candidate.deadlineAt());
     }
 }

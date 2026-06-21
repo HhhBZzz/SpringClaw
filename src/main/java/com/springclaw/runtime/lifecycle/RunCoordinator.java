@@ -123,10 +123,25 @@ public final class RunCoordinator {
             RunState.Failure failure,
             Instant at
     ) {
-        return terminal(
-                runId, RunStatus.FAILED, null, null,
-                Objects.requireNonNull(failure, "failure"),
-                RunEventType.CONFIRMATION_REJECTED, at
+        RunState current = require(runId);
+        if (current.status() != RunStatus.WAITING_CONFIRMATION) {
+            throw new IllegalStateException(
+                    "confirmation rejection requires WAITING_CONFIRMATION but was "
+                            + current.status()
+            );
+        }
+        RunState next = copy(
+                current, RunStatus.FAILED, at, current.startedAt(), at,
+                current.contextSnapshot(), current.executionDecision(),
+                current.strategyId(), current.pendingProposalId(),
+                null, null, current.usage(),
+                Objects.requireNonNull(failure, "failure")
+        );
+        return commit(
+                current,
+                next,
+                RunEventType.CONFIRMATION_REJECTED,
+                at
         );
     }
 

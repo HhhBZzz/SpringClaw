@@ -671,6 +671,26 @@ Claude authorized next:
   - do not modify runtime/** or other prohibited paths
 ```
 
+## Update: Phase 2B Task 7 core event API and projection handoff
+
+```text
+Owner: Codex
+Commit:
+  1f51ba2 feat: append canonical tool lifecycle facts
+Core additions:
+  - RunLifecycleStore.append for event-only facts under revision fencing
+  - RunCoordinator tool.started/tool.succeeded/tool.failed observations
+  - typed confirmationRejected transition and event
+  - LegacyLifecycleObserver projection-facing methods
+Clarification:
+  - ToolInvocationProposalService.createPending is the unique owner of persisted
+    tool-proposal WAITING_CONFIRMATION
+  - Task 6 PendingToolApproval rendering does not repeat that transition
+Claude authorized after Task 6:
+  - execute docs/superpowers/plans/
+    2026-06-22-unified-runtime-phase-2b-task7-projections.md
+```
+
 ## Update: Phase 2B Task 5 ingress wiring
 
 ```text

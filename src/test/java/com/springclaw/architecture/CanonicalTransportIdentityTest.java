@@ -2,6 +2,9 @@ package com.springclaw.architecture;
 
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
+import com.springclaw.runtime.contract.RunState;
+import com.springclaw.runtime.contract.RunStatus;
+import com.springclaw.runtime.lifecycle.RunStateRepository;
 import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
 import com.springclaw.service.chat.async.AsyncChatRequestMessage;
@@ -13,8 +16,11 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -55,12 +61,6 @@ class CanonicalTransportIdentityTest {
     void rabbitRedeliveryReusesIdentityButExecutesAgain() {
         ChatService chatService = mock(ChatService.class);
         AsyncChatResultStore resultStore = mock(AsyncChatResultStore.class);
-        ChatMessageConsumer consumer = new ChatMessageConsumer(
-                chatService,
-                resultStore,
-                mock(ChatMessageProducer.class),
-                mock(SimpMessagingTemplate.class)
-        );
         AsyncChatRequestMessage message = new AsyncChatRequestMessage(
                 "44444444444444444444444444444444",
                 "session",
@@ -69,6 +69,16 @@ class CanonicalTransportIdentityTest {
                 "api",
                 100L,
                 "agent"
+        );
+        RunStateRepository repository = mock(RunStateRepository.class);
+        when(repository.requireByRunId(message.requestId()))
+                .thenReturn(createdRun(message));
+        ChatMessageConsumer consumer = new ChatMessageConsumer(
+                chatService,
+                resultStore,
+                mock(ChatMessageProducer.class),
+                mock(SimpMessagingTemplate.class),
+                repository
         );
         ChatResponse response = new ChatResponse(
                 "session",
@@ -108,5 +118,18 @@ class CanonicalTransportIdentityTest {
                         + ":"
                         + component.getType().getSimpleName())
                 .toList();
+    }
+
+    private static RunState createdRun(AsyncChatRequestMessage message) {
+        Instant acceptedAt = Instant.ofEpochMilli(message.createdAt());
+        return new RunState(
+                message.requestId(), message.requestId(), 0, RunStatus.CREATED,
+                message.sessionKey(), message.channel(), message.userId(), "USER",
+                message.message(),
+                message.responseMode() == null ? "agent" : message.responseMode(),
+                acceptedAt, null, acceptedAt, null,
+                acceptedAt.plus(Duration.ofMinutes(30)),
+                null, null, "", 1, "", List.of(), null, null, Map.of(), null
+        );
     }
 }

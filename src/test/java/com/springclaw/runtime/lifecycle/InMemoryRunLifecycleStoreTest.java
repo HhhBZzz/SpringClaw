@@ -56,6 +56,23 @@ class InMemoryRunLifecycleStoreTest {
     }
 
     @Test
+    void identicalAcceptanceRemainsIdempotentAfterRunAdvances() {
+        RunState created = createdState("hello");
+        store.create(created, event(RunEventType.RUN_CREATED, RunStatus.CREATED, T0));
+        RunState failed = store.commit(
+                0,
+                failedState(),
+                event(RunEventType.RUN_FAILED, RunStatus.FAILED, T1)
+        );
+
+        assertThat(store.create(
+                created,
+                event(RunEventType.RUN_CREATED, RunStatus.CREATED, T0)
+        )).isEqualTo(failed);
+        assertThat(store.findEventsByRunId(RUN_ID)).hasSize(2);
+    }
+
+    @Test
     void staleRevisionWritesNeitherStateNorEvent() {
         store.create(
                 createdState("hello"),

@@ -96,4 +96,14 @@ public final class DefaultLegacyRuntimeBridge implements LegacyRuntimeBridge {
     public RunState failed(String runId, RunState.Failure failure, Instant at) {
         return coordinator.failed(runId, failure, at);
     }
+
+    @Override
+    public RunState failed(
+            String runId,
+            CompletionDecision decision,
+            RunState.Failure failure,
+            Instant at
+    ) {
+        return coordinator.failed(runId, decision, failure, at);
+    }
 }

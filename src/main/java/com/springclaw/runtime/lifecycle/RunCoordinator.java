@@ -157,8 +157,17 @@ public final class RunCoordinator {
     }
 
     public RunState failed(String runId, RunState.Failure failure, Instant at) {
+        return failed(runId, null, failure, at);
+    }
+
+    public RunState failed(
+            String runId,
+            CompletionDecision completionDecision,
+            RunState.Failure failure,
+            Instant at
+    ) {
         return terminal(
-                runId, RunStatus.FAILED, null, null,
+                runId, RunStatus.FAILED, completionDecision, null,
                 Objects.requireNonNull(failure, "failure"), RunEventType.RUN_FAILED, at
         );
     }

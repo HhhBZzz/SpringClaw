@@ -75,6 +75,46 @@ src/test/java/com/springclaw/architecture/**
 
 Claude must not modify production Java in Phase 1.
 
+### Early Phase 2B ownership transfer
+
+Claude may begin the following isolated task before the lifecycle core is complete:
+
+```text
+src/main/java/com/springclaw/service/agent/EngineSelector.java
+src/test/java/com/springclaw/architecture/RuntimeRouteCharacterizationTest.java
+all existing EngineSelector-focused test files discovered with:
+  rg -l "class EngineSelectorTest|new EngineSelector" src/test/java
+```
+
+Task:
+
+```text
+Freeze legacy engine ordering to (priority, legacyRank):
+  basic-stream=10
+  agent-runtime=20
+  autonomous-loop=30
+  opar-loop=40
+  model-led-stream=50
+  simplified=60
+
+Only change the EngineSelector constructor ordering and directly affected tests.
+A registered engine name without a rank must fail initialization.
+Do not change engine priority(), supports(), routing conditions, ChatServiceImpl,
+runtime lifecycle core, DTOs, configuration, or production files outside
+EngineSelector.java.
+
+Required verification:
+  mvn -q -Dtest=EngineSelectorTest,RuntimeRouteCharacterizationTest test
+  mvn -q -Dtest=EngineSelectorTest,ChatContextFactoryTest,PromptInjectionTest,AgentRuntimeEngineTest test
+  git diff --check
+
+Return commit SHA, changed files, test counts, and any environmental warnings.
+Do not merge or edit Codex commits.
+```
+
+This transfer removes `EngineSelector.java` from Codex ownership for the duration
+of the task. All other `service/agent/**` files remain Codex-owned.
+
 ## 4. Phase 0 — Coordination Setup
 
 - [x] **C0.1 — Deprecate the incorrect engine-modernization spec**
@@ -536,3 +576,20 @@ Next dependency:
 ```
 
 Production implementation beyond Phase 2A remains unauthorized until the rewritten Phase 2B lifecycle bridge plan is reviewed and accepted.
+
+## Update: Phase 2B core start and early Claude task
+
+```text
+Owner: Codex
+Design commit: 3c8d245
+Plan commit: e13f182
+Atomic lifecycle store commit: 75bc07e
+Codex in progress:
+  - RunCoordinator
+  - LegacyRuntimeBridge frozen API
+Claude authorized now:
+  - EngineSelector legacyRank freeze only
+Dependency:
+  - remaining ingress, projection, trace, and proposal integration waits for the
+    Codex lifecycle core and handoff commit.
+```

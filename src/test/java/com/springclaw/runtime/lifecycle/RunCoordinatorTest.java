@@ -117,6 +117,47 @@ class RunCoordinatorTest {
                 .hasMessageContaining("terminal");
     }
 
+    @Test
+    void appendsToolFactsWithoutChangingStateRevision() {
+        coordinator.accept(acceptance());
+        coordinator.contextReady(RUN_ID, snapshot(), T0.plusSeconds(1));
+        coordinator.decided(RUN_ID, decision(), T0.plusSeconds(2));
+        RunState running = coordinator.running(
+                RUN_ID, "agent-runtime", T0.plusSeconds(3)
+        );
+
+        coordinator.toolStarted(RUN_ID, T0.plusSeconds(4));
+        coordinator.toolSucceeded(RUN_ID, T0.plusSeconds(5));
+
+        assertThat(store.requireByRunId(RUN_ID)).isEqualTo(running);
+        assertThat(store.findEventsByRunId(RUN_ID))
+                .extracting(RunEvent::eventType)
+                .endsWith(RunEventType.TOOL_STARTED, RunEventType.TOOL_SUCCEEDED);
+    }
+
+    @Test
+    void confirmationRejectionFailsRunWithTypedBoundaryEvent() {
+        coordinator.accept(acceptance());
+        coordinator.contextReady(RUN_ID, snapshot(), T0.plusSeconds(1));
+        coordinator.decided(RUN_ID, decision(), T0.plusSeconds(2));
+        coordinator.running(RUN_ID, "agent-runtime", T0.plusSeconds(3));
+        coordinator.waitingConfirmation(RUN_ID, "proposal-1", T0.plusSeconds(4));
+
+        coordinator.confirmationRejected(
+                RUN_ID,
+                new RunState.Failure(
+                        "CONFIRMATION_REJECTED", "rejected by user", false
+                ),
+                T0.plusSeconds(5)
+        );
+
+        assertThat(store.requireByRunId(RUN_ID).status())
+                .isEqualTo(RunStatus.FAILED);
+        assertThat(store.findEventsByRunId(RUN_ID))
+                .extracting(RunEvent::eventType)
+                .endsWith(RunEventType.CONFIRMATION_REJECTED);
+    }
+
     private void prepareVerifyingRun() {
         coordinator.accept(acceptance());
         coordinator.contextReady(RUN_ID, snapshot(), T0.plusSeconds(1));

@@ -23,6 +23,18 @@ public interface LegacyRuntimeBridge {
 
     RunState confirmationApproved(String runId, Instant at);
 
+    RunState confirmationRejected(
+            String runId,
+            RunState.Failure failure,
+            Instant at
+    );
+
+    void toolStarted(String runId, Instant at);
+
+    void toolSucceeded(String runId, Instant at);
+
+    void toolFailed(String runId, Instant at);
+
     RunState verificationStarted(String runId, Instant at);
 
     RunState completed(

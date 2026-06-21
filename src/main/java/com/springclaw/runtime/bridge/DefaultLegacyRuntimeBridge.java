@@ -68,6 +68,30 @@ public final class DefaultLegacyRuntimeBridge implements LegacyRuntimeBridge {
     }
 
     @Override
+    public RunState confirmationRejected(
+            String runId,
+            RunState.Failure failure,
+            Instant at
+    ) {
+        return coordinator.confirmationRejected(runId, failure, at);
+    }
+
+    @Override
+    public void toolStarted(String runId, Instant at) {
+        coordinator.toolStarted(runId, at);
+    }
+
+    @Override
+    public void toolSucceeded(String runId, Instant at) {
+        coordinator.toolSucceeded(runId, at);
+    }
+
+    @Override
+    public void toolFailed(String runId, Instant at) {
+        coordinator.toolFailed(runId, at);
+    }
+
+    @Override
     public RunState verificationStarted(String runId, Instant at) {
         return coordinator.verifying(runId, at);
     }

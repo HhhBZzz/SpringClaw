@@ -61,6 +61,34 @@ public final class LegacyLifecycleObserver {
         bridge.confirmationApproved(runId, at);
     }
 
+    public void confirmationRejected(
+            String runId,
+            String reason,
+            Instant at
+    ) {
+        bridge.confirmationRejected(
+                runId,
+                new RunState.Failure(
+                        "CONFIRMATION_REJECTED",
+                        reason == null ? "" : reason,
+                        false
+                ),
+                at
+        );
+    }
+
+    public void toolStarted(String runId, Instant at) {
+        bridge.toolStarted(runId, at);
+    }
+
+    public void toolSucceeded(String runId, Instant at) {
+        bridge.toolSucceeded(runId, at);
+    }
+
+    public void toolFailed(String runId, Instant at) {
+        bridge.toolFailed(runId, at);
+    }
+
     public void resultReturned(
             ChatContext context,
             ChatExecutionResult executionResult,

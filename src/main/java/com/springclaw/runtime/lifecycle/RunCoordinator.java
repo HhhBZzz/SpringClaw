@@ -118,6 +118,30 @@ public final class RunCoordinator {
         );
     }
 
+    public RunState confirmationRejected(
+            String runId,
+            RunState.Failure failure,
+            Instant at
+    ) {
+        return terminal(
+                runId, RunStatus.FAILED, null, null,
+                Objects.requireNonNull(failure, "failure"),
+                RunEventType.CONFIRMATION_REJECTED, at
+        );
+    }
+
+    public RunEvent toolStarted(String runId, Instant at) {
+        return appendObservation(runId, RunEventType.TOOL_STARTED, at);
+    }
+
+    public RunEvent toolSucceeded(String runId, Instant at) {
+        return appendObservation(runId, RunEventType.TOOL_SUCCEEDED, at);
+    }
+
+    public RunEvent toolFailed(String runId, Instant at) {
+        return appendObservation(runId, RunEventType.TOOL_FAILED, at);
+    }
+
     public RunState verifying(String runId, Instant at) {
         RunState current = require(runId);
         return commit(
@@ -214,6 +238,18 @@ public final class RunCoordinator {
                 current.revision(),
                 next,
                 event(next, eventType, at)
+        );
+    }
+
+    private RunEvent appendObservation(
+            String runId,
+            RunEventType eventType,
+            Instant at
+    ) {
+        RunState current = require(runId);
+        return store.append(
+                current.revision(),
+                event(current, eventType, at)
         );
     }
 

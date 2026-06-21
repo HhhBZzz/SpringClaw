@@ -5,6 +5,9 @@ import com.springclaw.config.websocket.WebSocketConfig;
 import com.springclaw.controller.ChatController;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
+import com.springclaw.runtime.contract.RunState;
+import com.springclaw.runtime.contract.RunStatus;
+import com.springclaw.runtime.lifecycle.RunStateRepository;
 import com.springclaw.service.agent.AgentRunTraceService;
 import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
@@ -37,7 +40,11 @@ import org.springframework.web.socket.config.annotation.StompWebSocketEndpointRe
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -181,13 +188,17 @@ class TransportParityCharacterizationTest {
         AsyncChatResultStore resultStore = mock(AsyncChatResultStore.class);
         ChatMessageProducer producer = mock(ChatMessageProducer.class);
         SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
+        AsyncChatRequestMessage message = message("request-completed");
+        RunStateRepository repository = mock(RunStateRepository.class);
+        when(repository.requireByRunId(message.requestId()))
+                .thenReturn(createdRun(message));
         ChatMessageConsumer consumer = new ChatMessageConsumer(
                 chatService,
                 resultStore,
                 producer,
-                messagingTemplate
+                messagingTemplate,
+                repository
         );
-        AsyncChatRequestMessage message = message("request-completed");
         AcceptedChatCommand expectedCommand = new AcceptedChatCommand(
                 message.requestId(),
                 new ChatRequest(
@@ -228,13 +239,17 @@ class TransportParityCharacterizationTest {
         AsyncChatResultStore resultStore = mock(AsyncChatResultStore.class);
         ChatMessageProducer producer = mock(ChatMessageProducer.class);
         SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
+        AsyncChatRequestMessage message = message("request-failed");
+        RunStateRepository repository = mock(RunStateRepository.class);
+        when(repository.requireByRunId(message.requestId()))
+                .thenReturn(createdRun(message));
         ChatMessageConsumer consumer = new ChatMessageConsumer(
                 chatService,
                 resultStore,
                 producer,
-                messagingTemplate
+                messagingTemplate,
+                repository
         );
-        AsyncChatRequestMessage message = message("request-failed");
         AcceptedChatCommand expectedCommand = new AcceptedChatCommand(
                 message.requestId(),
                 new ChatRequest(
@@ -369,6 +384,19 @@ class TransportParityCharacterizationTest {
         assertThat(Arrays.stream(SseEventBridge.class.getDeclaredConstructors())
                 .flatMap(constructor -> Arrays.stream(constructor.getParameterTypes()))
                 .anyMatch(AgentRunTraceService.class::equals)).isTrue();
+    }
+
+    private static RunState createdRun(AsyncChatRequestMessage message) {
+        Instant acceptedAt = Instant.ofEpochMilli(message.createdAt());
+        return new RunState(
+                message.requestId(), message.requestId(), 0, RunStatus.CREATED,
+                message.sessionKey(), message.channel(), message.userId(), "USER",
+                message.message(),
+                message.responseMode() == null ? "agent" : message.responseMode(),
+                acceptedAt, null, acceptedAt, null,
+                acceptedAt.plus(Duration.ofMinutes(30)),
+                null, null, "", 1, "", List.of(), null, null, Map.of(), null
+        );
     }
 
     private static AsyncChatRequestMessage message(String requestId) {

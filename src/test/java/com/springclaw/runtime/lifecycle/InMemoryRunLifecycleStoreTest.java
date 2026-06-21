@@ -9,6 +9,9 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -76,6 +79,52 @@ class InMemoryRunLifecycleStoreTest {
         assertThat(store.findEventsByRunId(RUN_ID))
                 .extracting(RunEvent::sequence)
                 .containsExactly(1L, 2L);
+    }
+
+    @Test
+    void concurrentCommitsAcceptExactlyOneRevisionAndOneEvent() {
+        store.create(
+                createdState("hello"),
+                event(RunEventType.RUN_CREATED, RunStatus.CREATED, T0)
+        );
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicInteger accepted = new AtomicInteger();
+        AtomicInteger stale = new AtomicInteger();
+
+        CompletableFuture<Void> first = concurrentCommit(start, accepted, stale);
+        CompletableFuture<Void> second = concurrentCommit(start, accepted, stale);
+        start.countDown();
+        CompletableFuture.allOf(first, second).join();
+
+        assertThat(accepted).hasValue(1);
+        assertThat(stale).hasValue(1);
+        assertThat(store.requireByRunId(RUN_ID).revision()).isEqualTo(1);
+        assertThat(store.findEventsByRunId(RUN_ID))
+                .extracting(RunEvent::sequence)
+                .containsExactly(1L, 2L);
+    }
+
+    private CompletableFuture<Void> concurrentCommit(
+            CountDownLatch start,
+            AtomicInteger accepted,
+            AtomicInteger stale
+    ) {
+        return CompletableFuture.runAsync(() -> {
+            try {
+                start.await();
+                store.commit(
+                        0,
+                        failedState(),
+                        event(RunEventType.RUN_FAILED, RunStatus.FAILED, T1)
+                );
+                accepted.incrementAndGet();
+            } catch (IllegalStateException expected) {
+                stale.incrementAndGet();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            }
+        });
     }
 
     private static RunState createdState(String message) {

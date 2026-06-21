@@ -1,7 +1,10 @@
 package com.springclaw.service.webhook;
 
 import com.springclaw.dto.chat.ChatResponse;
+import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
 import com.springclaw.runtime.identity.RunIdentityFactory;
+import com.springclaw.runtime.lifecycle.RunAcceptance;
+import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
 import com.springclaw.service.event.MessageEventService;
@@ -12,9 +15,11 @@ import com.springclaw.strategy.channel.outbound.ChannelOutboundDispatcher;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -29,6 +34,8 @@ class WebhookRouterServiceTest {
         MessageEventService eventService = mock(MessageEventService.class);
         ChannelOutboundDispatcher dispatcher = mock(ChannelOutboundDispatcher.class);
         RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
+        AuthService authService = mock(AuthService.class);
+        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
         ChannelAdapter adapter = mock(ChannelAdapter.class);
         UnifiedInboundMessage inbound = new UnifiedInboundMessage(
                 "feishu",
@@ -40,7 +47,8 @@ class WebhookRouterServiceTest {
         when(adapter.adapt(Map.of("event", "message"))).thenReturn(inbound);
         when(identityFactory.accept(anyString()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        when(chatService.chat(org.mockito.ArgumentMatchers.any(
+        when(authService.resolveRoleByUserId("user-A")).thenReturn("USER");
+        when(chatService.chat(any(
                 AcceptedChatCommand.class
         ))).thenReturn(new ChatResponse("session-A", "answer", "model", 1L));
         WebhookRouterService service = new WebhookRouterService(
@@ -48,7 +56,9 @@ class WebhookRouterServiceTest {
                 chatService,
                 eventService,
                 dispatcher,
-                identityFactory
+                identityFactory,
+                authService,
+                runtimeBridge
         );
 
         service.dispatch("feishu", Map.of("event", "message"));
@@ -61,5 +71,57 @@ class WebhookRouterServiceTest {
         assertThat(acceptedId.getValue()).matches("[0-9a-f]{32}");
         assertThat(command.getValue().runId()).isEqualTo(acceptedId.getValue());
         assertThat(command.getValue().request().sessionKey()).isEqualTo("session-A");
+
+        ArgumentCaptor<RunAcceptance> acceptance =
+                ArgumentCaptor.forClass(RunAcceptance.class);
+        verify(runtimeBridge).accepted(acceptance.capture());
+        assertThat(acceptance.getValue().runId()).isEqualTo(acceptedId.getValue());
+        assertThat(acceptance.getValue().sessionKey()).isEqualTo("session-A");
+        assertThat(acceptance.getValue().channel()).isEqualTo("feishu");
+        assertThat(acceptance.getValue().userId()).isEqualTo("user-A");
+        assertThat(acceptance.getValue().roleCodeAtAcceptance()).isEqualTo("USER");
+        assertThat(acceptance.getValue().originalMessage()).isEqualTo("hello");
+        assertThat(acceptance.getValue().responseMode()).isEqualTo("agent");
+        assertThat(Duration.between(
+                acceptance.getValue().acceptedAt(),
+                acceptance.getValue().deadlineAt()
+        )).isEqualTo(Duration.ofMinutes(30));
+    }
+
+    @Test
+    void lifecycleAcceptanceFailureStopsWebhookBeforeChat() {
+        ChannelAdapterFactory adapterFactory = mock(ChannelAdapterFactory.class);
+        ChatService chatService = mock(ChatService.class);
+        RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
+        AuthService authService = mock(AuthService.class);
+        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        ChannelAdapter adapter = mock(ChannelAdapter.class);
+        when(adapterFactory.getRequired("feishu")).thenReturn(adapter);
+        when(adapter.adapt(Map.of("event", "message"))).thenReturn(
+                new UnifiedInboundMessage("feishu", "session-A", "user-A", "hello")
+        );
+        when(identityFactory.accept(anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(authService.resolveRoleByUserId("user-A")).thenReturn("USER");
+        when(runtimeBridge.accepted(any(
+                RunAcceptance.class
+        ))).thenThrow(new IllegalStateException("lifecycle unavailable"));
+        WebhookRouterService service = new WebhookRouterService(
+                adapterFactory,
+                chatService,
+                mock(MessageEventService.class),
+                mock(ChannelOutboundDispatcher.class),
+                identityFactory,
+                authService,
+                runtimeBridge
+        );
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                com.springclaw.common.exception.BusinessException.class,
+                () -> service.dispatch("feishu", Map.of("event", "message"))
+        );
+
+        verify(chatService, org.mockito.Mockito.never())
+                .chat(any(AcceptedChatCommand.class));
     }
 }

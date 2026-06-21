@@ -4,6 +4,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.domain.entity.ScheduledTask;
 import com.springclaw.domain.entity.ScheduledTaskExecution;
 import com.springclaw.dto.chat.ChatRequest;
+import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
+import com.springclaw.runtime.lifecycle.RunAcceptance;
+import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.chat.impl.ChatServiceImpl;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.memory.MemoryService;
@@ -16,6 +19,7 @@ import com.springclaw.strategy.channel.outbound.ChannelOutboundDispatcher;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Set;
 
@@ -44,6 +48,9 @@ class TaskExecutionServiceTest {
         MessageEventService messageEventService = mock(MessageEventService.class);
         SoulPromptService soulPromptService = mock(SoulPromptService.class);
         ChannelOutboundDispatcher dispatcher = mock(ChannelOutboundDispatcher.class);
+        AuthService authService = mock(AuthService.class);
+        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        when(authService.resolveRoleByUserId("tester")).thenReturn("USER");
 
         TaskExecutionService service = new TaskExecutionService(
                 scheduledTaskService,
@@ -57,6 +64,8 @@ class TaskExecutionServiceTest {
                 messageEventService,
                 soulPromptService,
                 dispatcher,
+                authService,
+                runtimeBridge,
                 new ObjectMapper(),
                 true
         );
@@ -95,6 +104,21 @@ class TaskExecutionServiceTest {
                 anyString()
         );
         verify(executionService).complete(anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), anyString(), any());
+
+        ArgumentCaptor<RunAcceptance> acceptance =
+                ArgumentCaptor.forClass(RunAcceptance.class);
+        verify(runtimeBridge).accepted(acceptance.capture());
+        assertThat(acceptance.getValue().sessionKey()).isEqualTo("task:shadow:task_1");
+        assertThat(acceptance.getValue().channel()).isEqualTo("api");
+        assertThat(acceptance.getValue().userId()).isEqualTo("tester");
+        assertThat(acceptance.getValue().roleCodeAtAcceptance()).isEqualTo("USER");
+        assertThat(acceptance.getValue().originalMessage())
+                .isEqualTo("读取这个网页 https://example.com");
+        assertThat(acceptance.getValue().responseMode()).isEqualTo("skill");
+        assertThat(Duration.between(
+                acceptance.getValue().acceptedAt(),
+                acceptance.getValue().deadlineAt()
+        )).isEqualTo(Duration.ofMinutes(30));
     }
 
     @Test
@@ -110,6 +134,9 @@ class TaskExecutionServiceTest {
         MessageEventService messageEventService = mock(MessageEventService.class);
         SoulPromptService soulPromptService = mock(SoulPromptService.class);
         ChannelOutboundDispatcher dispatcher = mock(ChannelOutboundDispatcher.class);
+        AuthService authService = mock(AuthService.class);
+        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        when(authService.resolveRoleByUserId("tester")).thenReturn("USER");
 
         TaskExecutionService service = new TaskExecutionService(
                 scheduledTaskService,
@@ -123,6 +150,8 @@ class TaskExecutionServiceTest {
                 messageEventService,
                 soulPromptService,
                 dispatcher,
+                authService,
+                runtimeBridge,
                 new ObjectMapper(),
                 true
         );
@@ -174,6 +203,9 @@ class TaskExecutionServiceTest {
         MessageEventService messageEventService = mock(MessageEventService.class);
         SoulPromptService soulPromptService = mock(SoulPromptService.class);
         ChannelOutboundDispatcher dispatcher = mock(ChannelOutboundDispatcher.class);
+        AuthService authService = mock(AuthService.class);
+        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        when(authService.resolveRoleByUserId("tester")).thenReturn("USER");
 
         TaskExecutionService service = new TaskExecutionService(
                 scheduledTaskService,
@@ -187,6 +219,8 @@ class TaskExecutionServiceTest {
                 messageEventService,
                 soulPromptService,
                 dispatcher,
+                authService,
+                runtimeBridge,
                 new ObjectMapper(),
                 true
         );
@@ -227,12 +261,82 @@ class TaskExecutionServiceTest {
                 eq("MANUAL"),
                 startedRunId.capture()
         );
+        ArgumentCaptor<RunAcceptance> acceptance =
+                ArgumentCaptor.forClass(RunAcceptance.class);
+        ArgumentCaptor<ChatRequest> chatRequest =
+                ArgumentCaptor.forClass(ChatRequest.class);
+        verify(runtimeBridge).accepted(acceptance.capture());
         verify(chatService).executeTaskMessage(
-                any(ChatRequest.class),
+                chatRequest.capture(),
                 eq(false),
                 eq(startedRunId.getValue())
         );
+        assertThat(acceptance.getValue().runId()).isEqualTo(startedRunId.getValue());
+        assertThat(acceptance.getValue().originalMessage())
+                .isEqualTo("总结今天的项目进展");
+        assertThat(acceptance.getValue().responseMode()).isEqualTo("agent");
+        assertThat(chatRequest.getValue().message())
+                .isEqualTo(acceptance.getValue().originalMessage());
+        assertThat(chatRequest.getValue().responseMode()).isEqualTo("agent");
         assertThat(outcome.resultPayload()).contains("今日进展");
         assertThat(outcome.requestId()).isEqualTo(startedRunId.getValue());
+    }
+
+    @Test
+    void lifecycleAcceptanceFailureStopsScheduledExecutionBeforeExecutionRow() {
+        ScheduledTaskService scheduledTaskService = mock(ScheduledTaskService.class);
+        ScheduledTaskExecutionService executionService =
+                mock(ScheduledTaskExecutionService.class);
+        SkillRuntimeService skillRuntimeService = mock(SkillRuntimeService.class);
+        ChatServiceImpl chatService = mock(ChatServiceImpl.class);
+        AuthService authService = mock(AuthService.class);
+        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        when(authService.resolveRoleByUserId("tester")).thenReturn("USER");
+        when(runtimeBridge.accepted(any(RunAcceptance.class)))
+                .thenThrow(new IllegalStateException("lifecycle unavailable"));
+        TaskExecutionService service = new TaskExecutionService(
+                scheduledTaskService,
+                executionService,
+                new TaskScheduleSupport(),
+                skillRuntimeService,
+                mock(SkillService.class),
+                chatService,
+                mock(AgentSessionService.class),
+                mock(MemoryService.class),
+                mock(MessageEventService.class),
+                mock(SoulPromptService.class),
+                mock(ChannelOutboundDispatcher.class),
+                authService,
+                runtimeBridge,
+                new ObjectMapper(),
+                true
+        );
+        ScheduledTask task = new ScheduledTask();
+        task.setTaskId("task_failure");
+        task.setOwnerUserId("tester");
+        task.setName("失败任务");
+        task.setChannel("api");
+        task.setTargetType("agent");
+        task.setInputPayload("执行失败验证");
+        task.setPersistToSession(0);
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalStateException.class,
+                () -> service.runTask(task, "MANUAL")
+        );
+
+        verify(executionService, never()).start(anyString(), anyString(), anyString());
+        verify(chatService, never()).executeTaskMessage(
+                any(ChatRequest.class),
+                anyBoolean(),
+                anyString()
+        );
+        verify(skillRuntimeService, never())
+                .executeBySkillId(anyString(), anyString(), any());
+        verify(scheduledTaskService).markFinished(
+                eq(task),
+                eq("FAILED"),
+                any(LocalDateTime.class)
+        );
     }
 }

@@ -4,7 +4,10 @@ import com.springclaw.common.exception.BusinessException;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
 import com.springclaw.dto.webhook.WebhookDispatchResponse;
+import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
 import com.springclaw.runtime.identity.RunIdentityFactory;
+import com.springclaw.runtime.lifecycle.RunAcceptance;
+import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
 import com.springclaw.service.event.MessageEventService;
@@ -17,6 +20,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
@@ -32,22 +37,30 @@ public class WebhookRouterService {
 
     private static final Logger log = LoggerFactory.getLogger(WebhookRouterService.class);
 
+    private static final Duration RUN_DEADLINE = Duration.ofMinutes(30);
+
     private final ChannelAdapterFactory channelAdapterFactory;
     private final ChatService chatService;
     private final MessageEventService messageEventService;
     private final ChannelOutboundDispatcher channelOutboundDispatcher;
     private final RunIdentityFactory runIdentityFactory;
+    private final AuthService authService;
+    private final LegacyRuntimeBridge runtimeBridge;
 
     public WebhookRouterService(ChannelAdapterFactory channelAdapterFactory,
                                 ChatService chatService,
                                 MessageEventService messageEventService,
                                 ChannelOutboundDispatcher channelOutboundDispatcher,
-                                RunIdentityFactory runIdentityFactory) {
+                                RunIdentityFactory runIdentityFactory,
+                                AuthService authService,
+                                LegacyRuntimeBridge runtimeBridge) {
         this.channelAdapterFactory = channelAdapterFactory;
         this.chatService = chatService;
         this.messageEventService = messageEventService;
         this.channelOutboundDispatcher = channelOutboundDispatcher;
         this.runIdentityFactory = runIdentityFactory;
+        this.authService = authService;
+        this.runtimeBridge = runtimeBridge;
     }
 
     public WebhookDispatchResponse dispatch(String channel, Map<String, Object> payload) {
@@ -55,21 +68,36 @@ public class WebhookRouterService {
             return new WebhookDispatchResponse(channel, "feishu-self-message", "ignored");
         }
 
-        String requestId = runIdentityFactory.accept(
-                UUID.randomUUID().toString().replace("-", "")
-        );
+        String requestId = "";
         UnifiedInboundMessage inboundMessage = null;
         ChatResponse response = null;
         try {
             ChannelAdapter adapter = channelAdapterFactory.getRequired(channel);
             inboundMessage = adapter.adapt(payload);
+            requestId = runIdentityFactory.accept(
+                    UUID.randomUUID().toString().replace("-", "")
+            );
+            Instant acceptedAt = Instant.now();
+            String roleCode = authService.resolveRoleByUserId(inboundMessage.userId());
+            runtimeBridge.accepted(new RunAcceptance(
+                    requestId,
+                    inboundMessage.sessionKey(),
+                    inboundMessage.channel(),
+                    inboundMessage.userId(),
+                    roleCode,
+                    inboundMessage.text(),
+                    "agent",
+                    acceptedAt,
+                    acceptedAt.plus(RUN_DEADLINE)
+            ));
             response = chatService.chat(new AcceptedChatCommand(
                     requestId,
                     new ChatRequest(
                             inboundMessage.sessionKey(),
                             inboundMessage.userId(),
                             inboundMessage.text(),
-                            inboundMessage.channel()
+                            inboundMessage.channel(),
+                            "agent"
                     )
             ));
         } catch (Exception ex) {

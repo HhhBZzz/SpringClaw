@@ -164,9 +164,7 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
                                 true
                         );
                         chatResultPersister.persist(context, answer, basicResult);
-                        if (lifecycleObserver != null) {
-                            lifecycleObserver.resultReturned(context, basicResult, answer, Instant.now());
-                        }
+                        reportResult(context, basicResult, answer);
                         sseEventBridge.sendTrace(emitter, context, "调用模型", "model", "success",
                                 streamClient.displayName(), System.currentTimeMillis() - startedAt);
                         sseEventBridge.sendTrace(emitter, context, "完成", "final", "success",
@@ -295,11 +293,28 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
                 false
         );
         chatResultPersister.persist(context, answer, partialResult);
-        if (lifecycleObserver != null) {
-            lifecycleObserver.resultReturned(context, partialResult, answer, Instant.now());
-        }
+        reportResult(context, partialResult, answer);
         releaseLock(emitter, context, lockToken, lockReleased);
         return true;
+    }
+
+    private void reportResult(
+            ChatContext context,
+            ChatExecutionResult result,
+            String answer
+    ) {
+        if (lifecycleObserver == null) {
+            return;
+        }
+        try {
+            lifecycleObserver.resultReturned(context, result, answer, Instant.now());
+        } catch (RuntimeException ex) {
+            log.error(
+                    "canonical lifecycle projection failed after basic stream persistence, requestId={}",
+                    context.requestId(),
+                    ex
+            );
+        }
     }
 
     private void releaseLock(SseEmitter emitter,

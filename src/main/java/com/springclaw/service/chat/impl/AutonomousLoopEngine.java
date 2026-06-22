@@ -140,9 +140,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
             String finalAnswer = resolveFinalAnswer(result);
             sseEventBridge.sendAnswerChunks(emitter, finalAnswer);
             chatResultPersister.persist(context, finalAnswer, result);
-            if (lifecycleObserver != null) {
-                lifecycleObserver.resultReturned(context, result, finalAnswer, Instant.now());
-            }
+            reportResult(context, result, finalAnswer);
 
             sseEventBridge.sendTrace(emitter, context, "自主循环", "agent", "success",
                     "自主循环执行 " + result.action() + "。", 0L);
@@ -160,6 +158,25 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
             fallbackHandler.handle(context, ex, emitter, lockToken, lockReleased);
         }
         return null;
+    }
+
+    private void reportResult(
+            ChatContext context,
+            ChatExecutionResult result,
+            String answer
+    ) {
+        if (lifecycleObserver == null) {
+            return;
+        }
+        try {
+            lifecycleObserver.resultReturned(context, result, answer, Instant.now());
+        } catch (RuntimeException ex) {
+            log.error(
+                    "canonical lifecycle projection failed after autonomous persistence, requestId={}",
+                    context.requestId(),
+                    ex
+            );
+        }
     }
 
     /**

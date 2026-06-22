@@ -1,5 +1,10 @@
 package com.springclaw.scheduled;
 
+import com.springclaw.runtime.bridge.LegacyExecutionDecisionAdapter;
+import com.springclaw.runtime.bridge.LegacyLifecycleObserver;
+import com.springclaw.runtime.bridge.LegacyRunContextAdapter;
+import com.springclaw.runtime.bridge.LegacyRunResultAdapter;
+import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
 import com.springclaw.service.proposal.ToolInvocationProposal;
 import com.springclaw.service.proposal.ToolInvocationProposalRepository;
 import com.springclaw.service.proposal.ToolInvocationProposalService;
@@ -21,7 +26,15 @@ class ToolProposalCleanupTaskTest {
 
     private final ToolInvocationProposalRepository repository = mock(ToolInvocationProposalRepository.class);
     private final ToolInvocationProposalService proposalService = mock(ToolInvocationProposalService.class);
-    private final ToolProposalCleanupTask cleanupTask = new ToolProposalCleanupTask(repository, proposalService, null);
+    private final LegacyRuntimeBridge lifecycleBridge = mock(LegacyRuntimeBridge.class);
+    private final LegacyLifecycleObserver lifecycleObserver = new LegacyLifecycleObserver(
+            lifecycleBridge,
+            new LegacyRunContextAdapter(),
+            new LegacyExecutionDecisionAdapter(),
+            new LegacyRunResultAdapter()
+    );
+    private final ToolProposalCleanupTask cleanupTask =
+            new ToolProposalCleanupTask(repository, proposalService, lifecycleObserver);
 
     @Test
     void cleanup_expiresPendingAndMarksStuckExecutingAsFailed() {
@@ -68,6 +81,26 @@ class ToolProposalCleanupTaskTest {
 
         verify(proposalService).markFailed("tip-1", "execution interrupted or timeout");
         verify(proposalService).markFailed("tip-2", "execution interrupted or timeout");
+    }
+
+    @Test
+    void cleanup_projectsCanonicalFailureForStuckExecutingProposal() {
+        ToolInvocationProposal stuck = proposal("tip-stuck");
+        when(repository.expirePendingBefore(any(LocalDateTime.class))).thenReturn(List.of());
+        when(repository.findStuckExecuting(any(LocalDateTime.class))).thenReturn(List.of(stuck));
+        when(proposalService.markFailed("tip-stuck", "execution interrupted or timeout"))
+                .thenReturn(true);
+
+        cleanupTask.cleanup();
+
+        verify(lifecycleBridge).toolFailed(any(), any());
+        verify(lifecycleBridge).failed(
+                any(),
+                org.mockito.ArgumentMatchers.argThat(
+                        failure -> "TOOL_EXECUTION_TIMEOUT".equals(failure.code())
+                ),
+                any()
+        );
     }
 
     private static ToolInvocationProposal proposal(String proposalId) {

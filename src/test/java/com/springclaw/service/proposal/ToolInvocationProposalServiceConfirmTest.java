@@ -198,7 +198,11 @@ class ToolInvocationProposalServiceConfirmTest {
         ToolInvocationProposal result = service.reject(pid, "nope");
 
         assertThat(result.status()).isEqualTo(ToolInvocationProposalStatus.REJECTED);
-        verify(publisher, never()).publishEvent(any());
+        ArgumentCaptor<ToolProposalRejectedEvent> rejectedEvent =
+                ArgumentCaptor.forClass(ToolProposalRejectedEvent.class);
+        verify(publisher, times(1)).publishEvent(rejectedEvent.capture());
+        assertThat(rejectedEvent.getValue().proposalId()).isEqualTo(pid);
+        assertThat(rejectedEvent.getValue().reason()).isEqualTo("nope");
     }
 
     @Test

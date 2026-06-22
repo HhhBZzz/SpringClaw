@@ -39,6 +39,7 @@ public class ToolInvocationProposalService {
         this.publisher = publisher;
     }
 
+    @Transactional
     public ToolInvocationProposal createPending(ToolInvocationSnapshot snapshot,
                                                 ToolExecutionContext ctx) {
         if (snapshot == null) {
@@ -66,7 +67,9 @@ public class ToolInvocationProposalService {
                 null, null,
                 now, now, now.plusMinutes(DEFAULT_TTL_MINUTES)
         );
-        return repository.insert(p);
+        ToolInvocationProposal inserted = repository.insert(p);
+        publisher.publishEvent(new ToolProposalCreatedEvent(proposalId, ctx.runId()));
+        return inserted;
     }
 
     public Optional<ToolInvocationProposal> findByProposalId(String proposalId) {
@@ -134,6 +137,7 @@ public class ToolInvocationProposalService {
         if (!ok) {
             throw new BusinessException(40409, "状态变更失败");
         }
+        publisher.publishEvent(new ToolProposalRejectedEvent(proposalId, proposal.runId(), reason));
         return repository.findByProposalId(proposalId).orElseThrow();
     }
 }

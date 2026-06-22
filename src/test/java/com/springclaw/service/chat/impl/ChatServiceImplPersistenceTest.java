@@ -116,6 +116,7 @@ class ChatServiceImplPersistenceTest {
                 null,
                 sseEventBridge,
                 null,
+                null,
                 new DefaultRunIdentityFactory(),
                 false,
                 true
@@ -215,6 +216,7 @@ class ChatServiceImplPersistenceTest {
                 engineSelector,
                 null,
                 sseEventBridge,
+                null,
                 null,
                 new DefaultRunIdentityFactory(),
                 false,

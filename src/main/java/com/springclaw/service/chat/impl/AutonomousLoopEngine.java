@@ -1,6 +1,7 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.common.util.TextUtils;
+import com.springclaw.runtime.bridge.LegacyLifecycleObserver;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
@@ -20,6 +21,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
 
 import java.lang.reflect.Method;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -57,6 +59,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
     private final SseEventBridge sseEventBridge;
     private final ChatResultPersister chatResultPersister;
     private final ChatGuardService chatGuardService;
+    private final LegacyLifecycleObserver lifecycleObserver;
     private final boolean localFallbackEnabled;
     private final int maxAutonomousSteps;
 
@@ -70,6 +73,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
                                 SseEventBridge sseEventBridge,
                                 ChatResultPersister chatResultPersister,
                                 ChatGuardService chatGuardService,
+                                LegacyLifecycleObserver lifecycleObserver,
                                 @Value("${springclaw.chat.local-fallback-enabled:true}") boolean localFallbackEnabled,
                                 @Value("${springclaw.chat.max-autonomous-steps:5}") int maxAutonomousSteps) {
         this.aiProviderService = aiProviderService;
@@ -82,6 +86,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
         this.sseEventBridge = sseEventBridge;
         this.chatResultPersister = chatResultPersister;
         this.chatGuardService = chatGuardService;
+        this.lifecycleObserver = lifecycleObserver;
         this.localFallbackEnabled = localFallbackEnabled;
         this.maxAutonomousSteps = Math.max(1, Math.min(maxAutonomousSteps, 15));
     }
@@ -135,6 +140,9 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
             String finalAnswer = resolveFinalAnswer(result);
             sseEventBridge.sendAnswerChunks(emitter, finalAnswer);
             chatResultPersister.persist(context, finalAnswer, result);
+            if (lifecycleObserver != null) {
+                lifecycleObserver.resultReturned(context, result, finalAnswer, Instant.now());
+            }
 
             sseEventBridge.sendTrace(emitter, context, "自主循环", "agent", "success",
                     "自主循环执行 " + result.action() + "。", 0L);

@@ -840,3 +840,53 @@ Limitation:
 Next dependency:
   Phase 2B Task 8 integration acceptance
 ```
+
+## Update: Phase 2B Task 8 integration acceptance
+
+```text
+Task: Phase 2B Task 8 integration acceptance
+Owner: Codex
+Reviewed Claude commits:
+  7ccc530 feat: project persisted proposal suspension onto canonical run
+  1d057c5 feat: project proposal approval, rejection, and expiry onto canonical run
+  aa7d9ad feat: project frozen tool outcomes onto canonical run
+  1dd933d docs: record phase 2b task 7 projection evidence
+Codex P1 fixes:
+  e349b90 fix: terminate canonical runs on frozen tool failure
+  435820d fix: isolate terminal tool failure projection
+  3f62662 fix: isolate timeout terminal projection
+Findings and corrections:
+  - ToolRuntimeAspect may mark a proposal FAILED before the async execution
+    owner catches the exception. The canonical run is now terminated even when
+    the executor's idempotent markFailed call returns false.
+  - toolFailed observation append and terminal failed transition use separate
+    exception boundaries, so an observation failure cannot strand RUNNING.
+  - cleanup of stuck EXECUTING proposals projects TOOL_FAILED and terminal
+    TOOL_EXECUTION_TIMEOUT only when its CAS actually changes the proposal.
+Acceptance evidence (2026-06-22, Asia/Shanghai):
+  - Gate 2 contract/lifecycle core: 86 tests, 0 failures, 0 errors, 0 skips
+  - Gate 3 characterization/Phase 2A: 53 tests, 0 failures, 0 errors, 0 skips
+  - Gate 4 ingress/execution observations: 47 tests, 0 failures, 0 errors, 0 skips
+  - Gate 5 async/trace/proposal/P0 safety: 61 tests, 0 failures, 0 errors, 0 skips
+  - Gate 6 focused baseline: 29 tests, 0 failures, 0 errors, 0 skips
+  - Gate 7 final full mvn test: 659 tests, 0 failures, 0 errors, 0 skips
+Review:
+  - bounded P0/P1 review after all three fixes: APPROVED
+Environment:
+  - local MySQL 8.0.43 connected through .env.local without exposing secrets
+  - Redis and RabbitMQ were available during Spring integration tests
+Scope:
+  - no Task 7 change to tool/runtime, service/workspace, DTOs, resources, or env
+  - e9013cc is the separately reviewed Codex core/stream fix after the original
+    1f51ba2 freeze baseline
+Known limits:
+  - lifecycle storage and AFTER_COMMIT projections remain process-local
+  - no restart durability, exactly-once execution, or duplicate suppression claim
+  - successful frozen tool execution does not resume the original strategy;
+    durable continuation remains Phase 4A
+Rollback order:
+  - revert Task 7 projection commits and Codex P1 fixes
+  - revert Task 6 observation wiring
+  - revert Task 5 ingress wiring
+  - revert lifecycle core while retaining Phase 2A canonical identity
+```

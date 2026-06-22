@@ -728,3 +728,57 @@ Whitespace check: clean
 Next dependency:
   Phase 2B Task 6 legacy observation wiring
 ```
+
+## Update: Phase 2B Task 6 legacy observation wiring
+
+```text
+Task: Phase 2B Task 6 observation wiring
+Owner: Claude
+Base: f0f15a9
+Commit:
+  e3c3538 feat: project legacy execution into canonical lifecycle
+Decisions:
+  - LegacyLifecycleObserver injected into ChatServiceImpl and the three
+    streamable engines (Basic/ModelLed/Autonomous).
+  - Blocking executeInternal: contextAndDecisionObserved after build,
+    single engine select + executionStarted, resultReturned after
+    persistence (even when persistResult=false), failed on exception.
+  - SSE executeStream: contextAndDecisionObserved after build,
+    executionStarted after the one EngineSelector.select,
+    confirmationRequired when streamActionRequired creates an
+    AgentActionProposal, failed on startup failure.
+  - PendingToolApprovalException catch does NOT call confirmationRequired;
+    Task 7 owns persisted tool-proposal suspension.
+  - Five SSE terminal points each call resultReturned exactly once:
+    streamImmediateAnswer, streamAgentRuntimeAnswer success,
+    streamBlockingFallback success, streamReflectAnswer doOnComplete,
+    streamReflectAnswer doOnError after fallback persistence.
+    streamBlockingFallback own failure calls failed.
+  - Engines call resultReturned after their successful persistence,
+    including partial-answer fallback recovery (mutually exclusive with
+    streamBlockingFallback via handlePartialAnswer return value).
+  - observer is nullable with guards; production Spring-injected path is
+    non-null. Existing behavior tests pass null observer and are
+    unchanged. New focused tests use a real observer backed by the
+    process-local store to prove DEGRADED/FAILED terminal projection.
+Deviation from plan:
+  - Plan 6.1 asked for "no-op-free real dependency" in compatibility
+    constructors. Claude used null-guarded observer instead, because
+    existing ChatServiceImpl tests do not pre-accept a canonical run and
+    a real observer would throw "run not found" in those behavior tests.
+    Lifecycle correctness is proven by the new focused projection test
+    with a real observer; production path is unaffected. Flagged for
+    Codex review.
+Tests:
+  - 67 contract tests pass
+  - 53 characterization/Phase 2A tests pass
+  - 29 baseline tests pass
+  - 3 new ChatServiceImplLifecycleProjectionTest cases pass
+  - all existing ChatServiceImpl/engine/transport tests green
+Prohibited-file check (f0f15a9..HEAD): clean (runtime, tool/runtime,
+  service/workspace, dto, resources, .env.example untouched)
+Whitespace check: clean
+Environmental warnings: none
+Next dependency:
+  Phase 2B Task 7 legacy status store projections
+```

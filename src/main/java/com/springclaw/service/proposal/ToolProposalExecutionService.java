@@ -71,11 +71,13 @@ public class ToolProposalExecutionService {
             try {
                 // 调用代理 bean → 再次进入 ToolRuntimeAspect → 二次校验 + GitGuard 包裹工具执行
                 toolInvoker.invoke(proposal.toolName(), proposal.argumentsCanonicalJson());
+                projectToolSucceeded(proposal);
             } catch (Throwable ex) {
                 // ToolRuntimeAspect 在校验失败时已经调过 markFailed；这里兜底再做一次（幂等）
-                proposalService.markFailed(proposalId,
+                boolean changed = proposalService.markFailed(proposalId,
                         ex.getClass().getSimpleName() + ": "
                                 + (ex.getMessage() == null ? "" : ex.getMessage()));
+                projectToolFailed(proposal, ex, changed);
                 log.error("execute proposal {} failed", proposalId, ex);
             } finally {
                 ToolExecutionContextHolder.clearApprovedProposal();
@@ -93,6 +95,44 @@ public class ToolProposalExecutionService {
             lifecycleObserver.toolStarted(runId, Instant.now());
         } catch (RuntimeException ex) {
             log.warn("canonical confirmationApproved/toolStarted projection failed, proposalId={}, reason={}",
+                    proposal.proposalId(), ex.getMessage());
+        }
+    }
+
+    private void projectToolSucceeded(ToolInvocationProposal proposal) {
+        String runId = proposal.runId();
+        if (runId == null || runId.isBlank() || lifecycleObserver == null) {
+            return;
+        }
+        try {
+            // Tool success is a frozen outcome; it does not mark the run terminal
+            // and does not claim strategy continuation (durable continuation is Phase 4A).
+            lifecycleObserver.toolSucceeded(runId, Instant.now());
+        } catch (RuntimeException ex) {
+            log.warn("canonical toolSucceeded projection failed, proposalId={}, reason={}",
+                    proposal.proposalId(), ex.getMessage());
+        }
+    }
+
+    private void projectToolFailed(ToolInvocationProposal proposal, Throwable error, boolean stateChanged) {
+        String runId = proposal.runId();
+        if (runId == null || runId.isBlank() || lifecycleObserver == null) {
+            return;
+        }
+        try {
+            lifecycleObserver.toolFailed(runId, Instant.now());
+            // Only the repository call that actually moved a nonterminal proposal
+            // to FAILED may transition the canonical run to FAILED (idempotent).
+            if (stateChanged) {
+                lifecycleObserver.failed(
+                        runId,
+                        "TOOL_EXECUTION_FAILED",
+                        error,
+                        Instant.now()
+                );
+            }
+        } catch (RuntimeException ex) {
+            log.warn("canonical toolFailed projection failed, proposalId={}, reason={}",
                     proposal.proposalId(), ex.getMessage());
         }
     }

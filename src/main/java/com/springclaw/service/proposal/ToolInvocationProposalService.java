@@ -76,8 +76,12 @@ public class ToolInvocationProposalService {
         return repository.findByProposalId(proposalId);
     }
 
-    public void markFailed(String proposalId, String error) {
-        repository.recordFailure(proposalId, error);
+    /**
+     * @return true 当且仅当本次调用真正把一个非终态 proposal 迁移到 FAILED。
+     * 调用方据此决定是否发出 canonical 失败投影（不变量 9 幂等）。
+     */
+    public boolean markFailed(String proposalId, String error) {
+        return repository.recordFailure(proposalId, error);
     }
 
     /**

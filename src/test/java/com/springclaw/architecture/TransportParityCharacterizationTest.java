@@ -74,6 +74,7 @@ class TransportParityCharacterizationTest {
         AsyncChatResultStore store = new AsyncChatResultStore(
                 providerOf(redisson),
                 OBJECT_MAPPER,
+                null,
                 " custom: ",
                 24
         );
@@ -94,6 +95,7 @@ class TransportParityCharacterizationTest {
         AsyncChatResultStore store = new AsyncChatResultStore(
                 providerOf(redisson),
                 OBJECT_MAPPER,
+                null,
                 "  ",
                 0
         );
@@ -109,6 +111,7 @@ class TransportParityCharacterizationTest {
         AsyncChatResultStore store = new AsyncChatResultStore(
                 providerOf(null),
                 OBJECT_MAPPER,
+                null,
                 "results:",
                 24
         );
@@ -143,6 +146,7 @@ class TransportParityCharacterizationTest {
         AsyncChatResultStore store = new AsyncChatResultStore(
                 providerOf(redisson),
                 OBJECT_MAPPER,
+                null,
                 "results:",
                 24
         );
@@ -174,6 +178,7 @@ class TransportParityCharacterizationTest {
         AsyncChatResultStore store = new AsyncChatResultStore(
                 providerOf(redisson),
                 OBJECT_MAPPER,
+                null,
                 "results:",
                 24
         );
@@ -317,13 +322,14 @@ class TransportParityCharacterizationTest {
         Constructor<AsyncChatResultStore> storeConstructor = AsyncChatResultStore.class.getConstructor(
                 ObjectProvider.class,
                 ObjectMapper.class,
+                com.springclaw.runtime.lifecycle.RunStateRepository.class,
                 String.class,
                 long.class
         );
         assertThat(storeConstructor.getParameterTypes()[0]).isEqualTo(ObjectProvider.class);
-        assertThat(storeConstructor.getParameters()[2].getAnnotation(Value.class).value())
-                .isEqualTo("${springclaw.rabbitmq.async-result-key-prefix:springclaw:chat:async:}");
         assertThat(storeConstructor.getParameters()[3].getAnnotation(Value.class).value())
+                .isEqualTo("${springclaw.rabbitmq.async-result-key-prefix:springclaw:chat:async:}");
+        assertThat(storeConstructor.getParameters()[4].getAnnotation(Value.class).value())
                 .isEqualTo("${springclaw.rabbitmq.async-result-ttl-hours:24}");
         assertThat(AsyncChatResultStore.class.getMethod(
                 "markQueued",
@@ -335,6 +341,7 @@ class TransportParityCharacterizationTest {
         AsyncChatResultStore localFallbackStore = new AsyncChatResultStore(
                 providerOf(null),
                 OBJECT_MAPPER,
+                null,
                 "inventory:",
                 24
         );

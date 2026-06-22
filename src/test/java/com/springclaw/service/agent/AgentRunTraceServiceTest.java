@@ -301,4 +301,65 @@ class AgentRunTraceServiceTest {
         verify(jdbcTemplate).update(startsWith("INSERT INTO agent_run"), varargs.capture());
         assertThat(varargs.getValue()[9]).isEqualTo("UNKNOWN");
     }
+
+    @Test
+    void structuredTraceProjectsOneCanonicalTerminalSnapshot() {
+        InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+        RunCoordinator coordinator = new RunCoordinator(store);
+        Instant acceptedAt = Instant.parse("2026-06-22T00:00:00Z");
+        coordinator.accept(new RunAcceptance(
+                "req-terminal", "s1", "api", "u1", "USER", "hi", "agent",
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+        coordinator.failed(
+                "req-terminal",
+                new RunState.Failure("LEGACY_EXECUTION_FAILED", "boom", false),
+                acceptedAt.plusSeconds(7)
+        );
+
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        when(jdbcTemplate.queryForObject(any(String.class), eq(Integer.class), eq("req-terminal")))
+                .thenReturn(0);
+        AgentRunTraceService service = new AgentRunTraceService(
+                messageEventService, new ObjectMapper(), jdbcTemplate, null, store);
+
+        service.record(
+                "s1", "api", "u1", "req-terminal",
+                "late trace", "final", "success", "late", 99L
+        );
+
+        ArgumentCaptor<Object[]> values = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(startsWith("INSERT INTO agent_run\n"), values.capture());
+        assertThat(values.getValue()[5]).isEqualTo("FAILED");
+        assertThat(values.getValue()[7]).isEqualTo(
+                java.time.LocalDateTime.ofInstant(
+                        acceptedAt.plusSeconds(7),
+                        java.time.ZoneId.systemDefault()
+                )
+        );
+        assertThat(values.getValue()[8]).isEqualTo(7000L);
+    }
+
+    @Test
+    void unknownProjectionCannotOverwriteExistingTerminalStatus() {
+        InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        when(jdbcTemplate.queryForObject(any(String.class), eq(Integer.class), eq("req-missing")))
+                .thenReturn(0);
+        AgentRunTraceService service = new AgentRunTraceService(
+                messageEventService, new ObjectMapper(), jdbcTemplate, null, store);
+
+        service.record(
+                "s1", "api", "u1", "req-missing",
+                "diagnostic", "final", "success", "late", 99L
+        );
+
+        verify(jdbcTemplate).update(
+                argThat(sql -> sql.contains("VALUES(status) = 'UNKNOWN'")
+                        && sql.contains("status IN ('COMPLETED', 'DEGRADED', 'FAILED')")),
+                any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any()
+        );
+    }
 }

@@ -19,6 +19,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.time.Duration;
+import java.time.ZoneId;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -41,12 +43,12 @@ public class AgentRunTraceService {
                                 ObjectMapper objectMapper,
                                 ObjectProvider<JdbcTemplate> jdbcTemplateProvider,
                                 ObjectProvider<AgentLearningService> agentLearningServiceProvider,
-                                ObjectProvider<RunStateRepository> runStateRepositoryProvider) {
+                                RunStateRepository runStateRepository) {
         this(messageEventService,
                 objectMapper,
                 jdbcTemplateProvider == null ? null : jdbcTemplateProvider.getIfAvailable(),
                 agentLearningServiceProvider == null ? null : agentLearningServiceProvider.getIfAvailable(),
-                runStateRepositoryProvider == null ? null : runStateRepositoryProvider.getIfAvailable());
+                runStateRepository);
     }
 
     public AgentRunTraceService(MessageEventService messageEventService,
@@ -204,7 +206,9 @@ public class AgentRunTraceService {
             return;
         }
         LocalDateTime now = LocalDateTime.now();
-        String canonicalStatus = resolveCanonicalStatus(requestId);
+        RunState canonical = canonicalRun(requestId);
+        String canonicalStatus = canonicalStatus(canonical);
+        LocalDateTime canonicalStartedAt = canonicalStart(canonical);
         try {
             jdbcTemplate.update("""
                             INSERT INTO agent_run
@@ -230,7 +234,7 @@ public class AgentRunTraceService {
                     emptyToNull(executionMode),
                     emptyToNull(intent),
                     canonicalStatus,
-                    now,
+                    canonicalStartedAt == null ? now : canonicalStartedAt,
                     now,
                     now);
         } catch (Exception ex) {
@@ -333,14 +337,25 @@ public class AgentRunTraceService {
                                 String requestId,
                                 AgentRunTraceEvent event) {
         LocalDateTime now = LocalDateTime.now();
-        String runStatus = resolveCanonicalStatus(requestId);
-        boolean terminal = isCanonicalTerminal(requestId);
+        RunState canonical = canonicalRun(requestId);
+        String runStatus = canonicalStatus(canonical);
+        LocalDateTime startedAt = canonicalStart(canonical);
+        LocalDateTime finishedAt = canonicalTime(
+                canonical == null ? null : canonical.finishedAt()
+        );
+        Long durationMs = canonicalDurationMs(canonical);
         jdbcTemplate.update("""
                         INSERT INTO agent_run
                         (id, request_id, session_key, channel, user_id, response_mode, execution_mode, intent, status, started_at, finished_at, duration_ms, quality_score, quality_level, evaluation_json, create_time, update_time, deleted)
                         VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                         ON DUPLICATE KEY UPDATE
-                          status = IF(VALUES(status) = 'RUNNING' AND status <> 'RUNNING', status, VALUES(status)),
+                          status = IF(
+                            (VALUES(status) = 'RUNNING' AND status <> 'RUNNING')
+                            OR (VALUES(status) = 'UNKNOWN'
+                                AND status IN ('COMPLETED', 'DEGRADED', 'FAILED')),
+                            status,
+                            VALUES(status)
+                          ),
                           finished_at = COALESCE(VALUES(finished_at), finished_at),
                           duration_ms = COALESCE(VALUES(duration_ms), duration_ms),
                           quality_score = COALESCE(VALUES(quality_score), quality_score),
@@ -354,9 +369,9 @@ public class AgentRunTraceService {
                 defaultText(channel, "api"),
                 defaultText(userId, "unknown"),
                 runStatus,
-                now,
-                terminal ? now : null,
-                terminal ? event.durationMs() : null,
+                startedAt == null ? now : startedAt,
+                finishedAt,
+                durationMs,
                 event.qualityScore(),
                 emptyToNull(event.qualityLevel()),
                 emptyToNull(event.evaluationJson()),
@@ -584,14 +599,33 @@ public class AgentRunTraceService {
      * events no longer infer status; if no canonical run exists the projection
      * is {@code UNKNOWN} and diagnostic trace persistence may still continue.
      */
-    private String resolveCanonicalStatus(String requestId) {
-        RunState state = canonicalRun(requestId);
+    private String canonicalStatus(RunState state) {
         return state == null ? "UNKNOWN" : state.status().name();
     }
 
-    private boolean isCanonicalTerminal(String requestId) {
-        RunState state = canonicalRun(requestId);
-        return state != null && state.status().isTerminal();
+    private LocalDateTime canonicalTime(java.time.Instant value) {
+        return value == null
+                ? null
+                : LocalDateTime.ofInstant(value, ZoneId.systemDefault());
+    }
+
+    private LocalDateTime canonicalStart(RunState state) {
+        if (state == null) {
+            return null;
+        }
+        return canonicalTime(
+                state.startedAt() == null ? state.acceptedAt() : state.startedAt()
+        );
+    }
+
+    private Long canonicalDurationMs(RunState state) {
+        if (state == null || state.finishedAt() == null) {
+            return null;
+        }
+        java.time.Instant start = state.startedAt() == null
+                ? state.acceptedAt()
+                : state.startedAt();
+        return Duration.between(start, state.finishedAt()).toMillis();
     }
 
     private RunState canonicalRun(String requestId) {

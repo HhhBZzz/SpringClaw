@@ -72,6 +72,7 @@ class PromptInjectionTest {
                 mock(SseEventBridge.class),
                 mock(ChatResultPersister.class),
                 mock(com.springclaw.service.guard.ChatGuardService.class),
+                null,
                 true
         );
         String prompt = engine.renderBasicChatPrompt(context());
@@ -110,6 +111,7 @@ class PromptInjectionTest {
                 mock(SseEventBridge.class),
                 mock(ChatResultPersister.class),
                 mock(com.springclaw.service.guard.ChatGuardService.class),
+                null,
                 false
         );
         String prompt = engine.renderModelLedPrompt(context());
@@ -130,6 +132,7 @@ class PromptInjectionTest {
                 mock(SseEventBridge.class),
                 mock(ChatResultPersister.class),
                 mock(com.springclaw.service.guard.ChatGuardService.class),
+                null,
                 true,
                 5
         );

@@ -319,6 +319,7 @@ class RuntimeRouteCharacterizationTest {
                     mock(SseEventBridge.class),
                     mock(ChatResultPersister.class),
                     mock(ChatGuardService.class),
+                    null,
                     true
             );
             agentRuntimeEngine = new AgentRuntimeEngine(
@@ -339,6 +340,7 @@ class RuntimeRouteCharacterizationTest {
                     mock(SseEventBridge.class),
                     mock(ChatResultPersister.class),
                     mock(ChatGuardService.class),
+                    null,
                     true,
                     5
             );
@@ -352,6 +354,7 @@ class RuntimeRouteCharacterizationTest {
                     mock(SseEventBridge.class),
                     mock(ChatResultPersister.class),
                     mock(ChatGuardService.class),
+                    null,
                     true
             );
             simplifiedOparEngine = RuntimeEngineTestFactory.simplifiedOparEngine(modelTransportGuardService);

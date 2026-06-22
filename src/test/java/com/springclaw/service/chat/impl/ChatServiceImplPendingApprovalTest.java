@@ -110,6 +110,7 @@ class ChatServiceImplPendingApprovalTest {
                 localExecutionSupport,
                 sseEventBridge,
                 proposalService,
+                null,
                 new DefaultRunIdentityFactory(),
                 false,
                 true

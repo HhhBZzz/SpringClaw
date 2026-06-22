@@ -446,6 +446,7 @@ class ChatServiceImplModeTest {
                     sseEventBridge,
                     chatResultPersister,
                     chatGuardService,
+                    null,
                     basicStreamingEnabled
             );
         }
@@ -462,6 +463,7 @@ class ChatServiceImplModeTest {
                     sseEventBridge,
                     chatResultPersister,
                     chatGuardService,
+                    null,
                     modelLedStreamingEnabled
             );
         }
@@ -528,6 +530,7 @@ class ChatServiceImplModeTest {
                     null,
                     sseEventBridge,
                     null,
+                    null,
                     runIdentityFactory,
                     false,
                     true
@@ -554,6 +557,7 @@ class ChatServiceImplModeTest {
                     engineSelector,
                     null,
                     sseEventBridge,
+                    null,
                     null,
                     runIdentityFactory,
                     false,

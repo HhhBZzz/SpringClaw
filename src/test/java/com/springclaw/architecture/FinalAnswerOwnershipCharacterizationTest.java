@@ -379,6 +379,7 @@ class FinalAnswerOwnershipCharacterizationTest {
                     null,
                     null,
                     null,
+                    null,
                     new DefaultRunIdentityFactory(),
                     false,
                     true

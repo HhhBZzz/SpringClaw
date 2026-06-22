@@ -94,6 +94,11 @@ public class ToolProposalCleanupTask {
         }
         try {
             lifecycleObserver.toolFailed(runId, Instant.now());
+        } catch (RuntimeException ex) {
+            log.warn("canonical toolFailed observation failed, proposalId={}, reason={}",
+                    proposal.proposalId(), ex.getMessage());
+        }
+        try {
             lifecycleObserver.failed(
                     runId,
                     "TOOL_EXECUTION_TIMEOUT",

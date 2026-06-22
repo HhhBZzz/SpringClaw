@@ -74,10 +74,10 @@ public class ToolProposalExecutionService {
                 projectToolSucceeded(proposal);
             } catch (Throwable ex) {
                 // ToolRuntimeAspect 在校验失败时已经调过 markFailed；这里兜底再做一次（幂等）
-                boolean changed = proposalService.markFailed(proposalId,
+                proposalService.markFailed(proposalId,
                         ex.getClass().getSimpleName() + ": "
                                 + (ex.getMessage() == null ? "" : ex.getMessage()));
-                projectToolFailed(proposal, ex, changed);
+                projectToolFailed(proposal, ex);
                 log.error("execute proposal {} failed", proposalId, ex);
             } finally {
                 ToolExecutionContextHolder.clearApprovedProposal();
@@ -114,23 +114,21 @@ public class ToolProposalExecutionService {
         }
     }
 
-    private void projectToolFailed(ToolInvocationProposal proposal, Throwable error, boolean stateChanged) {
+    private void projectToolFailed(ToolInvocationProposal proposal, Throwable error) {
         String runId = proposal.runId();
         if (runId == null || runId.isBlank() || lifecycleObserver == null) {
             return;
         }
         try {
             lifecycleObserver.toolFailed(runId, Instant.now());
-            // Only the repository call that actually moved a nonterminal proposal
-            // to FAILED may transition the canonical run to FAILED (idempotent).
-            if (stateChanged) {
-                lifecycleObserver.failed(
-                        runId,
-                        "TOOL_EXECUTION_FAILED",
-                        error,
-                        Instant.now()
-                );
-            }
+            // ToolRuntimeAspect may already have moved the proposal to FAILED.
+            // This execution owner must still terminate the canonical run.
+            lifecycleObserver.failed(
+                    runId,
+                    "TOOL_EXECUTION_FAILED",
+                    error,
+                    Instant.now()
+            );
         } catch (RuntimeException ex) {
             log.warn("canonical toolFailed projection failed, proposalId={}, reason={}",
                     proposal.proposalId(), ex.getMessage());

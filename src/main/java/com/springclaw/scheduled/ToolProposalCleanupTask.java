@@ -54,8 +54,14 @@ public class ToolProposalCleanupTask {
         List<ToolInvocationProposal> stuck = repository.findStuckExecuting(now.minusMinutes(10));
         for (ToolInvocationProposal p : stuck) {
             try {
-                proposalService.markFailed(p.proposalId(), "execution interrupted or timeout");
-                log.warn("marked stuck EXECUTING proposal {} as FAILED", p.proposalId());
+                boolean changed = proposalService.markFailed(
+                        p.proposalId(),
+                        "execution interrupted or timeout"
+                );
+                if (changed) {
+                    projectExecutionTimeout(p);
+                    log.warn("marked stuck EXECUTING proposal {} as FAILED", p.proposalId());
+                }
             } catch (Exception ex) {
                 log.error("failed to mark stuck EXECUTING proposal {} as FAILED: {}",
                         p.proposalId(), ex.getMessage(), ex);
@@ -77,6 +83,28 @@ public class ToolProposalCleanupTask {
             );
         } catch (RuntimeException ex) {
             log.warn("canonical CONFIRMATION_EXPIRED projection failed, proposalId={}, reason={}",
+                    proposal.proposalId(), ex.getMessage());
+        }
+    }
+
+    private void projectExecutionTimeout(ToolInvocationProposal proposal) {
+        String runId = proposal.runId();
+        if (runId == null || runId.isBlank() || lifecycleObserver == null) {
+            return;
+        }
+        try {
+            lifecycleObserver.toolFailed(runId, Instant.now());
+            lifecycleObserver.failed(
+                    runId,
+                    "TOOL_EXECUTION_TIMEOUT",
+                    new IllegalStateException(
+                            "proposal " + proposal.proposalId()
+                                    + " execution interrupted or timed out"
+                    ),
+                    Instant.now()
+            );
+        } catch (RuntimeException ex) {
+            log.warn("canonical TOOL_EXECUTION_TIMEOUT projection failed, proposalId={}, reason={}",
                     proposal.proposalId(), ex.getMessage());
         }
     }

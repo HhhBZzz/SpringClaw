@@ -782,3 +782,61 @@ Environmental warnings: none
 Next dependency:
   Phase 2B Task 7 legacy status store projections
 ```
+
+## Update: Phase 2B Task 7 legacy status store projections
+
+```text
+Task: Phase 2B Task 7 projection wiring
+Owner: Claude
+Base: 2c7ede7
+Commits:
+  7924456 feat: guard async result projection by canonical run status
+  597e562 feat: project canonical run status into trace metadata
+  7ccc530 feat: project persisted proposal suspension onto canonical run
+  1d057c5 feat: project proposal approval, rejection, and expiry onto canonical run
+  aa7d9ad feat: project frozen tool outcomes onto canonical run
+Decisions:
+  - 7.1 AsyncChatResultStore injects RunStateRepository (nullable guard);
+    markQueued requires nonterminal run, markCompleted requires COMPLETED or
+    DEGRADED, markFailed requires FAILED and no-ops otherwise (no overwrite of
+    a successful payload by a late notification failure).
+  - 7.2 AgentRunTraceService injects RunStateRepository (nullable); recordRunMetadata
+    and upsertAgentRun read status from canonical state (UNKNOWN when absent);
+    toRunStatus deleted; trace events/quality/steps/tool rows/payload JSON unchanged.
+  - 7.3 ToolProposalCreatedEvent + AFTER_COMMIT ToolProposalLifecycleListener is the
+    unique owner of persisted tool-proposal suspension (confirmationRequired);
+    createPending is @Transactional and publishes the event.
+  - 7.4 onExecutionRequested calls confirmationApproved + toolStarted before tool
+    context; reject publishes ToolProposalRejectedEvent (AFTER_COMMIT ->
+    confirmationRejected); expirePendingBefore is per-row CAS returning the exact
+    expired list; ToolProposalCleanupTask projects failed(CONFIRMATION_EXPIRED)
+    per expired proposal.
+  - 7.5 toolInvoker success -> toolSucceeded (run not marked terminal, no strategy
+    continuation claim); failure -> markFailed (now returns boolean) and only when
+    it actually moved a nonterminal proposal to FAILED does it emit toolFailed +
+    failed(TOOL_EXECUTION_FAILED). Idempotent.
+  - markFailed signature changed void -> boolean; existing callers ignore the
+    return value (Java-compatible). ToolRuntimeAspect and WorkspaceGitGuard untouched.
+Deviation from plan:
+  - RunStateRepository/LegacyLifecycleObserver are nullable with guards in
+    AsyncChatResultStore and AgentRunTraceService (same pattern as Task 6 observer),
+    so existing storage-mechanism and trace tests that do not pre-accept a canonical
+    run remain green. Production Spring-injected path is non-null; projection
+    correctness is proven by new focused tests with a real process-local store.
+Tests:
+  - full mvn test green (including DB-backed ToolInvocationProposalRepositoryTest
+    and ToolRuntimeAspectInterceptionIT against local MySQL 8.0.43)
+  - new focused tests: AsyncChatResultStoreProjectionTest (6),
+    ToolProposalLifecycleListenerTest (4), AgentRunTraceServiceTest canonical
+    projection cases (2)
+  - 7.6 verification groups green
+Prohibited-file check (2c7ede7..HEAD): clean (runtime, tool/runtime,
+  service/workspace, dto, resources, .env.example untouched)
+Whitespace check: clean
+Environmental warnings: none (local MySQL connected via .env.local)
+Limitation:
+  - successful frozen tool execution does not yet resume the original strategy
+    continuation (durable continuation remains Phase 4A)
+Next dependency:
+  Phase 2B Task 8 integration acceptance
+```

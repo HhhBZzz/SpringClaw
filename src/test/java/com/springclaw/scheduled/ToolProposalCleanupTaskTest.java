@@ -21,11 +21,14 @@ class ToolProposalCleanupTaskTest {
 
     private final ToolInvocationProposalRepository repository = mock(ToolInvocationProposalRepository.class);
     private final ToolInvocationProposalService proposalService = mock(ToolInvocationProposalService.class);
-    private final ToolProposalCleanupTask cleanupTask = new ToolProposalCleanupTask(repository, proposalService);
+    private final ToolProposalCleanupTask cleanupTask = new ToolProposalCleanupTask(repository, proposalService, null);
 
     @Test
     void cleanup_expiresPendingAndMarksStuckExecutingAsFailed() {
-        when(repository.expirePendingBefore(any(LocalDateTime.class))).thenReturn(2);
+        when(repository.expirePendingBefore(any(LocalDateTime.class))).thenReturn(List.of(
+                proposal("tip-expired-1"),
+                proposal("tip-expired-2")
+        ));
         when(repository.findStuckExecuting(any(LocalDateTime.class))).thenReturn(List.of(
                 proposal("tip-1"),
                 proposal("tip-2")
@@ -41,7 +44,7 @@ class ToolProposalCleanupTaskTest {
 
     @Test
     void cleanup_noStaleProposals_isNoop() {
-        when(repository.expirePendingBefore(any(LocalDateTime.class))).thenReturn(0);
+        when(repository.expirePendingBefore(any(LocalDateTime.class))).thenReturn(List.of());
         when(repository.findStuckExecuting(any(LocalDateTime.class))).thenReturn(List.of());
 
         cleanupTask.cleanup();
@@ -53,7 +56,7 @@ class ToolProposalCleanupTaskTest {
 
     @Test
     void cleanup_continuesWhenOneMarkFailedThrows() {
-        when(repository.expirePendingBefore(any(LocalDateTime.class))).thenReturn(0);
+        when(repository.expirePendingBefore(any(LocalDateTime.class))).thenReturn(List.of());
         when(repository.findStuckExecuting(any(LocalDateTime.class))).thenReturn(List.of(
                 proposal("tip-1"),
                 proposal("tip-2")

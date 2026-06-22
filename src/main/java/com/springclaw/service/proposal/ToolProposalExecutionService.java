@@ -1,5 +1,6 @@
 package com.springclaw.service.proposal;
 
+import com.springclaw.runtime.bridge.LegacyLifecycleObserver;
 import com.springclaw.tool.runtime.ToolExecutionContext;
 import com.springclaw.tool.runtime.ToolExecutionContextHolder;
 import org.slf4j.Logger;
@@ -8,6 +9,8 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
+
+import java.time.Instant;
 
 /**
  * confirm 事务提交后异步执行 proposal 的工具调用：
@@ -24,11 +27,14 @@ public class ToolProposalExecutionService {
 
     private final ToolInvocationProposalService proposalService;
     private final ToolInvoker toolInvoker;
+    private final LegacyLifecycleObserver lifecycleObserver;
 
     public ToolProposalExecutionService(ToolInvocationProposalService proposalService,
-                                        ToolInvoker toolInvoker) {
+                                        ToolInvoker toolInvoker,
+                                        LegacyLifecycleObserver lifecycleObserver) {
         this.proposalService = proposalService;
         this.toolInvoker = toolInvoker;
+        this.lifecycleObserver = lifecycleObserver;
     }
 
     @Async("proposalExecutor")
@@ -44,6 +50,8 @@ public class ToolProposalExecutionService {
             log.warn("ToolInvocationProposal {} 状态非 EXECUTING（{}），跳过", proposalId, proposal.status());
             return;
         }
+
+        projectConfirmationApproved(proposal);
 
         // 在 async 线程上重建 ToolExecutionContext —— 否则 ToolRuntimeAspect 的权限检查、
         // rate limit、audit 都会以 null context 运行，丢失 session/user/request 元数据，
@@ -72,6 +80,20 @@ public class ToolProposalExecutionService {
             } finally {
                 ToolExecutionContextHolder.clearApprovedProposal();
             }
+        }
+    }
+
+    private void projectConfirmationApproved(ToolInvocationProposal proposal) {
+        String runId = proposal.runId();
+        if (runId == null || runId.isBlank() || lifecycleObserver == null) {
+            return;
+        }
+        try {
+            lifecycleObserver.confirmationApproved(runId, Instant.now());
+            lifecycleObserver.toolStarted(runId, Instant.now());
+        } catch (RuntimeException ex) {
+            log.warn("canonical confirmationApproved/toolStarted projection failed, proposalId={}, reason={}",
+                    proposal.proposalId(), ex.getMessage());
         }
     }
 }

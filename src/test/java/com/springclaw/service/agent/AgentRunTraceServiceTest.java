@@ -4,12 +4,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.springclaw.domain.entity.MessageEvent;
+import com.springclaw.runtime.contract.RunState;
+import com.springclaw.runtime.lifecycle.InMemoryRunLifecycleStore;
+import com.springclaw.runtime.lifecycle.RunAcceptance;
+import com.springclaw.runtime.lifecycle.RunCoordinator;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.memory.AgentLearningService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -92,7 +98,7 @@ class AgentRunTraceServiceTest {
                         && sql.contains("response_mode = COALESCE(NULLIF(VALUES(response_mode), ''), response_mode)")
                         && sql.contains("execution_mode = COALESCE(NULLIF(VALUES(execution_mode), ''), execution_mode)")
                         && sql.contains("intent = COALESCE(NULLIF(VALUES(intent), ''), intent)")),
-                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()
         );
     }
 
@@ -254,5 +260,45 @@ class AgentRunTraceServiceTest {
                 any(),
                 any()
         );
+    }
+
+    @Test
+    void recordRunMetadataProjectsCanonicalStatusInsteadOfLiteralRunning() {
+        InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+        RunCoordinator coordinator = new RunCoordinator(store);
+        Instant now = Instant.now();
+        coordinator.accept(new RunAcceptance(
+                "req-canonical", "s1", "api", "u1", "USER", "hi", "agent",
+                now, now.plus(Duration.ofMinutes(30))));
+        coordinator.failed("req-canonical",
+                new RunState.Failure("LEGACY_EXECUTION_FAILED", "boom", false), now);
+
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        AgentRunTraceService service = new AgentRunTraceService(
+                messageEventService, new ObjectMapper(), jdbcTemplate, null, store);
+
+        service.recordRunMetadata("s1", "api", "u1", "req-canonical", "fast", "simplified", "general");
+
+        ArgumentCaptor<Object[]> varargs = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(startsWith("INSERT INTO agent_run"), varargs.capture());
+        // status is the 10th bind value (after id, request_id, session_key, channel,
+        // user_id, product_mode, response_mode, execution_mode, intent).
+        assertThat(varargs.getValue()[9]).isEqualTo("FAILED");
+    }
+
+    @Test
+    void recordRunMetadataProjectsUnknownWhenCanonicalRunIsAbsent() {
+        InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        AgentRunTraceService service = new AgentRunTraceService(
+                messageEventService, new ObjectMapper(), jdbcTemplate, null, store);
+
+        service.recordRunMetadata("s1", "api", "u1", "req-missing", "fast", "simplified", "general");
+
+        ArgumentCaptor<Object[]> varargs = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbcTemplate).update(startsWith("INSERT INTO agent_run"), varargs.capture());
+        assertThat(varargs.getValue()[9]).isEqualTo("UNKNOWN");
     }
 }

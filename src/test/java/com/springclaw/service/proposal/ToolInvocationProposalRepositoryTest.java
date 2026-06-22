@@ -126,9 +126,10 @@ class ToolInvocationProposalRepositoryTest {
         repository.insert(sampleProposal(oldId, ToolInvocationProposalStatus.PENDING, now.minusSeconds(1)));
         repository.insert(sampleProposal(freshId, ToolInvocationProposalStatus.PENDING, now.plusHours(1)));
 
-        int updated = repository.expirePendingBefore(now);
+        List<ToolInvocationProposal> expired = repository.expirePendingBefore(now);
 
-        assertThat(updated).isEqualTo(1);
+        assertThat(expired).hasSize(1);
+        assertThat(expired.get(0).proposalId()).isEqualTo(oldId);
         assertThat(repository.findByProposalId(oldId).orElseThrow().status())
                 .isEqualTo(ToolInvocationProposalStatus.EXPIRED);
         assertThat(repository.findByProposalId(freshId).orElseThrow().status())

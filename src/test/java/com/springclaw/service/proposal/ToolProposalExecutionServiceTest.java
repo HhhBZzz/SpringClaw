@@ -25,7 +25,7 @@ class ToolProposalExecutionServiceTest {
     void setUp() {
         proposalService = Mockito.mock(ToolInvocationProposalService.class);
         toolInvoker = Mockito.mock(ToolInvoker.class);
-        executor = new ToolProposalExecutionService(proposalService, toolInvoker);
+        executor = new ToolProposalExecutionService(proposalService, toolInvoker, null);
     }
 
     @Test

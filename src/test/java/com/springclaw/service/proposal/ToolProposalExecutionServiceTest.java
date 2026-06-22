@@ -112,6 +112,30 @@ class ToolProposalExecutionServiceTest {
     }
 
     @Test
+    void onExecutionRequested_terminatesCanonicalRunWhenToolFailedObservationThrows() {
+        ToolInvocationProposal proposal = sampleExecutingProposal("tip-observation-failed", "run-observation-failed");
+        when(proposalService.findByProposalId("tip-observation-failed"))
+                .thenReturn(Optional.of(proposal));
+        when(toolInvoker.invoke(Mockito.anyString(), Mockito.anyString()))
+                .thenThrow(new RuntimeException("tool boom"));
+        Mockito.doThrow(new IllegalStateException("event append failed"))
+                .when(lifecycleBridge).toolFailed(
+                        Mockito.eq("run-observation-failed"),
+                        Mockito.any()
+                );
+
+        executor.onExecutionRequested(
+                new ToolProposalExecutionRequestedEvent("tip-observation-failed")
+        );
+
+        verify(lifecycleBridge).failed(
+                Mockito.eq("run-observation-failed"),
+                Mockito.argThat(failure -> "TOOL_EXECUTION_FAILED".equals(failure.code())),
+                Mockito.any()
+        );
+    }
+
+    @Test
     void onExecutionRequested_proposalNotFound_skips() {
         when(proposalService.findByProposalId("ghost")).thenReturn(Optional.empty());
 

@@ -121,8 +121,13 @@ public class ToolProposalExecutionService {
         }
         try {
             lifecycleObserver.toolFailed(runId, Instant.now());
-            // ToolRuntimeAspect may already have moved the proposal to FAILED.
-            // This execution owner must still terminate the canonical run.
+        } catch (RuntimeException ex) {
+            log.warn("canonical toolFailed observation failed, proposalId={}, reason={}",
+                    proposal.proposalId(), ex.getMessage());
+        }
+        try {
+            // ToolRuntimeAspect may already have moved the proposal to FAILED,
+            // and observation append failure must not prevent terminal state.
             lifecycleObserver.failed(
                     runId,
                     "TOOL_EXECUTION_FAILED",
@@ -130,7 +135,7 @@ public class ToolProposalExecutionService {
                     Instant.now()
             );
         } catch (RuntimeException ex) {
-            log.warn("canonical toolFailed projection failed, proposalId={}, reason={}",
+            log.warn("canonical TOOL_EXECUTION_FAILED projection failed, proposalId={}, reason={}",
                     proposal.proposalId(), ex.getMessage());
         }
     }

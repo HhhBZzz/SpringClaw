@@ -103,6 +103,29 @@ class ToolProposalCleanupTaskTest {
         );
     }
 
+    @Test
+    void cleanup_terminatesCanonicalRunWhenToolFailedObservationThrows() {
+        ToolInvocationProposal stuck = proposal("tip-stuck-observation");
+        when(repository.expirePendingBefore(any(LocalDateTime.class))).thenReturn(List.of());
+        when(repository.findStuckExecuting(any(LocalDateTime.class))).thenReturn(List.of(stuck));
+        when(proposalService.markFailed(
+                "tip-stuck-observation",
+                "execution interrupted or timeout"
+        )).thenReturn(true);
+        doThrow(new IllegalStateException("event append failed"))
+                .when(lifecycleBridge).toolFailed(any(), any());
+
+        cleanupTask.cleanup();
+
+        verify(lifecycleBridge).failed(
+                any(),
+                org.mockito.ArgumentMatchers.argThat(
+                        failure -> "TOOL_EXECUTION_TIMEOUT".equals(failure.code())
+                ),
+                any()
+        );
+    }
+
     private static ToolInvocationProposal proposal(String proposalId) {
         LocalDateTime now = LocalDateTime.now();
         return new ToolInvocationProposal(

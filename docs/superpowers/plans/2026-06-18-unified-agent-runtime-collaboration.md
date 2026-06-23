@@ -954,5 +954,11 @@ Progress:
     process-local transaction boundaries
   - automatic source retries converge under concurrent MySQL and local writes
   - supersede ordering is fenced as UPSERT(1), DELETE(2), UPSERT(3)
-  - Claude may now begin Task 5 stable event receipts and persistence intent
+  - Phase 3A1 Task 5 stable event receipts and persistence intent complete
+  - Claude implemented explicit MessageEventWrite/Receipt, ChatPersistenceIntent,
+    terminal/suspension persistence split, and migrated terminal call sites
+  - Codex bounded P0/P1 review fixed duplicate-key DB receipt reload and bounded
+    local event-key fallback cleanup
+  - focused Task 5 tests pass
+  - Claude may now begin Task 6 Redis short-term shadow storage and recovery
 ```

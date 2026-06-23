@@ -10,6 +10,7 @@ import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.event.MessageEventWrite;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -70,14 +71,19 @@ public class MessageEventServiceImpl extends ServiceImpl<MessageEventMapper, Mes
 
         if (dbEnabled) {
             try {
-                MessageEvent existing = lambdaQuery()
-                        .eq(MessageEvent::getEventKey, write.eventKey())
-                        .last("LIMIT 1")
-                        .one();
+                MessageEvent existing = findByEventKey(write.eventKey());
                 if (existing != null) {
                     return toReceipt(existing);
                 }
-                save(event);
+                try {
+                    saveEvent(event);
+                } catch (DuplicateKeyException duplicate) {
+                    MessageEvent duplicateWinner = findByEventKey(write.eventKey());
+                    if (duplicateWinner != null) {
+                        return toReceipt(duplicateWinner);
+                    }
+                    throw duplicate;
+                }
                 return toReceipt(event);
             } catch (Exception ex) {
                 log.warn("消息事件写库失败，降级本地缓存。sessionKey={}, reason={}",
@@ -85,12 +91,26 @@ public class MessageEventServiceImpl extends ServiceImpl<MessageEventMapper, Mes
             }
         }
 
-        MessageEvent cached = localEventByKey.putIfAbsent(write.eventKey(), event);
-        if (cached != null) {
-            return toReceipt(cached);
+        synchronized (localEventByKey) {
+            MessageEvent cached = localEventByKey.get(write.eventKey());
+            if (cached != null) {
+                return toReceipt(cached);
+            }
+            cacheLocalEvent(write.sessionKey(), event);
+            localEventByKey.put(write.eventKey(), event);
+            return toReceipt(event);
         }
-        cacheLocalEvent(write.sessionKey(), event);
-        return toReceipt(event);
+    }
+
+    protected MessageEvent findByEventKey(String eventKey) {
+        return lambdaQuery()
+                .eq(MessageEvent::getEventKey, eventKey)
+                .last("LIMIT 1")
+                .one();
+    }
+
+    protected void saveEvent(MessageEvent event) {
+        save(event);
     }
 
     private static MessageEventReceipt toReceipt(MessageEvent event) {
@@ -387,7 +407,10 @@ public class MessageEventServiceImpl extends ServiceImpl<MessageEventMapper, Mes
         Deque<MessageEvent> deque = localEventCache.computeIfAbsent(sessionKey, key -> new ConcurrentLinkedDeque<>());
         deque.addLast(event);
         while (deque.size() > LOCAL_MAX_EVENTS_PER_SESSION) {
-            deque.pollFirst();
+            MessageEvent evicted = deque.pollFirst();
+            if (evicted != null && evicted.getEventKey() != null) {
+                localEventByKey.remove(evicted.getEventKey(), evicted);
+            }
         }
     }
 

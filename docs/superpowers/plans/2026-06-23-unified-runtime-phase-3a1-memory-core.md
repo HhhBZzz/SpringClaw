@@ -810,7 +810,7 @@ git commit -m "feat: manage memory versions and index events atomically"
 - Test: `src/test/java/com/springclaw/service/chat/impl/ChatResultPersisterTest.java`
 - Test: `src/test/java/com/springclaw/service/chat/impl/ChatServiceImplPendingApprovalTest.java`
 
-- [ ] **Step 1: Write failing receipt and suspension tests**
+- [x] **Step 1: Write failing receipt and suspension tests**
 
 ```java
 @Test
@@ -847,7 +847,7 @@ void confirmationSuspensionDoesNotWriteAssistantSemanticMemory() {
 }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 mvn -q -Dtest=MessageEventServiceImplTest,ChatResultPersisterTest,ChatServiceImplPendingApprovalTest test
@@ -855,7 +855,7 @@ mvn -q -Dtest=MessageEventServiceImplTest,ChatResultPersisterTest,ChatServiceImp
 
 Expected: compilation failure because receipt and intent APIs do not exist.
 
-- [ ] **Step 3: Add explicit event writes**
+- [x] **Step 3: Add explicit event writes**
 
 Implement:
 
@@ -896,7 +896,7 @@ chat:<requestId>:suspension
 The DB implementation inserts by unique `event_key`; on duplicate key it loads and
 returns the existing row. The local implementation uses one map by event key.
 
-- [ ] **Step 4: Add explicit persistence intent**
+- [x] **Step 4: Add explicit persistence intent**
 
 ```java
 public enum ChatPersistenceIntent {
@@ -934,7 +934,7 @@ Suspension behavior:
 - do not create episodic memory;
 - do not append a terminal assistant short-term entry.
 
-- [ ] **Step 5: Verify all persister call sites are explicit**
+- [x] **Step 5: Verify all persister call sites are explicit**
 
 Run:
 
@@ -946,7 +946,7 @@ mvn -q -Dtest=MessageEventServiceImplTest,AgentSessionServiceImplTest,ChatResult
 Expected: every call has the intent argument; test compilation proves every
 engine call site was migrated; all listed tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/main/java/com/springclaw/service/event \

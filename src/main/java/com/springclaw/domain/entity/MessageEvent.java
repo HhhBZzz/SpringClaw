@@ -53,6 +53,11 @@ public class MessageEvent extends BaseEntity {
     private String requestId;
 
     /**
+     * 确定性事件键（Phase 3A1 memory core）。旧数据回填为 legacy:&lt;id&gt;。
+     */
+    private String eventKey;
+
+    /**
      * 消息内容。
      */
     private String content;

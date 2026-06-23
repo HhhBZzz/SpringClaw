@@ -110,6 +110,33 @@ public class MySqlMemoryIndexOutboxStore implements MemoryIndexOutboxStore {
                 .toList();
     }
 
+    @Override
+    public List<MemoryIndexOutboxEntry> findPendingAfterRevision(
+            long exclusiveRevision,
+            String afterEventId,
+            int limit
+    ) {
+        if (exclusiveRevision < 0) {
+            throw new IllegalArgumentException("exclusiveRevision must not be negative");
+        }
+        if (limit <= 0) {
+            throw new IllegalArgumentException("limit must be positive");
+        }
+        QueryWrapper<MemoryIndexOutboxEntity> qw = new QueryWrapper<>();
+        qw.ne("status", MemoryIndexOutboxEntry.Status.SUCCEEDED.name())
+          .and(wrapper -> wrapper
+                  .gt("index_revision", exclusiveRevision)
+                  .or(afterEventId != null && !afterEventId.isBlank(),
+                          sameRevision -> sameRevision
+                                  .eq("index_revision", exclusiveRevision)
+                                  .gt("event_id", afterEventId.trim())))
+          .orderByAsc("index_revision").orderByAsc("event_id")
+          .last("LIMIT " + limit);
+        return mapper.selectList(qw).stream()
+                .map(MemoryIndexOutboxEntity::toDomain)
+                .toList();
+    }
+
     private static LocalDateTime toLocalDateTime(Instant instant) {
         return instant == null ? null
                 : LocalDateTime.ofInstant(instant, ZoneOffset.UTC);

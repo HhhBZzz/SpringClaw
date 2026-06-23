@@ -115,15 +115,39 @@ public class MySqlMemoryRecordStore implements MemoryRecordStore {
             throw new IllegalArgumentException("limit must be positive");
         }
         QueryWrapper<MemoryRecordEntity> qw = new QueryWrapper<>();
-        qw.eq("scope_type", scope.scopeType().name())
-          .eq("scope_id", scope.scopeId())
-          .eq("status", MemoryStatus.ACTIVE.name())
+        if (scope != null) {
+            qw.eq("scope_type", scope.scopeType().name())
+              .eq("scope_id", scope.scopeId());
+        }
+        qw.eq("status", MemoryStatus.ACTIVE.name())
           .eq("deleted", 0);
         if (types != null && !types.isEmpty()) {
             qw.in("memory_type", types.stream().map(Enum::name).toList());
         }
         qw.orderByDesc("update_time").orderByDesc("memory_version_id");
         qw.last("LIMIT " + limit);
+        return mapper.selectList(qw).stream()
+                .map(MemoryRecordEntity::toDomain)
+                .toList();
+    }
+
+    @Override
+    public List<MemoryRecordVersion> findActiveAfterRecordId(
+            long afterRecordId,
+            int limit
+    ) {
+        if (afterRecordId < 0) {
+            throw new IllegalArgumentException("afterRecordId must not be negative");
+        }
+        if (limit <= 0) {
+            throw new IllegalArgumentException("limit must be positive");
+        }
+        QueryWrapper<MemoryRecordEntity> qw = new QueryWrapper<>();
+        qw.eq("status", MemoryStatus.ACTIVE.name())
+          .eq("deleted", 0)
+          .gt("id", afterRecordId)
+          .orderByAsc("id").orderByAsc("memory_version_id")
+          .last("LIMIT " + limit);
         return mapper.selectList(qw).stream()
                 .map(MemoryRecordEntity::toDomain)
                 .toList();

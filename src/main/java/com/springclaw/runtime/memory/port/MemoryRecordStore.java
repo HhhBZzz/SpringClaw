@@ -43,6 +43,13 @@ public interface MemoryRecordStore {
             int limit
     );
 
+    default List<MemoryRecordVersion> findActiveAfterRecordId(
+            long afterRecordId,
+            int limit
+    ) {
+        return findActiveByScope(null, null, limit);
+    }
+
     void insert(MemoryRecordVersion version);
 
     boolean compareAndSetStatus(

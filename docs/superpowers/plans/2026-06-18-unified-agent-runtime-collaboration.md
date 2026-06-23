@@ -972,5 +972,17 @@ Progress:
   - Redis beans are conditional on RedissonClient; writer no-ops when Redis is not
     enabled, preserving default startup
   - focused Task 6 tests and package pass
-  - Claude may now begin Task 7 fenced vector projection and rebuild primitives
+  - Phase 3A1 Task 7 fenced vector projection and rebuild primitives complete
+  - MemoryVectorIndex wraps Spring AI VectorStore with memoryVersionId document
+    identity and canonical metadata fields
+  - index worker fences stale UPSERTs, compensates authority changes, and uses
+    claim-token completion through MemoryIndexOutboxStore
+  - reconciler deletes indexed ids that are no longer authoritative active
+    versions
+  - rebuild creates a new generation, marks retrieval degraded during rebuild,
+    copies active records, applies only non-succeeded tail events after the
+    active watermark, and activates the new generation
+  - VectorStore-dependent workers are conditional so default startup is preserved
+  - focused Task 7 tests, memory regression tests, and package pass
+  - Claude may now begin Task 8 typed Markdown project and procedural memory
 ```

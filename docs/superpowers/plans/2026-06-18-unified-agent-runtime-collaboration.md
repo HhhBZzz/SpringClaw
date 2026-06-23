@@ -949,5 +949,10 @@ Progress:
     fencing, lowest-revision claim TOCTOU, fail-loud migration, and claim-token
     reread fencing
   - real local MySQL integration tests pass without exposing credentials
-  - next Codex task: Task 4 atomic memory lifecycle management
+  - Phase 3A1 Task 4 atomic memory lifecycle management complete
+  - record and outbox changes share MySQL transactions or rollback-capable
+    process-local transaction boundaries
+  - automatic source retries converge under concurrent MySQL and local writes
+  - supersede ordering is fenced as UPSERT(1), DELETE(2), UPSERT(3)
+  - Claude may now begin Task 5 stable event receipts and persistence intent
 ```

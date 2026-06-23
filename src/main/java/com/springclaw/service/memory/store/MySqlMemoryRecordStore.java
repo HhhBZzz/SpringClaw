@@ -59,6 +59,53 @@ public class MySqlMemoryRecordStore implements MemoryRecordStore {
     }
 
     @Override
+    public Optional<MemoryRecordVersion> findByAutomaticSource(
+            String sourceKind,
+            String sourceIdentity,
+            String extractionPolicyVersion,
+            MemoryType memoryType
+    ) {
+        if (sourceKind == null || sourceKind.isBlank()
+                || sourceIdentity == null || sourceIdentity.isBlank()
+                || extractionPolicyVersion == null
+                || extractionPolicyVersion.isBlank()
+                || memoryType == null) {
+            return Optional.empty();
+        }
+        QueryWrapper<MemoryRecordEntity> qw = new QueryWrapper<>();
+        qw.eq("source_kind", sourceKind.trim())
+          .eq("source_identity", sourceIdentity.trim())
+          .eq("extraction_policy_version", extractionPolicyVersion.trim())
+          .eq("memory_type", memoryType.name())
+          .eq("deleted", 0);
+        return Optional.ofNullable(mapper.selectOne(qw))
+                .map(MemoryRecordEntity::toDomain);
+    }
+
+    @Override
+    public Optional<MemoryRecordVersion> findByAutomaticSourceCurrent(
+            String sourceKind,
+            String sourceIdentity,
+            String extractionPolicyVersion,
+            MemoryType memoryType
+    ) {
+        if (sourceKind == null || sourceKind.isBlank()
+                || sourceIdentity == null || sourceIdentity.isBlank()
+                || extractionPolicyVersion == null
+                || extractionPolicyVersion.isBlank()
+                || memoryType == null) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(mapper.selectByAutomaticSourceForUpdate(
+                        sourceKind.trim(),
+                        sourceIdentity.trim(),
+                        extractionPolicyVersion.trim(),
+                        memoryType.name()
+                ))
+                .map(MemoryRecordEntity::toDomain);
+    }
+
+    @Override
     public List<MemoryRecordVersion> findActiveByScope(
             MemoryScope scope,
             Set<MemoryType> types,

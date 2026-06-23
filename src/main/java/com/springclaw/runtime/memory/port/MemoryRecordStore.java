@@ -16,6 +16,27 @@ public interface MemoryRecordStore {
 
     Optional<MemoryRecordVersion> findActive(String logicalMemoryId);
 
+    Optional<MemoryRecordVersion> findByAutomaticSource(
+            String sourceKind,
+            String sourceIdentity,
+            String extractionPolicyVersion,
+            MemoryType memoryType
+    );
+
+    default Optional<MemoryRecordVersion> findByAutomaticSourceCurrent(
+            String sourceKind,
+            String sourceIdentity,
+            String extractionPolicyVersion,
+            MemoryType memoryType
+    ) {
+        return findByAutomaticSource(
+                sourceKind,
+                sourceIdentity,
+                extractionPolicyVersion,
+                memoryType
+        );
+    }
+
     List<MemoryRecordVersion> findActiveByScope(
             MemoryScope scope,
             Set<MemoryType> types,

@@ -15,6 +15,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 public final class InMemoryMemoryIndexOutboxStore
         implements MemoryIndexOutboxStore {
@@ -56,6 +57,59 @@ public final class InMemoryMemoryIndexOutboxStore
             }
             entries.put(entry.eventId(), entry);
             revisionOperationKeys.add(revisionOperationKey);
+        }
+    }
+
+    public List<MemoryIndexOutboxEntry> findAll() {
+        synchronized (lock) {
+            return entries.values().stream()
+                    .sorted(Comparator
+                            .comparing(MemoryIndexOutboxEntry::logicalMemoryId)
+                            .thenComparingLong(
+                                    MemoryIndexOutboxEntry::indexRevision
+                            )
+                            .thenComparing(MemoryIndexOutboxEntry::operation)
+                            .thenComparing(MemoryIndexOutboxEntry::eventId))
+                    .toList();
+        }
+    }
+
+    public Snapshot snapshot(String logicalMemoryId) {
+        logicalMemoryId = requireText(logicalMemoryId, "logicalMemoryId");
+        synchronized (lock) {
+            String target = logicalMemoryId;
+            return new Snapshot(
+                    target,
+                    entries.values().stream()
+                            .filter(entry -> entry.logicalMemoryId().equals(target))
+                            .toList()
+            );
+        }
+    }
+
+    public void restore(Snapshot snapshot) {
+        Objects.requireNonNull(snapshot, "snapshot");
+        synchronized (lock) {
+            List<MemoryIndexOutboxEntry> current = entries.values().stream()
+                    .filter(entry -> entry.logicalMemoryId().equals(
+                            snapshot.logicalMemoryId
+                    ))
+                    .toList();
+            for (MemoryIndexOutboxEntry entry : current) {
+                entries.remove(entry.eventId());
+                revisionOperationKeys.remove(RevisionOperationKey.from(entry));
+            }
+            for (MemoryIndexOutboxEntry entry : snapshot.entries) {
+                entries.put(entry.eventId(), entry);
+                revisionOperationKeys.add(RevisionOperationKey.from(entry));
+            }
+        }
+    }
+
+    public <T> T executeExclusively(Supplier<T> work) {
+        Objects.requireNonNull(work, "work");
+        synchronized (lock) {
+            return work.get();
         }
     }
 
@@ -216,6 +270,19 @@ public final class InMemoryMemoryIndexOutboxStore
                     entry.indexRevision(),
                     entry.operation()
             );
+        }
+    }
+
+    public static final class Snapshot {
+        private final String logicalMemoryId;
+        private final List<MemoryIndexOutboxEntry> entries;
+
+        private Snapshot(
+                String logicalMemoryId,
+                List<MemoryIndexOutboxEntry> entries
+        ) {
+            this.logicalMemoryId = logicalMemoryId;
+            this.entries = entries;
         }
     }
 }

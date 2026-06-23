@@ -305,7 +305,7 @@ git commit -m "feat: freeze trusted memory access at run acceptance"
 - Test: `src/test/java/com/springclaw/runtime/memory/MemoryContractTest.java`
 - Test: `src/test/java/com/springclaw/runtime/memory/InMemoryMemoryStoresTest.java`
 
-- [ ] **Step 1: Write failing invariants**
+- [x] **Step 1: Write failing invariants**
 
 Cover:
 
@@ -334,7 +334,7 @@ void inMemoryStoreRejectsSecondActiveVersion() {
 }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 mvn -q -Dtest=MemoryContractTest,InMemoryMemoryStoresTest test
@@ -342,7 +342,7 @@ mvn -q -Dtest=MemoryContractTest,InMemoryMemoryStoresTest test
 
 Expected: compilation failure because the memory package does not exist.
 
-- [ ] **Step 3: Implement minimal contracts**
+- [x] **Step 3: Implement minimal contracts**
 
 Use these enum values:
 
@@ -373,7 +373,7 @@ public enum MemoryIndexOperation { UPSERT, DELETE }
 - automatic records require source kind, source identity, and extraction policy;
 - `validUntil` is not before `validFrom`.
 
-- [ ] **Step 4: Implement narrow ports**
+- [x] **Step 4: Implement narrow ports**
 
 Use:
 
@@ -425,7 +425,7 @@ public interface ShortTermMemoryStore {
 }
 ```
 
-- [ ] **Step 5: Implement bounded in-memory stores**
+- [x] **Step 5: Implement bounded in-memory stores**
 
 Use one per-logical-memory synchronized section for active-version writes and one
 per-scope synchronized section for ordered short-term entries. Cap:
@@ -437,7 +437,7 @@ per-scope synchronized section for ordered short-term entries. Cap:
 
 Throw on cap exhaustion; do not silently evict authoritative memory versions.
 
-- [ ] **Step 6: Verify GREEN and commit**
+- [x] **Step 6: Verify GREEN and commit**
 
 ```bash
 mvn -q -Dtest=MemoryContractTest,InMemoryMemoryStoresTest test
@@ -649,6 +649,7 @@ git commit -m "feat: persist versioned memory and index outbox"
 - Create: `src/main/java/com/springclaw/service/memory/MemoryManagementService.java`
 - Create: `src/main/java/com/springclaw/service/memory/MemoryWriteCommand.java`
 - Create: `src/main/java/com/springclaw/service/memory/MemoryVersionFactory.java`
+- Create: `src/main/java/com/springclaw/service/memory/InMemoryMemoryTransactionBoundary.java`
 - Test: `src/test/java/com/springclaw/service/memory/MemoryManagementServiceTest.java`
 - Test: `src/test/java/com/springclaw/service/memory/MemoryManagementServiceIT.java`
 
@@ -736,7 +737,10 @@ IDs from logical ID plus version.
 - [ ] **Step 4: Keep record and outbox in one transaction**
 
 Annotate public lifecycle methods with `@Transactional` for MySQL-backed stores.
-For in-memory stores, synchronize on logical memory ID. Implement:
+For in-memory stores, use a shared per-logical-memory transaction boundary that
+can roll back both record and outbox mutations if either write fails; locking
+alone is insufficient because it can expose or retain a partial record/outbox
+state. Implement:
 
 ```java
 MemoryRecordVersion create(MemoryWriteCommand command);

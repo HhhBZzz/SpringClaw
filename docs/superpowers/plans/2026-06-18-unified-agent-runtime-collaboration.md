@@ -940,5 +940,10 @@ Progress:
   - verified HTTP webhook and Feishu SDK long connection carry explicit trusted
     ingress evidence
   - focused lifecycle, ingress, security, and compatibility tests pass
-  - next Codex task: Task 2 typed memory contracts and bounded fallback stores
+  - Phase 3A1 Task 2 typed memory contracts and bounded fallback stores complete
+  - MySQL adapters can map record rows without reconstructing authorization claims
+  - fallback stores enforce active/source/outbox uniqueness, lease fencing,
+    bounded short-term windows, and shared-session storage identity
+  - Claude may now begin Task 3 MySQL schema and persistence adapters
+  - next Codex task after Task 3: Task 4 atomic memory lifecycle management
 ```

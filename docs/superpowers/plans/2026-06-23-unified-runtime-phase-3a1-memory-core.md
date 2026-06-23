@@ -653,7 +653,7 @@ git commit -m "feat: persist versioned memory and index outbox"
 - Test: `src/test/java/com/springclaw/service/memory/MemoryManagementServiceTest.java`
 - Test: `src/test/java/com/springclaw/service/memory/MemoryManagementServiceIT.java`
 
-- [ ] **Step 1: Write failing lifecycle tests**
+- [x] **Step 1: Write failing lifecycle tests**
 
 Cover:
 
@@ -698,7 +698,7 @@ void repeatedAutomaticSourceReturnsExistingVersion() {
 }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 mvn -q -Dtest=MemoryManagementServiceTest test
@@ -706,7 +706,7 @@ mvn -q -Dtest=MemoryManagementServiceTest test
 
 Expected: compilation failure because the management service does not exist.
 
-- [ ] **Step 3: Implement deterministic commands**
+- [x] **Step 3: Implement deterministic commands**
 
 `MemoryWriteCommand` must contain:
 
@@ -734,7 +734,7 @@ extractionPolicyVersion
 version and index revision from the previous version, and derives stable version
 IDs from logical ID plus version.
 
-- [ ] **Step 4: Keep record and outbox in one transaction**
+- [x] **Step 4: Keep record and outbox in one transaction**
 
 Annotate public lifecycle methods with `@Transactional` for MySQL-backed stores.
 For in-memory stores, use a shared per-logical-memory transaction boundary that
@@ -765,7 +765,7 @@ Rules:
 - retries by automatic source identity return the existing version;
 - no method deletes raw audit facts.
 
-- [ ] **Step 5: Run unit and MySQL integration tests**
+- [x] **Step 5: Run unit and MySQL integration tests**
 
 ```bash
 set -a
@@ -776,7 +776,7 @@ mvn -q -Dtest=MemoryManagementServiceTest,MemoryManagementServiceIT test
 
 Expected: zero failures and zero errors.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/main/java/com/springclaw/service/memory \

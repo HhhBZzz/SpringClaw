@@ -4,6 +4,7 @@ import com.springclaw.runtime.contract.RunEvent;
 import com.springclaw.runtime.contract.RunEventType;
 import com.springclaw.runtime.contract.RunState;
 import com.springclaw.runtime.contract.RunStatus;
+import com.springclaw.runtime.contract.SessionAccessClaim;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -70,6 +71,23 @@ class InMemoryRunLifecycleStoreTest {
                 event(RunEventType.RUN_CREATED, RunStatus.CREATED, T0)
         )).isEqualTo(failed);
         assertThat(store.findEventsByRunId(RUN_ID)).hasSize(2);
+    }
+
+    @Test
+    void creationWithDifferentSessionAccessClaimConflicts() {
+        store.create(
+                createdState("hello"),
+                event(RunEventType.RUN_CREATED, RunStatus.CREATED, T0)
+        );
+
+        assertThatThrownBy(() -> store.create(
+                createdState(
+                        "hello",
+                        SessionAccessClaim.AcceptanceOrigin.VERIFIED_WEBHOOK
+                ),
+                event(RunEventType.RUN_CREATED, RunStatus.CREATED, T0)
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("conflicting");
     }
 
     @Test
@@ -145,9 +163,20 @@ class InMemoryRunLifecycleStoreTest {
     }
 
     private static RunState createdState(String message) {
+        return createdState(
+                message,
+                SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API
+        );
+    }
+
+    private static RunState createdState(
+            String message,
+            SessionAccessClaim.AcceptanceOrigin origin
+    ) {
         return new RunState(
                 RUN_ID, RUN_ID, 0, RunStatus.CREATED,
-                "session-1", "api", "user-1", "USER", message, "agent",
+                "session-1", "api", "user-1", claim(origin),
+                "USER", message, "agent",
                 T0, null, T0, null, T0.plusSeconds(300),
                 null, null, "", 1, "", List.of(), null, null, Map.of(), null
         );
@@ -156,7 +185,7 @@ class InMemoryRunLifecycleStoreTest {
     private static RunState failedState() {
         return new RunState(
                 RUN_ID, RUN_ID, 1, RunStatus.FAILED,
-                "session-1", "api", "user-1", "USER", "hello", "agent",
+                "session-1", "api", "user-1", claim(), "USER", "hello", "agent",
                 T0, null, T1, T1, T0.plusSeconds(300),
                 null, null, "", 1, "", List.of(), null, null, Map.of(),
                 new RunState.Failure("LEGACY_FAILED", "failed", false)
@@ -171,6 +200,21 @@ class InMemoryRunLifecycleStoreTest {
         return new RunEvent.Draft(
                 RUN_ID, type, "lifecycle", status, timestamp, 0,
                 "springclaw.runtime.lifecycle.v1", "{}", null, RUN_ID
+        );
+    }
+
+    private static SessionAccessClaim claim() {
+        return claim(SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API);
+    }
+
+    private static SessionAccessClaim claim(
+            SessionAccessClaim.AcceptanceOrigin origin
+    ) {
+        return SessionAccessClaim.personal(
+                origin,
+                "api",
+                "session-1",
+                "user-1"
         );
     }
 }

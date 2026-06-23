@@ -80,7 +80,7 @@ Workers must not modify Phase 3A2/3A3 owners or perform unrelated refactoring.
 - Test: `src/test/java/com/springclaw/service/task/TaskExecutionServiceTest.java`
 - Test: `src/test/java/com/springclaw/service/chat/async/ChatMessageConsumerTest.java`
 
-- [ ] **Step 1: Write failing access-claim contract tests**
+- [x] **Step 1: Write failing access-claim contract tests**
 
 Add tests equivalent to:
 
@@ -115,7 +115,7 @@ void personalClaimUsesAcceptedUserAsPrincipal() {
 
 Extend `RunStateContractTest` to prove the claim cannot change after acceptance.
 
-- [ ] **Step 2: Run the contract tests and verify RED**
+- [x] **Step 2: Run the contract tests and verify RED**
 
 Run:
 
@@ -126,7 +126,7 @@ mvn -q -Dtest=SessionAccessClaimTest,RunStateContractTest,RunCoordinatorTest tes
 Expected: compilation fails because `SessionAccessClaim` and the new acceptance
 field do not exist.
 
-- [ ] **Step 3: Add the immutable claim**
+- [x] **Step 3: Add the immutable claim**
 
 Implement:
 
@@ -216,7 +216,7 @@ Validate that its channel, session key, and accepted user match the acceptance
 fields. Preserve it in every `RunCoordinator.copy(...)` call and require equality
 in `RunTransitionPolicy.validate(...)`.
 
-- [ ] **Step 4: Mint claims only at trusted ingress**
+- [x] **Step 4: Mint claims only at trusted ingress**
 
 Use these exact policies:
 
@@ -251,7 +251,7 @@ Scheduled tasks use `SCHEDULED_TASK` plus a personal claim. Rabbit does not mint
 claim; `ChatMessageConsumer.requireMatchingAcceptance(...)` verifies the existing
 run claim is `PERSONAL` and matches the message.
 
-- [ ] **Step 5: Run focused ingress and lifecycle tests**
+- [x] **Step 5: Run focused ingress and lifecycle tests**
 
 Run:
 
@@ -262,7 +262,7 @@ mvn -q -Dtest=SessionAccessClaimTest,RunStateContractTest,RunCoordinatorTest,Cha
 Expected: all pass; a REST request using
 `channel=feishu, sessionKey=feishu:group:*` still creates a `PERSONAL` claim.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/main/java/com/springclaw/runtime \

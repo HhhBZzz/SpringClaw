@@ -6,6 +6,7 @@ import com.springclaw.runtime.contract.ExecutionDecision;
 import com.springclaw.runtime.contract.RunEvent;
 import com.springclaw.runtime.contract.RunEventType;
 import com.springclaw.runtime.contract.RunResult;
+import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.contract.RunState;
 import com.springclaw.runtime.contract.RunStatus;
 import org.junit.jupiter.api.Test;
@@ -44,6 +45,7 @@ class RunCoordinatorTest {
         RunState state = store.requireByRunId(RUN_ID);
         assertThat(state.status()).isEqualTo(RunStatus.COMPLETED);
         assertThat(state.revision()).isEqualTo(7);
+        assertThat(state.sessionAccessClaim()).isEqualTo(acceptance().sessionAccessClaim());
         assertThat(store.findEventsByRunId(RUN_ID))
                 .extracting(RunEvent::eventType)
                 .containsExactly(
@@ -177,6 +179,53 @@ class RunCoordinatorTest {
                 .isEqualTo(RunStatus.RUNNING);
     }
 
+    @Test
+    void acceptanceRejectsSessionAccessClaimMismatch() {
+        assertThatThrownBy(() -> new RunAcceptance(
+                RUN_ID,
+                "session-1",
+                "api",
+                "user-1",
+                SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        "web",
+                        "session-1",
+                        "user-1"
+                ),
+                "USER",
+                "hello",
+                "agent",
+                T0,
+                T0.plusSeconds(300)
+        )).isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("channel");
+    }
+
+    @Test
+    void acceptanceNormalizesIdentityBeforeComparingClaim() {
+        RunAcceptance acceptance = new RunAcceptance(
+                RUN_ID,
+                " session-1 ",
+                " api ",
+                " user-1 ",
+                SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        "api",
+                        "session-1",
+                        "user-1"
+                ),
+                "USER",
+                "hello",
+                "agent",
+                T0,
+                T0.plusSeconds(300)
+        );
+
+        assertThat(acceptance.sessionKey()).isEqualTo("session-1");
+        assertThat(acceptance.channel()).isEqualTo("api");
+        assertThat(acceptance.userId()).isEqualTo("user-1");
+    }
+
     private void prepareVerifyingRun() {
         coordinator.accept(acceptance());
         coordinator.contextReady(RUN_ID, snapshot(), T0.plusSeconds(1));
@@ -191,7 +240,14 @@ class RunCoordinatorTest {
 
     private static RunAcceptance acceptance(String runId) {
         return new RunAcceptance(
-                runId, "session-1", "api", "user-1", "USER", "hello",
+                runId, "session-1", "api", "user-1",
+                SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        "api",
+                        "session-1",
+                        "user-1"
+                ),
+                "USER", "hello",
                 "agent", T0, T0.plusSeconds(300)
         );
     }

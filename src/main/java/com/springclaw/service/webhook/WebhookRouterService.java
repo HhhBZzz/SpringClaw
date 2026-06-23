@@ -1,10 +1,12 @@
 package com.springclaw.service.webhook;
 
 import com.springclaw.common.exception.BusinessException;
+import com.springclaw.common.support.ConversationScopeSupport;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
 import com.springclaw.dto.webhook.WebhookDispatchResponse;
 import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
+import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.identity.RunIdentityFactory;
 import com.springclaw.runtime.lifecycle.RunAcceptance;
 import com.springclaw.service.auth.AuthService;
@@ -64,6 +66,21 @@ public class WebhookRouterService {
     }
 
     public WebhookDispatchResponse dispatch(String channel, Map<String, Object> payload) {
+        return dispatch(channel, payload, false);
+    }
+
+    public WebhookDispatchResponse dispatchTrusted(
+            String channel,
+            Map<String, Object> payload
+    ) {
+        return dispatch(channel, payload, true);
+    }
+
+    private WebhookDispatchResponse dispatch(
+            String channel,
+            Map<String, Object> payload,
+            boolean trustedIngress
+    ) {
         if (isFeishuSelfMessage(channel, payload)) {
             return new WebhookDispatchResponse(channel, "feishu-self-message", "ignored");
         }
@@ -79,11 +96,29 @@ public class WebhookRouterService {
             );
             Instant acceptedAt = Instant.now();
             String roleCode = authService.resolveRoleByUserId(inboundMessage.userId());
+            SessionAccessClaim sessionAccessClaim =
+                    trustedIngress
+                            && "feishu".equalsIgnoreCase(inboundMessage.channel())
+                            && ConversationScopeSupport.isFeishuGroupSession(
+                                    inboundMessage.sessionKey()
+                            )
+                            ? SessionAccessClaim.sharedVerified(
+                                    inboundMessage.channel(),
+                                    inboundMessage.sessionKey(),
+                                    inboundMessage.userId()
+                            )
+                            : SessionAccessClaim.personal(
+                                    SessionAccessClaim.AcceptanceOrigin.VERIFIED_WEBHOOK,
+                                    inboundMessage.channel(),
+                                    inboundMessage.sessionKey(),
+                                    inboundMessage.userId()
+                            );
             runtimeBridge.accepted(new RunAcceptance(
                     requestId,
                     inboundMessage.sessionKey(),
                     inboundMessage.channel(),
                     inboundMessage.userId(),
+                    sessionAccessClaim,
                     roleCode,
                     inboundMessage.text(),
                     "agent",

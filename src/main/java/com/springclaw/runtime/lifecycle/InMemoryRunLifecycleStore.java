@@ -151,6 +151,7 @@ public final class InMemoryRunLifecycleStore implements RunLifecycleStore {
                 && existing.sessionKey().equals(candidate.sessionKey())
                 && existing.channel().equals(candidate.channel())
                 && existing.userId().equals(candidate.userId())
+                && existing.sessionAccessClaim().equals(candidate.sessionAccessClaim())
                 && existing.roleCodeAtAcceptance().equals(candidate.roleCodeAtAcceptance())
                 && existing.originalMessage().equals(candidate.originalMessage())
                 && existing.responseMode().equals(candidate.responseMode())

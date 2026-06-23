@@ -932,4 +932,13 @@ Planned ownership:
     acceptance and final review
   - Claude: MySQL/Redis/vector/Markdown adapters and focused wiring after each
     corresponding Codex core commit
+Progress:
+  - Phase 3A1 Task 1 implementation and bounded P0/P1 review complete
+  - trusted SessionAccessClaim is frozen at acceptance and propagated through
+    canonical lifecycle state
+  - REST and unverified webhook input cannot mint SHARED access
+  - verified HTTP webhook and Feishu SDK long connection carry explicit trusted
+    ingress evidence
+  - focused lifecycle, ingress, security, and compatibility tests pass
+  - next Codex task: Task 2 typed memory contracts and bounded fallback stores
 ```

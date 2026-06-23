@@ -3,6 +3,7 @@ package com.springclaw.service.chat.async;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
 import com.springclaw.runtime.contract.RunState;
+import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.lifecycle.RunStateRepository;
 import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
@@ -73,6 +74,7 @@ public class ChatMessageConsumer {
             RunState run,
             AsyncChatRequestMessage message
     ) {
+        SessionAccessClaim claim = run.sessionAccessClaim();
         boolean matches = Objects.equals(run.runId(), message.requestId())
                 && Objects.equals(run.requestId(), message.requestId())
                 && Objects.equals(run.sessionKey(), message.sessionKey())
@@ -86,8 +88,18 @@ public class ChatMessageConsumer {
                 && Objects.equals(
                         run.acceptedAt(),
                         Instant.ofEpochMilli(message.createdAt())
-                );
+                )
+                && claim.claimType() == SessionAccessClaim.ClaimType.PERSONAL
+                && Objects.equals(claim.channel(), normalizedChannel(message.channel()))
+                && Objects.equals(claim.sessionKey(), message.sessionKey())
+                && Objects.equals(claim.acceptedUserId(), message.userId());
         if (!matches) {
+            if (claim.claimType() != SessionAccessClaim.ClaimType.PERSONAL) {
+                throw new IllegalStateException(
+                        "async canonical run requires PERSONAL session access claim: "
+                                + message.requestId()
+                );
+            }
             throw new IllegalStateException(
                     "async message does not match canonical run: " + message.requestId()
             );

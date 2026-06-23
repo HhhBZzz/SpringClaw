@@ -8,6 +8,7 @@ import com.springclaw.runtime.bridge.LegacyRunContextAdapter;
 import com.springclaw.runtime.bridge.LegacyRunResultAdapter;
 import com.springclaw.runtime.contract.RunState;
 import com.springclaw.runtime.contract.RunStatus;
+import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.lifecycle.InMemoryRunLifecycleStore;
 import com.springclaw.runtime.lifecycle.RunAcceptance;
 import com.springclaw.runtime.lifecycle.RunCoordinator;
@@ -131,7 +132,14 @@ class AsyncChatResultStoreProjectionTest {
 
     private static void acceptRun(RunCoordinator coordinator) {
         coordinator.accept(new RunAcceptance(
-                RUN_ID, "session", "api", "user", "USER", "hello", "agent",
+                RUN_ID, "session", "api", "user",
+                SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        "api",
+                        "session",
+                        "user"
+                ),
+                "USER", "hello", "agent",
                 T0, T0.plus(Duration.ofMinutes(30))
         ));
     }

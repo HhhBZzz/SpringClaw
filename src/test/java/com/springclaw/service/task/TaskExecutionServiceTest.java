@@ -6,6 +6,7 @@ import com.springclaw.domain.entity.ScheduledTaskExecution;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
 import com.springclaw.runtime.lifecycle.RunAcceptance;
+import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.chat.impl.ChatServiceImpl;
 import com.springclaw.service.event.MessageEventService;
@@ -115,6 +116,10 @@ class TaskExecutionServiceTest {
         assertThat(acceptance.getValue().originalMessage())
                 .isEqualTo("读取这个网页 https://example.com");
         assertThat(acceptance.getValue().responseMode()).isEqualTo("skill");
+        assertThat(acceptance.getValue().sessionAccessClaim().claimType())
+                .isEqualTo(SessionAccessClaim.ClaimType.PERSONAL);
+        assertThat(acceptance.getValue().sessionAccessClaim().acceptanceOrigin())
+                .isEqualTo(SessionAccessClaim.AcceptanceOrigin.SCHEDULED_TASK);
         assertThat(Duration.between(
                 acceptance.getValue().acceptedAt(),
                 acceptance.getValue().deadlineAt()
@@ -275,6 +280,8 @@ class TaskExecutionServiceTest {
         assertThat(acceptance.getValue().originalMessage())
                 .isEqualTo("总结今天的项目进展");
         assertThat(acceptance.getValue().responseMode()).isEqualTo("agent");
+        assertThat(acceptance.getValue().sessionAccessClaim().acceptanceOrigin())
+                .isEqualTo(SessionAccessClaim.AcceptanceOrigin.SCHEDULED_TASK);
         assertThat(chatRequest.getValue().message())
                 .isEqualTo(acceptance.getValue().originalMessage());
         assertThat(chatRequest.getValue().responseMode()).isEqualTo("agent");

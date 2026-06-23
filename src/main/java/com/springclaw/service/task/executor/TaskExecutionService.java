@@ -9,6 +9,7 @@ import com.springclaw.domain.entity.ScheduledTask;
 import com.springclaw.domain.entity.ScheduledTaskExecution;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
+import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.lifecycle.RunAcceptance;
 import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.chat.impl.ChatServiceImpl;
@@ -116,6 +117,12 @@ public class TaskExecutionService {
                     sessionKey,
                     channel,
                     task.getOwnerUserId(),
+                    SessionAccessClaim.personal(
+                            SessionAccessClaim.AcceptanceOrigin.SCHEDULED_TASK,
+                            channel,
+                            sessionKey,
+                            task.getOwnerUserId()
+                    ),
                     authService.resolveRoleByUserId(task.getOwnerUserId()),
                     originalMessage,
                     responseMode,

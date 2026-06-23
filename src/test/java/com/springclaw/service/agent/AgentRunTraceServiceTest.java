@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.runtime.contract.RunState;
+import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.lifecycle.InMemoryRunLifecycleStore;
 import com.springclaw.runtime.lifecycle.RunAcceptance;
 import com.springclaw.runtime.lifecycle.RunCoordinator;
@@ -268,7 +269,8 @@ class AgentRunTraceServiceTest {
         RunCoordinator coordinator = new RunCoordinator(store);
         Instant now = Instant.now();
         coordinator.accept(new RunAcceptance(
-                "req-canonical", "s1", "api", "u1", "USER", "hi", "agent",
+                "req-canonical", "s1", "api", "u1",
+                claim("s1", "u1"), "USER", "hi", "agent",
                 now, now.plus(Duration.ofMinutes(30))));
         coordinator.failed("req-canonical",
                 new RunState.Failure("LEGACY_EXECUTION_FAILED", "boom", false), now);
@@ -308,7 +310,8 @@ class AgentRunTraceServiceTest {
         RunCoordinator coordinator = new RunCoordinator(store);
         Instant acceptedAt = Instant.parse("2026-06-22T00:00:00Z");
         coordinator.accept(new RunAcceptance(
-                "req-terminal", "s1", "api", "u1", "USER", "hi", "agent",
+                "req-terminal", "s1", "api", "u1",
+                claim("s1", "u1"), "USER", "hi", "agent",
                 acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
         coordinator.failed(
                 "req-terminal",
@@ -338,6 +341,15 @@ class AgentRunTraceServiceTest {
                 )
         );
         assertThat(values.getValue()[8]).isEqualTo(7000L);
+    }
+
+    private static SessionAccessClaim claim(String sessionKey, String userId) {
+        return SessionAccessClaim.personal(
+                SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                "api",
+                sessionKey,
+                userId
+        );
     }
 
     @Test

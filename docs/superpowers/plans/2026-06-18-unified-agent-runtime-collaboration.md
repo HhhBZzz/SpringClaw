@@ -944,6 +944,10 @@ Progress:
   - MySQL adapters can map record rows without reconstructing authorization claims
   - fallback stores enforce active/source/outbox uniqueness, lease fencing,
     bounded short-term windows, and shared-session storage identity
-  - Claude may now begin Task 3 MySQL schema and persistence adapters
-  - next Codex task after Task 3: Task 4 atomic memory lifecycle management
+  - Phase 3A1 Task 3 MySQL schema and persistence adapters complete
+  - bounded P0/P1 review closed active-slot NULL CAS, database-time lease
+    fencing, lowest-revision claim TOCTOU, fail-loud migration, and claim-token
+    reread fencing
+  - real local MySQL integration tests pass without exposing credentials
+  - next Codex task: Task 4 atomic memory lifecycle management
 ```

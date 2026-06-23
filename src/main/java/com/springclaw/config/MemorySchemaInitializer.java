@@ -51,15 +51,18 @@ public class MemorySchemaInitializer implements ApplicationRunner {
         }
         try {
             if (migrationResource == null || !migrationResource.exists()) {
-                log.warn("Memory core migration resource absent, skipped");
-                return;
+                throw new IllegalStateException(
+                        "Memory core migration resource is missing: " + MIGRATION_PATH);
             }
             String sql = migrationResource.getContentAsString(StandardCharsets.UTF_8);
             for (String statement : RuntimeConsoleSchemaInitializer.splitSqlStatements(sql)) {
                 jdbcTemplate.execute(statement);
             }
+        } catch (IllegalStateException ex) {
+            throw ex;
         } catch (Exception ex) {
-            log.warn("Memory core schema initialization skipped, reason={}", ex.getMessage());
+            throw new IllegalStateException(
+                    "Memory core schema initialization failed", ex);
         }
     }
 }

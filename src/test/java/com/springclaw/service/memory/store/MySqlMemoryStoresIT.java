@@ -1,5 +1,7 @@
 package com.springclaw.service.memory.store;
 
+import com.springclaw.domain.entity.MemoryIndexOutboxEntity;
+import com.springclaw.mapper.MemoryIndexOutboxMapper;
 import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.memory.contract.MemoryIndexOperation;
 import com.springclaw.runtime.memory.contract.MemoryIndexOutboxEntry;
@@ -15,6 +17,8 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -56,6 +60,9 @@ class MySqlMemoryStoresIT {
 
     @Autowired
     private MySqlMemoryIndexOutboxStore outboxStore;
+
+    @Autowired
+    private MemoryIndexOutboxMapper outboxMapper;
 
     @Test
     void onlyOneActiveVersionMayExist() {
@@ -141,6 +148,32 @@ class MySqlMemoryStoresIT {
     }
 
     @Test
+    void compareAndSetStatusClearsActiveSlotBeforeNewActiveInsert() {
+        recordStore.insert(active("logical-1", "version-1", 1, 1));
+        MemoryRecordVersion inserted = recordStore.findByVersionId("version-1").orElseThrow();
+
+        boolean changed = recordStore.compareAndSetStatus(
+                "version-1",
+                MemoryStatus.ACTIVE,
+                MemoryStatus.SUPERSEDED,
+                null,
+                inserted.indexRevision(),
+                inserted.indexRevision() + 1,
+                T0.plusSeconds(10)
+        );
+
+        assertThat(changed).isTrue();
+        MemoryRecordVersion superseded =
+                recordStore.findByVersionId("version-1").orElseThrow();
+        assertThat(superseded.status()).isEqualTo(MemoryStatus.SUPERSEDED);
+        assertThat(superseded.activeSlot()).isNull();
+
+        recordStore.insert(active("logical-1", "version-2", 2, 1));
+        assertThat(recordStore.findActive("logical-1").orElseThrow().memoryVersionId())
+                .isEqualTo("version-2");
+    }
+
+    @Test
     void compareAndSetStatusFailsOnStaleRevision() {
         recordStore.insert(candidate("logical-1", "version-1", 1));
         boolean changed = recordStore.compareAndSetStatus(
@@ -181,6 +214,28 @@ class MySqlMemoryStoresIT {
     }
 
     @Test
+    void claimByIdRejectsSelectedHigherRevisionWhenLowerRevisionAppears() {
+        outboxStore.insert(pending("event-2", "logical-1", 2L, T0));
+        MemoryIndexOutboxEntity selected =
+                outboxMapper.selectFencedCandidate(toLocalDateTime(T0));
+        assertThat(selected.getIndexRevision()).isEqualTo(2L);
+
+        outboxStore.insert(pending("event-1", "logical-1", 1L, T0));
+
+        int changed = outboxMapper.claimById(
+                selected.getId(),
+                selected.getLogicalMemoryId(),
+                selected.getIndexRevision(),
+                "worker-a",
+                "claim-token",
+                toLocalDateTime(T0),
+                toLocalDateTime(T0.plusSeconds(30))
+        );
+
+        assertThat(changed).isZero();
+    }
+
+    @Test
     void outboxRejectsDuplicateEventAndDuplicateLogicalRevisionOperation() {
         outboxStore.insert(pending("event-1", "logical-1", 1L, T0));
         assertThatThrownBy(() ->
@@ -196,19 +251,49 @@ class MySqlMemoryStoresIT {
 
     @Test
     void completeAndFailRequireMatchingClaimToken() {
-        outboxStore.insert(pending("event-1", "logical-1", 1L, T0));
+        Instant now = Instant.now();
+        outboxStore.insert(pending(
+                "event-1", "logical-1", 1L, now.minusSeconds(1)));
         MemoryIndexOutboxEntry claimed =
-                outboxStore.claimNext("worker-a", T0, T0.plusSeconds(30)).orElseThrow();
+                outboxStore.claimNext("worker-a", now, now.plusSeconds(30)).orElseThrow();
 
-        assertThat(outboxStore.complete("event-1", "wrong", T0.plusSeconds(1))).isFalse();
+        assertThat(outboxStore.complete(
+                "event-1", "wrong", now.plusSeconds(1))).isFalse();
         assertThat(outboxStore.fail(
-                "event-1", claimed.claimToken(), "temporary", T0.plusSeconds(40))).isTrue();
+                "event-1", claimed.claimToken(), "temporary", now.plusSeconds(40))).isTrue();
 
         // failed entry becomes reclaimable after retryAt
         MemoryIndexOutboxEntry retried = outboxStore.claimNext(
-                "worker-b", T0.plusSeconds(40), T0.plusSeconds(60)).orElseThrow();
+                "worker-b", now.plusSeconds(41), now.plusSeconds(60)).orElseThrow();
         assertThat(outboxStore.complete(
-                "event-1", retried.claimToken(), T0.plusSeconds(41))).isTrue();
+                "event-1", retried.claimToken(), now.plusSeconds(42))).isTrue();
+    }
+
+    @Test
+    void completeAndFailRejectExpiredLeaseDespiteForgedEarlierTimes()
+            throws InterruptedException {
+        Instant claimedAt = Instant.now();
+        Instant leaseUntil = claimedAt.plusMillis(500);
+        Instant forgedEarlierTime = claimedAt.plusMillis(1);
+        Instant availableAt = claimedAt.minusSeconds(1);
+        outboxStore.insert(pending("event-1", "logical-1", 1L, availableAt));
+        outboxStore.insert(pending("event-2", "logical-2", 1L, availableAt));
+
+        MemoryIndexOutboxEntry first =
+                outboxStore.claimNext("worker-a", claimedAt, leaseUntil).orElseThrow();
+        MemoryIndexOutboxEntry second =
+                outboxStore.claimNext("worker-a", claimedAt, leaseUntil).orElseThrow();
+
+        assertThat(first.eventId()).isEqualTo("event-1");
+        assertThat(second.eventId()).isEqualTo("event-2");
+        Thread.sleep(750);
+        boolean completed = outboxStore.complete(
+                first.eventId(), first.claimToken(), forgedEarlierTime);
+        boolean failed = outboxStore.fail(
+                second.eventId(), second.claimToken(), "temporary", forgedEarlierTime);
+
+        assertThat(completed).isFalse();
+        assertThat(failed).isFalse();
     }
 
     @Test
@@ -330,5 +415,9 @@ class MySqlMemoryStoresIT {
                 T0,
                 T0
         );
+    }
+
+    private static LocalDateTime toLocalDateTime(Instant instant) {
+        return LocalDateTime.ofInstant(instant, ZoneOffset.UTC);
     }
 }

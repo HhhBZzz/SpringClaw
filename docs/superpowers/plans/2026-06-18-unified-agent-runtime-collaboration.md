@@ -890,3 +890,46 @@ Rollback order:
   - revert Task 5 ingress wiring
   - revert lifecycle core while retaining Phase 2A canonical identity
 ```
+
+## Update: Phase 3A memory and context design
+
+```text
+Task: Phase 3A architecture and Phase 3A1 implementation planning
+Owner: Codex
+Design commits:
+  c311c6c docs: design canonical memory and context ownership
+  b97d37f docs: harden memory design after bounded review
+Design:
+  docs/superpowers/specs/
+  2026-06-22-unified-runtime-memory-and-context-design.md
+Bounded review:
+  - architecture consistency: 5 P1 findings
+  - data/security/operations: 1 P0 and 4 P1 findings
+  - scope/YAGNI/implementability: APPROVED
+  - reviewers were explicitly limited to P0/P1 and forbidden from code polish,
+    style suggestions, or scope expansion
+Closed findings:
+  - ContextSnapshot must embed the complete structured MemoryFrame
+  - legacy Phase 2B context producer must stop at canonical activation
+  - factory, Advisors, and old retrieval must switch in one activation unit
+  - confirmation suspension must not create terminal memory
+  - snapshot role reuses roleCodeAtAcceptance
+  - REST strings cannot mint SHARED_SESSION access
+  - logical memory identity is separate from version-row identity
+  - outbox uses revision fencing and recoverable claim leases
+  - short-term Redis order uses persisted event IDs and recovery watermark
+  - vector rebuild uses a new generation and authoritative revision watermark
+Next implementation plan:
+  docs/superpowers/plans/
+  2026-06-23-unified-runtime-phase-3a1-memory-core.md
+Phase 3A1 boundary:
+  - add memory storage authority and shadow projections
+  - do not activate MemoryFrame/ContextSnapshotFactory
+  - do not replace Advisors or legacy context owner
+  - do not change route, answer, lock, stream, or tool-safety ownership
+Planned ownership:
+  - Codex: acceptance claim, contracts, lifecycle, management invariants,
+    acceptance and final review
+  - Claude: MySQL/Redis/vector/Markdown adapters and focused wiring after each
+    corresponding Codex core commit
+```

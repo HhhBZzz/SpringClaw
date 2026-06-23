@@ -103,6 +103,32 @@ public class AgentSessionServiceImpl extends ServiceImpl<AgentSessionMapper, Age
         localSessionCache.put(session.getSessionKey(), session);
     }
 
+    @Override
+    public void persistUserMessage(AgentSession session, String userMessage, String soulVersion) {
+        session.setLastUserMessage(userMessage);
+        session.setSoulVersion(soulVersion);
+        session.setStatus("ACTIVE");
+
+        if (!dbEnabled) {
+            localSessionCache.put(session.getSessionKey(), session);
+            return;
+        }
+
+        if (session.getId() != null && session.getId() > 0) {
+            if (isDbTemporarilyUnavailable()) {
+                localSessionCache.put(session.getSessionKey(), session);
+                return;
+            }
+            try {
+                updateById(session);
+                return;
+            } catch (Exception ex) {
+                markDbTemporarilyUnavailable(ex);
+            }
+        }
+        localSessionCache.put(session.getSessionKey(), session);
+    }
+
     private AgentSession buildSession(String sessionKey, String channel, String userId) {
         AgentSession session = new AgentSession();
         session.setSessionKey(sessionKey);

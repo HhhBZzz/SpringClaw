@@ -275,7 +275,7 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
                                 answer,
                                 true
                         );
-                        chatResultPersister.persist(context, answer, modelLedResult);
+                        chatResultPersister.persist(context, answer, modelLedResult, ChatPersistenceIntent.TERMINAL_RESULT);
                         reportResult(context, modelLedResult, answer);
                         sseEventBridge.sendTrace(emitter, context, "调用模型", "model", "success",
                                 streamClient.displayName(), System.currentTimeMillis() - startedAt);
@@ -348,7 +348,7 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
                 answer,
                 false
         );
-        chatResultPersister.persist(context, answer, partialResult);
+        chatResultPersister.persist(context, answer, partialResult, ChatPersistenceIntent.TERMINAL_RESULT);
         reportResult(context, partialResult, answer);
         releaseLock(emitter, context, lockToken, lockReleased);
         return true;

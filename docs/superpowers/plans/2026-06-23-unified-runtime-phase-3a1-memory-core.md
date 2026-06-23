@@ -468,7 +468,7 @@ git commit -m "feat: add canonical memory contracts and fallback stores"
 - Test: `src/test/java/com/springclaw/config/MemorySchemaInitializerTest.java`
 - Test: `src/test/java/com/springclaw/service/memory/store/MySqlMemoryStoresIT.java`
 
-- [ ] **Step 1: Write schema and repository tests first**
+- [x] **Step 1: Write schema and repository tests first**
 
 The integration test must prove:
 
@@ -502,7 +502,7 @@ void expiredClaimCanBeReclaimedWithNewToken() {
 }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Load local credentials without printing them:
 
@@ -515,7 +515,7 @@ mvn -q -Dtest=MemorySchemaInitializerTest,MySqlMemoryStoresIT test
 
 Expected: compilation failure because schema and adapters do not exist.
 
-- [ ] **Step 3: Add exact DDL**
+- [x] **Step 3: Add exact DDL**
 
 The migration must create:
 
@@ -599,14 +599,14 @@ Add nullable `event_key VARCHAR(192)` to `message_event`, backfill
 The migration must use information-schema guards so it is idempotent on an
 existing database.
 
-- [ ] **Step 4: Implement explicit entity conversion**
+- [x] **Step 4: Implement explicit entity conversion**
 
 Do not use implicit JSON type handlers. Follow `ToolInvocationProposalEntity`:
 encode/decode lists explicitly and fail loudly on corrupt security/provenance JSON.
 Do not extend `BaseEntity`; memory version and outbox timestamps participate in
 CAS/lease semantics and must be controlled explicitly.
 
-- [ ] **Step 5: Implement fenced mapper operations**
+- [x] **Step 5: Implement fenced mapper operations**
 
 `MemoryIndexOutboxMapper.claimNext(...)` must select only an event for which no
 lower outstanding revision exists for the same logical memory, and update it to:
@@ -621,7 +621,7 @@ attempts=attempts+1
 
 Completion and failure updates must include both `event_id` and `claim_token`.
 
-- [ ] **Step 6: Run integration tests and commit**
+- [x] **Step 6: Run integration tests and commit**
 
 ```bash
 set -a

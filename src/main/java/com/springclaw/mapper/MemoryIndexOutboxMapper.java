@@ -40,18 +40,40 @@ public interface MemoryIndexOutboxMapper extends BaseMapper<MemoryIndexOutboxEnt
             "AND ( " +
             "  (status IN ('PENDING','FAILED') AND available_at <= #{now}) " +
             "  OR (status = 'CLAIMED' AND lease_until <= #{now})" +
+            ") " +
+            "AND NOT EXISTS (" +
+            "  SELECT 1 FROM (" +
+            "    SELECT logical_memory_id, index_revision, status " +
+            "    FROM memory_index_outbox" +
+            "  ) lower_o " +
+            "  WHERE lower_o.logical_memory_id = #{logicalMemoryId} " +
+            "    AND lower_o.status IN ('PENDING','FAILED','CLAIMED') " +
+            "    AND lower_o.index_revision < #{indexRevision}" +
             ")")
     int claimById(@Param("id") Long id,
+                  @Param("logicalMemoryId") String logicalMemoryId,
+                  @Param("indexRevision") Long indexRevision,
                   @Param("owner") String owner,
                   @Param("token") String token,
                   @Param("now") LocalDateTime now,
                   @Param("leaseUntil") LocalDateTime leaseUntil);
 
+    @Select("SELECT * FROM memory_index_outbox " +
+            "WHERE id = #{id} " +
+            "AND status = 'CLAIMED' " +
+            "AND claim_token = #{claimToken}")
+    MemoryIndexOutboxEntity selectClaimedByIdAndToken(
+            @Param("id") Long id,
+            @Param("claimToken") String claimToken
+    );
+
     @Update("UPDATE memory_index_outbox " +
             "SET status = 'SUCCEEDED', claim_owner = NULL, claim_token = NULL, " +
             "    claimed_at = NULL, lease_until = NULL, last_error = NULL, update_time = #{completedAt} " +
             "WHERE event_id = #{eventId} AND claim_token = #{claimToken} " +
-            "AND status = 'CLAIMED' AND lease_until > #{completedAt}")
+            "AND status = 'CLAIMED' " +
+            "AND lease_until > UTC_TIMESTAMP(3) " +
+            "AND lease_until > #{completedAt}")
     int complete(@Param("eventId") String eventId,
                  @Param("claimToken") String claimToken,
                  @Param("completedAt") LocalDateTime completedAt);
@@ -61,7 +83,8 @@ public interface MemoryIndexOutboxMapper extends BaseMapper<MemoryIndexOutboxEnt
             "    claimed_at = NULL, lease_until = NULL, last_error = #{error}, " +
             "    available_at = #{retryAt}, update_time = #{retryAt} " +
             "WHERE event_id = #{eventId} AND claim_token = #{claimToken} " +
-            "AND status = 'CLAIMED'")
+            "AND status = 'CLAIMED' " +
+            "AND lease_until > UTC_TIMESTAMP(3)")
     int fail(@Param("eventId") String eventId,
              @Param("claimToken") String claimToken,
              @Param("error") String error,

@@ -55,6 +55,8 @@ public class MySqlMemoryIndexOutboxStore implements MemoryIndexOutboxStore {
         String token = UUID.randomUUID().toString();
         int changed = mapper.claimById(
                 candidate.getId(),
+                candidate.getLogicalMemoryId(),
+                candidate.getIndexRevision(),
                 owner,
                 token,
                 nowLdt,
@@ -65,9 +67,8 @@ public class MySqlMemoryIndexOutboxStore implements MemoryIndexOutboxStore {
             return Optional.empty();
         }
         // 重读以拿到 attempts 自增后的最新状态。
-        QueryWrapper<MemoryIndexOutboxEntity> qw = new QueryWrapper<>();
-        qw.eq("id", candidate.getId());
-        return Optional.ofNullable(mapper.selectOne(qw))
+        return Optional.ofNullable(
+                        mapper.selectClaimedByIdAndToken(candidate.getId(), token))
                 .map(MemoryIndexOutboxEntity::toDomain);
     }
 

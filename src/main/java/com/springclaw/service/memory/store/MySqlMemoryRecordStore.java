@@ -98,17 +98,15 @@ public class MySqlMemoryRecordStore implements MemoryRecordStore {
             long nextIndexRevision,
             Instant updatedAt
     ) {
-        MemoryRecordEntity update = new MemoryRecordEntity();
-        update.setStatus(next.name());
-        update.setActiveSlot(nextActiveSlot);
-        update.setIndexRevision(nextIndexRevision);
-        update.setUpdateTime(toLocalDateTime(updatedAt));
-        QueryWrapper<MemoryRecordEntity> qw = new QueryWrapper<>();
-        qw.eq("memory_version_id", memoryVersionId)
-          .eq("status", expected.name())
-          .eq("index_revision", expectedIndexRevision)
-          .eq("deleted", 0);
-        return mapper.update(update, qw) == 1;
+        return mapper.compareAndSetStatus(
+                memoryVersionId,
+                expected.name(),
+                next.name(),
+                nextActiveSlot,
+                expectedIndexRevision,
+                nextIndexRevision,
+                toLocalDateTime(updatedAt)
+        ) == 1;
     }
 
     private static LocalDateTime toLocalDateTime(Instant instant) {

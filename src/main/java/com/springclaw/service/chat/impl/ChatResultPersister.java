@@ -1,9 +1,11 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.common.util.TextUtils;
+import com.springclaw.service.event.MessageEventReceipt;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.event.MessageEventWrite;
 import com.springclaw.service.memory.MemoryService;
+import com.springclaw.service.memory.ShortTermMemoryWriter;
 import com.springclaw.service.prompt.SoulPromptService;
 import com.springclaw.service.session.AgentSessionService;
 import org.slf4j.Logger;
@@ -23,15 +25,18 @@ public class ChatResultPersister {
     private final MemoryService memoryService;
     private final MessageEventService messageEventService;
     private final SoulPromptService soulPromptService;
+    private final ShortTermMemoryWriter shortTermMemoryWriter;
 
     public ChatResultPersister(AgentSessionService agentSessionService,
                                MemoryService memoryService,
                                MessageEventService messageEventService,
-                               SoulPromptService soulPromptService) {
+                               SoulPromptService soulPromptService,
+                               ShortTermMemoryWriter shortTermMemoryWriter) {
         this.agentSessionService = agentSessionService;
         this.memoryService = memoryService;
         this.messageEventService = messageEventService;
         this.soulPromptService = soulPromptService;
+        this.shortTermMemoryWriter = shortTermMemoryWriter;
     }
 
     public void persist(ChatContext context,
@@ -65,14 +70,16 @@ public class ChatResultPersister {
                 context.effectiveUserMessage(),
                 normalizeAssistantForMemory(assistantMessage)
         );
-        messageEventService.append(new MessageEventWrite(
+        String assistantForMemory = normalizeAssistantForMemory(assistantMessage);
+        MessageEventReceipt userReceipt = messageEventService.append(new MessageEventWrite(
                 "chat:" + requestId + ":user", sessionKey, channel, userId,
                 "USER", "CHAT", context.effectiveUserMessage(), requestId));
-        messageEventService.append(new MessageEventWrite(
+        MessageEventReceipt assistantReceipt = messageEventService.append(new MessageEventWrite(
                 "chat:" + requestId + ":assistant:terminal", sessionKey, channel, userId,
                 "ASSISTANT", "CHAT",
-                "[REFLECT] " + TextUtils.truncate(normalizeAssistantForMemory(assistantMessage), 1600),
+                "[REFLECT] " + TextUtils.truncate(assistantForMemory, 1600),
                 requestId));
+        shadowTerminal(context, userReceipt, context.effectiveUserMessage(), assistantReceipt, assistantForMemory);
         messageEventService.recordSingle(
                 sessionKey, channel, userId, "SYSTEM", "OPAR",
                 "ROUTING=mode=%s, role=%s, reason=%s".formatted(
@@ -108,7 +115,7 @@ public class ChatResultPersister {
                 context.effectiveUserMessage(),
                 soulPromptService.soulVersion()
         );
-        messageEventService.append(new MessageEventWrite(
+        MessageEventReceipt userReceipt = messageEventService.append(new MessageEventWrite(
                 "chat:" + requestId + ":user", sessionKey, channel, userId,
                 "USER", "CHAT", context.effectiveUserMessage(), requestId));
         messageEventService.append(new MessageEventWrite(
@@ -116,6 +123,38 @@ public class ChatResultPersister {
                 "ASSISTANT", "CHAT",
                 TextUtils.truncate(assistantMessage, 1600),
                 requestId));
+        shadowSuspension(context, userReceipt, context.effectiveUserMessage());
+    }
+
+    private void shadowTerminal(ChatContext context,
+                                MessageEventReceipt userReceipt,
+                                String userContent,
+                                MessageEventReceipt assistantReceipt,
+                                String assistantContent) {
+        if (shortTermMemoryWriter == null || userReceipt == null || assistantReceipt == null) {
+            return;
+        }
+        try {
+            shortTermMemoryWriter.appendTerminal(
+                    context, userReceipt, userContent, assistantReceipt, assistantContent);
+        } catch (Exception ex) {
+            log.warn("短期记忆 terminal shadow 写入失败，继续使用 MySQL 恢复源。requestId={}, reason={}",
+                    context.requestId(), ex.getMessage());
+        }
+    }
+
+    private void shadowSuspension(ChatContext context,
+                                  MessageEventReceipt userReceipt,
+                                  String userContent) {
+        if (shortTermMemoryWriter == null || userReceipt == null) {
+            return;
+        }
+        try {
+            shortTermMemoryWriter.appendSuspension(context, userReceipt, userContent);
+        } catch (Exception ex) {
+            log.warn("短期记忆 suspension shadow 写入失败，继续使用 MySQL 恢复源。requestId={}, reason={}",
+                    context.requestId(), ex.getMessage());
+        }
     }
 
     private String normalizeAssistantForMemory(String answer) {

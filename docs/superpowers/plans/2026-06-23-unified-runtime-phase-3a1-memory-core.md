@@ -975,7 +975,7 @@ git commit -m "feat: distinguish terminal and suspended memory writes"
 - Test: `src/test/java/com/springclaw/service/memory/ShortTermMemoryRecoveryServiceTest.java`
 - Test: `src/test/java/com/springclaw/service/chat/impl/ChatResultPersisterTest.java`
 
-- [ ] **Step 1: Write failing ordering and recovery tests**
+- [x] **Step 1: Write failing ordering and recovery tests**
 
 ```java
 @Test
@@ -1004,7 +1004,7 @@ void recoveryMergePreservesConcurrentAppendAboveWatermark() {
 }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 mvn -q -Dtest=RedisShortTermMemoryStoreTest,ShortTermMemoryRecoveryServiceTest test
@@ -1012,7 +1012,7 @@ mvn -q -Dtest=RedisShortTermMemoryStoreTest,ShortTermMemoryRecoveryServiceTest t
 
 Expected: compilation failure because Redis storage does not exist.
 
-- [ ] **Step 3: Implement one Lua append/trim/TTL operation**
+- [x] **Step 3: Implement one Lua append/trim/TTL operation**
 
 Use one ZSET key plus one recovery-lock key per scope. Score is persisted
 `eventId`; member is canonical JSON containing `eventKey`. The Lua script performs:
@@ -1026,7 +1026,7 @@ EXPIRE key ttlSeconds
 Do not use arrival time as order and do not delete/rewrite the key during normal
 recovery.
 
-- [ ] **Step 4: Implement owner-filtered MySQL recovery**
+- [x] **Step 4: Implement owner-filtered MySQL recovery**
 
 `ShortTermMemoryRecoveryService`:
 
@@ -1039,14 +1039,14 @@ recovery.
 If the persisted personal-session owner does not match the claim, throw before
 querying chat events.
 
-- [ ] **Step 5: Shadow-write terminal and suspension events**
+- [x] **Step 5: Shadow-write terminal and suspension events**
 
 `ChatResultPersister` passes returned event receipts to
 `ShortTermMemoryWriter`. Terminal intent appends user and assistant. Suspension
 intent appends user only. Redis failure logs a bounded warning and leaves MySQL as
 the recovery source; it does not fail the already-persisted conversation.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 ```bash
 mvn -q -Dtest=RedisShortTermMemoryStoreTest,ShortTermMemoryRecoveryServiceTest,ChatResultPersisterTest test

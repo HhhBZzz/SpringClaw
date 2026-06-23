@@ -1,17 +1,22 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.domain.entity.AgentSession;
+import com.springclaw.service.event.MessageEventReceipt;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.event.MessageEventWrite;
 import com.springclaw.service.memory.MemoryService;
+import com.springclaw.service.memory.ShortTermMemoryWriter;
 import com.springclaw.service.prompt.SoulPromptService;
 import com.springclaw.service.session.AgentSessionService;
 import org.junit.jupiter.api.Test;
+
+import java.time.Instant;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -31,11 +36,14 @@ class ChatResultPersisterTest {
     private final MemoryService memoryService = mock(MemoryService.class);
     private final MessageEventService messageEventService = mock(MessageEventService.class);
     private final SoulPromptService soulPromptService = mock(SoulPromptService.class);
+    private final ShortTermMemoryWriter shortTermMemoryWriter =
+            mock(ShortTermMemoryWriter.class);
 
     private ChatResultPersister persister() {
         when(soulPromptService.soulVersion()).thenReturn("v1");
         return new ChatResultPersister(
-                agentSessionService, memoryService, messageEventService, soulPromptService);
+                agentSessionService, memoryService, messageEventService,
+                soulPromptService, shortTermMemoryWriter);
     }
 
     private static ChatContext context() {
@@ -61,6 +69,51 @@ class ChatResultPersisterTest {
                 eq(context.session()), eq("你好"), eq("answer"), eq("v1"));
         verify(memoryService).storeConversationTurn(
                 "s1", "api", "u1", "你好", "answer");
+    }
+
+    @Test
+    void terminalResultShadowWritesUserAndAssistantWithStableReceipts() {
+        ChatResultPersister persister = persister();
+        ChatContext context = context();
+        ChatExecutionResult result = new ChatExecutionResult(
+                "observe", "PLAN", "ACT", "answer", true);
+        MessageEventReceipt userReceipt = new MessageEventReceipt(
+                10L, "chat:req-1:user", Instant.parse("2026-06-23T00:00:00Z"));
+        MessageEventReceipt assistantReceipt = new MessageEventReceipt(
+                11L, "chat:req-1:assistant:terminal", Instant.parse("2026-06-23T00:00:01Z"));
+        when(messageEventService.append(argThat((MessageEventWrite write) ->
+                write != null && write.eventKey().endsWith(":user")))).thenReturn(userReceipt);
+        when(messageEventService.append(argThat((MessageEventWrite write) ->
+                write != null && write.eventKey().endsWith(":assistant:terminal")))).thenReturn(assistantReceipt);
+
+        persister.persist(context, "answer", result, ChatPersistenceIntent.TERMINAL_RESULT);
+
+        verify(shortTermMemoryWriter).appendTerminal(
+                context, userReceipt, "你好", assistantReceipt, "answer");
+    }
+
+    @Test
+    void terminalResultDoesNotFailWhenShadowWriteFails() {
+        ChatResultPersister persister = persister();
+        ChatContext context = context();
+        ChatExecutionResult result = new ChatExecutionResult(
+                "observe", "PLAN", "ACT", "answer", true);
+        MessageEventReceipt userReceipt = new MessageEventReceipt(
+                10L, "chat:req-1:user", Instant.parse("2026-06-23T00:00:00Z"));
+        MessageEventReceipt assistantReceipt = new MessageEventReceipt(
+                11L, "chat:req-1:assistant:terminal", Instant.parse("2026-06-23T00:00:01Z"));
+        when(messageEventService.append(argThat((MessageEventWrite write) ->
+                write != null && write.eventKey().endsWith(":user")))).thenReturn(userReceipt);
+        when(messageEventService.append(argThat((MessageEventWrite write) ->
+                write != null && write.eventKey().endsWith(":assistant:terminal")))).thenReturn(assistantReceipt);
+        doThrow(new IllegalStateException("redis down"))
+                .when(shortTermMemoryWriter)
+                .appendTerminal(context, userReceipt, "你好", assistantReceipt, "answer");
+
+        persister.persist(context, "answer", result, ChatPersistenceIntent.TERMINAL_RESULT);
+
+        verify(agentSessionService).persistConversation(
+                eq(context.session()), eq("你好"), eq("answer"), eq("v1"));
     }
 
     @Test

@@ -960,5 +960,17 @@ Progress:
   - Codex bounded P0/P1 review fixed duplicate-key DB receipt reload and bounded
     local event-key fallback cleanup
   - focused Task 5 tests pass
-  - Claude may now begin Task 6 Redis short-term shadow storage and recovery
+  - Phase 3A1 Task 6 Redis short-term shadow storage and recovery complete
+  - Claude started Redis store/recovery/writer and persister wiring; Codex picked
+    up the interrupted work and closed compile/runtime gaps
+  - Redis short-term storage uses eventId as ZSET score, Lua ZADD NX + trim + TTL,
+    and StringCodec for script arguments
+  - recovery uses a token-checked per-scope lease, owner-filtered CHAT
+    user/assistant events, and mergeRecovery watermark semantics
+  - terminal shadow writes user + assistant receipts; confirmation suspension
+    writes user only; Redis/shadow failure leaves MySQL as recovery source
+  - Redis beans are conditional on RedissonClient; writer no-ops when Redis is not
+    enabled, preserving default startup
+  - focused Task 6 tests and package pass
+  - Claude may now begin Task 7 fenced vector projection and rebuild primitives
 ```

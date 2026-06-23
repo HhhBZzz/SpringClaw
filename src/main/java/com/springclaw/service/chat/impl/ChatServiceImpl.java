@@ -385,7 +385,7 @@ public class ChatServiceImpl implements ChatService {
                     context.decision().reason(),
                     answer,
                     false
-            ));
+            ), ChatPersistenceIntent.CONFIRMATION_SUSPENSION);
             sseEventBridge.sendTrace(emitter, context, "等待确认", "agent", "success",
                     proposal == null ? "确认服务不可用。" : "已生成 action proposal: " + proposal.proposalId(), 0L);
         } catch (Exception ex) {
@@ -402,7 +402,7 @@ public class ChatServiceImpl implements ChatService {
                                        SseEmitter emitter) {
         String answer = resolveFinalAnswer(context, executionResult);
         sseEventBridge.sendAnswerChunks(emitter, answer);
-        chatResultPersister.persist(context, answer, executionResult);
+        chatResultPersister.persist(context, answer, executionResult, ChatPersistenceIntent.TERMINAL_RESULT);
         if (lifecycleObserver != null) {
             lifecycleObserver.resultReturned(context, executionResult, answer, Instant.now());
         }
@@ -422,7 +422,7 @@ public class ChatServiceImpl implements ChatService {
             ChatExecutionResult executionResult = run.executionResult();
             String answer = resolveFinalAnswer(context, executionResult);
             sseEventBridge.sendAnswerChunks(emitter, answer);
-            chatResultPersister.persist(context, answer, executionResult);
+            chatResultPersister.persist(context, answer, executionResult, ChatPersistenceIntent.TERMINAL_RESULT);
             if (lifecycleObserver != null) {
                 lifecycleObserver.resultReturned(context, executionResult, answer, Instant.now());
             }
@@ -456,7 +456,7 @@ public class ChatServiceImpl implements ChatService {
                 );
             }
             sseEventBridge.sendAnswerChunks(emitter, answer);
-            chatResultPersister.persist(context, answer, fallbackResult);
+            chatResultPersister.persist(context, answer, fallbackResult, ChatPersistenceIntent.TERMINAL_RESULT);
             if (lifecycleObserver != null) {
                 lifecycleObserver.resultReturned(context, fallbackResult, answer, Instant.now());
             }
@@ -548,7 +548,7 @@ public class ChatServiceImpl implements ChatService {
                             log.warn("流式回答自动修正失败，sessionKey={}, reason={}", context.assembled().sessionKey(), ex.getMessage());
                         }
                     }
-                    chatResultPersister.persist(context, fullAnswer.toString(), executionResult);
+                    chatResultPersister.persist(context, fullAnswer.toString(), executionResult, ChatPersistenceIntent.TERMINAL_RESULT);
                     if (lifecycleObserver != null) {
                         lifecycleObserver.resultReturned(
                                 context, executionResult, fullAnswer.toString(), Instant.now()
@@ -571,7 +571,7 @@ public class ChatServiceImpl implements ChatService {
                     fullAnswer.setLength(0);
                     fullAnswer.append(fallback);
                     sseEventBridge.sendAnswerChunks(emitter, fallback);
-                    chatResultPersister.persist(context, fullAnswer.toString(), executionResult);
+                    chatResultPersister.persist(context, fullAnswer.toString(), executionResult, ChatPersistenceIntent.TERMINAL_RESULT);
                     if (lifecycleObserver != null) {
                         lifecycleObserver.resultReturned(
                                 context, executionResult, fullAnswer.toString(), Instant.now()
@@ -644,7 +644,7 @@ public class ChatServiceImpl implements ChatService {
             }
             String finalAnswer = resolveFinalAnswer(context, executionResult);
             if (persistResult) {
-                chatResultPersister.persist(context, finalAnswer, executionResult);
+                chatResultPersister.persist(context, finalAnswer, executionResult, ChatPersistenceIntent.TERMINAL_RESULT);
             }
             if (lifecycleObserver != null) {
                 lifecycleObserver.resultReturned(

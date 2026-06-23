@@ -19,6 +19,7 @@ import com.springclaw.service.chat.async.ChatMessageConsumer;
 import com.springclaw.service.chat.async.ChatMessageProducer;
 import com.springclaw.service.chat.impl.ChatContext;
 import com.springclaw.service.chat.impl.ChatExecutionResult;
+import com.springclaw.service.chat.impl.ChatPersistenceIntent;
 import com.springclaw.service.chat.impl.ChatResultPersister;
 import com.springclaw.service.chat.impl.SseEventBridge;
 import org.junit.jupiter.api.DisplayName;
@@ -371,7 +372,8 @@ class TransportParityCharacterizationTest {
                 "persist",
                 ChatContext.class,
                 String.class,
-                ChatExecutionResult.class
+                ChatExecutionResult.class,
+                ChatPersistenceIntent.class
         )).isNotNull();
 
         assertThat(SseEventBridge.class.getMethod(

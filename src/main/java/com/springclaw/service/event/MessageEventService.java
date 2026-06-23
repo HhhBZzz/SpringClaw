@@ -12,6 +12,8 @@ import java.util.Map;
  */
 public interface MessageEventService extends IService<MessageEvent> {
 
+    MessageEventReceipt append(MessageEventWrite write);
+
     void recordSingle(String sessionKey,
                       String channel,
                       String userId,

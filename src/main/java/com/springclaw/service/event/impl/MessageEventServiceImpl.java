@@ -5,13 +5,16 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.mapper.MessageEventMapper;
+import com.springclaw.service.event.MessageEventReceipt;
 import com.springclaw.service.event.MessageEventService;
+import com.springclaw.service.event.MessageEventWrite;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
@@ -19,6 +22,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicLong;
@@ -41,10 +45,58 @@ public class MessageEventServiceImpl extends ServiceImpl<MessageEventMapper, Mes
 
     private final boolean dbEnabled;
     private final Map<String, Deque<MessageEvent>> localEventCache = new ConcurrentHashMap<>();
+    private final Map<String, MessageEvent> localEventByKey = new ConcurrentHashMap<>();
     private final AtomicLong localIdGenerator = new AtomicLong(1);
 
     public MessageEventServiceImpl(@Value("${springclaw.persistence.db-enabled:false}") boolean dbEnabled) {
         this.dbEnabled = dbEnabled;
+    }
+
+    @Override
+    public MessageEventReceipt append(MessageEventWrite write) {
+        if (write == null || !StringUtils.hasText(write.sessionKey())
+                || !StringUtils.hasText(write.content())) {
+            return null;
+        }
+        MessageEvent event = new MessageEvent();
+        event.setEventKey(write.eventKey());
+        event.setSessionKey(write.sessionKey());
+        event.setChannel(write.channel() == null ? "unknown" : write.channel());
+        event.setUserId(write.userId() == null ? "anonymous" : write.userId());
+        event.setRole(write.role() == null ? "SYSTEM" : write.role());
+        event.setEventType(write.eventType() == null ? "SYSTEM" : write.eventType());
+        event.setRequestId(write.requestId() == null ? "" : write.requestId());
+        event.setContent(write.content());
+
+        if (dbEnabled) {
+            try {
+                MessageEvent existing = lambdaQuery()
+                        .eq(MessageEvent::getEventKey, write.eventKey())
+                        .last("LIMIT 1")
+                        .one();
+                if (existing != null) {
+                    return toReceipt(existing);
+                }
+                save(event);
+                return toReceipt(event);
+            } catch (Exception ex) {
+                log.warn("消息事件写库失败，降级本地缓存。sessionKey={}, reason={}",
+                        write.sessionKey(), ex.getMessage());
+            }
+        }
+
+        MessageEvent cached = localEventByKey.putIfAbsent(write.eventKey(), event);
+        if (cached != null) {
+            return toReceipt(cached);
+        }
+        cacheLocalEvent(write.sessionKey(), event);
+        return toReceipt(event);
+    }
+
+    private static MessageEventReceipt toReceipt(MessageEvent event) {
+        long id = event.getId() == null ? 0L : event.getId();
+        Instant occurredAt = Instant.now();
+        return new MessageEventReceipt(id, event.getEventKey(), occurredAt);
     }
 
     @Override
@@ -58,26 +110,10 @@ public class MessageEventServiceImpl extends ServiceImpl<MessageEventMapper, Mes
         if (!StringUtils.hasText(sessionKey) || !StringUtils.hasText(content)) {
             return;
         }
-
-        MessageEvent event = new MessageEvent();
-        event.setSessionKey(sessionKey);
-        event.setChannel(channel == null ? "unknown" : channel);
-        event.setUserId(userId == null ? "anonymous" : userId);
-        event.setRole(role == null ? "SYSTEM" : role);
-        event.setEventType(eventType == null ? "SYSTEM" : eventType);
-        event.setRequestId(requestId == null ? "" : requestId);
-        event.setContent(content);
-
-        if (dbEnabled) {
-            try {
-                save(event);
-                return;
-            } catch (Exception ex) {
-                log.warn("消息事件写库失败，降级本地缓存。sessionKey={}, reason={}", sessionKey, ex.getMessage());
-            }
-        }
-
-        cacheLocalEvent(sessionKey, event);
+        // 兼容入口：生成唯一非 chat: 事件键，不参与 memory 收据幂等。
+        String eventKey = "evt:" + UUID.randomUUID();
+        append(new MessageEventWrite(
+                eventKey, sessionKey, channel, userId, role, eventType, content, requestId));
     }
 
     @Override

@@ -139,7 +139,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
             // 循环完成 → 发送最终回答
             String finalAnswer = resolveFinalAnswer(result);
             sseEventBridge.sendAnswerChunks(emitter, finalAnswer);
-            chatResultPersister.persist(context, finalAnswer, result);
+            chatResultPersister.persist(context, finalAnswer, result, ChatPersistenceIntent.TERMINAL_RESULT);
             reportResult(context, result, finalAnswer);
 
             sseEventBridge.sendTrace(emitter, context, "自主循环", "agent", "success",

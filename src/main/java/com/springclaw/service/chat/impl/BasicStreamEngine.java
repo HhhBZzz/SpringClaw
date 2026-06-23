@@ -163,7 +163,7 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
                                 answer,
                                 true
                         );
-                        chatResultPersister.persist(context, answer, basicResult);
+                        chatResultPersister.persist(context, answer, basicResult, ChatPersistenceIntent.TERMINAL_RESULT);
                         reportResult(context, basicResult, answer);
                         sseEventBridge.sendTrace(emitter, context, "调用模型", "model", "success",
                                 streamClient.displayName(), System.currentTimeMillis() - startedAt);
@@ -292,7 +292,7 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
                 answer,
                 false
         );
-        chatResultPersister.persist(context, answer, partialResult);
+        chatResultPersister.persist(context, answer, partialResult, ChatPersistenceIntent.TERMINAL_RESULT);
         reportResult(context, partialResult, answer);
         releaseLock(emitter, context, lockToken, lockReleased);
         return true;

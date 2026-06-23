@@ -15,4 +15,6 @@ public interface AgentSessionService extends IService<AgentSession> {
     AgentSession getOrCreate(String sessionKey, String channel, String userId);
 
     void persistConversation(AgentSession session, String userMessage, String assistantMessage, String soulVersion);
+
+    void persistUserMessage(AgentSession session, String userMessage, String soulVersion);
 }

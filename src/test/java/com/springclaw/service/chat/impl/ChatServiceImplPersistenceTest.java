@@ -124,7 +124,7 @@ class ChatServiceImplPersistenceTest {
 
         service.chat(new ChatRequest("s1", "u1", "在么", "feishu"));
 
-        verify(chatResultPersister).persist(eq(context), eq("在。"), any(ChatExecutionResult.class));
+        verify(chatResultPersister).persist(eq(context), eq("在。"), any(ChatExecutionResult.class), eq(ChatPersistenceIntent.TERMINAL_RESULT));
     }
 
     @Test
@@ -229,6 +229,6 @@ class ChatServiceImplPersistenceTest {
         );
 
         assertThat(result.answer()).isEqualTo("今天完成了 skill 重构");
-        verify(chatResultPersister, never()).persist(any(ChatContext.class), anyString(), any(ChatExecutionResult.class));
+        verify(chatResultPersister, never()).persist(any(ChatContext.class), anyString(), any(ChatExecutionResult.class), any(ChatPersistenceIntent.class));
     }
 }

@@ -215,6 +215,43 @@ public final class InMemoryMemoryIndexOutboxStore
         }
     }
 
+    @Override
+    public List<MemoryIndexOutboxEntry> findPendingAfterRevision(
+            long exclusiveRevision,
+            String afterEventId,
+            int limit
+    ) {
+        if (exclusiveRevision < 0) {
+            throw new IllegalArgumentException("exclusiveRevision must not be negative");
+        }
+        if (limit <= 0) {
+            throw new IllegalArgumentException("limit must be positive");
+        }
+        synchronized (lock) {
+            return entries.values().stream()
+                    .filter(entry -> entry.status() != MemoryIndexOutboxEntry.Status.SUCCEEDED)
+                    .filter(entry -> isAfterCursor(entry, exclusiveRevision, afterEventId))
+                    .sorted(Comparator
+                            .comparingLong(MemoryIndexOutboxEntry::indexRevision)
+                            .thenComparing(MemoryIndexOutboxEntry::eventId))
+                    .limit(limit)
+                    .toList();
+        }
+    }
+
+    private static boolean isAfterCursor(
+            MemoryIndexOutboxEntry entry,
+            long revision,
+            String afterEventId
+    ) {
+        if (entry.indexRevision() > revision) {
+            return true;
+        }
+        return entry.indexRevision() == revision
+                && afterEventId != null
+                && entry.eventId().compareTo(afterEventId) > 0;
+    }
+
     private Map<String, Long> lowestOutstandingRevisions() {
         Map<String, Long> revisions = new HashMap<>();
         for (MemoryIndexOutboxEntry entry : entries.values()) {

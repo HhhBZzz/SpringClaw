@@ -26,4 +26,19 @@ public interface MemoryIndexOutboxStore {
     );
 
     List<MemoryIndexOutboxEntry> findExpiredClaims(Instant now, int limit);
+
+    default List<MemoryIndexOutboxEntry> findPendingAfterRevision(
+            long exclusiveRevision,
+            int limit
+    ) {
+        return findPendingAfterRevision(exclusiveRevision, null, limit);
+    }
+
+    default List<MemoryIndexOutboxEntry> findPendingAfterRevision(
+            long exclusiveRevision,
+            String afterEventId,
+            int limit
+    ) {
+        return List.of();
+    }
 }

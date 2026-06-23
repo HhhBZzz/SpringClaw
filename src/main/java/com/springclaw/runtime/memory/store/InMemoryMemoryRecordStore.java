@@ -91,15 +91,16 @@ public final class InMemoryMemoryRecordStore implements MemoryRecordStore {
             int limit
     ) {
         return executeExclusively(() -> {
-            Objects.requireNonNull(scope, "scope");
             if (limit <= 0) {
                 throw new IllegalArgumentException("limit must be positive");
             }
             return recordsByVersionId.values().stream()
                     .filter(record -> !record.deleted())
                     .filter(record -> record.status() == MemoryStatus.ACTIVE)
-                    .filter(record -> record.scopeType() == scope.scopeType())
-                    .filter(record -> record.scopeId().equals(scope.scopeId()))
+                    .filter(record -> scope == null
+                            || record.scopeType() == scope.scopeType())
+                    .filter(record -> scope == null
+                            || record.scopeId().equals(scope.scopeId()))
                     .filter(record -> types == null
                             || types.isEmpty()
                             || types.contains(record.memoryType()))
@@ -109,6 +110,31 @@ public final class InMemoryMemoryRecordStore implements MemoryRecordStore {
                             .thenComparing(
                                     MemoryRecordVersion::memoryVersionId
                             ))
+                    .limit(limit)
+                    .toList();
+        });
+    }
+
+    @Override
+    public List<MemoryRecordVersion> findActiveAfterRecordId(
+            long afterRecordId,
+            int limit
+    ) {
+        if (afterRecordId < 0) {
+            throw new IllegalArgumentException("afterRecordId must not be negative");
+        }
+        return executeExclusively(() -> {
+            if (limit <= 0) {
+                throw new IllegalArgumentException("limit must be positive");
+            }
+            return recordsByVersionId.values().stream()
+                    .filter(record -> !record.deleted())
+                    .filter(record -> record.status() == MemoryStatus.ACTIVE)
+                    .filter(record -> record.recordId() != null)
+                    .filter(record -> record.recordId() > afterRecordId)
+                    .sorted(Comparator
+                            .comparing(MemoryRecordVersion::recordId)
+                            .thenComparing(MemoryRecordVersion::memoryVersionId))
                     .limit(limit)
                     .toList();
         });

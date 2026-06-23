@@ -1075,7 +1075,7 @@ git commit -m "feat: project ordered short-term memory into redis"
 - Test: `src/test/java/com/springclaw/service/memory/index/MemoryIndexReconcilerTest.java`
 - Test: `src/test/java/com/springclaw/service/memory/index/MemoryIndexRebuildServiceTest.java`
 
-- [ ] **Step 1: Write stale-write and rebuild tests**
+- [x] **Step 1: Write stale-write and rebuild tests**
 
 ```java
 @Test
@@ -1110,7 +1110,7 @@ void rebuildCopiesOnlyCurrentActiveVersionsThenAppliesTail() {
 }
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 mvn -q -Dtest=MemoryIndexWorkerTest,MemoryIndexReconcilerTest,MemoryIndexRebuildServiceTest test
@@ -1118,7 +1118,7 @@ mvn -q -Dtest=MemoryIndexWorkerTest,MemoryIndexReconcilerTest,MemoryIndexRebuild
 
 Expected: compilation failure because index components do not exist.
 
-- [ ] **Step 3: Wrap Spring AI VectorStore**
+- [x] **Step 3: Wrap Spring AI VectorStore**
 
 Use `memoryVersionId` as `Document.id`. Store metadata:
 
@@ -1139,7 +1139,7 @@ contentHash
 `VectorStore.delete(List.of(memoryVersionId))`. This adapter exposes no raw
 similarity-search API to controllers or engines.
 
-- [ ] **Step 4: Fence worker execution**
+- [x] **Step 4: Fence worker execution**
 
 For every claimed event:
 
@@ -1152,7 +1152,7 @@ For every claimed event:
 
 The worker must not mark success after losing its lease.
 
-- [ ] **Step 5: Implement reconciliation and generation rebuild**
+- [x] **Step 5: Implement reconciliation and generation rebuild**
 
 Reconciler scans indexed IDs in bounded batches and deletes any ID that is not the
 current active version in MySQL.
@@ -1170,7 +1170,7 @@ Rebuild service:
 
 Do not replay historical successful outbox events into the new generation.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 ```bash
 mvn -q -Dtest=MemoryIndexWorkerTest,MemoryIndexReconcilerTest,MemoryIndexRebuildServiceTest test

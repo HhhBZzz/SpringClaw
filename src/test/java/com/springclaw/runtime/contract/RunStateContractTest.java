@@ -239,6 +239,7 @@ class RunStateContractTest {
                 "session-1",
                 "web",
                 "user-1",
+                personalClaim("web", "session-1", "user-1"),
                 "USER",
                 "hello",
                 "agent",
@@ -321,6 +322,53 @@ class RunStateContractTest {
                 snapshot("run-1"), decision("run-1"), "strategy-1", 1, "",
                 List.of(), null, null, null
         )).hasMessageContaining("pendingProposalId");
+    }
+
+    @Test
+    void runStateRequiresClaimToMatchAcceptedSessionChannelAndUser() {
+        assertThatThrownBy(() -> claimVariant(
+                createdState(),
+                SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        "api",
+                        "session-1",
+                        "user-1"
+                )
+        )).hasMessageContaining("channel");
+
+        assertThatThrownBy(() -> claimVariant(
+                createdState(),
+                SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        "web",
+                        "session-2",
+                        "user-1"
+                )
+        )).hasMessageContaining("sessionKey");
+
+        assertThatThrownBy(() -> claimVariant(
+                createdState(),
+                SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        "web",
+                        "session-1",
+                        "user-2"
+                )
+        )).hasMessageContaining("acceptedUserId");
+    }
+
+    @Test
+    void runStateNormalizesIdentityBeforeComparingClaim() {
+        RunState normalized = identityVariant(
+                createdState(),
+                " session-1 ",
+                " web ",
+                " user-1 "
+        );
+
+        assertThat(normalized.sessionKey()).isEqualTo("session-1");
+        assertThat(normalized.channel()).isEqualTo("web");
+        assertThat(normalized.userId()).isEqualTo("user-1");
     }
 
     @Test
@@ -444,6 +492,18 @@ class RunStateContractTest {
                         valid.roleCodeAtAcceptance(), valid.originalMessage(), valid.responseMode(),
                         valid.acceptedAt(), valid.deadlineAt().plusSeconds(1))
         )).hasMessageContaining("deadlineAt");
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                createdState(),
+                claimVariant(
+                        valid,
+                        SessionAccessClaim.personal(
+                                SessionAccessClaim.AcceptanceOrigin.VERIFIED_WEBHOOK,
+                                valid.channel(),
+                                valid.sessionKey(),
+                                valid.userId()
+                        )
+                )
+        )).hasMessageContaining("sessionAccessClaim");
     }
 
     @Test
@@ -1180,6 +1240,7 @@ class RunStateContractTest {
                 "session-1",
                 "web",
                 "user-1",
+                personalClaim("web", "session-1", "user-1"),
                 "USER",
                 "hello",
                 "agent",
@@ -1229,6 +1290,7 @@ class RunStateContractTest {
                 previous.sessionKey(),
                 previous.channel(),
                 previous.userId(),
+                previous.sessionAccessClaim(),
                 previous.roleCodeAtAcceptance(),
                 previous.originalMessage(),
                 previous.responseMode(),
@@ -1276,6 +1338,7 @@ class RunStateContractTest {
                 previous.sessionKey(),
                 previous.channel(),
                 previous.userId(),
+                previous.sessionAccessClaim(),
                 previous.roleCodeAtAcceptance(),
                 previous.originalMessage(),
                 previous.responseMode(),
@@ -1316,6 +1379,7 @@ class RunStateContractTest {
                 sessionKey,
                 channel,
                 userId,
+                source.sessionAccessClaim(),
                 roleCodeAtAcceptance,
                 originalMessage,
                 responseMode,
@@ -1324,6 +1388,76 @@ class RunStateContractTest {
                 source.updatedAt(),
                 source.finishedAt(),
                 deadlineAt,
+                source.contextSnapshot(),
+                source.executionDecision(),
+                source.strategyId(),
+                source.attempt(),
+                source.pendingProposalId(),
+                source.toolInvocations(),
+                source.completionDecision(),
+                source.result(),
+                source.usage(),
+                source.failure()
+        );
+    }
+
+    private static RunState claimVariant(
+            RunState source,
+            SessionAccessClaim sessionAccessClaim
+    ) {
+        return new RunState(
+                source.runId(),
+                source.requestId(),
+                source.revision(),
+                source.status(),
+                source.sessionKey(),
+                source.channel(),
+                source.userId(),
+                sessionAccessClaim,
+                source.roleCodeAtAcceptance(),
+                source.originalMessage(),
+                source.responseMode(),
+                source.acceptedAt(),
+                source.startedAt(),
+                source.updatedAt(),
+                source.finishedAt(),
+                source.deadlineAt(),
+                source.contextSnapshot(),
+                source.executionDecision(),
+                source.strategyId(),
+                source.attempt(),
+                source.pendingProposalId(),
+                source.toolInvocations(),
+                source.completionDecision(),
+                source.result(),
+                source.usage(),
+                source.failure()
+        );
+    }
+
+    private static RunState identityVariant(
+            RunState source,
+            String sessionKey,
+            String channel,
+            String userId
+    ) {
+        return new RunState(
+                source.runId(),
+                source.requestId(),
+                source.revision(),
+                source.status(),
+                sessionKey,
+                channel,
+                userId,
+                source.sessionAccessClaim(),
+                source.roleCodeAtAcceptance(),
+                source.originalMessage(),
+                source.responseMode(),
+                source.acceptedAt(),
+                source.startedAt(),
+                source.updatedAt(),
+                source.finishedAt(),
+                source.deadlineAt(),
                 source.contextSnapshot(),
                 source.executionDecision(),
                 source.strategyId(),
@@ -1353,6 +1487,7 @@ class RunStateContractTest {
                 "session-1",
                 "web",
                 "user-1",
+                personalClaim("web", "session-1", "user-1"),
                 "USER",
                 "hello",
                 "agent",
@@ -1376,6 +1511,19 @@ class RunStateContractTest {
 
     private static ContextSnapshot snapshot(String runId) {
         return snapshot(runId, "hash-1");
+    }
+
+    private static SessionAccessClaim personalClaim(
+            String channel,
+            String sessionKey,
+            String userId
+    ) {
+        return SessionAccessClaim.personal(
+                SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                channel,
+                sessionKey,
+                userId
+        );
     }
 
     private static ContextSnapshot snapshot(String runId, String snapshotHash) {

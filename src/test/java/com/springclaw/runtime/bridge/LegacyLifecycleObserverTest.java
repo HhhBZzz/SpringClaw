@@ -4,6 +4,7 @@ import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.runtime.contract.RunEvent;
 import com.springclaw.runtime.contract.RunEventType;
 import com.springclaw.runtime.contract.RunStatus;
+import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.lifecycle.InMemoryRunLifecycleStore;
 import com.springclaw.runtime.lifecycle.RunAcceptance;
 import com.springclaw.runtime.lifecycle.RunCoordinator;
@@ -31,7 +32,8 @@ class LegacyLifecycleObserverTest {
         InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
         RunCoordinator coordinator = new RunCoordinator(store);
         coordinator.accept(new RunAcceptance(
-                RUN_ID, "session-1", "api", "user-1", "USER", "original",
+                RUN_ID, "session-1", "api", "user-1",
+                claim(), "USER", "original",
                 "agent", T0, T0.plusSeconds(300)
         ));
         LegacyLifecycleObserver observer = new LegacyLifecycleObserver(
@@ -70,7 +72,8 @@ class LegacyLifecycleObserverTest {
         InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
         RunCoordinator coordinator = new RunCoordinator(store);
         coordinator.accept(new RunAcceptance(
-                RUN_ID, "session-1", "api", "user-1", "USER", "original",
+                RUN_ID, "session-1", "api", "user-1",
+                claim(), "USER", "original",
                 "agent", T0, T0.plusSeconds(300)
         ));
         LegacyLifecycleObserver observer = new LegacyLifecycleObserver(
@@ -113,6 +116,15 @@ class LegacyLifecycleObserverTest {
                         "observe-prompt", "", "",
                         Map.of("contextSummary", assembled.sourceSummary())
                 )
+        );
+    }
+
+    private static SessionAccessClaim claim() {
+        return SessionAccessClaim.personal(
+                SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                "api",
+                "session-1",
+                "user-1"
         );
     }
 }

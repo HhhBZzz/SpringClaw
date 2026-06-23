@@ -8,6 +8,7 @@ import com.springclaw.runtime.bridge.LegacyExecutionDecisionAdapter;
 import com.springclaw.runtime.bridge.LegacyRunContextAdapter;
 import com.springclaw.runtime.bridge.LegacyRunResultAdapter;
 import com.springclaw.runtime.contract.RunStatus;
+import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.identity.RunIdentityFactory;
 import com.springclaw.runtime.lifecycle.InMemoryRunLifecycleStore;
 import com.springclaw.runtime.lifecycle.RunAcceptance;
@@ -134,7 +135,14 @@ class ChatServiceImplLifecycleProjectionTest {
     private static void acceptRun(RunCoordinator coordinator) {
         Instant now = Instant.now();
         coordinator.accept(new RunAcceptance(
-                RUN_ID, "s1", "api", "u1", "USER", "你好", "agent",
+                RUN_ID, "s1", "api", "u1",
+                SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        "api",
+                        "s1",
+                        "u1"
+                ),
+                "USER", "你好", "agent",
                 now, now.plusSeconds(1800)
         ));
     }

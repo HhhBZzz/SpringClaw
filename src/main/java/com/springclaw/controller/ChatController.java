@@ -9,6 +9,7 @@ import com.springclaw.dto.chat.ChatHistoryResponse;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
 import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
+import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.identity.RunIdentityFactory;
 import com.springclaw.runtime.lifecycle.RunAcceptance;
 import com.springclaw.service.agent.AgentActionProposalResult;
@@ -250,8 +251,11 @@ public class ChatController {
         if (!StringUtils.hasText(effectiveUserId)) {
             throw new BusinessException(40066, "userId 不能为空");
         }
+        String normalizedSessionKey = StringUtils.hasText(request.sessionKey())
+                ? request.sessionKey().trim()
+                : request.sessionKey();
         return new ChatRequest(
-                request.sessionKey(),
+                normalizedSessionKey,
                 effectiveUserId.trim(),
                 request.message(),
                 request.channel(),
@@ -264,11 +268,18 @@ public class ChatController {
             ChatRequest request,
             Instant acceptedAt
     ) {
+        String channel = normalizedChannel(request.channel());
         runtimeBridge.accepted(new RunAcceptance(
                 runId,
                 request.sessionKey(),
-                normalizedChannel(request.channel()),
+                channel,
                 request.userId(),
+                SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        channel,
+                        request.sessionKey(),
+                        request.userId()
+                ),
                 resolveRoleCode(request.userId()),
                 request.message(),
                 normalizedResponseMode(request.responseMode()),

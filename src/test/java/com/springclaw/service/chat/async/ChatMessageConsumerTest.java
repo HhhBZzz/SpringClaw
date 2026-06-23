@@ -3,6 +3,7 @@ package com.springclaw.service.chat.async;
 import com.springclaw.dto.chat.ChatResponse;
 import com.springclaw.runtime.contract.RunState;
 import com.springclaw.runtime.contract.RunStatus;
+import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.lifecycle.RunStateRepository;
 import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
@@ -114,6 +115,35 @@ class ChatMessageConsumerTest {
         verify(chatService, never()).chat(any(AcceptedChatCommand.class));
     }
 
+    @Test
+    void sharedCanonicalClaimStopsRabbitDeliveryBeforeLegacyExecution() {
+        ChatService chatService = mock(ChatService.class);
+        RunStateRepository repository = mock(RunStateRepository.class);
+        AsyncChatRequestMessage message = message();
+        when(repository.requireByRunId(message.requestId()))
+                .thenReturn(createdRun(
+                        message,
+                        SessionAccessClaim.sharedVerified(
+                                message.channel(),
+                                message.sessionKey(),
+                                message.userId()
+                        )
+                ));
+        ChatMessageConsumer consumer = new ChatMessageConsumer(
+                chatService,
+                mock(AsyncChatResultStore.class),
+                mock(ChatMessageProducer.class),
+                mock(SimpMessagingTemplate.class),
+                repository
+        );
+
+        assertThatThrownBy(() -> consumer.consume(message))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("PERSONAL");
+
+        verify(chatService, never()).chat(any(AcceptedChatCommand.class));
+    }
+
     private static AsyncChatRequestMessage message() {
         return new AsyncChatRequestMessage(
                 "44444444444444444444444444444444",
@@ -127,6 +157,21 @@ class ChatMessageConsumerTest {
     }
 
     private static RunState createdRun(AsyncChatRequestMessage message) {
+        return createdRun(
+                message,
+                SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        message.channel(),
+                        message.sessionKey(),
+                        message.userId()
+                )
+        );
+    }
+
+    private static RunState createdRun(
+            AsyncChatRequestMessage message,
+            SessionAccessClaim sessionAccessClaim
+    ) {
         Instant acceptedAt = Instant.ofEpochMilli(message.createdAt());
         return new RunState(
                 message.requestId(),
@@ -136,6 +181,7 @@ class ChatMessageConsumerTest {
                 message.sessionKey(),
                 message.channel(),
                 message.userId(),
+                sessionAccessClaim,
                 "USER",
                 message.message(),
                 message.responseMode(),

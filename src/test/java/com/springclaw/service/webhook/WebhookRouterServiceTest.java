@@ -4,6 +4,7 @@ import com.springclaw.dto.chat.ChatResponse;
 import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
 import com.springclaw.runtime.identity.RunIdentityFactory;
 import com.springclaw.runtime.lifecycle.RunAcceptance;
+import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
@@ -82,10 +83,113 @@ class WebhookRouterServiceTest {
         assertThat(acceptance.getValue().roleCodeAtAcceptance()).isEqualTo("USER");
         assertThat(acceptance.getValue().originalMessage()).isEqualTo("hello");
         assertThat(acceptance.getValue().responseMode()).isEqualTo("agent");
+        assertThat(acceptance.getValue().sessionAccessClaim().claimType())
+                .isEqualTo(SessionAccessClaim.ClaimType.PERSONAL);
+        assertThat(acceptance.getValue().sessionAccessClaim().acceptanceOrigin())
+                .isEqualTo(SessionAccessClaim.AcceptanceOrigin.VERIFIED_WEBHOOK);
         assertThat(Duration.between(
                 acceptance.getValue().acceptedAt(),
                 acceptance.getValue().deadlineAt()
         )).isEqualTo(Duration.ofMinutes(30));
+    }
+
+    @Test
+    void untrustedFeishuGroupWebhookRemainsPersonal() {
+        ChannelAdapterFactory adapterFactory = mock(ChannelAdapterFactory.class);
+        ChatService chatService = mock(ChatService.class);
+        RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
+        AuthService authService = mock(AuthService.class);
+        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        ChannelAdapter adapter = mock(ChannelAdapter.class);
+        when(adapterFactory.getRequired("feishu")).thenReturn(adapter);
+        when(adapter.adapt(Map.of("event", "group-message"))).thenReturn(
+                new UnifiedInboundMessage(
+                        "feishu",
+                        "feishu:group:g1",
+                        "alice",
+                        "hello group"
+                )
+        );
+        when(identityFactory.accept(anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(authService.resolveRoleByUserId("alice")).thenReturn("USER");
+        when(chatService.chat(any(AcceptedChatCommand.class)))
+                .thenReturn(new ChatResponse(
+                        "feishu:group:g1",
+                        "answer",
+                        "model",
+                        1L
+                ));
+        WebhookRouterService service = new WebhookRouterService(
+                adapterFactory,
+                chatService,
+                mock(MessageEventService.class),
+                mock(ChannelOutboundDispatcher.class),
+                identityFactory,
+                authService,
+                runtimeBridge
+        );
+
+        service.dispatch("feishu", Map.of("event", "group-message"));
+
+        ArgumentCaptor<RunAcceptance> acceptance =
+                ArgumentCaptor.forClass(RunAcceptance.class);
+        verify(runtimeBridge).accepted(acceptance.capture());
+        assertThat(acceptance.getValue().sessionAccessClaim().claimType())
+                .isEqualTo(SessionAccessClaim.ClaimType.PERSONAL);
+    }
+
+    @Test
+    void trustedFeishuGroupWebhookMintsSharedClaim() {
+        ChannelAdapterFactory adapterFactory = mock(ChannelAdapterFactory.class);
+        ChatService chatService = mock(ChatService.class);
+        RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
+        AuthService authService = mock(AuthService.class);
+        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        ChannelAdapter adapter = mock(ChannelAdapter.class);
+        when(adapterFactory.getRequired("feishu")).thenReturn(adapter);
+        when(adapter.adapt(Map.of("event", "trusted-group-message"))).thenReturn(
+                new UnifiedInboundMessage(
+                        "feishu",
+                        "feishu:group:g1",
+                        "alice",
+                        "hello group"
+                )
+        );
+        when(identityFactory.accept(anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(authService.resolveRoleByUserId("alice")).thenReturn("USER");
+        when(chatService.chat(any(AcceptedChatCommand.class)))
+                .thenReturn(new ChatResponse(
+                        "feishu:group:g1",
+                        "answer",
+                        "model",
+                        1L
+                ));
+        WebhookRouterService service = new WebhookRouterService(
+                adapterFactory,
+                chatService,
+                mock(MessageEventService.class),
+                mock(ChannelOutboundDispatcher.class),
+                identityFactory,
+                authService,
+                runtimeBridge
+        );
+
+        service.dispatchTrusted(
+                "feishu",
+                Map.of("event", "trusted-group-message")
+        );
+
+        ArgumentCaptor<RunAcceptance> acceptance =
+                ArgumentCaptor.forClass(RunAcceptance.class);
+        verify(runtimeBridge).accepted(acceptance.capture());
+        assertThat(acceptance.getValue().sessionAccessClaim().claimType())
+                .isEqualTo(SessionAccessClaim.ClaimType.SHARED);
+        assertThat(acceptance.getValue().sessionAccessClaim().acceptanceOrigin())
+                .isEqualTo(SessionAccessClaim.AcceptanceOrigin.VERIFIED_WEBHOOK);
+        assertThat(acceptance.getValue().sessionAccessClaim().ownerOrSharedPrincipal())
+                .isEqualTo("shared:feishu:feishu:group:g1");
     }
 
     @Test

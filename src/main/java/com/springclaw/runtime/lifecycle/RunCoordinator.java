@@ -30,6 +30,7 @@ public final class RunCoordinator {
         RunState created = new RunState(
                 acceptance.runId(), acceptance.runId(), 0, RunStatus.CREATED,
                 acceptance.sessionKey(), acceptance.channel(), acceptance.userId(),
+                acceptance.sessionAccessClaim(),
                 acceptance.roleCodeAtAcceptance(), acceptance.originalMessage(),
                 acceptance.responseMode(), acceptance.acceptedAt(), null,
                 acceptance.acceptedAt(), null, acceptance.deadlineAt(),
@@ -286,6 +287,7 @@ public final class RunCoordinator {
         return new RunState(
                 current.runId(), current.requestId(), current.revision() + 1, status,
                 current.sessionKey(), current.channel(), current.userId(),
+                current.sessionAccessClaim(),
                 current.roleCodeAtAcceptance(), current.originalMessage(),
                 current.responseMode(), current.acceptedAt(), startedAt, updatedAt,
                 finishedAt, current.deadlineAt(), contextSnapshot, executionDecision,

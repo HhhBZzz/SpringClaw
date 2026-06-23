@@ -4,6 +4,7 @@ import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
 import com.springclaw.runtime.contract.RunState;
 import com.springclaw.runtime.contract.RunStatus;
+import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.lifecycle.RunStateRepository;
 import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
@@ -124,7 +125,14 @@ class CanonicalTransportIdentityTest {
         Instant acceptedAt = Instant.ofEpochMilli(message.createdAt());
         return new RunState(
                 message.requestId(), message.requestId(), 0, RunStatus.CREATED,
-                message.sessionKey(), message.channel(), message.userId(), "USER",
+                message.sessionKey(), message.channel(), message.userId(),
+                SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        message.channel(),
+                        message.sessionKey(),
+                        message.userId()
+                ),
+                "USER",
                 message.message(),
                 message.responseMode() == null ? "agent" : message.responseMode(),
                 acceptedAt, null, acceptedAt, null,

@@ -40,7 +40,23 @@ class DefaultWebhookSecurityServiceTest {
         headers.put("X-Springclaw-Nonce", nonce);
         headers.put("X-Springclaw-Signature", sign);
 
-        Assertions.assertDoesNotThrow(() -> service.verify("telegram", headers, body));
+        Assertions.assertTrue(service.verify("telegram", headers, body));
+    }
+
+    @Test
+    void shouldReturnFalseWhenSecurityIsDisabled() {
+        DefaultWebhookSecurityService service = new DefaultWebhookSecurityService(
+                null,
+                false,
+                false,
+                300,
+                "",
+                "",
+                "",
+                ""
+        );
+
+        Assertions.assertFalse(service.verify("feishu", Map.of(), "{}"));
     }
 
     @Test

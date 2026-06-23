@@ -29,6 +29,11 @@ public final class RunTransitionPolicy {
         requireEqual(previous.channel(), next.channel(), "channel");
         requireEqual(previous.userId(), next.userId(), "userId");
         requireEqual(
+                previous.sessionAccessClaim(),
+                next.sessionAccessClaim(),
+                "sessionAccessClaim"
+        );
+        requireEqual(
                 previous.roleCodeAtAcceptance(),
                 next.roleCodeAtAcceptance(),
                 "roleCodeAtAcceptance"

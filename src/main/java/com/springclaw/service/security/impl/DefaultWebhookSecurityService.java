@@ -71,9 +71,9 @@ public class DefaultWebhookSecurityService implements WebhookSecurityService {
     }
 
     @Override
-    public void verify(String channel, Map<String, String> headers, String rawBody) {
+    public boolean verify(String channel, Map<String, String> headers, String rawBody) {
         if (!enabled) {
-            return;
+            return false;
         }
 
         String timestamp = header(headers, "x-springclaw-timestamp");
@@ -104,6 +104,7 @@ public class DefaultWebhookSecurityService implements WebhookSecurityService {
         }
 
         ensureNotReplayed(channel, ts, nonce);
+        return true;
     }
 
     private void ensureNotReplayed(String channel, long ts, String nonce) {

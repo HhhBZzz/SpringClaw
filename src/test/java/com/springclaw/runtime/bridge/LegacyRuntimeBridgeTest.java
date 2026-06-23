@@ -1,6 +1,7 @@
 package com.springclaw.runtime.bridge;
 
 import com.springclaw.runtime.contract.RuntimeStrategy;
+import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.lifecycle.InMemoryRunLifecycleStore;
 import com.springclaw.runtime.lifecycle.RunAcceptance;
 import com.springclaw.runtime.lifecycle.RunCoordinator;
@@ -27,7 +28,14 @@ class LegacyRuntimeBridgeTest {
         );
 
         bridge.accepted(new RunAcceptance(
-                RUN_ID, "session-1", "api", "user-1", "USER", "hello",
+                RUN_ID, "session-1", "api", "user-1",
+                SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        "api",
+                        "session-1",
+                        "user-1"
+                ),
+                "USER", "hello",
                 "agent", Instant.parse("2026-06-21T00:00:00Z"),
                 Instant.parse("2026-06-21T00:05:00Z")
         ));

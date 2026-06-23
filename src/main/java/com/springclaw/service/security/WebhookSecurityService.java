@@ -7,5 +7,5 @@ import java.util.Map;
  */
 public interface WebhookSecurityService {
 
-    void verify(String channel, Map<String, String> headers, String rawBody);
+    boolean verify(String channel, Map<String, String> headers, String rawBody);
 }

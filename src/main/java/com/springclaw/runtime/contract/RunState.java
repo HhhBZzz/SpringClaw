@@ -30,6 +30,7 @@ public record RunState(
         String sessionKey,
         String channel,
         String userId,
+        SessionAccessClaim sessionAccessClaim,
         String roleCodeAtAcceptance,
         String originalMessage,
         String responseMode,
@@ -68,9 +69,20 @@ public record RunState(
             throw new IllegalArgumentException("revision must be >= 0");
         }
         status = Objects.requireNonNull(status, "status");
-        sessionKey = requireText(sessionKey, "sessionKey");
-        channel = requireText(channel, "channel");
-        userId = requireText(userId, "userId");
+        sessionKey = requireIdentityText(sessionKey, "sessionKey");
+        channel = requireIdentityText(channel, "channel");
+        userId = requireIdentityText(userId, "userId");
+        sessionAccessClaim = Objects.requireNonNull(
+                sessionAccessClaim,
+                "sessionAccessClaim"
+        );
+        requireClaimField(channel, sessionAccessClaim.channel(), "channel");
+        requireClaimField(sessionKey, sessionAccessClaim.sessionKey(), "sessionKey");
+        requireClaimField(
+                userId,
+                sessionAccessClaim.acceptedUserId(),
+                "acceptedUserId/userId"
+        );
         roleCodeAtAcceptance = requireText(roleCodeAtAcceptance, "roleCodeAtAcceptance");
         originalMessage = Objects.requireNonNullElse(originalMessage, "");
         responseMode = requireText(responseMode, "responseMode");
@@ -250,5 +262,21 @@ public record RunState(
             throw new IllegalArgumentException(field + " must not be blank");
         }
         return value;
+    }
+
+    private static String requireIdentityText(String value, String field) {
+        return requireText(value, field).trim();
+    }
+
+    private static void requireClaimField(
+            String stateValue,
+            String claimValue,
+            String field
+    ) {
+        if (!stateValue.equals(claimValue)) {
+            throw new IllegalArgumentException(
+                    "sessionAccessClaim " + field + " must match RunState"
+            );
+        }
     }
 }

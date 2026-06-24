@@ -5,7 +5,9 @@ import com.springclaw.runtime.memory.contract.MemoryIndexOperation;
 import com.springclaw.runtime.memory.contract.MemoryRecordVersion;
 import com.springclaw.runtime.memory.port.MemoryIndexOutboxStore;
 import com.springclaw.runtime.memory.port.MemoryRecordStore;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
@@ -15,6 +17,7 @@ import java.util.Objects;
 
 @Component
 @ConditionalOnBean(MemoryVectorIndex.class)
+@ConditionalOnProperty(prefix = "springclaw.memory.index", name = "enabled", havingValue = "true")
 public class MemoryIndexRebuildService {
 
     private static final int ACTIVE_SCAN_LIMIT = 5_000;
@@ -29,6 +32,7 @@ public class MemoryIndexRebuildService {
     @SuppressWarnings("unused")
     private final Clock clock;
 
+    @Autowired
     public MemoryIndexRebuildService(
             MemoryRecordStore recordStore,
             MemoryIndexOutboxStore outboxStore,

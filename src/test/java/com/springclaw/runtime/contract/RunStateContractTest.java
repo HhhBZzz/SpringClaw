@@ -2,6 +2,8 @@ package com.springclaw.runtime.contract;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.springclaw.runtime.memory.contract.MemoryFrame;
+import com.springclaw.runtime.memory.contract.MemoryScope;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -1531,7 +1533,20 @@ class RunStateContractTest {
                 runId, "session-1", "user-1", "web", "user-1", "USER",
                 "original", "effective", "system", "memory",
                 List.of(), List.of(), List.of(), List.of("web.search"),
-                Map.of(), Map.of("schema", "v1"), T0, snapshotHash
+                Map.of(), Map.of("schema", "v1"), memoryFrame(runId), T0, snapshotHash
+        );
+    }
+
+    private static MemoryFrame memoryFrame(String runId) {
+        return new MemoryFrame(
+                runId,
+                MemoryScope.from(SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        "api", "session-1", "user-1"
+                )),
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+                Map.of("source", "legacy-test"), List.of(),
+                java.time.Instant.parse("2026-06-24T00:00:00Z"), "frame-hash-" + runId
         );
     }
 

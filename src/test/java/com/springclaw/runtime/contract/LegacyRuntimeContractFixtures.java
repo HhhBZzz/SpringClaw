@@ -1,5 +1,7 @@
 package com.springclaw.runtime.contract;
 
+import com.springclaw.runtime.memory.contract.MemoryFrame;
+import com.springclaw.runtime.memory.contract.MemoryScope;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.context.AssembledContext;
 
@@ -54,8 +56,31 @@ final class LegacyRuntimeContractFixtures {
                 Map.of("schema", "springclaw.context-source.v1",
                         "learningActive", String.valueOf(assembled.memoryLearningActiveCount()),
                         "learningFiltered", String.valueOf(assembled.memoryLearningFilteredCount())),
+                memoryFrame(runId),
                 capturedAt,
                 snapshotHash(runId, assembled, capturedAt)
+        );
+    }
+
+    static MemoryFrame memoryFrame(String runId) {
+        return new MemoryFrame(
+                runId,
+                MemoryScope.from(SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        "api",
+                        "session-1",
+                        "user-1"
+                )),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                Map.of("source", "legacy-test"),
+                List.of(),
+                Instant.parse("2026-06-24T00:00:00Z"),
+                "frame-hash-" + runId
         );
     }
 

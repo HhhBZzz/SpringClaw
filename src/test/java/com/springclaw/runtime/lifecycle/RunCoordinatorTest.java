@@ -7,6 +7,8 @@ import com.springclaw.runtime.contract.RunEvent;
 import com.springclaw.runtime.contract.RunEventType;
 import com.springclaw.runtime.contract.RunResult;
 import com.springclaw.runtime.contract.SessionAccessClaim;
+import com.springclaw.runtime.memory.contract.MemoryFrame;
+import com.springclaw.runtime.memory.contract.MemoryScope;
 import com.springclaw.runtime.contract.RunState;
 import com.springclaw.runtime.contract.RunStatus;
 import org.junit.jupiter.api.Test;
@@ -256,7 +258,20 @@ class RunCoordinatorTest {
         return new ContextSnapshot(
                 RUN_ID, "session-1", "user-1", "api", "user-1", "USER",
                 "hello", "hello", "system", "", List.of(), List.of(), List.of(),
-                List.of(), Map.of(), Map.of(), T0.plusSeconds(1), "snapshot-hash"
+                List.of(), Map.of(), Map.of(), memoryFrame(RUN_ID), T0.plusSeconds(1), "snapshot-hash"
+        );
+    }
+
+    private static MemoryFrame memoryFrame(String runId) {
+        return new MemoryFrame(
+                runId,
+                MemoryScope.from(SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        "api", "session-1", "user-1"
+                )),
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+                java.util.Map.of("source", "legacy-test"), List.of(),
+                java.time.Instant.parse("2026-06-24T00:00:00Z"), "frame-hash-" + runId
         );
     }
 

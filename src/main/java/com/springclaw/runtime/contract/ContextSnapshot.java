@@ -1,5 +1,7 @@
 package com.springclaw.runtime.contract;
 
+import com.springclaw.runtime.memory.contract.MemoryFrame;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -30,6 +32,7 @@ public record ContextSnapshot(
         List<String> allowedCapabilities,
         Map<String, String> providerSnapshot,
         Map<String, String> contextSourceSummary,
+        MemoryFrame memoryFrame,
         Instant capturedAt,
         String snapshotHash
 ) {
@@ -50,6 +53,10 @@ public record ContextSnapshot(
         allowedCapabilities = copy(allowedCapabilities);
         providerSnapshot = providerSnapshot == null ? Map.of() : Map.copyOf(providerSnapshot);
         contextSourceSummary = contextSourceSummary == null ? Map.of() : Map.copyOf(contextSourceSummary);
+        memoryFrame = Objects.requireNonNull(memoryFrame, "memoryFrame");
+        if (!runId.equals(memoryFrame.runId())) {
+            throw new IllegalArgumentException("MemoryFrame runId must match ContextSnapshot runId");
+        }
         capturedAt = Objects.requireNonNull(capturedAt, "capturedAt");
         snapshotHash = requireText(snapshotHash, "snapshotHash");
     }

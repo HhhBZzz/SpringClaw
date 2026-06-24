@@ -984,5 +984,74 @@ Progress:
     active watermark, and activates the new generation
   - VectorStore-dependent workers are conditional so default startup is preserved
   - focused Task 7 tests, memory regression tests, and package pass
-  - Claude may now begin Task 8 typed Markdown project and procedural memory
+  - Phase 3A1 Task 8 typed Markdown project and procedural memory complete
+  - Claude exposed reviewed Markdown project memory as typed ProjectMemoryItem
+    sources and preserved bounded legacy MemoryBankService rendering from those
+    typed items
+  - newly captured automatic learnings now start as candidate; only approved,
+    active, and explicitly retained legacy learning sections enter runtime
+    project memory context
+  - Phase 3A1 Task 9 shadow mode wiring and closing evidence complete
+  - Codex added disabled-by-default memory core flags:
+    SPRINGCLAW_MEMORY_CORE_ENABLED=false,
+    SPRINGCLAW_MEMORY_SHORT_TERM_SHADOW_ENABLED=false,
+    SPRINGCLAW_MEMORY_INDEX_WORKER_ENABLED=false,
+    SPRINGCLAW_MEMORY_SCHEMA_AUTO_INIT=true,
+    SPRINGCLAW_MEMORY_SHORT_TERM_MAX_MESSAGES=40,
+    SPRINGCLAW_MEMORY_SHORT_TERM_TTL_DAYS=7
+  - when memory core DB persistence is disabled, Spring wires bounded
+    process-local MemoryRecordStore and MemoryIndexOutboxStore; MySQL memory
+    store integration tests explicitly enable springclaw.memory.core.enabled
+  - Redis short-term shadow store/recovery are no longer component-scanned
+    directly; MemoryShortTermShadowConfig registers them only when
+    springclaw.memory.core.short-term-shadow-enabled=true
+  - vector worker/reconciler/rebuild beans are gated by
+    springclaw.memory.core.index-worker-enabled=true and remain inactive by
+    default
+  - REST authenticated API group-like strings still produce PERSONAL
+    AUTHENTICATED_API claims; existing ChatControllerAuthTest covers this
+    boundary
+  - active Phase 2B context, Advisors, routes, final-answer ownership, stream
+    transport, and tool-safety guards remain unchanged in Phase 3A1
+Phase 3A1 commits:
+  - 1a3792e docs: plan phase 3a1 canonical memory core
+  - 5ad582d feat: freeze trusted memory access at run acceptance
+  - 3704c40 feat: add canonical memory contracts and fallback stores
+  - 1772d95 feat: persist versioned memory and index outbox
+  - 3c26163 fix: fence memory persistence transitions
+  - 871d869 feat: manage memory versions and index events atomically
+  - 043d1ec feat: distinguish terminal and suspended memory writes
+  - 47c3f1e fix: harden stable message event receipts
+  - 4543723 feat: project ordered short-term memory into redis
+  - 30b7b0b feat: fence memory vector projection and rebuild
+  - 249a2cb fix: gate memory index background beans
+  - 97ebfb6 feat: expose reviewed project memory as typed sources
+  - ba010e9 feat: wire memory core shadow mode
+Task 9 verification:
+  - RED: mvn -q -Dtest=MemoryCoreShadowIT test failed because
+    MemoryCoreStoreConfig was missing
+  - focused suite: 119 tests, 0 failures, 0 errors, 0 skipped
+  - compatibility gates: 40 tests, 0 failures, 0 errors, 0 skipped
+  - full suite: 731 tests, 0 failures, 0 errors, 0 skipped
+  - MySQL-backed tests were run with local /Users/hanbingzheng/springclaw/.env.local
+    environment variables loaded without printing secrets
+Known Phase 3A1 limitations:
+  - canonical MemoryFrame read activation is not enabled
+  - ContextSnapshotFactory is not wired
+  - automatic semantic extraction is not implemented
+  - process-local memory stores are bounded but not restart durable when DB
+    persistence is disabled
+Rollback order:
+  - set SPRINGCLAW_MEMORY_SHORT_TERM_SHADOW_ENABLED=false and
+    SPRINGCLAW_MEMORY_INDEX_WORKER_ENABLED=false
+  - set SPRINGCLAW_MEMORY_CORE_ENABLED=false to use local bounded stores
+  - revert ba010e9 if shadow wiring itself must be removed
+  - revert 97ebfb6 to remove typed Markdown project/procedural memory
+  - revert 30b7b0b and 249a2cb to remove vector projection/rebuild wiring
+  - revert 4543723 to remove Redis short-term projection
+  - revert 043d1ec and 47c3f1e to remove stable persistence intent/event
+    receipt changes
+Next dependency:
+  - Phase 3A2/3A3 may activate canonical MemoryFrame retrieval and
+    ContextSnapshotFactory in a separate, single-cutover plan
 ```

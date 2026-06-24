@@ -16,20 +16,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 class MemoryFrameSpringWiringTest {
 
     @Test
-    void memoryFrameCoordinatorIsInactiveByDefault() {
+    void memoryFrameCoordinatorIsActiveByDefault() {
         new ApplicationContextRunner()
-                .withUserConfiguration(MemoryFrameConfig.class)
+                .withUserConfiguration(MemoryFrameConfig.class, TestConfig.class)
                 .run(context -> assertThat(context)
-                        .doesNotHaveBean(MemoryCoordinator.class));
+                        .hasSingleBean(MemoryCoordinator.class));
     }
 
     @Test
-    void memoryFrameCoordinatorActivatesOnlyWhenEnabled() {
+    void memoryFrameCoordinatorCanBeDisabledForRollback() {
         new ApplicationContextRunner()
-                .withUserConfiguration(MemoryFrameConfig.class, TestConfig.class)
-                .withPropertyValues("springclaw.memory.frame.enabled=true")
+                .withUserConfiguration(MemoryFrameConfig.class)
+                .withPropertyValues("springclaw.memory.frame.enabled=false")
                 .run(context -> assertThat(context)
-                        .hasSingleBean(MemoryCoordinator.class));
+                        .doesNotHaveBean(MemoryCoordinator.class));
     }
 
     @Configuration(proxyBeanMethods = false)

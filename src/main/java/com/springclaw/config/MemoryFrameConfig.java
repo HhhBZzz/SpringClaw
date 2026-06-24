@@ -26,7 +26,8 @@ public class MemoryFrameConfig {
     @ConditionalOnProperty(
             prefix = "springclaw.memory.frame",
             name = "enabled",
-            havingValue = "true"
+            havingValue = "true",
+            matchIfMissing = true
     )
     public MemoryCoordinator memoryCoordinator(
             MemoryRecordStore recordStore,

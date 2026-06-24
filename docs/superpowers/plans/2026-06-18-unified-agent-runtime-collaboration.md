@@ -1134,3 +1134,89 @@ Next dependency:
     ContextSnapshotFactory/MemoryFrame prompt ownership and retire duplicate
     legacy retrieval paths.
 ```
+
+## Update: Phase 3A3a ContextSnapshot bridge
+
+```text
+Task: Phase 3A3a conservative ContextSnapshot bridge
+Owner split:
+  - Claude: Task 1-3 implementation
+  - Codex: review fix, Task 4-6 implementation, final gates
+Design and plan:
+  - 3dfbedc docs: design phase 3a3a context snapshot bridge
+  - aea0071 docs: plan phase 3a3a context snapshot bridge
+Implementation commits:
+  - f90aae2 feat: embed memory frame in context snapshot
+  - 20c48fa feat: build context snapshots from memory frames
+  - bde2754 feat: project context snapshots to legacy views
+  - ad0a9e1 fix: stabilize legacy memory frame timestamps
+  - 84c66cb feat: bridge chat context through canonical snapshots
+  - 6db1ec2 feat: guard semantic advisor in canonical context mode
+Modified paths:
+  - src/main/java/com/springclaw/runtime/contract/ContextSnapshot.java
+  - src/main/java/com/springclaw/runtime/contract/ContextSnapshotFactory.java
+  - src/main/java/com/springclaw/runtime/contract/ContextSnapshotRequest.java
+  - src/main/java/com/springclaw/runtime/bridge/LegacyContextView.java
+  - src/main/java/com/springclaw/runtime/bridge/LegacyContextViewAdapter.java
+  - src/main/java/com/springclaw/runtime/bridge/LegacyRunContextAdapter.java
+  - src/main/java/com/springclaw/runtime/memory/contract/MemoryScope.java
+  - src/main/java/com/springclaw/service/chat/impl/ChatContextFactory.java
+  - src/main/java/com/springclaw/service/chat/impl/ConversationAdvisorSupport.java
+  - src/main/resources/application.yml
+  - .env.example
+  - focused tests under src/test/java/com/springclaw/runtime and
+    src/test/java/com/springclaw/service/chat/impl
+Default behavior:
+  - SPRINGCLAW_CONTEXT_SNAPSHOT_FACTORY_ENABLED=false
+  - default ChatContextFactory path still calls ContextAssembler
+  - default ConversationAdvisorSupport still attaches SemanticMemoryAdvisor as
+    before
+  - no route, engine, stream, final-answer, tool-safety, proposal, or workspace
+    ownership change
+Canonical-mode behavior:
+  - ChatContextFactory can use ContextSnapshotFactory behind the default-off flag
+  - ContextSnapshotFactory calls MemoryCoordinator once to build a MemoryFrame
+  - LegacyContextViewAdapter projects the saved snapshot back to AssembledContext
+    and ContextInjection so old engines still receive legacy-compatible inputs
+  - ConversationAdvisorSupport suppresses independent SemanticMemoryAdvisor
+    retrieval in canonical snapshot mode
+Review notes:
+  - Codex reviewed Claude Task 1-3 scope and found no ChatContextFactory or
+    Advisor changes outside the requested boundary
+  - Codex fixed nondeterministic legacy compatibility item timestamps by using
+    capturedAt instead of Instant.now()
+  - local surefire fork occasionally left Maven parent sessions waiting; focused
+    and full gates were run with -DforkCount=0 to avoid that environment issue
+Verification (2026-06-24, Asia/Shanghai):
+  - focused Phase 3A3a suite:
+    21 tests, 0 failures, 0 errors, 0 skipped
+  - compatibility gates:
+    40 tests, 0 failures, 0 errors, 0 skipped
+  - full suite:
+    757 tests, 0 failures, 0 errors, 0 skipped
+  - compatibility and full gates loaded local
+    /Users/hanbingzheng/springclaw/.env.local without printing secrets
+Known limitations:
+  - canonical mode still derives a REST personal SessionAccessClaim in
+    ChatContextFactory; Phase 3A3b must use the real accepted
+    RunState.sessionAccessClaim
+  - ContextAssembler still exists and remains active in default/legacy mode
+  - SemanticMemoryAdvisor still exists and remains active in default/legacy mode
+  - ContextSnapshotFactory is a bridge class, not yet the default production
+    owner
+  - projection-only Advisor remains deferred
+  - removing legacy context producer and old retrieval paths remains Phase 3A3b
+Rollback order:
+  - set SPRINGCLAW_CONTEXT_SNAPSHOT_FACTORY_ENABLED=false
+  - set SPRINGCLAW_MEMORY_FRAME_ENABLED=false if memory frame retrieval also
+    needs to be disabled
+  - revert 6db1ec2 to restore Advisor selection
+  - revert 84c66cb to remove ChatContextFactory bridge/config flag
+  - revert ad0a9e1, bde2754, and 20c48fa to remove snapshot factory/view bridge
+  - revert f90aae2 last if ContextSnapshot.memoryFrame must be removed
+Next dependency:
+  - Phase 3A3b should make canonical snapshot ownership the default, use the
+    real accepted SessionAccessClaim, replace SemanticMemoryAdvisor with
+    projection-only behavior if needed, and stop production runtime reads from
+    ContextAssembler.
+```

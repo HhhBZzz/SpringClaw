@@ -40,7 +40,8 @@ class LegacyLifecycleObserverTest {
                 new DefaultLegacyRuntimeBridge(coordinator),
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),
-                new LegacyRunResultAdapter()
+                new LegacyRunResultAdapter(),
+                false
         );
         ChatContext context = context();
         ChatExecutionResult result = new ChatExecutionResult(
@@ -80,7 +81,8 @@ class LegacyLifecycleObserverTest {
                 new DefaultLegacyRuntimeBridge(coordinator),
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),
-                new LegacyRunResultAdapter()
+                new LegacyRunResultAdapter(),
+                false
         );
 
         observer.contextAndDecisionObserved(context(), T0.plusSeconds(1));

@@ -4,10 +4,11 @@ import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.runtime.bridge.LegacyContextView;
 import com.springclaw.runtime.bridge.LegacyContextViewAdapter;
+import com.springclaw.runtime.bridge.RunStateContextSnapshotRequestFactory;
 import com.springclaw.runtime.contract.ContextSnapshot;
 import com.springclaw.runtime.contract.ContextSnapshotFactory;
-import com.springclaw.runtime.contract.ContextSnapshotRequest;
-import com.springclaw.runtime.contract.SessionAccessClaim;
+import com.springclaw.runtime.contract.RunState;
+import com.springclaw.runtime.lifecycle.RunStateRepository;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentDecisionRequest;
@@ -49,6 +50,8 @@ public class ChatContextFactory {
     private final AgentDecisionService agentDecisionService;
     private final ObjectProvider<ContextSnapshotFactory> contextSnapshotFactoryProvider;
     private final ObjectProvider<LegacyContextViewAdapter> legacyContextViewAdapterProvider;
+    private final ObjectProvider<RunStateRepository> runStateRepositoryProvider;
+    private final ObjectProvider<RunStateContextSnapshotRequestFactory> runStateContextSnapshotRequestFactoryProvider;
     private final boolean contextSnapshotFactoryEnabled;
     private final String configuredAgentMode;
     private final boolean routingAutoUpgradeEnabled;
@@ -66,7 +69,9 @@ public class ChatContextFactory {
                               AgentDecisionService agentDecisionService,
                               ObjectProvider<ContextSnapshotFactory> contextSnapshotFactoryProvider,
                               ObjectProvider<LegacyContextViewAdapter> legacyContextViewAdapterProvider,
-                              @org.springframework.beans.factory.annotation.Value("${springclaw.context.snapshot.factory-enabled:false}") boolean contextSnapshotFactoryEnabled,
+                              ObjectProvider<RunStateRepository> runStateRepositoryProvider,
+                              ObjectProvider<RunStateContextSnapshotRequestFactory> runStateContextSnapshotRequestFactoryProvider,
+                              @org.springframework.beans.factory.annotation.Value("${springclaw.context.snapshot.factory-enabled:true}") boolean contextSnapshotFactoryEnabled,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.agent-mode:simplified}") String configuredAgentMode,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.routing.auto-upgrade-enabled:true}") boolean routingAutoUpgradeEnabled) {
         this.aiProviderService = aiProviderService;
@@ -81,6 +86,8 @@ public class ChatContextFactory {
         this.agentDecisionService = agentDecisionService;
         this.contextSnapshotFactoryProvider = contextSnapshotFactoryProvider;
         this.legacyContextViewAdapterProvider = legacyContextViewAdapterProvider;
+        this.runStateRepositoryProvider = runStateRepositoryProvider;
+        this.runStateContextSnapshotRequestFactoryProvider = runStateContextSnapshotRequestFactoryProvider;
         this.contextSnapshotFactoryEnabled = contextSnapshotFactoryEnabled;
         this.configuredAgentMode = configuredAgentMode;
         this.routingAutoUpgradeEnabled = routingAutoUpgradeEnabled;
@@ -109,6 +116,8 @@ public class ChatContextFactory {
                 chatRoutingStateService,
                 chatRoutingPolicyService,
                 agentDecisionService,
+                emptyProvider(),
+                emptyProvider(),
                 emptyProvider(),
                 emptyProvider(),
                 false,
@@ -174,28 +183,21 @@ public class ChatContextFactory {
                     contextSnapshotFactoryProvider.getIfAvailable();
             LegacyContextViewAdapter viewAdapter =
                     legacyContextViewAdapterProvider.getIfAvailable();
-            if (snapshotFactory == null || viewAdapter == null) {
+            RunStateRepository runStateRepository =
+                    runStateRepositoryProvider.getIfAvailable();
+            RunStateContextSnapshotRequestFactory requestFactory =
+                    runStateContextSnapshotRequestFactoryProvider.getIfAvailable();
+            if (snapshotFactory == null
+                    || viewAdapter == null
+                    || runStateRepository == null
+                    || requestFactory == null) {
                 throw new IllegalStateException(
                         "canonical ContextSnapshotFactory path is enabled but required beans are missing"
                 );
             }
-            String ownerUserId = StringUtils.hasText(session.getUserId())
-                    ? session.getUserId()
-                    : request.userId();
-            ContextSnapshot snapshot = snapshotFactory.create(new ContextSnapshotRequest(
-                    requestId,
-                    session.getSessionKey(),
-                    ownerUserId,
-                    channel,
-                    request.userId(),
-                    SessionAccessClaim.personal(
-                            SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
-                            channel,
-                            session.getSessionKey(),
-                            request.userId()
-                    ),
-                    roleCode,
-                    request.message(),
+            RunState runState = runStateRepository.requireByRunId(requestId);
+            ContextSnapshot snapshot = snapshotFactory.create(requestFactory.create(
+                    runState,
                     routingDecision.effectiveQuestion(),
                     systemPrompt,
                     decision.selectedCapabilities(),

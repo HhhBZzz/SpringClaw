@@ -249,6 +249,11 @@ springclaw:
       schema-auto-init: ${SPRINGCLAW_MEMORY_SCHEMA_AUTO_INIT:true}
       short-term-max-messages: ${SPRINGCLAW_MEMORY_SHORT_TERM_MAX_MESSAGES:40}
       short-term-ttl-days: ${SPRINGCLAW_MEMORY_SHORT_TERM_TTL_DAYS:7}
+    frame:
+      enabled: ${SPRINGCLAW_MEMORY_FRAME_ENABLED:false}
+      shadow-compare-enabled: ${SPRINGCLAW_MEMORY_FRAME_SHADOW_COMPARE_ENABLED:false}
+      max-chars: ${SPRINGCLAW_MEMORY_FRAME_MAX_CHARS:6000}
+      trace-max-warnings: ${SPRINGCLAW_MEMORY_FRAME_TRACE_MAX_WARNINGS:20}
     vector-enabled: true
     recall-top-k: 8
     recall-max-chars: 400

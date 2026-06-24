@@ -241,6 +241,9 @@ springclaw:
     rate-limit:
       max-requests: 20
       window-seconds: 60
+  context:
+    snapshot:
+      factory-enabled: ${SPRINGCLAW_CONTEXT_SNAPSHOT_FACTORY_ENABLED:false}
   memory:
     core:
       enabled: ${SPRINGCLAW_MEMORY_CORE_ENABLED:false}

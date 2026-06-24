@@ -5,6 +5,7 @@ import com.springclaw.domain.entity.MemoryIndexOutboxEntity;
 import com.springclaw.mapper.MemoryIndexOutboxMapper;
 import com.springclaw.runtime.memory.contract.MemoryIndexOutboxEntry;
 import com.springclaw.runtime.memory.port.MemoryIndexOutboxStore;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -21,6 +22,7 @@ import java.util.UUID;
  * complete/fail 必须带匹配 claimToken 且租约未过期。
  */
 @Component
+@ConditionalOnProperty(prefix = "springclaw.memory.core", name = "enabled", havingValue = "true")
 public class MySqlMemoryIndexOutboxStore implements MemoryIndexOutboxStore {
 
     private final MemoryIndexOutboxMapper mapper;

@@ -17,7 +17,7 @@ import java.util.Objects;
 
 @Component
 @ConditionalOnBean(MemoryVectorIndex.class)
-@ConditionalOnProperty(prefix = "springclaw.memory.index", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "springclaw.memory.core", name = "index-worker-enabled", havingValue = "true")
 public class MemoryIndexRebuildService {
 
     private static final int ACTIVE_SCAN_LIMIT = 5_000;

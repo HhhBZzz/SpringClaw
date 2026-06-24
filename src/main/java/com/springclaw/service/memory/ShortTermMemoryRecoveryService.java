@@ -11,8 +11,6 @@ import org.redisson.api.RedissonClient;
 import org.redisson.client.codec.StringCodec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -33,8 +31,6 @@ import java.util.UUID;
  *   <li>释放 lease（token-checked Lua）。</li>
  * </ol>
  */
-@Component
-@ConditionalOnBean(RedissonClient.class)
 public class ShortTermMemoryRecoveryService {
 
     private static final Logger log = LoggerFactory.getLogger(ShortTermMemoryRecoveryService.class);

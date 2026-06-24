@@ -15,6 +15,32 @@ class AgentLearningServiceTest {
     Path tempDir;
 
     @Test
+    void capturedFailureStartsAsCandidate() throws Exception {
+        AgentLearningService service = new AgentLearningService(true, true, tempDir.toString(), 320);
+        AgentRunTraceEvent event = new AgentRunTraceEvent(
+                "req-learn-candidate",
+                "workspaceRunCommand",
+                "tool",
+                "failed",
+                "guard denied",
+                1L,
+                1710000000000L
+        );
+
+        var entry = service.captureTraceFailure(event).orElseThrow();
+
+        assertThat(service.listEntries(10))
+                .filteredOn(item -> item.signature().equals(entry.signature()))
+                .singleElement()
+                .extracting(AgentLearningService.AgentLearningReviewItem::status)
+                .isEqualTo("candidate");
+        String learning = Files.readString(tempDir.resolve("agent-learnings.md"));
+        assertThat(learning).contains("status: candidate");
+        // candidate 不进 runtime context
+        assertThat(service.listEntries(10).get(0).contextIncluded()).isFalse();
+    }
+
+    @Test
     void shouldPersistFailedTraceAsReviewableLearningEntry() throws Exception {
         AgentLearningService service = new AgentLearningService(true, true, tempDir.toString(), 320);
         AgentRunTraceEvent event = new AgentRunTraceEvent(
@@ -42,7 +68,7 @@ class AgentLearningServiceTest {
         String learning = Files.readString(tempDir.resolve("agent-learnings.md"));
         assertThat(learning)
                 .contains("springclaw.agent-learning.v1")
-                .contains("status: active")
+                .contains("status: candidate")
                 .contains("requestId: req-learn-1")
                 .contains("source: trace-failure")
                 .contains("rule:")
@@ -163,14 +189,14 @@ class AgentLearningServiceTest {
 
         assertThat(update).isPresent();
         assertThat(update.get().signature()).isEqualTo(entry.signature());
-        assertThat(update.get().previousStatus()).isEqualTo("active");
+        assertThat(update.get().previousStatus()).isEqualTo("candidate");
         assertThat(update.get().status()).isEqualTo("disabled");
         String learning = Files.readString(tempDir.resolve("agent-learnings.md"));
         assertThat(learning)
                 .contains("- status: disabled")
                 .contains("- reviewedAt:")
                 .contains("- reviewReason: 规则过宽，容易阻止合法重试")
-                .doesNotContain("- status: active");
+                .doesNotContain("- status: candidate");
 
         MemoryBankService memoryBankService = new MemoryBankService(true, tempDir.toString(), 1200);
         assertThat(memoryBankService.renderContext()).doesNotContain("不要原样重复执行失败命令。");
@@ -228,11 +254,11 @@ class AgentLearningServiceTest {
         assertThat(entries)
                 .extracting(AgentLearningService.AgentLearningReviewItem::signature)
                 .containsExactly(active.signature(), disabled.signature());
-        assertThat(entries.get(0).status()).isEqualTo("active");
+        assertThat(entries.get(0).status()).isEqualTo("candidate");
         assertThat(entries.get(0).rule()).isEqualTo("不要原样重复失败命令。");
         assertThat(entries.get(0).counterexampleCategory()).isEqualTo("tool_failure");
-        assertThat(entries.get(0).contextIncluded()).isTrue();
-        assertThat(entries.get(0).contextImpact()).isEqualTo("included_in_context");
+        assertThat(entries.get(0).contextIncluded()).isFalse();
+        assertThat(entries.get(0).contextImpact()).isEqualTo("filtered_from_context");
         assertThat(entries.get(1).status()).isEqualTo("disabled");
         assertThat(entries.get(1).counterexampleCategory()).isEqualTo("permission_boundary");
         assertThat(entries.get(1).contextIncluded()).isFalse();

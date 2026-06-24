@@ -1,6 +1,14 @@
 package com.springclaw.runtime.bridge;
 
 import com.springclaw.runtime.contract.ContextSnapshot;
+import com.springclaw.runtime.contract.SessionAccessClaim;
+import com.springclaw.runtime.memory.contract.MemoryFrame;
+import com.springclaw.runtime.memory.contract.MemoryFrameItem;
+import com.springclaw.runtime.memory.contract.MemoryFrameLayer;
+import com.springclaw.runtime.memory.contract.MemoryFrameSourceKind;
+import com.springclaw.runtime.memory.contract.MemoryScope;
+import com.springclaw.runtime.memory.contract.MemoryScopeType;
+import com.springclaw.runtime.memory.contract.MemoryType;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.chat.impl.ChatContext;
 import com.springclaw.service.context.AssembledContext;
@@ -11,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -85,8 +94,83 @@ public final class LegacyRunContextAdapter {
                 allowedCapabilities,
                 provider,
                 sources,
+                memoryFrameFromLegacy(
+                        context.requestId(),
+                        context.channel(),
+                        context.session().getSessionKey(),
+                        context.userId(),
+                        assembled,
+                        capturedAt
+                ),
                 capturedAt,
                 sha256(hashInput)
+        );
+    }
+
+    /**
+     * 从 legacy assembled 字段构建兼容性 MemoryFrame。不调用 MemoryCoordinator；
+     * 仅在 eventContext/semanticContext 非空时放入兼容性 MemoryFrameItem。
+     */
+    private static MemoryFrame memoryFrameFromLegacy(
+            String runId,
+            String channel,
+            String sessionKey,
+            String userId,
+            AssembledContext assembled,
+            Instant capturedAt
+    ) {
+        MemoryScope scope = MemoryScope.from(SessionAccessClaim.personal(
+                SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                channel,
+                sessionKey,
+                userId
+        ));
+        List<MemoryFrameItem> shortTerm = new ArrayList<>();
+        if (StringUtils.hasText(assembled.eventContext())) {
+            shortTerm.add(legacyItem(assembled.eventContext(), MemoryFrameLayer.SHORT_TERM,
+                    "legacy-short-term"));
+        }
+        List<MemoryFrameItem> semantic = new ArrayList<>();
+        if (StringUtils.hasText(assembled.semanticContext())) {
+            semantic.add(legacyItem(assembled.semanticContext(), MemoryFrameLayer.SEMANTIC_FACT,
+                    "legacy-semantic"));
+        }
+        String frameHash = sha256(String.join("\n",
+                runId, scope.scopeId(), assembled.eventContext(), assembled.semanticContext()));
+        return new MemoryFrame(
+                runId,
+                scope,
+                List.of(),
+                List.copyOf(shortTerm),
+                List.of(),
+                List.copyOf(semantic),
+                List.of(),
+                List.of(),
+                Map.of("source", "legacy-run-context-adapter"),
+                List.of(),
+                capturedAt,
+                frameHash
+        );
+    }
+
+    private static MemoryFrameItem legacyItem(String content, MemoryFrameLayer layer, String sourceId) {
+        return new MemoryFrameItem(
+                sourceId,
+                MemoryFrameSourceKind.MESSAGE_EVENT,
+                layer,
+                null,
+                null,
+                MemoryType.EPISODIC,
+                MemoryScopeType.PERSONAL_SESSION,
+                null,
+                content,
+                sha256(content),
+                List.of(),
+                0.0,
+                0.0,
+                0.0,
+                1,
+                Instant.now()
         );
     }
 

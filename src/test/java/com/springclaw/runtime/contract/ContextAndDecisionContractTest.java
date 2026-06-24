@@ -1,5 +1,7 @@
 package com.springclaw.runtime.contract;
 
+import com.springclaw.runtime.memory.contract.MemoryFrame;
+import com.springclaw.runtime.memory.contract.MemoryScope;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -23,6 +25,7 @@ class ContextAndDecisionContractTest {
                 "original", "effective", "system", "memory",
                 events, List.of("semantic-1"), List.of("rule-1"),
                 List.of("web.search"), provider, Map.of("schema", "v1"),
+                memoryFrame("run-1"),
                 Instant.parse("2026-06-19T00:00:00Z"), "hash-1"
         );
 
@@ -62,5 +65,18 @@ class ContextAndDecisionContractTest {
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("confidence");
         }
+    }
+
+    private static MemoryFrame memoryFrame(String runId) {
+        return new MemoryFrame(
+                runId,
+                MemoryScope.from(SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        "api", "session-1", "user-1"
+                )),
+                List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+                Map.of("source", "legacy-test"), List.of(),
+                Instant.parse("2026-06-24T00:00:00Z"), "frame-hash-" + runId
+        );
     }
 }

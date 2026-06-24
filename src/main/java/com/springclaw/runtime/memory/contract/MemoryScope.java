@@ -1,9 +1,13 @@
 package com.springclaw.runtime.memory.contract;
 
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.springclaw.runtime.contract.SessionAccessClaim;
 
 import java.util.Objects;
 
+@JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.ANY)
 public final class MemoryScope {
 
     private final MemoryScopeType scopeType;
@@ -14,14 +18,15 @@ public final class MemoryScope {
     private final String authorizationPrincipal;
     private final boolean crossSessionUserMemoryAllowed;
 
+    @JsonCreator
     private MemoryScope(
-            MemoryScopeType scopeType,
-            String scopeId,
-            String channel,
-            String sessionKey,
-            String requestingUserId,
-            String authorizationPrincipal,
-            boolean crossSessionUserMemoryAllowed
+            @JsonProperty("scopeType") MemoryScopeType scopeType,
+            @JsonProperty("scopeId") String scopeId,
+            @JsonProperty("channel") String channel,
+            @JsonProperty("sessionKey") String sessionKey,
+            @JsonProperty("requestingUserId") String requestingUserId,
+            @JsonProperty("authorizationPrincipal") String authorizationPrincipal,
+            @JsonProperty("crossSessionUserMemoryAllowed") boolean crossSessionUserMemoryAllowed
     ) {
         this.scopeType = Objects.requireNonNull(scopeType, "scopeType");
         this.scopeId = requireText(scopeId, "scopeId");

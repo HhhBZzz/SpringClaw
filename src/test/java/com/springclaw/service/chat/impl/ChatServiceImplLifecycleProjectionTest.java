@@ -55,7 +55,8 @@ class ChatServiceImplLifecycleProjectionTest {
                 new DefaultLegacyRuntimeBridge(coordinator),
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),
-                new LegacyRunResultAdapter()
+                new LegacyRunResultAdapter(),
+                false
         );
         Fixture f = new Fixture(observer);
         ChatContext context = f.context();
@@ -83,7 +84,8 @@ class ChatServiceImplLifecycleProjectionTest {
                 new DefaultLegacyRuntimeBridge(coordinator),
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),
-                new LegacyRunResultAdapter()
+                new LegacyRunResultAdapter(),
+                false
         );
         Fixture f = new Fixture(observer);
         ChatContext context = f.context();
@@ -111,7 +113,8 @@ class ChatServiceImplLifecycleProjectionTest {
                 new DefaultLegacyRuntimeBridge(coordinator),
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),
-                new LegacyRunResultAdapter()
+                new LegacyRunResultAdapter(),
+                false
         );
         Fixture f = new Fixture(observer);
         ChatContext context = f.context();

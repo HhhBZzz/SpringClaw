@@ -3,6 +3,8 @@ package com.springclaw.runtime.bridge;
 import com.springclaw.runtime.contract.RunState;
 import com.springclaw.service.chat.impl.ChatContext;
 import com.springclaw.service.chat.impl.ChatExecutionResult;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -15,6 +17,23 @@ public final class LegacyLifecycleObserver {
     private final LegacyRunContextAdapter contextAdapter;
     private final LegacyExecutionDecisionAdapter decisionAdapter;
     private final LegacyRunResultAdapter resultAdapter;
+    private final boolean contextSnapshotFactoryEnabled;
+
+    @Autowired
+    public LegacyLifecycleObserver(
+            LegacyRuntimeBridge bridge,
+            LegacyRunContextAdapter contextAdapter,
+            LegacyExecutionDecisionAdapter decisionAdapter,
+            LegacyRunResultAdapter resultAdapter,
+            @Value("${springclaw.context.snapshot.factory-enabled:true}")
+            boolean contextSnapshotFactoryEnabled
+    ) {
+        this.bridge = Objects.requireNonNull(bridge, "bridge");
+        this.contextAdapter = Objects.requireNonNull(contextAdapter, "contextAdapter");
+        this.decisionAdapter = Objects.requireNonNull(decisionAdapter, "decisionAdapter");
+        this.resultAdapter = Objects.requireNonNull(resultAdapter, "resultAdapter");
+        this.contextSnapshotFactoryEnabled = contextSnapshotFactoryEnabled;
+    }
 
     public LegacyLifecycleObserver(
             LegacyRuntimeBridge bridge,
@@ -22,18 +41,17 @@ public final class LegacyLifecycleObserver {
             LegacyExecutionDecisionAdapter decisionAdapter,
             LegacyRunResultAdapter resultAdapter
     ) {
-        this.bridge = Objects.requireNonNull(bridge, "bridge");
-        this.contextAdapter = Objects.requireNonNull(contextAdapter, "contextAdapter");
-        this.decisionAdapter = Objects.requireNonNull(decisionAdapter, "decisionAdapter");
-        this.resultAdapter = Objects.requireNonNull(resultAdapter, "resultAdapter");
+        this(bridge, contextAdapter, decisionAdapter, resultAdapter, true);
     }
 
     public void contextAndDecisionObserved(ChatContext context, Instant at) {
-        bridge.contextObserved(
-                context.requestId(),
-                contextAdapter.adapt(context, at),
-                at
-        );
+        if (!contextSnapshotFactoryEnabled) {
+            bridge.contextObserved(
+                    context.requestId(),
+                    contextAdapter.adapt(context, at),
+                    at
+            );
+        }
         bridge.decisionObserved(
                 context.requestId(),
                 decisionAdapter.adapt(context, at),

@@ -10,8 +10,6 @@ import org.redisson.api.RedissonClient;
 import org.redisson.client.codec.StringCodec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -27,8 +25,6 @@ import java.time.Instant;
  * 一次 Lua 完成 ZADD NX + trim + EXPIRE，保证 append 原子且按 eventId 排序。乱序追加仍按
  * eventId 升序读出。mergeRecovery 只补 eventId<=watermark 的行，不删除既有 key。
  */
-@Component
-@ConditionalOnBean(RedissonClient.class)
 public class RedisShortTermMemoryStore implements ShortTermMemoryStore {
 
     private static final Logger log = LoggerFactory.getLogger(RedisShortTermMemoryStore.class);
@@ -52,11 +48,7 @@ public class RedisShortTermMemoryStore implements ShortTermMemoryStore {
     private final long ttlSeconds;
 
     public RedisShortTermMemoryStore(RedissonClient redissonClient,
-                                     @org.springframework.beans.factory.annotation.Value(
-                                             "${springclaw.memory.short-term-max-entries:40}")
                                      int maxEntries,
-                                     @org.springframework.beans.factory.annotation.Value(
-                                             "${springclaw.memory.short-term-ttl-seconds:86400}")
                                      long ttlSeconds) {
         this.redissonClient = redissonClient;
         this.maxEntries = Math.max(1, maxEntries);

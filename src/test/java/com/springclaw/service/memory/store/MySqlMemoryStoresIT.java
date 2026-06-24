@@ -40,7 +40,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @SpringBootTest(properties = {
         "OPENCLAW_PRIMARY_API_KEY=test-key",
         "spring.ai.model.chat=none",
-        "spring.ai.model.embedding=none"
+        "spring.ai.model.embedding=none",
+        "springclaw.memory.core.enabled=true"
 })
 @Transactional
 class MySqlMemoryStoresIT {

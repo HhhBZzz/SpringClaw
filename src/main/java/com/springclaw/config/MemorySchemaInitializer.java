@@ -34,7 +34,7 @@ public class MemorySchemaInitializer implements ApplicationRunner {
 
     @Autowired
     public MemorySchemaInitializer(JdbcTemplate jdbcTemplate,
-                                   @Value("${springclaw.memory.schema-auto-init:true}") boolean enabled) {
+                                   @Value("${springclaw.memory.core.schema-auto-init:${springclaw.memory.schema-auto-init:true}}") boolean enabled) {
         this(jdbcTemplate, new ClassPathResource(MIGRATION_PATH), enabled);
     }
 

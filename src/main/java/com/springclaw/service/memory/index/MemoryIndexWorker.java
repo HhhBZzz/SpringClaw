@@ -18,7 +18,7 @@ import java.util.Optional;
 
 @Component
 @ConditionalOnBean(MemoryVectorIndex.class)
-@ConditionalOnProperty(prefix = "springclaw.memory.index", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "springclaw.memory.core", name = "index-worker-enabled", havingValue = "true")
 public class MemoryIndexWorker {
 
     private static final Duration RETRY_DELAY = Duration.ofSeconds(30);

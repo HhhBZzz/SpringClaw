@@ -8,6 +8,7 @@ import com.springclaw.runtime.memory.contract.MemoryScope;
 import com.springclaw.runtime.memory.contract.MemoryStatus;
 import com.springclaw.runtime.memory.contract.MemoryType;
 import com.springclaw.runtime.memory.port.MemoryRecordStore;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -25,6 +26,7 @@ import java.util.Set;
  * uk_memory_source_policy）。重复插入抛 DuplicateKeyException，由上层视为幂等冲突。
  */
 @Component
+@ConditionalOnProperty(prefix = "springclaw.memory.core", name = "enabled", havingValue = "true")
 public class MySqlMemoryRecordStore implements MemoryRecordStore {
 
     private final MemoryRecordMapper mapper;

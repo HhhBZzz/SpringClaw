@@ -32,6 +32,7 @@ public class AgentLearningService {
     private static final Set<String> REVIEWABLE_STATUSES = Set.of(
             "active",
             "approved",
+            "candidate",
             "disabled",
             "rejected",
             "superseded"
@@ -236,7 +237,7 @@ public class AgentLearningService {
                 ## %s
 
                 - schema: %s
-                - status: active
+                - status: candidate
                 - requestId: %s
                 - source: %s
                 - trigger: %s

@@ -128,12 +128,12 @@ public final class LegacyRunContextAdapter {
         List<MemoryFrameItem> shortTerm = new ArrayList<>();
         if (StringUtils.hasText(assembled.eventContext())) {
             shortTerm.add(legacyItem(assembled.eventContext(), MemoryFrameLayer.SHORT_TERM,
-                    "legacy-short-term"));
+                    "legacy-short-term", capturedAt));
         }
         List<MemoryFrameItem> semantic = new ArrayList<>();
         if (StringUtils.hasText(assembled.semanticContext())) {
             semantic.add(legacyItem(assembled.semanticContext(), MemoryFrameLayer.SEMANTIC_FACT,
-                    "legacy-semantic"));
+                    "legacy-semantic", capturedAt));
         }
         String frameHash = sha256(String.join("\n",
                 runId, scope.scopeId(), assembled.eventContext(), assembled.semanticContext()));
@@ -153,7 +153,12 @@ public final class LegacyRunContextAdapter {
         );
     }
 
-    private static MemoryFrameItem legacyItem(String content, MemoryFrameLayer layer, String sourceId) {
+    private static MemoryFrameItem legacyItem(
+            String content,
+            MemoryFrameLayer layer,
+            String sourceId,
+            Instant updatedAt
+    ) {
         return new MemoryFrameItem(
                 sourceId,
                 MemoryFrameSourceKind.MESSAGE_EVENT,
@@ -170,7 +175,7 @@ public final class LegacyRunContextAdapter {
                 0.0,
                 0.0,
                 1,
-                Instant.now()
+                updatedAt
         );
     }
 

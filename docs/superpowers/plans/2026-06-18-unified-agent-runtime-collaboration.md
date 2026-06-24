@@ -1220,3 +1220,88 @@ Next dependency:
     projection-only behavior if needed, and stop production runtime reads from
     ContextAssembler.
 ```
+
+## Update: Phase 3A3b canonical ContextSnapshot ownership
+
+```text
+Task: Phase 3A3b canonical context ownership default-on
+Owner split:
+  - Claude: Task 1 Spring wiring/defaults
+  - Codex: Task 2 request factory review/fix, Task 3 ChatContextFactory
+    accepted-run ownership, Task 4 LegacyLifecycleObserver split, Task 5-6
+    gates and ledger
+Design and plan:
+  - 8bfb3c3 docs: design phase 3a3b canonical context ownership
+  - 595b466 docs: plan phase 3a3b canonical context ownership
+Implementation commits:
+  - 833f662 feat: enable canonical snapshot wiring by default
+  - c38aad7 feat: derive snapshot requests from accepted runs
+  - 89ad901 feat: use accepted run state for canonical context
+  - e3ef509 feat: skip legacy context observation in canonical mode
+Modified paths:
+  - src/main/java/com/springclaw/config/ContextSnapshotConfig.java
+  - src/main/java/com/springclaw/config/MemoryFrameConfig.java
+  - src/main/java/com/springclaw/runtime/bridge/RunStateContextSnapshotRequestFactory.java
+  - src/main/java/com/springclaw/service/chat/impl/ChatContextFactory.java
+  - src/main/java/com/springclaw/runtime/bridge/LegacyLifecycleObserver.java
+  - src/main/resources/application.yml
+  - .env.example
+  - focused tests under src/test/java/com/springclaw/runtime/bridge,
+    src/test/java/com/springclaw/runtime/contract,
+    src/test/java/com/springclaw/service/chat/impl, and lifecycle projection
+    compatibility fixtures
+Default behavior:
+  - SPRINGCLAW_MEMORY_FRAME_ENABLED=true
+  - SPRINGCLAW_CONTEXT_SNAPSHOT_FACTORY_ENABLED=true
+  - ContextSnapshotFactory, LegacyContextViewAdapter, and
+    RunStateContextSnapshotRequestFactory are wired by default when
+    MemoryCoordinator is available
+  - ChatContextFactory canonical branch uses the accepted RunState and its
+    SessionAccessClaim as the MemoryFrame/ContextSnapshot authority source
+  - LegacyLifecycleObserver no longer emits a second contextObserved event in
+    canonical mode
+Rollback behavior:
+  - set SPRINGCLAW_CONTEXT_SNAPSHOT_FACTORY_ENABLED=false to return
+    ChatContextFactory to ContextAssembler and keep legacy lifecycle context
+    observation
+  - set SPRINGCLAW_MEMORY_FRAME_ENABLED=false if MemoryCoordinator/frame
+    retrieval must also be disabled
+Compatibility notes:
+  - route policy, final-answer ownership, stream termination, tool approval,
+    proposal lifecycle, workspace guard, and tool runtime safety were not
+    intentionally changed
+  - legacy lifecycle projection tests that validate old event ordering now pass
+    contextSnapshotFactoryEnabled=false explicitly
+Verification (2026-06-24, Asia/Shanghai):
+  - focused Phase 3A3b suite:
+    24 tests, 0 failures, 0 errors, 0 skipped
+  - compatibility gates:
+    40 tests, 0 failures, 0 errors, 0 skipped
+  - full suite:
+    769 tests, 0 failures, 0 errors, 0 skipped
+  - compatibility and full gates loaded local
+    /Users/hanbingzheng/springclaw/.env.local without printing secrets
+  - final gates used MAVEN_OPTS=-Djdk.lang.Process.launchMechanism=FORK
+    because this local macOS/JDK environment otherwise intermittently fails
+    Java ProcessBuilder sh/python3 launches with "Failed to exec spawn helper"
+Known limitations:
+  - ContextAssembler and SemanticMemoryAdvisor remain present for explicit
+    rollback/legacy paths
+  - canonical context ownership is default-on, but full runtime reducer
+    ownership is still incremental; future phases should make canonical
+    contextReady projection explicit rather than relying on legacy bridge
+    compatibility fixtures
+  - projection-only Advisor cleanup and removal of old retrieval paths remain
+    deferred
+Rollback order:
+  - set SPRINGCLAW_CONTEXT_SNAPSHOT_FACTORY_ENABLED=false
+  - revert e3ef509 to restore legacy contextObserved in observer default
+  - revert 89ad901 to restore reconstructed ChatContextFactory snapshot request
+  - revert c38aad7 to remove RunStateContextSnapshotRequestFactory behavior
+  - revert 833f662 to return canonical snapshot wiring/memory frame defaults to
+    their previous default-off state
+Next dependency:
+  - Next phase should decide whether to remove or quarantine duplicate legacy
+    retrieval paths, and should make canonical RunCoordinator contextReady
+    projection explicit for the default runtime path.
+```

@@ -119,7 +119,8 @@ class AsyncChatResultStoreProjectionTest {
                 new DefaultLegacyRuntimeBridge(coordinator),
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),
-                new LegacyRunResultAdapter()
+                new LegacyRunResultAdapter(),
+                false
         );
         ChatContext context = context();
         ChatExecutionResult result = new ChatExecutionResult(

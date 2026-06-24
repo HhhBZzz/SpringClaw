@@ -1055,3 +1055,82 @@ Next dependency:
   - Phase 3A2/3A3 may activate canonical MemoryFrame retrieval and
     ContextSnapshotFactory in a separate, single-cutover plan
 ```
+
+## Update: Phase 3A2 MemoryFrame shadow retrieval
+
+```text
+Task: Phase 3A2 canonical MemoryFrame retrieval as disabled shadow infrastructure
+Owner: Codex
+Design and plan:
+  - da67104 docs: design phase 3a2 memory frame retrieval
+  - ad6c29b docs: plan phase 3a2 memory frame retrieval
+Implementation commits:
+  - 2d3ea2e feat: add memory frame contracts
+  - 37f8cb4 feat: add memory frame hashing and budgets
+  - 1a0618b feat: assemble canonical memory frames
+  - d6fd9ef feat: wire memory frame shadow retrieval
+Modified ownership:
+  - runtime memory contracts:
+    src/main/java/com/springclaw/runtime/memory/contract/MemoryFrame*.java
+    src/main/java/com/springclaw/runtime/memory/contract/MemoryRetrievalTrace.java
+  - frame assembly service:
+    src/main/java/com/springclaw/service/memory/frame/*
+  - disabled-by-default wiring:
+    src/main/java/com/springclaw/config/MemoryFrameConfig.java
+    src/main/resources/application.yml
+    .env.example
+  - tests:
+    src/test/java/com/springclaw/runtime/memory/MemoryFrameContractTest.java
+    src/test/java/com/springclaw/service/memory/frame/*
+Active prompt/input boundary:
+  - ContextAssembler unchanged
+  - SemanticMemoryAdvisor unchanged
+  - ConversationAdvisorSupport unchanged
+  - ContextSnapshot unchanged
+  - RunCoordinator unchanged
+  - no engine behavior or prompt-input owner activated MemoryFrame
+Flags and default behavior:
+  - SPRINGCLAW_MEMORY_FRAME_ENABLED=false
+  - SPRINGCLAW_MEMORY_FRAME_SHADOW_COMPARE_ENABLED=false
+  - SPRINGCLAW_MEMORY_FRAME_MAX_CHARS=6000
+  - SPRINGCLAW_MEMORY_FRAME_TRACE_MAX_WARNINGS=20
+  - MemoryCoordinator bean is not created unless
+    springclaw.memory.frame.enabled=true
+  - shadow comparator is read-only and does not mutate legacy AssembledContext
+Functionality:
+  - immutable MemoryFrame and MemoryRetrievalTrace contracts
+  - deterministic canonical frame hashing excluding frameHash self-reference
+  - budget utility for deterministic layer caps
+  - MemoryCoordinator reads one accepted MemoryScope from:
+    short-term store, active memory records, and reviewed project Markdown
+  - project CANDIDATE/REJECTED entries are omitted from runtime frame content
+  - duplicate content hashes are omitted with trace counts
+  - missing optional short-term store produces SOURCE_UNAVAILABLE omission
+Verification (2026-06-24, Asia/Shanghai):
+  - focused Phase 3A2 suite:
+    67 tests, 0 failures, 0 errors, 0 skipped
+  - compatibility gates:
+    40 tests, 0 failures, 0 errors, 0 skipped
+  - full suite:
+    749 tests, 0 failures, 0 errors, 0 skipped
+  - full and compatibility gates loaded local
+    /Users/hanbingzheng/springclaw/.env.local without printing secrets
+Known limitations:
+  - ContextSnapshotFactory still inactive
+  - ContextSnapshot still does not embed MemoryFrame
+  - Advisors still perform legacy retrieval until Phase 3A3
+  - MemoryFrame is not injected into active prompts or engine context
+  - vector candidates remain optional and authority-checked; Phase 3A2 does
+    not activate vector candidate retrieval
+Rollback order:
+  - set SPRINGCLAW_MEMORY_FRAME_ENABLED=false
+  - set SPRINGCLAW_MEMORY_FRAME_SHADOW_COMPARE_ENABLED=false
+  - revert d6fd9ef to remove shadow wiring/config/comparator
+  - revert 1a0618b to remove MemoryCoordinator assembly
+  - revert 37f8cb4 to remove hashing/budget utilities
+  - revert 2d3ea2e to remove MemoryFrame contracts
+Next dependency:
+  - Phase 3A3 must be a separate single-cutover plan to activate
+    ContextSnapshotFactory/MemoryFrame prompt ownership and retire duplicate
+    legacy retrieval paths.
+```

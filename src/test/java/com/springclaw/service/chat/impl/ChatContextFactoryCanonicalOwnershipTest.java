@@ -27,6 +27,7 @@ import com.springclaw.service.session.AgentSessionService;
 import com.springclaw.service.skill.SkillService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.ObjectProvider;
 
@@ -36,6 +37,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -43,41 +45,63 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
-class ChatContextFactoryCanonicalSnapshotTest {
+class ChatContextFactoryCanonicalOwnershipTest {
+
+    private static final String RUN_ID = "0123456789abcdef0123456789abcdef";
+    private static final Instant NOW = Instant.parse("2026-06-24T00:00:00Z");
 
     @Test
-    void defaultModeStillUsesLegacyContextAssembler() {
+    void canonicalDefaultUsesAcceptedRunStateClaimAndSkipsContextAssembler() {
+        Fixture fixture = new Fixture(true);
+        when(fixture.runStateRepository.requireByRunId(RUN_ID))
+                .thenReturn(sharedRunState());
+
+        ChatContext context = fixture.factory.build(
+                new ChatRequest("forged-session", "mallory", "hello", "api", "agent"),
+                true,
+                RUN_ID
+        );
+
+        ArgumentCaptor<ContextSnapshotRequest> requestCaptor =
+                ArgumentCaptor.forClass(ContextSnapshotRequest.class);
+        verify(fixture.runStateRepository).requireByRunId(RUN_ID);
+        verify(fixture.contextSnapshotFactory).create(requestCaptor.capture());
+        verifyNoInteractions(fixture.contextAssembler);
+        assertThat(requestCaptor.getValue().sessionAccessClaim().claimType())
+                .isEqualTo(SessionAccessClaim.ClaimType.SHARED);
+        assertThat(requestCaptor.getValue().sessionAccessClaim().ownerOrSharedPrincipal())
+                .isEqualTo("shared:feishu:group-1");
+        assertThat(requestCaptor.getValue().sessionKey()).isEqualTo("group-1");
+        assertThat(requestCaptor.getValue().userId()).isEqualTo("ou-1");
+        assertThat(context.assembled().observePrompt()).isEqualTo("canonical observe");
+    }
+
+    @Test
+    void explicitLegacyRollbackUsesContextAssembler() {
         Fixture fixture = new Fixture(false);
 
         ChatContext context = fixture.factory.build(
-                new ChatRequest("s1", "u1", "hello", "api", "agent"),
+                new ChatRequest("session-1", "alice", "hello", "api", "agent"),
                 true,
-                "0123456789abcdef0123456789abcdef"
+                RUN_ID
         );
 
-        verify(fixture.contextAssembler).assemble("s1", "api", "u1", "hello");
-        verifyNoInteractions(
-                fixture.contextSnapshotFactory,
-                fixture.legacyContextViewAdapter
-        );
+        verify(fixture.contextAssembler).assemble("session-1", "api", "alice", "hello");
+        verifyNoInteractions(fixture.runStateRepository, fixture.contextSnapshotFactory);
         assertThat(context.assembled().observePrompt()).isEqualTo("legacy observe");
     }
 
     @Test
-    void canonicalModeUsesSnapshotFactoryAndSkipsContextAssembler() {
+    void canonicalDefaultFailsWhenAcceptedRunIsMissing() {
         Fixture fixture = new Fixture(true);
+        when(fixture.runStateRepository.requireByRunId(RUN_ID))
+                .thenThrow(new IllegalStateException("run not found: " + RUN_ID));
 
-        ChatContext context = fixture.factory.build(
-                new ChatRequest("s1", "u1", "hello", "api", "agent"),
+        assertThatThrownBy(() -> fixture.factory.build(
+                new ChatRequest("session-1", "alice", "hello", "api", "agent"),
                 true,
-                "0123456789abcdef0123456789abcdef"
-        );
-
-        verifyNoInteractions(fixture.contextAssembler);
-        verify(fixture.contextSnapshotFactory).create(any(ContextSnapshotRequest.class));
-        verify(fixture.legacyContextViewAdapter).adapt(fixture.snapshot);
-        assertThat(context.assembled().observePrompt()).isEqualTo("canonical observe");
-        assertThat(context.contextInjection().observePrompt()).isEqualTo("canonical observe");
+                RUN_ID
+        )).hasMessageContaining("run not found");
     }
 
     private static final class Fixture {
@@ -88,29 +112,22 @@ class ChatContextFactoryCanonicalSnapshotTest {
         private final SkillService skillService = mock(SkillService.class);
         private final SkillRegistryService skillRegistryService = mock(SkillRegistryService.class);
         private final ContextAssembler contextAssembler = mock(ContextAssembler.class);
-        private final ChatRoutingStateService chatRoutingStateService = mock(ChatRoutingStateService.class);
-        private final ChatRoutingPolicyService chatRoutingPolicyService = mock(ChatRoutingPolicyService.class);
-        private final AgentDecisionService agentDecisionService = mock(AgentDecisionService.class);
+        private final ChatRoutingStateService chatRoutingStateService =
+                mock(ChatRoutingStateService.class);
+        private final ChatRoutingPolicyService chatRoutingPolicyService =
+                mock(ChatRoutingPolicyService.class);
+        private final AgentDecisionService agentDecisionService =
+                mock(AgentDecisionService.class);
         private final ContextSnapshotFactory contextSnapshotFactory =
                 mock(ContextSnapshotFactory.class);
         private final LegacyContextViewAdapter legacyContextViewAdapter =
                 mock(LegacyContextViewAdapter.class);
         private final RunStateRepository runStateRepository =
                 mock(RunStateRepository.class);
-        private final RunStateContextSnapshotRequestFactory requestFactory =
-                mock(RunStateContextSnapshotRequestFactory.class);
-        private final ContextSnapshot snapshot = snapshot();
-        private final RunState runState = runState();
-        private final ContextSnapshotRequest snapshotRequest = snapshotRequest();
         private final ChatContextFactory factory;
 
         @SuppressWarnings("unchecked")
         private Fixture(boolean canonicalMode) {
-            AgentSession session = new AgentSession();
-            session.setId(1L);
-            session.setSessionKey("s1");
-            session.setUserId("u1");
-            session.setChannel("api");
             Set<String> allowedToolPacks = Set.of("web");
             AgentDecision decision = new AgentDecision(
                     "general",
@@ -121,19 +138,20 @@ class ChatContextFactoryCanonicalSnapshotTest {
                     "test"
             );
             AssembledContext legacy = new AssembledContext(
-                    "s1",
+                    "session-1",
                     "api",
-                    "u1",
+                    "alice",
                     "hello",
                     "legacy events",
                     "legacy memory",
                     "legacy observe"
             );
+            ContextSnapshot snapshot = snapshot();
             LegacyContextView canonicalView = new LegacyContextView(
                     new AssembledContext(
-                            "s1",
-                            "api",
-                            "u1",
+                            "group-1",
+                            "feishu",
+                            "ou-1",
                             "hello",
                             "canonical events",
                             "canonical memory",
@@ -141,11 +159,23 @@ class ChatContextFactoryCanonicalSnapshotTest {
                     ),
                     new ContextInjection("canonical observe", "", "", Map.of())
             );
-            when(agentSessionService.getOrCreate("s1", "api", "u1")).thenReturn(session);
-            when(authService.resolveRoleByUserId("u1")).thenReturn("USER");
-            when(skillService.resolveAllowedToolPacks("api", "u1")).thenReturn(allowedToolPacks);
-            when(agentDecisionService.decide(any(AgentDecisionRequest.class))).thenReturn(decision);
-            when(chatRoutingStateService.resolveDefaultMode("simplified")).thenReturn("simplified");
+
+            when(agentSessionService.getOrCreate(any(), any(), any()))
+                    .thenAnswer(invocation -> {
+                        AgentSession session = new AgentSession();
+                        session.setId(1L);
+                        session.setSessionKey(invocation.getArgument(0));
+                        session.setChannel(invocation.getArgument(1));
+                        session.setUserId(invocation.getArgument(2));
+                        return session;
+                    });
+            when(authService.resolveRoleByUserId(any())).thenReturn("USER");
+            when(skillService.resolveAllowedToolPacks(any(), any()))
+                    .thenReturn(allowedToolPacks);
+            when(agentDecisionService.decide(any(AgentDecisionRequest.class)))
+                    .thenReturn(decision);
+            when(chatRoutingStateService.resolveDefaultMode("simplified"))
+                    .thenReturn("simplified");
             when(chatRoutingStateService.resolveAutoUpgrade(true)).thenReturn(true);
             when(chatRoutingPolicyService.decide(
                     eq("hello"),
@@ -165,9 +195,9 @@ class ChatContextFactoryCanonicalSnapshotTest {
             ));
             when(skillRegistryService.matchAgentVisibleDefinitions("hello", allowedToolPacks, 2))
                     .thenReturn(List.of());
-            when(soulPromptService.buildSystemPrompt("api", "u1", List.of()))
+            when(soulPromptService.buildSystemPrompt(any(), any(), eq(List.of())))
                     .thenReturn("system");
-            when(contextAssembler.assemble("s1", "api", "u1", "hello"))
+            when(contextAssembler.assemble("session-1", "api", "alice", "hello"))
                     .thenReturn(legacy);
             when(aiProviderService.activeClient()).thenReturn(new AiProviderService.ActiveChatClient(
                     "provider",
@@ -180,15 +210,6 @@ class ChatContextFactoryCanonicalSnapshotTest {
             when(contextSnapshotFactory.create(any(ContextSnapshotRequest.class)))
                     .thenReturn(snapshot);
             when(legacyContextViewAdapter.adapt(snapshot)).thenReturn(canonicalView);
-            when(runStateRepository.requireByRunId("0123456789abcdef0123456789abcdef"))
-                    .thenReturn(runState);
-            when(requestFactory.create(
-                    eq(runState),
-                    eq("hello"),
-                    eq("system"),
-                    eq(List.of("web")),
-                    any()
-            )).thenReturn(snapshotRequest);
 
             ObjectProvider<ContextSnapshotFactory> snapshotProvider =
                     (ObjectProvider<ContextSnapshotFactory>) mock(ObjectProvider.class);
@@ -201,7 +222,8 @@ class ChatContextFactoryCanonicalSnapshotTest {
             when(snapshotProvider.getIfAvailable()).thenReturn(contextSnapshotFactory);
             when(adapterProvider.getIfAvailable()).thenReturn(legacyContextViewAdapter);
             when(runStateRepositoryProvider.getIfAvailable()).thenReturn(runStateRepository);
-            when(requestFactoryProvider.getIfAvailable()).thenReturn(requestFactory);
+            when(requestFactoryProvider.getIfAvailable())
+                    .thenReturn(new RunStateContextSnapshotRequestFactory());
 
             this.factory = new ChatContextFactory(
                     aiProviderService,
@@ -225,76 +247,29 @@ class ChatContextFactoryCanonicalSnapshotTest {
         }
     }
 
-    private static ContextSnapshot snapshot() {
-        return new ContextSnapshot(
-                "0123456789abcdef0123456789abcdef",
-                "s1",
-                "u1",
-                "api",
-                "u1",
-                "USER",
-                "hello",
-                "hello",
-                "system",
-                "project",
-                List.of("short"),
-                List.of("semantic"),
-                List.of("rule"),
-                List.of("web"),
-                Map.of("providerId", "provider"),
-                Map.of("schema", "test"),
-                frame(),
-                Instant.parse("2026-06-24T00:00:00Z"),
-                "snapshot-hash"
+    private static RunState sharedRunState() {
+        SessionAccessClaim claim = SessionAccessClaim.sharedVerified(
+                "feishu",
+                "group-1",
+                "ou-1"
         );
-    }
-
-    private static ContextSnapshotRequest snapshotRequest() {
-        return new ContextSnapshotRequest(
-                "0123456789abcdef0123456789abcdef",
-                "s1",
-                "u1",
-                "api",
-                "u1",
-                SessionAccessClaim.personal(
-                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
-                        "api",
-                        "s1",
-                        "u1"
-                ),
-                "USER",
-                "hello",
-                "hello",
-                "system",
-                List.of("web"),
-                Map.of("providerId", "provider")
-        );
-    }
-
-    private static RunState runState() {
-        Instant now = Instant.parse("2026-06-24T00:00:00Z");
         return new RunState(
-                "0123456789abcdef0123456789abcdef",
-                "0123456789abcdef0123456789abcdef",
+                RUN_ID,
+                RUN_ID,
                 0,
                 RunStatus.CREATED,
-                "s1",
-                "api",
-                "u1",
-                SessionAccessClaim.personal(
-                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
-                        "api",
-                        "s1",
-                        "u1"
-                ),
-                "USER",
+                claim.sessionKey(),
+                claim.channel(),
+                claim.acceptedUserId(),
+                claim,
+                "MEMBER",
                 "hello",
                 "agent",
-                now,
+                NOW,
                 null,
-                now,
+                NOW,
                 null,
-                now.plusSeconds(300),
+                NOW.plusSeconds(300),
                 null,
                 null,
                 "",
@@ -308,14 +283,37 @@ class ChatContextFactoryCanonicalSnapshotTest {
         );
     }
 
+    private static ContextSnapshot snapshot() {
+        return new ContextSnapshot(
+                RUN_ID,
+                "group-1",
+                "ou-1",
+                "feishu",
+                "ou-1",
+                "MEMBER",
+                "hello",
+                "hello",
+                "system",
+                "project",
+                List.of("short"),
+                List.of("semantic"),
+                List.of("rule"),
+                List.of("web"),
+                Map.of("providerId", "provider"),
+                Map.of("schema", "test"),
+                frame(),
+                NOW,
+                "snapshot-hash"
+        );
+    }
+
     private static MemoryFrame frame() {
         return new MemoryFrame(
-                "0123456789abcdef0123456789abcdef",
-                MemoryScope.from(SessionAccessClaim.personal(
-                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
-                        "api",
-                        "s1",
-                        "u1"
+                RUN_ID,
+                MemoryScope.from(SessionAccessClaim.sharedVerified(
+                        "feishu",
+                        "group-1",
+                        "ou-1"
                 )),
                 List.of(),
                 List.of(),
@@ -325,7 +323,7 @@ class ChatContextFactoryCanonicalSnapshotTest {
                 List.of(),
                 Map.of("source", "test"),
                 List.of(),
-                Instant.parse("2026-06-24T00:00:00Z"),
+                NOW,
                 "frame-hash"
         );
     }

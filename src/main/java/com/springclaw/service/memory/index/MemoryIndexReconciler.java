@@ -3,6 +3,7 @@ package com.springclaw.service.memory.index;
 import com.springclaw.runtime.memory.contract.MemoryRecordVersion;
 import com.springclaw.runtime.memory.port.MemoryRecordStore;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.Objects;
@@ -10,6 +11,7 @@ import java.util.Optional;
 
 @Component
 @ConditionalOnBean(MemoryVectorIndex.class)
+@ConditionalOnProperty(prefix = "springclaw.memory.index", name = "enabled", havingValue = "true")
 public class MemoryIndexReconciler {
 
     private final MemoryRecordStore recordStore;

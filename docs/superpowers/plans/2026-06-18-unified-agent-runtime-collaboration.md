@@ -1565,3 +1565,50 @@ Next dependency:
     retrieval retirement/quarantine task only after this SpringBoot gate remains
     green.
 ```
+
+## Update: Phase 3D retrieval advisor quarantine
+
+```text
+Task: Phase 3D retrieval advisor quarantine
+Branch:
+  - codex/unified-runtime-phase-3d-retrieval-quarantine
+Design and plan:
+  - docs/superpowers/plans/2026-06-25-unified-runtime-phase-3d-retrieval-quarantine.md
+Modified paths:
+  - src/main/java/com/springclaw/service/chat/impl/ConversationAdvisorSupport.java
+  - src/test/java/com/springclaw/service/chat/impl/ConversationAdvisorSupportCanonicalModeTest.java
+Runtime path tightened:
+  - canonical ContextSnapshot mode now attaches no Spring AI retrieval advisors
+    at model-call time
+  - ContextSnapshotFactory/MemoryCoordinator remains the single context/memory
+    retrieval source before model execution
+  - rollback/default mode still preserves existing advisor behavior:
+    SemanticMemoryAdvisor when Spring AI chat memory is off, and
+    MessageChatMemoryAdvisor + SemanticMemoryAdvisor when it is on
+RED evidence:
+  - mvn -Dtest=ConversationAdvisorSupportCanonicalModeTest test
+  - failed because canonical mode still attached MessageChatMemoryAdvisor when
+    springclaw.chat.spring-ai-chat-memory-enabled=true
+Verification (2026-06-25, Asia/Shanghai):
+  - advisor quarantine + rollback characterization:
+    mvn -Dtest=ConversationAdvisorSupportCanonicalModeTest,ContextPropagationCharacterizationTest test
+    7 tests, 0 failures, 0 errors, 0 skipped
+  - canonical boundary + HTTP smoke gate:
+    set -a; . /Users/hanbingzheng/springclaw/.env.local; set +a;
+    mvn -Dtest=CanonicalRetrievalBoundaryTest,ChatControllerCanonicalHttpSmokeTest,ChatControllerSpringBootCanonicalSmokeIT test
+    4 tests, 0 failures, 0 errors, 0 skipped
+  - full suite:
+    set -a; . /Users/hanbingzheng/springclaw/.env.local; set +a;
+    MAVEN_OPTS='-Djdk.lang.Process.launchMechanism=FORK' mvn test
+    807 tests, 0 failures, 0 errors, 0 skipped
+Known limitations:
+  - this phase does not delete ContextAssembler, SemanticMemoryAdvisor, or
+    MessageChatMemoryAdvisor because they remain rollback/default components
+  - this phase does not change MemoryController manual recall endpoints
+Rollback order:
+  - revert the Phase 3D commit to restore canonical-mode MessageChatMemoryAdvisor
+    attachment when the Spring AI chat memory flag is on
+Next dependency:
+  - review and merge Phase 3D, then continue to either persistent RunState
+    storage or deeper legacy component deletion once rollback policy allows it.
+```

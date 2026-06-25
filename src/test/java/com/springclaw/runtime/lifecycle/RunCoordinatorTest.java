@@ -182,6 +182,21 @@ class RunCoordinatorTest {
     }
 
     @Test
+    void confirmationApprovalCannotResumeRunThatIsNotWaiting() {
+        coordinator.accept(acceptance());
+        coordinator.contextReady(RUN_ID, snapshot(), T0.plusSeconds(1));
+        coordinator.decided(RUN_ID, decision(), T0.plusSeconds(2));
+
+        assertThatThrownBy(() -> coordinator.confirmationApproved(
+                RUN_ID,
+                T0.plusSeconds(3)
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("WAITING_CONFIRMATION");
+        assertThat(store.requireByRunId(RUN_ID).status())
+                .isEqualTo(RunStatus.DECIDED);
+    }
+
+    @Test
     void acceptanceRejectsSessionAccessClaimMismatch() {
         assertThatThrownBy(() -> new RunAcceptance(
                 RUN_ID,

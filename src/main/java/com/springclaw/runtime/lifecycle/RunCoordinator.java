@@ -108,6 +108,12 @@ public final class RunCoordinator {
 
     public RunState confirmationApproved(String runId, Instant at) {
         RunState current = require(runId);
+        if (current.status() != RunStatus.WAITING_CONFIRMATION) {
+            throw new IllegalStateException(
+                    "confirmation approval requires WAITING_CONFIRMATION but was "
+                            + current.status()
+            );
+        }
         return commit(
                 current,
                 copy(current, RunStatus.RUNNING, at, current.startedAt(), null,

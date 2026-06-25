@@ -2,6 +2,7 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.dto.chat.ChatRequest;
+import com.springclaw.runtime.bridge.CanonicalContextReadyProjector;
 import com.springclaw.runtime.bridge.LegacyContextView;
 import com.springclaw.runtime.bridge.LegacyContextViewAdapter;
 import com.springclaw.runtime.bridge.RunStateContextSnapshotRequestFactory;
@@ -198,10 +199,14 @@ class ChatContextFactoryCanonicalSnapshotTest {
                     (ObjectProvider<RunStateRepository>) mock(ObjectProvider.class);
             ObjectProvider<RunStateContextSnapshotRequestFactory> requestFactoryProvider =
                     (ObjectProvider<RunStateContextSnapshotRequestFactory>) mock(ObjectProvider.class);
+            ObjectProvider<CanonicalContextReadyProjector> projectorProvider =
+                    (ObjectProvider<CanonicalContextReadyProjector>) mock(ObjectProvider.class);
             when(snapshotProvider.getIfAvailable()).thenReturn(contextSnapshotFactory);
             when(adapterProvider.getIfAvailable()).thenReturn(legacyContextViewAdapter);
             when(runStateRepositoryProvider.getIfAvailable()).thenReturn(runStateRepository);
             when(requestFactoryProvider.getIfAvailable()).thenReturn(requestFactory);
+            when(projectorProvider.getIfAvailable())
+                    .thenReturn(mock(CanonicalContextReadyProjector.class));
 
             this.factory = new ChatContextFactory(
                     aiProviderService,
@@ -218,6 +223,7 @@ class ChatContextFactoryCanonicalSnapshotTest {
                     adapterProvider,
                     runStateRepositoryProvider,
                     requestFactoryProvider,
+                    projectorProvider,
                     canonicalMode,
                     "simplified",
                     true

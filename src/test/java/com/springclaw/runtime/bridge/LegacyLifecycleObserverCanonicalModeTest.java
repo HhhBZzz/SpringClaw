@@ -90,6 +90,48 @@ class LegacyLifecycleObserverCanonicalModeTest {
     }
 
     @Test
+    void canonicalProjectionAllowsDecisionObservationWithoutLegacyContextObserved() {
+        InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+        RunCoordinator coordinator = new RunCoordinator(store);
+        coordinator.accept(new RunAcceptance(
+                RUN_ID,
+                "session-1",
+                "api",
+                "user-1",
+                claim(),
+                "USER",
+                "original",
+                "agent",
+                T0,
+                T0.plusSeconds(300)
+        ));
+        ChatContext context = context(RUN_ID);
+        new CanonicalContextReadyProjector(coordinator, store)
+                .project(
+                        RUN_ID,
+                        new LegacyRunContextAdapter().adapt(context, T0.plusSeconds(1)),
+                        T0.plusSeconds(1)
+                );
+        LegacyLifecycleObserver observer = new LegacyLifecycleObserver(
+                new DefaultLegacyRuntimeBridge(coordinator),
+                new LegacyRunContextAdapter(),
+                new LegacyExecutionDecisionAdapter(),
+                new LegacyRunResultAdapter(),
+                true
+        );
+
+        observer.contextAndDecisionObserved(context, T0.plusSeconds(2));
+
+        assertThat(store.findEventsByRunId(RUN_ID))
+                .extracting(RunEvent::eventType)
+                .containsExactly(
+                        RunEventType.RUN_CREATED,
+                        RunEventType.CONTEXT_READY,
+                        RunEventType.DECISION_MADE
+                );
+    }
+
+    @Test
     void legacyModeKeepsContextAndDecisionObservation() {
         LegacyRuntimeBridge bridge = mock(LegacyRuntimeBridge.class);
         LegacyLifecycleObserver observer = new LegacyLifecycleObserver(

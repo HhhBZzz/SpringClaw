@@ -1612,3 +1612,73 @@ Next dependency:
   - review and merge Phase 3D, then continue to either persistent RunState
     storage or deeper legacy component deletion once rollback policy allows it.
 ```
+
+## Update: Phase 3E MySQL run lifecycle persistence
+
+```text
+Task: Phase 3E MySQL RunLifecycleStore
+Branch:
+  - codex/unified-runtime-phase-3e-run-lifecycle-mysql
+Design and plan:
+  - docs/superpowers/plans/2026-06-25-unified-runtime-phase-3e-mysql-run-lifecycle-store.md
+Modified paths:
+  - src/main/java/com/springclaw/config/RuntimeLifecycleStoreConfig.java
+  - src/main/java/com/springclaw/config/RuntimeLifecycleSchemaInitializer.java
+  - src/main/java/com/springclaw/runtime/lifecycle/InMemoryRunLifecycleStore.java
+  - src/main/java/com/springclaw/runtime/lifecycle/MySqlRunLifecycleStore.java
+  - src/main/resources/application.yml
+  - src/main/resources/sql/migrations/2026-06-25-runtime-run-lifecycle.sql
+  - src/test/java/com/springclaw/config/RuntimeLifecycleSchemaInitializerTest.java
+  - src/test/java/com/springclaw/runtime/lifecycle/RuntimeLifecycleStoreConfigTest.java
+  - src/test/java/com/springclaw/runtime/lifecycle/MySqlRunLifecycleStoreIT.java
+Runtime path added:
+  - default runtime.lifecycle store remains process-local InMemoryRunLifecycleStore
+  - springclaw.runtime.lifecycle.store=mysql selects MySqlRunLifecycleStore
+  - runtime_run_state stores the latest canonical RunState JSON with revision
+    and query columns
+  - runtime_run_event stores append-only RunEvent JSON with per-run sequence
+  - MySqlRunLifecycleStore preserves current RunLifecycleStore semantics:
+    idempotent same acceptance, conflicting create rejection, stale revision
+    rejection, transition-policy validation, and observation append without
+    state revision mutation
+RED evidence:
+  - mvn -q -Dtest=RuntimeLifecycleStoreConfigTest,RuntimeLifecycleSchemaInitializerTest,MySqlRunLifecycleStoreIT test
+  - failed at test compile because RuntimeLifecycleStoreConfig and
+    MySqlRunLifecycleStore did not exist
+Verification (2026-06-25, Asia/Shanghai):
+  - config/schema initializer gate:
+    mvn -q -Dtest=RuntimeLifecycleStoreConfigTest,RuntimeLifecycleSchemaInitializerTest test
+    4 tests, 0 failures, 0 errors, 0 skipped
+  - lifecycle regression gate:
+    mvn -q -Dtest=InMemoryRunLifecycleStoreTest,RunCoordinatorTest,RuntimeLifecycleStoreConfigTest,RuntimeLifecycleSchemaInitializerTest test
+    20 tests, 0 failures, 0 errors, 0 skipped
+  - compile gate:
+    mvn -q -DskipTests test
+    passed
+  - MySQL IT with default worktree env first failed because the isolated
+    worktree did not load /Users/hanbingzheng/springclaw/.env.local and fell
+    back to MYSQL_PASSWORD=root:
+    mvn -q -Dtest=MySqlRunLifecycleStoreIT test
+    Access denied for user 'root'@'localhost' (using password: YES)
+  - MySQL IT gate:
+    set -a; . /Users/hanbingzheng/springclaw/.env.local; set +a;
+    mvn -q -Dtest=MySqlRunLifecycleStoreIT test
+    3 tests, 0 failures, 0 errors, 0 skipped
+  - final Phase 3E gate:
+    set -a; . /Users/hanbingzheng/springclaw/.env.local; set +a;
+    mvn -q -Dtest=InMemoryRunLifecycleStoreTest,RunCoordinatorTest,RuntimeLifecycleStoreConfigTest,RuntimeLifecycleSchemaInitializerTest,MySqlRunLifecycleStoreIT test
+    23 tests, 0 failures, 0 errors, 0 skipped
+Known limitations:
+  - MySqlRunLifecycleStoreIT requires loading the main project .env.local from
+    isolated worktrees unless MYSQL_USER/MYSQL_PASSWORD/MYSQL_DB are exported
+  - this phase does not migrate existing in-memory runtime rows because no such
+    durable rows existed before Phase 3E
+  - this phase does not remove legacy runtime console tables; it only adds the
+    canonical lifecycle authority tables
+Rollback order:
+  - set SPRINGCLAW_RUNTIME_LIFECYCLE_STORE=memory
+  - or revert the Phase 3E branch commit
+Next dependency:
+  - request review/merge, then continue to the next legacy runtime retirement
+    task once Phase 3E is accepted
+```

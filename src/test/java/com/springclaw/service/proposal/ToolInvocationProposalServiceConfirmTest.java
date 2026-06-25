@@ -1,6 +1,7 @@
 package com.springclaw.service.proposal;
 
 import com.springclaw.common.exception.BusinessException;
+import com.springclaw.tool.runtime.ToolExecutionContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -10,6 +11,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -69,6 +71,41 @@ class ToolInvocationProposalServiceConfirmTest {
                 ArgumentCaptor.forClass(ToolProposalExecutionRequestedEvent.class);
         verify(publisher, times(1)).publishEvent(ev.capture());
         assertThat(ev.getValue().proposalId()).isEqualTo(pid);
+    }
+
+    @Test
+    void createPendingCopiesCanonicalIdentityIntoProposalRow() {
+        String canonicalId = "55555555555555555555555555555555";
+        ToolInvocationSnapshot snapshot = new ToolInvocationSnapshot(
+                "WorkspaceEditToolPack.workspaceWriteFile",
+                "workspace",
+                "[\"docs/a.md\",\"content\"]",
+                "hash",
+                "write",
+                List.of("docs/a.md"),
+                "write docs/a.md",
+                false,
+                Set.of(),
+                "head"
+        );
+        ToolExecutionContext context = new ToolExecutionContext(
+                "session-A",
+                "api",
+                "u1",
+                canonicalId,
+                "ACT-1",
+                canonicalId,
+                "USER"
+        );
+        when(repository.insert(any(ToolInvocationProposal.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        ToolInvocationProposal proposal = service.createPending(snapshot, context);
+
+        assertThat(proposal.requestId()).isEqualTo(canonicalId);
+        assertThat(proposal.runId()).isEqualTo(canonicalId);
+        assertThat(proposal.sessionKey()).isEqualTo("session-A");
+        assertThat(proposal.userId()).isEqualTo("u1");
     }
 
     @Test
@@ -161,7 +198,11 @@ class ToolInvocationProposalServiceConfirmTest {
         ToolInvocationProposal result = service.reject(pid, "nope");
 
         assertThat(result.status()).isEqualTo(ToolInvocationProposalStatus.REJECTED);
-        verify(publisher, never()).publishEvent(any());
+        ArgumentCaptor<ToolProposalRejectedEvent> rejectedEvent =
+                ArgumentCaptor.forClass(ToolProposalRejectedEvent.class);
+        verify(publisher, times(1)).publishEvent(rejectedEvent.capture());
+        assertThat(rejectedEvent.getValue().proposalId()).isEqualTo(pid);
+        assertThat(rejectedEvent.getValue().reason()).isEqualTo("nope");
     }
 
     @Test

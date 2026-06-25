@@ -109,10 +109,16 @@ class ChatContextFactoryTest {
                 true
         );
 
-        ChatContext context = factory.build(new ChatRequest("s1", "u1", "北京呢", "api", "agent"), true);
+        String acceptedRunId = "0123456789abcdef0123456789abcdef";
+        ChatContext context = factory.build(
+                new ChatRequest("s1", "u1", "北京呢", "api", "agent"),
+                true,
+                acceptedRunId
+        );
 
         ArgumentCaptor<AgentDecisionRequest> decisionRequestCaptor = ArgumentCaptor.forClass(AgentDecisionRequest.class);
         verify(agentDecisionService).decide(decisionRequestCaptor.capture());
+        assertThat(context.requestId()).isEqualTo(acceptedRunId);
         assertThat(decisionRequestCaptor.getValue().question()).isEqualTo("北京呢");
         verify(contextAssembler).assemble("s1", "api", "u1", "北京呢");
         assertThat(context.userMessage()).isEqualTo("北京呢");

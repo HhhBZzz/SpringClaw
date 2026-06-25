@@ -128,7 +128,9 @@ public class OparLoopEngine implements AgentEngine {
                 assembled.channel(),
                 assembled.userId(),
                 requestId,
-                "LOCAL-SHORTCUT"
+                "LOCAL-SHORTCUT",
+                requestId,
+                null
         );
         try (ToolExecutionContextHolder.Scope localScope = ToolExecutionContextHolder.open(localShortcutCtx)) {
             LocalSkillFallbackService.LocalSkillResult decisionBoundResult = tryDecisionBoundLocalResult(assembled.question(), decision);
@@ -337,7 +339,9 @@ public class OparLoopEngine implements AgentEngine {
                 assembled.channel(),
                 assembled.userId(),
                 requestId,
-                "ACT-" + stepNo
+                "ACT-" + stepNo,
+                requestId,
+                null
         );
 
         try (ToolExecutionContextHolder.Scope ignored = ToolExecutionContextHolder.open(context)) {

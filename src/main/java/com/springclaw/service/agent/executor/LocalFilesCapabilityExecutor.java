@@ -37,7 +37,15 @@ public class LocalFilesCapabilityExecutor extends AbstractCapabilityExecutor imp
     @Override
     public List<CapabilityResult> execute(AgentDecision decision, AssembledContext assembled, String requestId) {
         List<CapabilityResult> results = new ArrayList<>();
-        ToolExecutionContext context = new ToolExecutionContext(assembled.sessionKey(), assembled.channel(), assembled.userId(), requestId, "AGENT-RUNTIME");
+        ToolExecutionContext context = new ToolExecutionContext(
+                assembled.sessionKey(),
+                assembled.channel(),
+                assembled.userId(),
+                requestId,
+                "AGENT-RUNTIME",
+                requestId,
+                null
+        );
         try (ToolExecutionContextHolder.Scope ignored = ToolExecutionContextHolder.open(context)) {
             results.add(run("local-files.roots", toolset(), "read", "列出授权本地目录", localFilesystemToolPack::listAuthorizedRoots));
             DirectoryTarget directoryTarget = detectDirectoryTarget(assembled.question());

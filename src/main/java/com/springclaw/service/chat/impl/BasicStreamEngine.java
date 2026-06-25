@@ -1,6 +1,7 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.common.util.TextUtils;
+import com.springclaw.runtime.bridge.LegacyLifecycleObserver;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
 import com.springclaw.service.ai.AiProviderService;
@@ -16,6 +17,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
 
+import java.time.Instant;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -38,6 +40,7 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
     private final SseEventBridge sseEventBridge;
     private final ChatResultPersister chatResultPersister;
     private final ChatGuardService chatGuardService;
+    private final LegacyLifecycleObserver lifecycleObserver;
     private final boolean basicStreamingEnabled;
 
     public BasicStreamEngine(ModelCallExecutor modelCallExecutor,
@@ -49,6 +52,7 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
                              SseEventBridge sseEventBridge,
                              ChatResultPersister chatResultPersister,
                              ChatGuardService chatGuardService,
+                             LegacyLifecycleObserver lifecycleObserver,
                              @Value("${springclaw.chat.basic-streaming-enabled:true}") boolean basicStreamingEnabled) {
         this.modelCallExecutor = modelCallExecutor;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
@@ -59,6 +63,7 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
         this.sseEventBridge = sseEventBridge;
         this.chatResultPersister = chatResultPersister;
         this.chatGuardService = chatGuardService;
+        this.lifecycleObserver = lifecycleObserver;
         this.basicStreamingEnabled = basicStreamingEnabled;
     }
 
@@ -151,13 +156,15 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
                                     emitter, lockToken, lockReleased);
                             return;
                         }
-                        chatResultPersister.persist(context, answer, new ChatExecutionResult(
+                        ChatExecutionResult basicResult = new ChatExecutionResult(
                                 context.assembled().observePrompt(),
                                 "BASIC_STREAM: 普通聊天最短路径。",
                                 "未挂载工具，未进入多步规划。",
                                 answer,
                                 true
-                        ));
+                        );
+                        chatResultPersister.persist(context, answer, basicResult, ChatPersistenceIntent.TERMINAL_RESULT);
+                        reportResult(context, basicResult, answer);
                         sseEventBridge.sendTrace(emitter, context, "调用模型", "model", "success",
                                 streamClient.displayName(), System.currentTimeMillis() - startedAt);
                         sseEventBridge.sendTrace(emitter, context, "完成", "final", "success",
@@ -277,16 +284,37 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
         String answer = partial + notice;
         sseEventBridge.sendStatus(emitter, "模型流式连接中断，已保留部分内容");
         sseEventBridge.sendToken(emitter, notice);
-        chatResultPersister.persist(context, answer, new ChatExecutionResult(
+        ChatExecutionResult partialResult = new ChatExecutionResult(
                 context.assembled().observePrompt(),
                 "STREAM_BASIC_INTERRUPTED: 模型流式输出中途断开。",
                 "已保留部分模型输出。reason=" + TextUtils.safe(
                         streamFailure == null ? "" : streamFailure.getMessage()),
                 answer,
                 false
-        ));
+        );
+        chatResultPersister.persist(context, answer, partialResult, ChatPersistenceIntent.TERMINAL_RESULT);
+        reportResult(context, partialResult, answer);
         releaseLock(emitter, context, lockToken, lockReleased);
         return true;
+    }
+
+    private void reportResult(
+            ChatContext context,
+            ChatExecutionResult result,
+            String answer
+    ) {
+        if (lifecycleObserver == null) {
+            return;
+        }
+        try {
+            lifecycleObserver.resultReturned(context, result, answer, Instant.now());
+        } catch (RuntimeException ex) {
+            log.error(
+                    "canonical lifecycle projection failed after basic stream persistence, requestId={}",
+                    context.requestId(),
+                    ex
+            );
+        }
     }
 
     private void releaseLock(SseEmitter emitter,

@@ -50,8 +50,15 @@ public class WebhookController {
             return quickResponse;
         }
 
-        webhookSecurityService.verify(channel, headers, rawBody);
-        return ApiResponse.success("Webhook 处理成功", webhookRouterService.dispatch(channel, payload));
+        boolean trustedIngress = webhookSecurityService.verify(
+                channel,
+                headers,
+                rawBody
+        );
+        WebhookDispatchResponse response = trustedIngress
+                ? webhookRouterService.dispatchTrusted(channel, payload)
+                : webhookRouterService.dispatch(channel, payload);
+        return ApiResponse.success("Webhook 处理成功", response);
     }
 
     private Object handleFeishuUrlVerification(String channel, Map<String, Object> payload) {

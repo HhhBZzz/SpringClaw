@@ -2,6 +2,7 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.dto.chat.ChatRequest;
+import com.springclaw.runtime.identity.DefaultRunIdentityFactory;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentRuntimeEngine;
 import com.springclaw.service.agent.EngineSelector;
@@ -85,7 +86,7 @@ class ChatServiceImplPersistenceTest {
 
         when(chatGuardService.acquireSessionLock("s1")).thenReturn("lock");
         when(aiProviderService.activeClient()).thenReturn(activeClient);
-        when(chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(chatContextFactory.build(any(ChatRequest.class), anyBoolean(), anyString())).thenReturn(context);
         when(engineSelector.select(any(ChatContext.class))).thenReturn(oparLoopEngine);
         when(oparLoopEngine.execute(any(), any()))
                 .thenReturn(new ChatExecutionResult(
@@ -115,13 +116,15 @@ class ChatServiceImplPersistenceTest {
                 null,
                 sseEventBridge,
                 null,
+                null,
+                new DefaultRunIdentityFactory(),
                 false,
                 true
         );
 
         service.chat(new ChatRequest("s1", "u1", "在么", "feishu"));
 
-        verify(chatResultPersister).persist(eq(context), eq("在。"), any(ChatExecutionResult.class));
+        verify(chatResultPersister).persist(eq(context), eq("在。"), any(ChatExecutionResult.class), eq(ChatPersistenceIntent.TERMINAL_RESULT));
     }
 
     @Test
@@ -184,7 +187,7 @@ class ChatServiceImplPersistenceTest {
 
         when(chatGuardService.acquireSessionLock("task:shadow:t1")).thenReturn("lock");
         when(aiProviderService.activeClient()).thenReturn(activeClient);
-        when(chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(chatContextFactory.build(any(ChatRequest.class), anyBoolean(), anyString())).thenReturn(context);
         when(engineSelector.select(any(ChatContext.class))).thenReturn(simplifiedOparEngine);
         when(simplifiedOparEngine.execute(any(), any()))
                 .thenReturn(new ChatExecutionResult(
@@ -214,6 +217,8 @@ class ChatServiceImplPersistenceTest {
                 null,
                 sseEventBridge,
                 null,
+                null,
+                new DefaultRunIdentityFactory(),
                 false,
                 true
         );
@@ -224,6 +229,6 @@ class ChatServiceImplPersistenceTest {
         );
 
         assertThat(result.answer()).isEqualTo("今天完成了 skill 重构");
-        verify(chatResultPersister, never()).persist(any(ChatContext.class), anyString(), any(ChatExecutionResult.class));
+        verify(chatResultPersister, never()).persist(any(ChatContext.class), anyString(), any(ChatExecutionResult.class), any(ChatPersistenceIntent.class));
     }
 }

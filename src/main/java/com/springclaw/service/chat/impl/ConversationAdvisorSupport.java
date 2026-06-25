@@ -50,9 +50,7 @@ public class ConversationAdvisorSupport {
                                                   String userId) {
         List<Advisor> advisors;
         if (contextSnapshotFactoryEnabled) {
-            advisors = springAiChatMemoryEnabled
-                    ? List.of(messageChatMemoryAdvisor)
-                    : List.of();
+            advisors = List.of();
         } else {
             advisors = springAiChatMemoryEnabled
                     ? List.of(messageChatMemoryAdvisor, semanticMemoryAdvisor)

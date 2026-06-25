@@ -1491,3 +1491,77 @@ Next dependency:
   - ask for review, merge if accepted, then decide between full SpringBoot HTTP
     integration smoke or permanent legacy retrieval removal/quarantine work.
 ```
+
+## Update: Phase 3C SpringBoot real-env canonical HTTP smoke
+
+```text
+Task: Phase 3C SpringBoot real-env canonical HTTP smoke
+Branch:
+  - codex/unified-runtime-phase-3c-springboot-smoke
+Design and plan:
+  - docs/superpowers/plans/2026-06-25-unified-runtime-phase-3c-springboot-real-env-smoke.md
+Modified paths:
+  - src/test/java/com/springclaw/controller/ChatControllerSpringBootCanonicalSmokeIT.java
+Runtime path proven:
+  - MockMvc POST /api/chat/send through the real SpringBoot web context
+  - real TokenAuthenticationInterceptor authenticates Bearer token into
+    RequestUserContextHolder
+  - real ChatController normalizes the authenticated request and accepts the run
+  - real ChatServiceImpl consumes AcceptedChatCommand with the same runId
+  - real ChatContextFactory uses the canonical ContextSnapshotFactory branch
+  - real ContextSnapshotFactory calls real MemoryCoordinator
+  - real MemoryCoordinator retrieves seeded Redis short-term memory, seeded
+    MySQL memory_record semantic/procedural memories, and docs/memory-bank
+    project memory
+  - real CanonicalContextReadyProjector advances the run to CONTEXT_READY
+  - real LegacyLifecycleObserver in canonical mode emits decision/running/terminal
+  - external model/auth/decision/engine dependencies are mocked
+Smoke event sequence:
+  - RUN_CREATED
+  - CONTEXT_READY
+  - DECISION_MADE
+  - STRATEGY_STARTED
+  - VERIFICATION_COMPLETED
+  - RUN_DEGRADED
+Verification (2026-06-25, Asia/Shanghai):
+  - RED 1:
+    mvn -Dtest=ChatControllerSpringBootCanonicalSmokeIT test
+    failed at test compile due to wrong ContextSnapshot accessor
+    sourceSummary() vs contextSourceSummary()
+  - RED 2:
+    same command failed Spring context startup because local MySQL requires
+    allowPublicKeyRetrieval=true
+  - RED 3:
+    same command with allowPublicKeyRetrieval=true failed because isolated
+    worktree did not load the main project .env.local, so default
+    MYSQL_PASSWORD=root was used
+  - GREEN:
+    set -a; . /Users/hanbingzheng/springclaw/.env.local; set +a;
+    mvn -Dtest=ChatControllerSpringBootCanonicalSmokeIT test
+    1 test, 0 failures, 0 errors, 0 skipped
+  - Phase 3B + Phase 3C smoke gate:
+    set -a; . /Users/hanbingzheng/springclaw/.env.local; set +a;
+    mvn -Dtest=ChatControllerCanonicalHttpSmokeTest,ChatControllerSpringBootCanonicalSmokeIT test
+    2 tests, 0 failures, 0 errors, 0 skipped
+  - Memory adapter gate:
+    set -a; . /Users/hanbingzheng/springclaw/.env.local; set +a;
+    mvn -Dtest=MemoryManagementServiceIT,MySqlMemoryStoresIT,RedisShortTermMemoryStoreTest test
+    27 tests, 0 failures, 0 errors, 0 skipped
+  - full suite:
+    set -a; . /Users/hanbingzheng/springclaw/.env.local; set +a;
+    MAVEN_OPTS='-Djdk.lang.Process.launchMechanism=FORK' mvn test
+    806 tests, 0 failures, 0 errors, 0 skipped
+Known limitations:
+  - smoke still mocks external model provider, auth token verification,
+    AgentDecisionService, and EngineSelector/AgentEngine execution
+  - smoke does not start an actual TCP web server; it uses MockMvc against the
+    real Spring web application context
+  - in this isolated worktree, MySQL verification requires loading the main
+    project /Users/hanbingzheng/springclaw/.env.local without printing secrets
+Rollback order:
+  - revert the Phase 3C smoke test commit
+Next dependency:
+  - ask for review, merge if accepted, then proceed to the next legacy
+    retrieval retirement/quarantine task only after this SpringBoot gate remains
+    green.
+```

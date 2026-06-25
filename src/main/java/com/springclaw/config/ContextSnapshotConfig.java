@@ -1,8 +1,11 @@
 package com.springclaw.config;
 
+import com.springclaw.runtime.bridge.CanonicalContextReadyProjector;
 import com.springclaw.runtime.bridge.LegacyContextViewAdapter;
 import com.springclaw.runtime.bridge.RunStateContextSnapshotRequestFactory;
 import com.springclaw.runtime.contract.ContextSnapshotFactory;
+import com.springclaw.runtime.lifecycle.RunCoordinator;
+import com.springclaw.runtime.lifecycle.RunStateRepository;
 import com.springclaw.service.memory.frame.MemoryCoordinator;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -39,5 +42,16 @@ public class ContextSnapshotConfig {
     @Bean
     public RunStateContextSnapshotRequestFactory runStateContextSnapshotRequestFactory() {
         return new RunStateContextSnapshotRequestFactory();
+    }
+
+    @Bean
+    public CanonicalContextReadyProjector canonicalContextReadyProjector(
+            RunCoordinator runCoordinator,
+            RunStateRepository runStateRepository
+    ) {
+        return new CanonicalContextReadyProjector(
+                runCoordinator,
+                runStateRepository
+        );
     }
 }

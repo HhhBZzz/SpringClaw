@@ -2,6 +2,7 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.dto.chat.ChatRequest;
+import com.springclaw.runtime.bridge.CanonicalContextReadyProjector;
 import com.springclaw.runtime.bridge.LegacyContextView;
 import com.springclaw.runtime.bridge.LegacyContextViewAdapter;
 import com.springclaw.runtime.bridge.RunStateContextSnapshotRequestFactory;
@@ -52,6 +53,7 @@ public class ChatContextFactory {
     private final ObjectProvider<LegacyContextViewAdapter> legacyContextViewAdapterProvider;
     private final ObjectProvider<RunStateRepository> runStateRepositoryProvider;
     private final ObjectProvider<RunStateContextSnapshotRequestFactory> runStateContextSnapshotRequestFactoryProvider;
+    private final ObjectProvider<CanonicalContextReadyProjector> canonicalContextReadyProjectorProvider;
     private final boolean contextSnapshotFactoryEnabled;
     private final String configuredAgentMode;
     private final boolean routingAutoUpgradeEnabled;
@@ -71,6 +73,7 @@ public class ChatContextFactory {
                               ObjectProvider<LegacyContextViewAdapter> legacyContextViewAdapterProvider,
                               ObjectProvider<RunStateRepository> runStateRepositoryProvider,
                               ObjectProvider<RunStateContextSnapshotRequestFactory> runStateContextSnapshotRequestFactoryProvider,
+                              ObjectProvider<CanonicalContextReadyProjector> canonicalContextReadyProjectorProvider,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.context.snapshot.factory-enabled:true}") boolean contextSnapshotFactoryEnabled,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.agent-mode:simplified}") String configuredAgentMode,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.routing.auto-upgrade-enabled:true}") boolean routingAutoUpgradeEnabled) {
@@ -88,6 +91,7 @@ public class ChatContextFactory {
         this.legacyContextViewAdapterProvider = legacyContextViewAdapterProvider;
         this.runStateRepositoryProvider = runStateRepositoryProvider;
         this.runStateContextSnapshotRequestFactoryProvider = runStateContextSnapshotRequestFactoryProvider;
+        this.canonicalContextReadyProjectorProvider = canonicalContextReadyProjectorProvider;
         this.contextSnapshotFactoryEnabled = contextSnapshotFactoryEnabled;
         this.configuredAgentMode = configuredAgentMode;
         this.routingAutoUpgradeEnabled = routingAutoUpgradeEnabled;
@@ -116,6 +120,7 @@ public class ChatContextFactory {
                 chatRoutingStateService,
                 chatRoutingPolicyService,
                 agentDecisionService,
+                emptyProvider(),
                 emptyProvider(),
                 emptyProvider(),
                 emptyProvider(),
@@ -187,10 +192,13 @@ public class ChatContextFactory {
                     runStateRepositoryProvider.getIfAvailable();
             RunStateContextSnapshotRequestFactory requestFactory =
                     runStateContextSnapshotRequestFactoryProvider.getIfAvailable();
+            CanonicalContextReadyProjector contextReadyProjector =
+                    canonicalContextReadyProjectorProvider.getIfAvailable();
             if (snapshotFactory == null
                     || viewAdapter == null
                     || runStateRepository == null
-                    || requestFactory == null) {
+                    || requestFactory == null
+                    || contextReadyProjector == null) {
                 throw new IllegalStateException(
                         "canonical ContextSnapshotFactory path is enabled but required beans are missing"
                 );
@@ -203,6 +211,11 @@ public class ChatContextFactory {
                     decision.selectedCapabilities(),
                     providerSnapshot(activeClient)
             ));
+            contextReadyProjector.project(
+                    requestId,
+                    snapshot,
+                    snapshot.capturedAt()
+            );
             LegacyContextView view = viewAdapter.adapt(snapshot);
             assembled = view.assembled();
             injection = view.injection();

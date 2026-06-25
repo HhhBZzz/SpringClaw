@@ -1305,3 +1305,72 @@ Next dependency:
     retrieval paths, and should make canonical RunCoordinator contextReady
     projection explicit for the default runtime path.
 ```
+
+## Update: Phase 3A4 explicit contextReady projection and retrieval quarantine
+
+```text
+Task: Phase 3A4 explicit contextReady projection and retrieval quarantine
+Owner split:
+  - Claude: Task 1-2 implementation
+  - Codex: review, Task 3-4 completion, Task 5 gates and ledger
+Design and plan:
+  - a2ce9eb docs: plan phase 3a4 context projection
+Implementation commits:
+  - 0075078 feat: project canonical context snapshots to run state
+  - 3e75b41 feat: project chat snapshots to context ready
+  - 95381a3 test: prove canonical retrieval boundaries
+Modified paths:
+  - src/main/java/com/springclaw/config/ContextSnapshotConfig.java
+  - src/main/java/com/springclaw/runtime/bridge/CanonicalContextReadyProjector.java
+  - src/main/java/com/springclaw/service/chat/impl/ChatContextFactory.java
+  - src/test/java/com/springclaw/runtime/bridge/CanonicalContextReadyProjectorTest.java
+  - src/test/java/com/springclaw/runtime/bridge/LegacyLifecycleObserverCanonicalModeTest.java
+  - src/test/java/com/springclaw/runtime/contract/ContextSnapshotFactorySpringWiringTest.java
+  - src/test/java/com/springclaw/service/chat/impl/ChatContextFactoryCanonicalLifecycleProjectionTest.java
+  - src/test/java/com/springclaw/service/chat/impl/ChatContextFactoryCanonicalOwnershipTest.java
+  - src/test/java/com/springclaw/service/chat/impl/ChatContextFactoryCanonicalSnapshotTest.java
+  - src/test/java/com/springclaw/architecture/CanonicalRetrievalBoundaryTest.java
+Default behavior:
+  - ContextSnapshotConfig wires CanonicalContextReadyProjector in canonical mode
+  - ChatContextFactory projects the canonical ContextSnapshot into RunState
+    CONTEXT_READY using snapshot.capturedAt()
+  - LegacyLifecycleObserver canonical mode then emits DECISION_MADE without a
+    duplicate legacy contextObserved event
+  - canonical mode tests prove ContextAssembler is not called
+Rollback behavior:
+  - set SPRINGCLAW_CONTEXT_SNAPSHOT_FACTORY_ENABLED=false to return
+    ChatContextFactory to ContextAssembler and legacy context observation
+  - set SPRINGCLAW_MEMORY_FRAME_ENABLED=false if MemoryCoordinator/frame
+    retrieval must also be disabled
+Verification (2026-06-25, Asia/Shanghai):
+  - focused Phase 3A4 suite:
+    19 tests, 0 failures, 0 errors, 0 skipped
+  - compatibility gates:
+    40 tests, 0 failures, 0 errors, 0 skipped
+  - full suite:
+    776 tests, 0 failures, 0 errors, 0 skipped
+  - compatibility and full gates loaded local
+    /Users/hanbingzheng/springclaw/.env.local without printing secrets
+  - final gates used MAVEN_OPTS=-Djdk.lang.Process.launchMechanism=FORK
+    because this local macOS/JDK environment otherwise intermittently fails
+    Java ProcessBuilder sh/python3 launches with "Failed to exec spawn helper"
+  - final gates overrode spring.datasource.url with allowPublicKeyRetrieval=true
+    because the local MySQL account uses caching_sha2_password and rejected
+    public key retrieval with the default application.yml URL
+  - Redis dependency was satisfied by the existing Docker container
+    openclaw-redis on 127.0.0.1:6379
+Known limitations:
+  - ContextAssembler and SemanticMemoryAdvisor remain present for rollback
+  - legacy code is quarantined by tests, not deleted
+  - production smoke validation with a real accepted run remains required before
+    deleting old retrieval code
+Rollback order:
+  - set SPRINGCLAW_CONTEXT_SNAPSHOT_FACTORY_ENABLED=false
+  - revert 95381a3 to remove the added boundary tests
+  - revert 3e75b41 to stop projecting snapshots from ChatContextFactory
+  - revert 0075078 to remove CanonicalContextReadyProjector and wiring
+Next dependency:
+  - run a production-like smoke test with a real accepted run, then decide
+    whether to delete or permanently quarantine ContextAssembler and
+    SemanticMemoryAdvisor legacy retrieval paths.
+```

@@ -2,11 +2,18 @@ package com.springclaw.runtime.contract;
 
 import com.springclaw.config.ContextSnapshotConfig;
 import com.springclaw.config.MemoryFrameConfig;
+import com.springclaw.runtime.bridge.CanonicalContextReadyProjector;
 import com.springclaw.runtime.bridge.LegacyContextViewAdapter;
 import com.springclaw.runtime.bridge.RunStateContextSnapshotRequestFactory;
+import com.springclaw.runtime.lifecycle.InMemoryRunLifecycleStore;
+import com.springclaw.runtime.lifecycle.RunCoordinator;
+import com.springclaw.runtime.lifecycle.RunLifecycleStore;
+import com.springclaw.runtime.lifecycle.RunStateRepository;
 import com.springclaw.runtime.memory.port.MemoryRecordStore;
 import com.springclaw.runtime.memory.port.ProjectMemorySource;
+import com.springclaw.runtime.memory.port.ShortTermMemoryStore;
 import com.springclaw.runtime.memory.store.InMemoryMemoryRecordStore;
+import com.springclaw.runtime.memory.store.InMemoryShortTermMemoryStore;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
@@ -30,7 +37,8 @@ class ContextSnapshotFactorySpringWiringTest {
                 .run(context -> assertThat(context)
                         .hasSingleBean(ContextSnapshotFactory.class)
                         .hasSingleBean(LegacyContextViewAdapter.class)
-                        .hasSingleBean(RunStateContextSnapshotRequestFactory.class));
+                        .hasSingleBean(RunStateContextSnapshotRequestFactory.class)
+                        .hasSingleBean(CanonicalContextReadyProjector.class));
     }
 
     @Test
@@ -48,7 +56,8 @@ class ContextSnapshotFactorySpringWiringTest {
                 .run(context -> assertThat(context)
                         .doesNotHaveBean(ContextSnapshotFactory.class)
                         .doesNotHaveBean(LegacyContextViewAdapter.class)
-                        .doesNotHaveBean(RunStateContextSnapshotRequestFactory.class));
+                        .doesNotHaveBean(RunStateContextSnapshotRequestFactory.class)
+                        .doesNotHaveBean(CanonicalContextReadyProjector.class));
     }
 
     @Test
@@ -71,6 +80,11 @@ class ContextSnapshotFactorySpringWiringTest {
         }
 
         @Bean
+        ShortTermMemoryStore shortTermMemoryStore() {
+            return new InMemoryShortTermMemoryStore();
+        }
+
+        @Bean
         ProjectMemorySource projectMemorySource() {
             return ignored -> java.util.List.of();
         }
@@ -78,6 +92,21 @@ class ContextSnapshotFactorySpringWiringTest {
         @Bean
         Clock clock() {
             return Clock.systemUTC();
+        }
+
+        @Bean
+        RunLifecycleStore runLifecycleStore() {
+            return new InMemoryRunLifecycleStore();
+        }
+
+        @Bean
+        RunCoordinator runCoordinator(RunLifecycleStore store) {
+            return new RunCoordinator(store);
+        }
+
+        @Bean
+        RunStateRepository runStateRepository(RunLifecycleStore store) {
+            return store;
         }
     }
 }

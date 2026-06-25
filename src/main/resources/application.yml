@@ -241,6 +241,10 @@ springclaw:
     rate-limit:
       max-requests: 20
       window-seconds: 60
+  runtime:
+    lifecycle:
+      store: ${SPRINGCLAW_RUNTIME_LIFECYCLE_STORE:memory}
+      schema-auto-init: ${SPRINGCLAW_RUNTIME_LIFECYCLE_SCHEMA_AUTO_INIT:true}
   context:
     snapshot:
       factory-enabled: ${SPRINGCLAW_CONTEXT_SNAPSHOT_FACTORY_ENABLED:true}

@@ -119,7 +119,9 @@ public class SimplifiedOparEngine implements AgentEngine {
                 assembled.channel(),
                 assembled.userId(),
                 requestId,
-                "LOCAL-SHORTCUT"
+                "LOCAL-SHORTCUT",
+                requestId,
+                null
         );
         try (ToolExecutionContextHolder.Scope ignored = ToolExecutionContextHolder.open(localCtx)) {
             LocalSkillFallbackService.LocalSkillResult contextAware = contextAwareSupport.tryContextAwareLocalResult(assembled);
@@ -148,7 +150,9 @@ public class SimplifiedOparEngine implements AgentEngine {
                 assembled.channel(),
                 assembled.userId(),
                 requestId,
-                "ACT-SIMPLIFIED"
+                "ACT-SIMPLIFIED",
+                requestId,
+                null
         );
         try (ToolExecutionContextHolder.Scope ignored = ToolExecutionContextHolder.open(toolContext)) {
             ModelCallExecutor.ModelCallResult<String> result = modelCallExecutor.executeChat(

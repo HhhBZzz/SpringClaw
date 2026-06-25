@@ -6,11 +6,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.Locale;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -22,29 +20,28 @@ import java.util.regex.Pattern;
 @Service
 public class MemoryBankService {
 
-    private static final String AGENT_LEARNINGS_FILE = "agent-learnings.md";
     private static final Pattern AGENT_LEARNING_STATUS =
             Pattern.compile("(?im)^-\\s*status:\\s*(\\S+)\\s*$");
-
-    private static final List<String> ORDERED_FILES = List.of(
-            "project-brief.md",
-            "current-state.md",
-            "architecture-decisions.md",
-            "agent-learnings.md",
-            "progress.md",
-            "user-preferences.md"
-    );
 
     private final boolean enabled;
     private final Path rootPath;
     private final int maxChars;
+    private final MarkdownProjectMemorySource projectMemorySource;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public MemoryBankService(@Value("${springclaw.memory.bank-enabled:true}") boolean enabled,
                              @Value("${springclaw.memory.bank-root:${user.dir}/docs/memory-bank}") String root,
                              @Value("${springclaw.memory.bank-max-chars:2400}") int maxChars) {
+        this(enabled, root, maxChars, new MarkdownProjectMemorySource(root));
+    }
+
+    /** 测试/显式注入构造器：复用同一 rootPath 的 typed source。 */
+    public MemoryBankService(boolean enabled, String root, int maxChars,
+                             MarkdownProjectMemorySource projectMemorySource) {
         this.enabled = enabled;
         this.rootPath = Path.of(root).toAbsolutePath().normalize();
         this.maxChars = Math.max(400, maxChars);
+        this.projectMemorySource = projectMemorySource;
     }
 
     public String renderContext() {
@@ -55,11 +52,13 @@ public class MemoryBankService {
         if (!enabled || !Files.isDirectory(rootPath)) {
             return MemoryBankSnapshot.empty();
         }
+        List<com.springclaw.runtime.memory.contract.ProjectMemoryItem> items =
+                projectMemorySource.read(null);
         StringBuilder builder = new StringBuilder();
         int activeLearningCount = 0;
         int filteredLearningCount = 0;
-        for (Path file : orderedMarkdownFiles()) {
-            MemoryText memoryText = appendFile(builder, file);
+        for (com.springclaw.runtime.memory.contract.ProjectMemoryItem item : items) {
+            MemoryText memoryText = appendItem(builder, item);
             activeLearningCount += memoryText.activeLearningCount();
             filteredLearningCount += memoryText.filteredLearningCount();
             if (builder.length() >= maxChars) {
@@ -73,52 +72,30 @@ public class MemoryBankService {
         );
     }
 
-    private List<Path> orderedMarkdownFiles() {
-        try {
-            return Files.list(rootPath)
-                    .filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().endsWith(".md"))
-                    .sorted(Comparator.comparingInt(this::fileOrder)
-                            .thenComparing(path -> path.getFileName().toString()))
-                    .toList();
-        } catch (IOException ex) {
-            return List.of();
+    private MemoryText appendItem(StringBuilder builder,
+                                  com.springclaw.runtime.memory.contract.ProjectMemoryItem item) {
+        String text;
+        int activeCount = 0;
+        int filteredCount = 0;
+        if (item.sourceType() == com.springclaw.runtime.memory.contract.ProjectMemoryItem.SourceType.APPROVED_LEARNING) {
+            LearningFilterResult result = filterAgentLearnings(item.content());
+            text = result.text();
+            activeCount = result.activeCount();
+            filteredCount = result.filteredCount();
+        } else {
+            text = item.content();
         }
-    }
-
-    private int fileOrder(Path path) {
-        String name = path.getFileName().toString();
-        int index = ORDERED_FILES.indexOf(name);
-        return index < 0 ? ORDERED_FILES.size() : index;
-    }
-
-    private MemoryText appendFile(StringBuilder builder, Path file) {
-        try {
-            MemoryText memoryText = readMemoryText(file);
-            String text = TextUtils.normalizeWS(memoryText.text());
-            if (!StringUtils.hasText(text)) {
-                return memoryText;
-            }
-            String name = file.getFileName().toString().replaceFirst("\\.md$", "");
-            if (!builder.isEmpty()) {
-                builder.append("\n");
-            }
-            builder.append("### ").append(name).append("\n");
-            builder.append(text).append("\n");
-            return memoryText;
-        } catch (IOException ignored) {
-            // 单个记忆文件读取失败时跳过，避免影响主链路。
-            return MemoryText.empty();
+        String normalized = TextUtils.normalizeWS(text);
+        if (!StringUtils.hasText(normalized)) {
+            return new MemoryText(text, activeCount, filteredCount);
         }
-    }
-
-    private MemoryText readMemoryText(Path file) throws IOException {
-        String text = Files.readString(file, StandardCharsets.UTF_8);
-        if (AGENT_LEARNINGS_FILE.equals(file.getFileName().toString())) {
-            LearningFilterResult result = filterAgentLearnings(text);
-            return new MemoryText(result.text(), result.activeCount(), result.filteredCount());
+        String name = item.sourcePath().replaceFirst("\\.md$", "");
+        if (!builder.isEmpty()) {
+            builder.append("\n");
         }
-        return new MemoryText(text, 0, 0);
+        builder.append("### ").append(name).append("\n");
+        builder.append(normalized).append("\n");
+        return new MemoryText(text, activeCount, filteredCount);
     }
 
     private LearningFilterResult filterAgentLearnings(String text) {

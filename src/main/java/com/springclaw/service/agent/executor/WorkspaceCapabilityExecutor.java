@@ -38,7 +38,15 @@ public class WorkspaceCapabilityExecutor extends AbstractCapabilityExecutor impl
     @Override
     public List<CapabilityResult> execute(AgentDecision decision, AssembledContext assembled, String requestId) {
         List<CapabilityResult> results = new ArrayList<>();
-        ToolExecutionContext context = new ToolExecutionContext(assembled.sessionKey(), assembled.channel(), assembled.userId(), requestId, "AGENT-RUNTIME");
+        ToolExecutionContext context = new ToolExecutionContext(
+                assembled.sessionKey(),
+                assembled.channel(),
+                assembled.userId(),
+                requestId,
+                "AGENT-RUNTIME",
+                requestId,
+                null
+        );
         try (ToolExecutionContextHolder.Scope ignored = ToolExecutionContextHolder.open(context)) {
             results.add(run("workspace-review", toolset(), "read", "审查当前工作区", () -> workspaceReviewToolPack.reviewWorkspace(assembled.question())));
             results.add(run("workspace-search", toolset(), "read", "定位相关源码与配置", () -> workspaceSearchToolPack.analyzeWorkspaceTask(assembled.question())));

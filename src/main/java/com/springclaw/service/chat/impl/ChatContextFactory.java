@@ -2,6 +2,13 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.dto.chat.ChatRequest;
+import com.springclaw.runtime.bridge.LegacyContextView;
+import com.springclaw.runtime.bridge.LegacyContextViewAdapter;
+import com.springclaw.runtime.bridge.RunStateContextSnapshotRequestFactory;
+import com.springclaw.runtime.contract.ContextSnapshot;
+import com.springclaw.runtime.contract.ContextSnapshotFactory;
+import com.springclaw.runtime.contract.RunState;
+import com.springclaw.runtime.lifecycle.RunStateRepository;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentDecisionRequest;
@@ -16,12 +23,14 @@ import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.SkillService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
+import java.util.stream.Stream;
 
 /**
  * 聊天上下文工厂，负责构建 ChatContext。
@@ -39,6 +48,11 @@ public class ChatContextFactory {
     private final ChatRoutingStateService chatRoutingStateService;
     private final ChatRoutingPolicyService chatRoutingPolicyService;
     private final AgentDecisionService agentDecisionService;
+    private final ObjectProvider<ContextSnapshotFactory> contextSnapshotFactoryProvider;
+    private final ObjectProvider<LegacyContextViewAdapter> legacyContextViewAdapterProvider;
+    private final ObjectProvider<RunStateRepository> runStateRepositoryProvider;
+    private final ObjectProvider<RunStateContextSnapshotRequestFactory> runStateContextSnapshotRequestFactoryProvider;
+    private final boolean contextSnapshotFactoryEnabled;
     private final String configuredAgentMode;
     private final boolean routingAutoUpgradeEnabled;
 
@@ -53,6 +67,11 @@ public class ChatContextFactory {
                               ChatRoutingStateService chatRoutingStateService,
                               ChatRoutingPolicyService chatRoutingPolicyService,
                               AgentDecisionService agentDecisionService,
+                              ObjectProvider<ContextSnapshotFactory> contextSnapshotFactoryProvider,
+                              ObjectProvider<LegacyContextViewAdapter> legacyContextViewAdapterProvider,
+                              ObjectProvider<RunStateRepository> runStateRepositoryProvider,
+                              ObjectProvider<RunStateContextSnapshotRequestFactory> runStateContextSnapshotRequestFactoryProvider,
+                              @org.springframework.beans.factory.annotation.Value("${springclaw.context.snapshot.factory-enabled:true}") boolean contextSnapshotFactoryEnabled,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.agent-mode:simplified}") String configuredAgentMode,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.routing.auto-upgrade-enabled:true}") boolean routingAutoUpgradeEnabled) {
         this.aiProviderService = aiProviderService;
@@ -65,16 +84,59 @@ public class ChatContextFactory {
         this.chatRoutingStateService = chatRoutingStateService;
         this.chatRoutingPolicyService = chatRoutingPolicyService;
         this.agentDecisionService = agentDecisionService;
+        this.contextSnapshotFactoryProvider = contextSnapshotFactoryProvider;
+        this.legacyContextViewAdapterProvider = legacyContextViewAdapterProvider;
+        this.runStateRepositoryProvider = runStateRepositoryProvider;
+        this.runStateContextSnapshotRequestFactoryProvider = runStateContextSnapshotRequestFactoryProvider;
+        this.contextSnapshotFactoryEnabled = contextSnapshotFactoryEnabled;
         this.configuredAgentMode = configuredAgentMode;
         this.routingAutoUpgradeEnabled = routingAutoUpgradeEnabled;
     }
 
-    public ChatContext build(ChatRequest request, boolean persistSession) {
+    public ChatContextFactory(AiProviderService aiProviderService,
+                              SoulPromptService soulPromptService,
+                              AgentSessionService agentSessionService,
+                              AuthService authService,
+                              SkillService skillService,
+                              SkillRegistryService skillRegistryService,
+                              ContextAssembler contextAssembler,
+                              ChatRoutingStateService chatRoutingStateService,
+                              ChatRoutingPolicyService chatRoutingPolicyService,
+                              AgentDecisionService agentDecisionService,
+                              @org.springframework.beans.factory.annotation.Value("${springclaw.chat.agent-mode:simplified}") String configuredAgentMode,
+                              @org.springframework.beans.factory.annotation.Value("${springclaw.chat.routing.auto-upgrade-enabled:true}") boolean routingAutoUpgradeEnabled) {
+        this(
+                aiProviderService,
+                soulPromptService,
+                agentSessionService,
+                authService,
+                skillService,
+                skillRegistryService,
+                contextAssembler,
+                chatRoutingStateService,
+                chatRoutingPolicyService,
+                agentDecisionService,
+                emptyProvider(),
+                emptyProvider(),
+                emptyProvider(),
+                emptyProvider(),
+                false,
+                configuredAgentMode,
+                routingAutoUpgradeEnabled
+        );
+    }
+
+    public ChatContext build(ChatRequest request,
+                             boolean persistSession,
+                             String acceptedRunId) {
+        if (!StringUtils.hasText(acceptedRunId)) {
+            throw new IllegalArgumentException("acceptedRunId must not be blank");
+        }
         String channel = StringUtils.hasText(request.channel()) ? request.channel() : "api";
         AgentSession session = persistSession
                 ? agentSessionService.getOrCreate(request.sessionKey(), channel, request.userId())
                 : buildEphemeralSession(request.sessionKey(), channel, request.userId());
-        String requestId = UUID.randomUUID().toString().replace("-", "");
+        String requestId = acceptedRunId;
         String roleCode = authService.resolveRoleByUserId(request.userId());
         var allowedToolPacks = skillService.resolveAllowedToolPacks(channel, request.userId());
         String routingQuestion = resolveRoutingQuestion(session.getSessionKey(), channel, request.userId(), requestId, request.message(), request.responseMode());
@@ -113,24 +175,56 @@ public class ChatContextFactory {
                 2
         );
         String systemPrompt = soulPromptService.buildSystemPrompt(channel, request.userId(), matchedSkills);
-        AssembledContext assembled = contextAssembler.assemble(
-                session.getSessionKey(),
-                channel,
-                request.userId(),
-                routingDecision.effectiveQuestion()
-        );
         AiProviderService.ActiveChatClient activeClient = aiProviderService.activeClient();
-        ContextInjection injection = new ContextInjection(
-                assembled == null ? "" : assembled.observePrompt(),
-                "",
-                "",
-                Map.of(
-                        "contextSummary",
-                        assembled == null
-                                ? AssembledContext.ContextSourceSummary.empty()
-                                : assembled.sourceSummary()
-                )
-        );
+        AssembledContext assembled;
+        ContextInjection injection;
+        if (contextSnapshotFactoryEnabled) {
+            ContextSnapshotFactory snapshotFactory =
+                    contextSnapshotFactoryProvider.getIfAvailable();
+            LegacyContextViewAdapter viewAdapter =
+                    legacyContextViewAdapterProvider.getIfAvailable();
+            RunStateRepository runStateRepository =
+                    runStateRepositoryProvider.getIfAvailable();
+            RunStateContextSnapshotRequestFactory requestFactory =
+                    runStateContextSnapshotRequestFactoryProvider.getIfAvailable();
+            if (snapshotFactory == null
+                    || viewAdapter == null
+                    || runStateRepository == null
+                    || requestFactory == null) {
+                throw new IllegalStateException(
+                        "canonical ContextSnapshotFactory path is enabled but required beans are missing"
+                );
+            }
+            RunState runState = runStateRepository.requireByRunId(requestId);
+            ContextSnapshot snapshot = snapshotFactory.create(requestFactory.create(
+                    runState,
+                    routingDecision.effectiveQuestion(),
+                    systemPrompt,
+                    decision.selectedCapabilities(),
+                    providerSnapshot(activeClient)
+            ));
+            LegacyContextView view = viewAdapter.adapt(snapshot);
+            assembled = view.assembled();
+            injection = view.injection();
+        } else {
+            assembled = contextAssembler.assemble(
+                    session.getSessionKey(),
+                    channel,
+                    request.userId(),
+                    routingDecision.effectiveQuestion()
+            );
+            injection = new ContextInjection(
+                    assembled == null ? "" : assembled.observePrompt(),
+                    "",
+                    "",
+                    Map.of(
+                            "contextSummary",
+                            assembled == null
+                                    ? AssembledContext.ContextSourceSummary.empty()
+                                    : assembled.sourceSummary()
+                    )
+            );
+        }
         return new ChatContext(
                 session,
                 channel,
@@ -168,5 +262,57 @@ public class ChatContextFactory {
                                           String message,
                                           String responseMode) {
         return message == null ? "" : message.trim();
+    }
+
+    private static Map<String, String> providerSnapshot(
+            AiProviderService.ActiveChatClient activeClient
+    ) {
+        if (activeClient == null) {
+            return Map.of();
+        }
+        return Map.of(
+                "providerId", safe(activeClient.providerId()),
+                "model", safe(activeClient.model()),
+                "baseUrl", safe(activeClient.baseUrl()),
+                "available", Boolean.toString(activeClient.available())
+        );
+    }
+
+    private static String safe(String value) {
+        return value == null ? "" : value;
+    }
+
+    private static <T> ObjectProvider<T> emptyProvider() {
+        return new ObjectProvider<>() {
+            @Override
+            public T getObject(Object... args) {
+                throw new IllegalStateException("No bean available");
+            }
+
+            @Override
+            public T getIfAvailable() {
+                return null;
+            }
+
+            @Override
+            public T getIfUnique() {
+                return null;
+            }
+
+            @Override
+            public T getObject() {
+                throw new IllegalStateException("No bean available");
+            }
+
+            @Override
+            public Iterator<T> iterator() {
+                return List.<T>of().iterator();
+            }
+
+            @Override
+            public Stream<T> stream() {
+                return Stream.empty();
+            }
+        };
     }
 }

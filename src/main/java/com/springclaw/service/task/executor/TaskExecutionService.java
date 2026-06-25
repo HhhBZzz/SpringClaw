@@ -8,6 +8,10 @@ import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.domain.entity.ScheduledTask;
 import com.springclaw.domain.entity.ScheduledTaskExecution;
 import com.springclaw.dto.chat.ChatRequest;
+import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
+import com.springclaw.runtime.contract.SessionAccessClaim;
+import com.springclaw.runtime.lifecycle.RunAcceptance;
+import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.chat.impl.ChatServiceImpl;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.memory.MemoryService;
@@ -27,6 +31,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -41,6 +47,8 @@ public class TaskExecutionService {
 
     private static final Logger log = LoggerFactory.getLogger(TaskExecutionService.class);
 
+    private static final Duration RUN_DEADLINE = Duration.ofMinutes(30);
+
     private final ScheduledTaskService scheduledTaskService;
     private final ScheduledTaskExecutionService scheduledTaskExecutionService;
     private final TaskScheduleSupport taskScheduleSupport;
@@ -52,6 +60,8 @@ public class TaskExecutionService {
     private final MessageEventService messageEventService;
     private final SoulPromptService soulPromptService;
     private final ChannelOutboundDispatcher channelOutboundDispatcher;
+    private final AuthService authService;
+    private final LegacyRuntimeBridge runtimeBridge;
     private final ObjectMapper objectMapper;
     private final boolean feishuDeliveryEnabled;
 
@@ -66,6 +76,8 @@ public class TaskExecutionService {
                                 MessageEventService messageEventService,
                                 SoulPromptService soulPromptService,
                                 ChannelOutboundDispatcher channelOutboundDispatcher,
+                                AuthService authService,
+                                LegacyRuntimeBridge runtimeBridge,
                                 ObjectMapper objectMapper,
                                 @Value("${springclaw.task.delivery.feishu-enabled:true}") boolean feishuDeliveryEnabled) {
         this.scheduledTaskService = scheduledTaskService;
@@ -79,25 +91,62 @@ public class TaskExecutionService {
         this.messageEventService = messageEventService;
         this.soulPromptService = soulPromptService;
         this.channelOutboundDispatcher = channelOutboundDispatcher;
+        this.authService = authService;
+        this.runtimeBridge = runtimeBridge;
         this.objectMapper = objectMapper;
         this.feishuDeliveryEnabled = feishuDeliveryEnabled;
     }
 
     public TaskExecutionOutcome runTask(ScheduledTask task, String triggerSource) {
         LocalDateTime startedAt = LocalDateTime.now();
-        if (!"CRON".equalsIgnoreCase(TextUtils.safe(triggerSource))) {
-            scheduledTaskService.markRunning(task, startedAt, task.getNextRunAt());
-        }
         String requestId = UUID.randomUUID().toString().replace("-", "");
-        ScheduledTaskExecution execution = scheduledTaskExecutionService.start(task.getTaskId(), triggerSource, requestId);
+        String sessionKey = resolveTaskSessionKey(task);
+        String channel = TextUtils.safe(task.getChannel(), "api");
+        ScheduledTaskExecution execution = null;
         try {
+            if (!"CRON".equalsIgnoreCase(TextUtils.safe(triggerSource))) {
+                scheduledTaskService.markRunning(task, startedAt, task.getNextRunAt());
+            }
+            String originalMessage = renderTaskPrompt(task);
+            String responseMode = "agent".equalsIgnoreCase(task.getTargetType())
+                    ? "agent"
+                    : "skill";
+            Instant acceptedAt = Instant.now();
+            runtimeBridge.accepted(new RunAcceptance(
+                    requestId,
+                    sessionKey,
+                    channel,
+                    task.getOwnerUserId(),
+                    SessionAccessClaim.personal(
+                            SessionAccessClaim.AcceptanceOrigin.SCHEDULED_TASK,
+                            channel,
+                            sessionKey,
+                            task.getOwnerUserId()
+                    ),
+                    authService.resolveRoleByUserId(task.getOwnerUserId()),
+                    originalMessage,
+                    responseMode,
+                    acceptedAt,
+                    acceptedAt.plus(RUN_DEADLINE)
+            ));
+            execution = scheduledTaskExecutionService.start(
+                    task.getTaskId(),
+                    triggerSource,
+                    requestId
+            );
             TaskExecutionOutcome outcome = switch (TextUtils.normalize(task.getTargetType())) {
                 case "skill" -> executeSkillTask(task, requestId);
-                case "agent" -> executeAgentTask(task);
+                case "agent" -> executeAgentTask(task, requestId, originalMessage);
                 default -> throw new BusinessException(40079, "不支持的任务目标类型: " + task.getTargetType());
             };
             if (shouldPersistToSession(task) && !"agent".equalsIgnoreCase(task.getTargetType())) {
-                persistTaskTurn(task, outcome.requestId(), outcome.sessionKey(), renderTaskPrompt(task), outcome.resultPayload());
+                persistTaskTurn(
+                        task,
+                        outcome.requestId(),
+                        outcome.sessionKey(),
+                        originalMessage,
+                        outcome.resultPayload()
+                );
             }
             deliverIfNeeded(task, outcome.resultPayload());
             scheduledTaskExecutionService.complete(
@@ -113,17 +162,21 @@ public class TaskExecutionService {
             scheduledTaskService.markFinished(task, "SUCCESS", LocalDateTime.now());
             return outcome;
         } catch (Exception ex) {
-            String error = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
-            scheduledTaskExecutionService.complete(
-                    execution.getExecutionId(),
-                    "FAILED",
-                    TextUtils.truncate(error, 300),
-                    "",
-                    TextUtils.truncate(error, 1000),
-                    requestId,
-                    resolveTaskSessionKey(task),
-                    LocalDateTime.now()
-            );
+            String error = ex.getMessage() == null
+                    ? ex.getClass().getSimpleName()
+                    : ex.getMessage();
+            if (execution != null) {
+                scheduledTaskExecutionService.complete(
+                        execution.getExecutionId(),
+                        "FAILED",
+                        TextUtils.truncate(error, 300),
+                        "",
+                        TextUtils.truncate(error, 1000),
+                        requestId,
+                        sessionKey,
+                        LocalDateTime.now()
+                );
+            }
             scheduledTaskService.markFinished(task, "FAILED", LocalDateTime.now());
             throw ex;
         }
@@ -153,13 +206,29 @@ public class TaskExecutionService {
         return new TaskExecutionOutcome(buildSummary(task, answer), answer, requestId, resolveTaskSessionKey(task));
     }
 
-    private TaskExecutionOutcome executeAgentTask(ScheduledTask task) {
-        String prompt = resolveAgentPrompt(task.getInputPayload());
-        ChatServiceImpl.TaskChatExecutionResult result = chatService.executeTaskMessage(
-                new ChatRequest(resolveTaskSessionKey(task), task.getOwnerUserId(), prompt, task.getChannel()),
-                shouldPersistToSession(task)
+    private TaskExecutionOutcome executeAgentTask(
+            ScheduledTask task,
+            String runId,
+            String prompt
+    ) {
+        ChatServiceImpl.TaskChatExecutionResult result =
+                chatService.executeTaskMessage(
+                        new ChatRequest(
+                                resolveTaskSessionKey(task),
+                                task.getOwnerUserId(),
+                                prompt,
+                                TextUtils.safe(task.getChannel(), "api"),
+                                "agent"
+                        ),
+                        shouldPersistToSession(task),
+                        runId
+                );
+        return new TaskExecutionOutcome(
+                buildSummary(task, result.answer()),
+                result.answer(),
+                result.requestId(),
+                result.sessionKey()
         );
-        return new TaskExecutionOutcome(buildSummary(task, result.answer()), result.answer(), result.requestId(), result.sessionKey());
     }
 
     private void persistTaskTurn(ScheduledTask task, String requestId, String sessionKey, String userMessage, String assistantMessage) {

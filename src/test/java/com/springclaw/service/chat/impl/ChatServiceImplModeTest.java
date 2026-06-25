@@ -3,6 +3,7 @@ package com.springclaw.service.chat.impl;
 import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
+import com.springclaw.runtime.identity.RunIdentityFactory;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentActionProposal;
 import com.springclaw.service.agent.AgentActionProposalService;
@@ -13,6 +14,7 @@ import com.springclaw.service.agent.AgentRuntimeEngine;
 import com.springclaw.service.agent.CapabilityPlan;
 import com.springclaw.service.agent.EngineSelector;
 import com.springclaw.service.agent.VerificationResult;
+import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
 import com.springclaw.service.usage.LlmUsageRecordService;
@@ -43,7 +45,7 @@ class ChatServiceImplModeTest {
         Fixture fixture = new Fixture();
         fixture.useEngine(fixture.simplifiedOparEngine);
         ChatContext context = fixture.buildChatContext("你好", "simplified", "默认");
-        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean(), anyString())).thenReturn(context);
         when(fixture.simplifiedOparEngine.execute(any(), any()))
                 .thenReturn(new ChatExecutionResult("observe", "SIMPLIFIED", "ACTION", "answer", true));
 
@@ -59,7 +61,7 @@ class ChatServiceImplModeTest {
         Fixture fixture = new Fixture();
         fixture.useEngine(fixture.oparLoopEngine);
         ChatContext context = fixture.buildChatContext("你好", "opar", "默认");
-        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean(), anyString())).thenReturn(context);
         when(fixture.oparLoopEngine.execute(any(), any()))
                 .thenReturn(new ChatExecutionResult("observe", "PLAN", "ACTION", "answer", true));
 
@@ -75,7 +77,7 @@ class ChatServiceImplModeTest {
         Fixture fixture = new Fixture();
         fixture.useEngine(fixture.oparLoopEngine);
         ChatContext context = fixture.buildChatContext("分析这个启动报错并给修复方案", "opar", "自动升级");
-        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean(), anyString())).thenReturn(context);
         when(fixture.oparLoopEngine.execute(any(), any()))
                 .thenReturn(new ChatExecutionResult("observe", "PLAN", "ACTION", "answer", true));
 
@@ -91,7 +93,7 @@ class ChatServiceImplModeTest {
         Fixture fixture = new Fixture();
         fixture.useEngine(fixture.simplifiedOparEngine);
         ChatContext context = fixture.buildChatContext("你好", "simplified", "默认");
-        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean(), anyString())).thenReturn(context);
         when(fixture.simplifiedOparEngine.execute(any(), any()))
                 .thenAnswer(invocation -> {
                     Thread.sleep(350);
@@ -127,7 +129,7 @@ class ChatServiceImplModeTest {
                 "workspace_analysis",
                 decision
         );
-        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean(), anyString())).thenReturn(context);
         when(fixture.oparLoopEngine.execute(any(), any())).thenReturn(new ChatExecutionResult(
                 "observe",
                 "命中已决策能力的本地执行路线。\n执行路线: BUILTIN_SKILL:CODE_ANALYSIS",
@@ -255,7 +257,7 @@ class ChatServiceImplModeTest {
                 "PENDING"
         );
         fixture.useEngine(streamable);
-        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean(), anyString())).thenReturn(context);
         when(fixture.actionProposalService.createProposal(
                 eq("s1"),
                 eq("api"),
@@ -286,7 +288,7 @@ class ChatServiceImplModeTest {
                 "workspace_analysis",
                 decision
         );
-        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean())).thenReturn(context);
+        when(fixture.chatContextFactory.build(any(ChatRequest.class), anyBoolean(), anyString())).thenReturn(context);
         when(fixture.agentRuntimeEngine.run(context)).thenReturn(new AgentRun(
                 "req-1",
                 decision,
@@ -323,6 +325,64 @@ class ChatServiceImplModeTest {
         Assertions.assertFalse(fixture.modelLedStreamEngine(true).supports(context));
     }
 
+    @Test
+    void acceptedChatAndStreamReuseTheSuppliedIdentity() {
+        Fixture fixture = new Fixture();
+        fixture.useEngine(fixture.simplifiedOparEngine);
+        ChatRequest request = new ChatRequest("s1", "u1", "你好", "api");
+        ChatContext context = fixture.buildChatContext("你好", "simplified", "默认");
+        when(fixture.chatContextFactory.build(
+                eq(request),
+                eq(true),
+                anyString()
+        )).thenReturn(context);
+        when(fixture.simplifiedOparEngine.execute(any(), any()))
+                .thenReturn(new ChatExecutionResult(
+                        "observe",
+                        "SIMPLIFIED",
+                        "ACTION",
+                        "answer",
+                        true
+                ));
+
+        fixture.build().chat(new AcceptedChatCommand(
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                request
+        ));
+        SseEmitter emitter = fixture.build().stream(new AcceptedChatCommand(
+                "cccccccccccccccccccccccccccccccc",
+                request
+        ));
+
+        verify(fixture.runIdentityFactory, never()).create();
+        verify(fixture.runIdentityFactory).accept(
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        );
+        verify(fixture.runIdentityFactory).accept(
+                "cccccccccccccccccccccccccccccccc"
+        );
+        verify(fixture.chatContextFactory).build(
+                request,
+                true,
+                "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        );
+        verify(fixture.sseEventBridge, timeout(1000)).sendTrace(
+                eq(emitter),
+                eq("cccccccccccccccccccccccccccccccc"),
+                eq("接收请求"),
+                eq("request"),
+                eq("started"),
+                anyString(),
+                eq(0L)
+        );
+        verify(fixture.chatContextFactory, timeout(1000)).build(
+                request,
+                true,
+                "cccccccccccccccccccccccccccccccc"
+        );
+        emitter.complete();
+    }
+
     private static final class Fixture {
 
         private final AiProviderService aiProviderService = mock(AiProviderService.class);
@@ -342,6 +402,7 @@ class ChatServiceImplModeTest {
         private final AgentRuntimeEngine agentRuntimeEngine = mock(AgentRuntimeEngine.class);
         private final SseEventBridge sseEventBridge = mock(SseEventBridge.class);
         private final EngineSelector engineSelector = mock(EngineSelector.class);
+        private final RunIdentityFactory runIdentityFactory = mock(RunIdentityFactory.class);
         private final AgentSession session = new AgentSession();
         private final AssembledContext assembled = new AssembledContext(
                 "s1",
@@ -367,6 +428,10 @@ class ChatServiceImplModeTest {
             when(chatGuardService.acquireSessionLock("s1")).thenReturn("lock");
             when(aiProviderService.activeClient()).thenReturn(activeClient);
             when(modelTransportGuardService.isModelCallEnabled(activeClient)).thenReturn(true);
+            when(runIdentityFactory.create())
+                    .thenReturn("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+            when(runIdentityFactory.accept(anyString()))
+                    .thenAnswer(invocation -> invocation.getArgument(0));
         }
 
         /** Create a real BasicStreamEngine with given basicStreamingEnabled flag for supports() testing. */
@@ -381,6 +446,7 @@ class ChatServiceImplModeTest {
                     sseEventBridge,
                     chatResultPersister,
                     chatGuardService,
+                    null,
                     basicStreamingEnabled
             );
         }
@@ -397,6 +463,7 @@ class ChatServiceImplModeTest {
                     sseEventBridge,
                     chatResultPersister,
                     chatGuardService,
+                    null,
                     modelLedStreamingEnabled
             );
         }
@@ -463,6 +530,8 @@ class ChatServiceImplModeTest {
                     null,
                     sseEventBridge,
                     null,
+                    null,
+                    runIdentityFactory,
                     false,
                     true
             );
@@ -489,6 +558,8 @@ class ChatServiceImplModeTest {
                     null,
                     sseEventBridge,
                     null,
+                    null,
+                    runIdentityFactory,
                     false,
                     true
             );

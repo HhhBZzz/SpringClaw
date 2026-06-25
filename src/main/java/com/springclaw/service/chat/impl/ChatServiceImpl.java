@@ -3,6 +3,9 @@ package com.springclaw.service.chat.impl;
 import com.springclaw.common.util.TextUtils;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
+import com.springclaw.runtime.bridge.LegacyLifecycleObserver;
+import com.springclaw.runtime.identity.DefaultRunIdentityFactory;
+import com.springclaw.runtime.identity.RunIdentityFactory;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentActionProposal;
 import com.springclaw.service.agent.AgentActionProposalService;
@@ -12,6 +15,7 @@ import com.springclaw.service.agent.AgentRun;
 import com.springclaw.service.agent.AgentRuntimeEngine;
 import com.springclaw.service.agent.EngineSelector;
 import com.springclaw.service.chat.ChatService;
+import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
@@ -28,6 +32,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
 
+import java.time.Instant;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -60,6 +65,8 @@ public class ChatServiceImpl implements ChatService {
     private final LocalExecutionSupport localExecutionSupport;
     private final SseEventBridge sseEventBridge;
     private final ToolInvocationProposalService proposalService;
+    private final LegacyLifecycleObserver lifecycleObserver;
+    private final RunIdentityFactory runIdentityFactory;
     private final boolean modelLedStreamingEnabled;
     private final boolean basicStreamingEnabled;
 
@@ -82,6 +89,8 @@ public class ChatServiceImpl implements ChatService {
                            LocalExecutionSupport localExecutionSupport,
                            SseEventBridge sseEventBridge,
                            ToolInvocationProposalService proposalService,
+                           LegacyLifecycleObserver lifecycleObserver,
+                           RunIdentityFactory runIdentityFactory,
                            @Value("${springclaw.chat.model-led-streaming-enabled:false}") boolean modelLedStreamingEnabled,
                            @Value("${springclaw.chat.basic-streaming-enabled:true}") boolean basicStreamingEnabled) {
         this.aiProviderService = aiProviderService;
@@ -102,6 +111,8 @@ public class ChatServiceImpl implements ChatService {
         this.localExecutionSupport = localExecutionSupport;
         this.sseEventBridge = sseEventBridge;
         this.proposalService = proposalService;
+        this.lifecycleObserver = lifecycleObserver;
+        this.runIdentityFactory = runIdentityFactory;
         this.modelLedStreamingEnabled = modelLedStreamingEnabled;
         this.basicStreamingEnabled = basicStreamingEnabled;
     }
@@ -123,12 +134,24 @@ public class ChatServiceImpl implements ChatService {
         this(aiProviderService, chatGuardService, oparLoopEngine, simplifiedOparEngine,
                 chatResponsePolicyService, modelTransportGuardService, llmUsageRecordService,
                 conversationAdvisorSupport, chatContextFactory, chatResultPersister,
-                metaGuardExecutor, null, null, null, null, null, null, null, false, true);
+                metaGuardExecutor, null, null, null, null, null, null, null, null,
+                new DefaultRunIdentityFactory(), false, true);
     }
 
     @Override
     public ChatResponse chat(ChatRequest request) {
-        TaskChatExecutionResult result = executeInternal(request, true, true);
+        return chat(new AcceptedChatCommand(runIdentityFactory.create(), request));
+    }
+
+    @Override
+    public ChatResponse chat(AcceptedChatCommand command) {
+        String acceptedRunId = runIdentityFactory.accept(command.runId());
+        TaskChatExecutionResult result = executeInternal(
+                command.request(),
+                true,
+                true,
+                acceptedRunId
+        );
         return new ChatResponse(
                 result.sessionKey(),
                 result.answer(),
@@ -139,6 +162,13 @@ public class ChatServiceImpl implements ChatService {
 
     @Override
     public SseEmitter stream(ChatRequest request) {
+        return stream(new AcceptedChatCommand(runIdentityFactory.create(), request));
+    }
+
+    @Override
+    public SseEmitter stream(AcceptedChatCommand command) {
+        String acceptedRunId = runIdentityFactory.accept(command.runId());
+        ChatRequest request = command.request();
         chatGuardService.checkRateLimit(request.sessionKey());
         String lockToken = chatGuardService.acquireSessionLock(request.sessionKey());
         AtomicBoolean lockReleased = new AtomicBoolean(false);
@@ -160,20 +190,35 @@ public class ChatServiceImpl implements ChatService {
             releaseSessionLockOnce(request.sessionKey(), lockToken, lockReleased);
             emitter.complete();
         });
-        CompletableFuture.runAsync(() -> executeStream(request, lockToken, lockReleased, emitter, disposableRef));
+        CompletableFuture.runAsync(() -> executeStream(
+                request,
+                acceptedRunId,
+                lockToken,
+                lockReleased,
+                emitter,
+                disposableRef
+        ));
         return emitter;
     }
 
     private void executeStream(ChatRequest request,
+                               String acceptedRunId,
                                String lockToken,
                                AtomicBoolean lockReleased,
                                SseEmitter emitter,
                                AtomicReference<Disposable> disposableRef) {
         try {
             long requestStartedAt = System.currentTimeMillis();
-            sseEventBridge.sendTrace(emitter, "", "接收请求", "request", "started", "已收到用户输入，准备组装上下文。", 0L);
+            sseEventBridge.sendTrace(emitter, acceptedRunId, "接收请求", "request", "started", "已收到用户输入，准备组装上下文。", 0L);
             sseEventBridge.sendStatus(emitter, "正在组织上下文");
-            ChatContext context = chatContextFactory.build(request, true);
+            ChatContext context = chatContextFactory.build(
+                    request,
+                    true,
+                    acceptedRunId
+            );
+            if (lifecycleObserver != null) {
+                lifecycleObserver.contextAndDecisionObserved(context, Instant.now());
+            }
             sseEventBridge.sendMeta(emitter, context);
             sseEventBridge.sendDecision(emitter, context);
             String decisionPath = context.decision() == null ? "" : context.decision().executionPath();
@@ -183,6 +228,9 @@ public class ChatServiceImpl implements ChatService {
                     System.currentTimeMillis() - requestStartedAt);
             // 统一路由：通过 EngineSelector 选择引擎
             AgentEngine engine = engineSelector.select(context);
+            if (lifecycleObserver != null) {
+                lifecycleObserver.executionStarted(context, engine.name(), Instant.now());
+            }
             if (shouldRequestActionConfirmation(context)) {
                 streamActionRequired(context, lockToken, lockReleased, emitter);
                 return;
@@ -217,6 +265,11 @@ public class ChatServiceImpl implements ChatService {
             handlePendingApproval(emitter, request, lockToken, lockReleased, pending);
         } catch (Exception ex) {
             log.warn("流式聊天启动失败，sessionKey={}, reason={}", request.sessionKey(), ex.getMessage());
+            if (lifecycleObserver != null) {
+                lifecycleObserver.failed(
+                        acceptedRunId, "LEGACY_STREAM_FAILED", ex, Instant.now()
+                );
+            }
             sseEventBridge.sendError(emitter, chatResponsePolicyService.simplifyFailureReason(ex.getMessage()));
             releaseSessionLockOnce(request.sessionKey(), lockToken, lockReleased);
             sseEventBridge.completeEmitter(emitter);
@@ -316,6 +369,11 @@ public class ChatServiceImpl implements ChatService {
             );
             if (proposal != null) {
                 sseEventBridge.sendActionRequired(emitter, proposal);
+                if (lifecycleObserver != null) {
+                    lifecycleObserver.confirmationRequired(
+                            context.requestId(), proposal.proposalId(), Instant.now()
+                    );
+                }
             }
             String answer = proposal == null
                     ? "这个动作需要确认，但当前确认服务不可用。"
@@ -327,7 +385,7 @@ public class ChatServiceImpl implements ChatService {
                     context.decision().reason(),
                     answer,
                     false
-            ));
+            ), ChatPersistenceIntent.CONFIRMATION_SUSPENSION);
             sseEventBridge.sendTrace(emitter, context, "等待确认", "agent", "success",
                     proposal == null ? "确认服务不可用。" : "已生成 action proposal: " + proposal.proposalId(), 0L);
         } catch (Exception ex) {
@@ -344,7 +402,10 @@ public class ChatServiceImpl implements ChatService {
                                        SseEmitter emitter) {
         String answer = resolveFinalAnswer(context, executionResult);
         sseEventBridge.sendAnswerChunks(emitter, answer);
-        chatResultPersister.persist(context, answer, executionResult);
+        chatResultPersister.persist(context, answer, executionResult, ChatPersistenceIntent.TERMINAL_RESULT);
+        if (lifecycleObserver != null) {
+            lifecycleObserver.resultReturned(context, executionResult, answer, Instant.now());
+        }
     }
 
     private void streamAgentRuntimeAnswer(ChatContext context,
@@ -361,7 +422,10 @@ public class ChatServiceImpl implements ChatService {
             ChatExecutionResult executionResult = run.executionResult();
             String answer = resolveFinalAnswer(context, executionResult);
             sseEventBridge.sendAnswerChunks(emitter, answer);
-            chatResultPersister.persist(context, answer, executionResult);
+            chatResultPersister.persist(context, answer, executionResult, ChatPersistenceIntent.TERMINAL_RESULT);
+            if (lifecycleObserver != null) {
+                lifecycleObserver.resultReturned(context, executionResult, answer, Instant.now());
+            }
             boolean sufficient = run.verification() == null || run.verification().sufficient();
             sseEventBridge.sendTrace(emitter, context, "完成", "final", sufficient ? "success" : "failed",
                     sufficient ? "Agent Runtime 已完成。" : "Agent Runtime 已返回证据不足结果。", System.currentTimeMillis() - startedAt);
@@ -392,11 +456,19 @@ public class ChatServiceImpl implements ChatService {
                 );
             }
             sseEventBridge.sendAnswerChunks(emitter, answer);
-            chatResultPersister.persist(context, answer, fallbackResult);
+            chatResultPersister.persist(context, answer, fallbackResult, ChatPersistenceIntent.TERMINAL_RESULT);
+            if (lifecycleObserver != null) {
+                lifecycleObserver.resultReturned(context, fallbackResult, answer, Instant.now());
+            }
             sseEventBridge.sendTrace(emitter, context, "降级处理", "fallback", "success",
                     "已通过现有 Agent 链路整理结果。", 0L);
         } catch (Exception fallbackEx) {
             log.warn("流式降级回答失败，sessionKey={}, reason={}", context.session().getSessionKey(), fallbackEx.getMessage());
+            if (lifecycleObserver != null) {
+                lifecycleObserver.failed(
+                        context.requestId(), "LEGACY_STREAM_FAILED", fallbackEx, Instant.now()
+                );
+            }
             sseEventBridge.sendTrace(emitter, context, "降级处理", "fallback", "failed",
                     chatResponsePolicyService.simplifyFailureReason(fallbackEx.getMessage()), 0L);
             sseEventBridge.sendError(emitter, chatResponsePolicyService.simplifyFailureReason(fallbackEx.getMessage()));
@@ -476,7 +548,12 @@ public class ChatServiceImpl implements ChatService {
                             log.warn("流式回答自动修正失败，sessionKey={}, reason={}", context.assembled().sessionKey(), ex.getMessage());
                         }
                     }
-                    chatResultPersister.persist(context, fullAnswer.toString(), executionResult);
+                    chatResultPersister.persist(context, fullAnswer.toString(), executionResult, ChatPersistenceIntent.TERMINAL_RESULT);
+                    if (lifecycleObserver != null) {
+                        lifecycleObserver.resultReturned(
+                                context, executionResult, fullAnswer.toString(), Instant.now()
+                        );
+                    }
                     sseEventBridge.sendTrace(emitter, context, "模型整理", "model", "success",
                             reflectClient.displayName(), 0L);
                     sseEventBridge.sendTrace(emitter, context, "完成", "final", "success", "已生成最终回答。", 0L);
@@ -494,7 +571,12 @@ public class ChatServiceImpl implements ChatService {
                     fullAnswer.setLength(0);
                     fullAnswer.append(fallback);
                     sseEventBridge.sendAnswerChunks(emitter, fallback);
-                    chatResultPersister.persist(context, fullAnswer.toString(), executionResult);
+                    chatResultPersister.persist(context, fullAnswer.toString(), executionResult, ChatPersistenceIntent.TERMINAL_RESULT);
+                    if (lifecycleObserver != null) {
+                        lifecycleObserver.resultReturned(
+                                context, executionResult, fullAnswer.toString(), Instant.now()
+                        );
+                    }
                     sseEventBridge.sendTrace(emitter, context, "完成", "final", "failed", "已返回降级结果。", 0L);
                     releaseSessionLockOnce(context.session().getSessionKey(), lockToken, lockReleased);
                     sseEventBridge.completeEmitter(emitter);
@@ -504,22 +586,70 @@ public class ChatServiceImpl implements ChatService {
     }
 
     public TaskChatExecutionResult executeTaskMessage(ChatRequest request, boolean persistResult) {
-        return executeInternal(request, false, persistResult);
+        return executeTaskMessage(
+                request,
+                persistResult,
+                runIdentityFactory.create()
+        );
+    }
+
+    public TaskChatExecutionResult executeTaskMessage(
+            ChatRequest request,
+            boolean persistResult,
+            String runId
+    ) {
+        return executeInternal(
+                request,
+                false,
+                persistResult,
+                runIdentityFactory.accept(runId)
+        );
     }
 
     private TaskChatExecutionResult executeInternal(ChatRequest request,
                                                     boolean enforceRateLimit,
-                                                    boolean persistResult) {
+                                                    boolean persistResult,
+                                                    String acceptedRunId) {
         if (enforceRateLimit) {
             chatGuardService.checkRateLimit(request.sessionKey());
         }
         String lockToken = chatGuardService.acquireSessionLock(request.sessionKey());
         try {
-            ChatContext context = chatContextFactory.build(request, persistResult);
-            ChatExecutionResult executionResult = runAgentExecution(context);
+            ChatContext context = chatContextFactory.build(
+                    request,
+                    persistResult,
+                    acceptedRunId
+            );
+            Instant contextAt = Instant.now();
+            if (lifecycleObserver != null) {
+                lifecycleObserver.contextAndDecisionObserved(context, contextAt);
+            }
+            AgentEngine engine = engineSelector.select(context);
+            if (lifecycleObserver != null) {
+                lifecycleObserver.executionStarted(context, engine.name(), Instant.now());
+            }
+            ChatExecutionResult executionResult;
+            try {
+                executionResult = executeSelected(context, engine);
+            } catch (RuntimeException ex) {
+                if (lifecycleObserver != null) {
+                    lifecycleObserver.failed(
+                            context.requestId(),
+                            "LEGACY_EXECUTION_FAILED",
+                            ex,
+                            Instant.now()
+                    );
+                }
+                throw ex;
+            }
             String finalAnswer = resolveFinalAnswer(context, executionResult);
             if (persistResult) {
-                chatResultPersister.persist(context, finalAnswer, executionResult);
+                chatResultPersister.persist(context, finalAnswer, executionResult, ChatPersistenceIntent.TERMINAL_RESULT);
+            }
+            if (lifecycleObserver != null) {
+                lifecycleObserver.resultReturned(
+                        context, executionResult, finalAnswer, Instant.now()
+                );
             }
             return new TaskChatExecutionResult(
                     context.session().getSessionKey(),
@@ -534,7 +664,10 @@ public class ChatServiceImpl implements ChatService {
     }
 
     private ChatExecutionResult runAgentExecution(ChatContext context) {
-        AgentEngine engine = engineSelector.select(context);
+        return executeSelected(context, engineSelector.select(context));
+    }
+
+    private ChatExecutionResult executeSelected(ChatContext context, AgentEngine engine) {
         if (engine instanceof AgentRuntimeEngine runtimeEngine) {
             AgentRun run = runtimeEngine.run(context);
             if (sseEventBridge != null) {

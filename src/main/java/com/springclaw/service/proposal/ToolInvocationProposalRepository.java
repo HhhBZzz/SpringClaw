@@ -66,15 +66,36 @@ public class ToolInvocationProposalRepository {
         ) == 1;
     }
 
-    public int expirePendingBefore(LocalDateTime threshold) {
-        UpdateWrapper<ToolInvocationProposalEntity> uw = new UpdateWrapper<>();
-        uw.eq("status", ToolInvocationProposalStatus.PENDING.name())
+    /**
+     * 将过期且仍为 PENDING 的授权单逐行 CAS 迁移到 EXPIRED，返回本次成功迁移的精确列表。
+     *
+     * <p>使用 per-row 乐观锁（version）而非批量 UPDATE，确保并发 confirm 不会把已被确认
+     * 的授权单误报为过期。只有真正把某行从 PENDING 迁移到 EXPIRED 的 CAS 才计入返回列表。
+     */
+    public List<ToolInvocationProposal> expirePendingBefore(LocalDateTime threshold) {
+        QueryWrapper<ToolInvocationProposalEntity> qw = new QueryWrapper<>();
+        qw.eq("status", ToolInvocationProposalStatus.PENDING.name())
           .lt("expires_at", threshold)
           .eq("deleted", 0);
-        ToolInvocationProposalEntity update = new ToolInvocationProposalEntity();
-        update.setStatus(ToolInvocationProposalStatus.EXPIRED.name());
-        update.setUpdateTime(LocalDateTime.now());
-        return mapper.update(update, uw);
+        List<ToolInvocationProposalEntity> expired = mapper.selectList(qw);
+        if (expired.isEmpty()) {
+            return List.of();
+        }
+        java.util.List<ToolInvocationProposal> expiredProposals = new java.util.ArrayList<>();
+        for (ToolInvocationProposalEntity entity : expired) {
+            int version = entity.getVersion() == null ? 0 : entity.getVersion();
+            boolean changed = compareAndSetStatus(
+                    entity.getProposalId(),
+                    ToolInvocationProposalStatus.PENDING,
+                    ToolInvocationProposalStatus.EXPIRED,
+                    version,
+                    null
+            );
+            if (changed) {
+                expiredProposals.add(entity.toDomain());
+            }
+        }
+        return expiredProposals;
     }
 
     public List<ToolInvocationProposal> findStuckExecuting(LocalDateTime updatedBefore) {

@@ -103,7 +103,7 @@ public class FeishuLongConnectionRunner implements ApplicationRunner, Disposable
                             return;
                         }
                         try {
-                            webhookRouterService.dispatch("feishu", payload);
+                            dispatchVerifiedPayload(payload);
                         } catch (Exception ex) {
                             if (isSessionBusy(ex)) {
                                 log.info("飞书长连接会话忙，已跳过重复并发消息。reason={}", ex.getMessage());
@@ -128,6 +128,10 @@ public class FeishuLongConnectionRunner implements ApplicationRunner, Disposable
             wsClient.start();
         });
         log.info("飞书长连接已初始化，等待事件中。");
+    }
+
+    void dispatchVerifiedPayload(Map<String, Object> payload) {
+        webhookRouterService.dispatchTrusted("feishu", payload);
     }
 
     @Override

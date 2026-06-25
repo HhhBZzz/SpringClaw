@@ -3,6 +3,9 @@ package com.springclaw.service.chat.async;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.springclaw.runtime.contract.RunState;
+import com.springclaw.runtime.contract.RunStatus;
+import com.springclaw.runtime.lifecycle.RunStateRepository;
 import org.redisson.api.RBucket;
 import org.redisson.api.RedissonClient;
 import org.springframework.beans.factory.ObjectProvider;
@@ -17,16 +20,19 @@ public class AsyncChatResultStore {
 
     private final ObjectProvider<RedissonClient> redissonClientProvider;
     private final ObjectMapper objectMapper;
+    private final RunStateRepository runStateRepository;
     private final String keyPrefix;
     private final long ttlHours;
     private final Cache<String, AsyncChatResultPayload> localStore;
 
     public AsyncChatResultStore(ObjectProvider<RedissonClient> redissonClientProvider,
                                 ObjectMapper objectMapper,
+                                RunStateRepository runStateRepository,
                                 @Value("${springclaw.rabbitmq.async-result-key-prefix:springclaw:chat:async:}") String keyPrefix,
                                 @Value("${springclaw.rabbitmq.async-result-ttl-hours:24}") long ttlHours) {
         this.redissonClientProvider = redissonClientProvider;
         this.objectMapper = objectMapper;
+        this.runStateRepository = runStateRepository;
         this.keyPrefix = StringUtils.hasText(keyPrefix) ? keyPrefix.trim() : "springclaw:chat:async:";
         this.ttlHours = Math.max(1, ttlHours);
         this.localStore = Caffeine.newBuilder()
@@ -36,6 +42,7 @@ public class AsyncChatResultStore {
     }
 
     public AsyncChatResultPayload markQueued(AsyncChatRequestMessage message) {
+        requireCanonical(message.requestId(), false);
         AsyncChatResultPayload payload = new AsyncChatResultPayload(
                 message.requestId(),
                 "QUEUED",
@@ -52,6 +59,7 @@ public class AsyncChatResultStore {
     }
 
     public AsyncChatResultPayload markCompleted(AsyncChatRequestMessage message, String answer, String model) {
+        requireCanonical(message.requestId(), RunStatus.COMPLETED, RunStatus.DEGRADED);
         AsyncChatResultPayload payload = new AsyncChatResultPayload(
                 message.requestId(),
                 "COMPLETED",
@@ -68,6 +76,12 @@ public class AsyncChatResultStore {
     }
 
     public AsyncChatResultPayload markFailed(AsyncChatRequestMessage message, String errorMessage) {
+        if (!hasCanonicalStatus(message.requestId(), RunStatus.FAILED)) {
+            // Canonical run is not FAILED (e.g. already DEGRADED/COMPLETED, or a
+            // notification failure after success). Do not overwrite the projected
+            // payload. Phase 2B does not redesign the consumer broad catch.
+            return find(message.requestId());
+        }
         AsyncChatResultPayload payload = new AsyncChatResultPayload(
                 message.requestId(),
                 "FAILED",
@@ -90,6 +104,48 @@ public class AsyncChatResultStore {
             return cached;
         }
         return localStore.getIfPresent(normalizedRequestId);
+    }
+
+    private void requireCanonical(String requestId, boolean allowTerminal) {
+        if (runStateRepository == null) {
+            return;
+        }
+        RunState state = runStateRepository.findByRunId(requestId).orElse(null);
+        if (state == null) {
+            throw new IllegalStateException("canonical run not found: " + requestId);
+        }
+        if (!allowTerminal && state.status().isTerminal()) {
+            throw new IllegalStateException(
+                    "canonical run is terminal: " + state.status()
+            );
+        }
+    }
+
+    private void requireCanonical(String requestId, RunStatus... allowed) {
+        if (runStateRepository == null) {
+            return;
+        }
+        RunState state = runStateRepository.findByRunId(requestId).orElse(null);
+        if (state == null) {
+            throw new IllegalStateException("canonical run not found: " + requestId);
+        }
+        for (RunStatus status : allowed) {
+            if (state.status() == status) {
+                return;
+            }
+        }
+        throw new IllegalStateException(
+                "canonical run status " + state.status()
+                        + " is not one of the required terminal states for projection"
+        );
+    }
+
+    private boolean hasCanonicalStatus(String requestId, RunStatus expected) {
+        if (runStateRepository == null) {
+            return true;
+        }
+        RunState state = runStateRepository.findByRunId(requestId).orElse(null);
+        return state != null && state.status() == expected;
     }
 
     private void save(AsyncChatResultPayload payload) {

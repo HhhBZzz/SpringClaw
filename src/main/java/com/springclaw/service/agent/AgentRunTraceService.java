@@ -4,6 +4,9 @@ import com.springclaw.common.util.TextUtils;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.domain.entity.MessageEvent;
+import com.springclaw.runtime.contract.RunState;
+import com.springclaw.runtime.contract.RunStatus;
+import com.springclaw.runtime.lifecycle.RunStateRepository;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.memory.AgentLearningService;
 import com.baomidou.mybatisplus.core.toolkit.IdWorker;
@@ -16,6 +19,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.time.Duration;
+import java.time.ZoneId;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -31,40 +36,52 @@ public class AgentRunTraceService {
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbcTemplate;
     private final AgentLearningService agentLearningService;
+    private final RunStateRepository runStateRepository;
 
     @Autowired
     public AgentRunTraceService(MessageEventService messageEventService,
                                 ObjectMapper objectMapper,
                                 ObjectProvider<JdbcTemplate> jdbcTemplateProvider,
-                                ObjectProvider<AgentLearningService> agentLearningServiceProvider) {
+                                ObjectProvider<AgentLearningService> agentLearningServiceProvider,
+                                RunStateRepository runStateRepository) {
         this(messageEventService,
                 objectMapper,
                 jdbcTemplateProvider == null ? null : jdbcTemplateProvider.getIfAvailable(),
-                agentLearningServiceProvider == null ? null : agentLearningServiceProvider.getIfAvailable());
+                agentLearningServiceProvider == null ? null : agentLearningServiceProvider.getIfAvailable(),
+                runStateRepository);
     }
 
     public AgentRunTraceService(MessageEventService messageEventService,
                                 ObjectMapper objectMapper,
                                 ObjectProvider<JdbcTemplate> jdbcTemplateProvider) {
-        this(messageEventService, objectMapper, jdbcTemplateProvider == null ? null : jdbcTemplateProvider.getIfAvailable(), null);
+        this(messageEventService, objectMapper, jdbcTemplateProvider == null ? null : jdbcTemplateProvider.getIfAvailable(), null, null);
     }
 
     public AgentRunTraceService(MessageEventService messageEventService, ObjectMapper objectMapper) {
-        this(messageEventService, objectMapper, (JdbcTemplate) null, null);
+        this(messageEventService, objectMapper, (JdbcTemplate) null, null, null);
     }
 
     AgentRunTraceService(MessageEventService messageEventService, ObjectMapper objectMapper, JdbcTemplate jdbcTemplate) {
-        this(messageEventService, objectMapper, jdbcTemplate, null);
+        this(messageEventService, objectMapper, jdbcTemplate, null, null);
     }
 
     AgentRunTraceService(MessageEventService messageEventService,
                          ObjectMapper objectMapper,
                          JdbcTemplate jdbcTemplate,
                          AgentLearningService agentLearningService) {
+        this(messageEventService, objectMapper, jdbcTemplate, agentLearningService, null);
+    }
+
+    AgentRunTraceService(MessageEventService messageEventService,
+                         ObjectMapper objectMapper,
+                         JdbcTemplate jdbcTemplate,
+                         AgentLearningService agentLearningService,
+                         RunStateRepository runStateRepository) {
         this.messageEventService = messageEventService;
         this.objectMapper = objectMapper;
         this.jdbcTemplate = jdbcTemplate;
         this.agentLearningService = agentLearningService;
+        this.runStateRepository = runStateRepository;
     }
 
     public AgentRunTraceEvent record(String sessionKey,
@@ -189,11 +206,14 @@ public class AgentRunTraceService {
             return;
         }
         LocalDateTime now = LocalDateTime.now();
+        RunState canonical = canonicalRun(requestId);
+        String canonicalStatus = canonicalStatus(canonical);
+        LocalDateTime canonicalStartedAt = canonicalStart(canonical);
         try {
             jdbcTemplate.update("""
                             INSERT INTO agent_run
                             (id, request_id, session_key, channel, user_id, product_mode, response_mode, execution_mode, intent, status, started_at, create_time, update_time, deleted)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'RUNNING', ?, ?, ?, 0)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                             ON DUPLICATE KEY UPDATE
                               session_key = COALESCE(NULLIF(VALUES(session_key), ''), session_key),
                               channel = COALESCE(NULLIF(VALUES(channel), ''), channel),
@@ -213,7 +233,8 @@ public class AgentRunTraceService {
                     emptyToNull(responseMode),
                     emptyToNull(executionMode),
                     emptyToNull(intent),
-                    now,
+                    canonicalStatus,
+                    canonicalStartedAt == null ? now : canonicalStartedAt,
                     now,
                     now);
         } catch (Exception ex) {
@@ -316,13 +337,25 @@ public class AgentRunTraceService {
                                 String requestId,
                                 AgentRunTraceEvent event) {
         LocalDateTime now = LocalDateTime.now();
-        String runStatus = toRunStatus(event);
+        RunState canonical = canonicalRun(requestId);
+        String runStatus = canonicalStatus(canonical);
+        LocalDateTime startedAt = canonicalStart(canonical);
+        LocalDateTime finishedAt = canonicalTime(
+                canonical == null ? null : canonical.finishedAt()
+        );
+        Long durationMs = canonicalDurationMs(canonical);
         jdbcTemplate.update("""
                         INSERT INTO agent_run
                         (id, request_id, session_key, channel, user_id, response_mode, execution_mode, intent, status, started_at, finished_at, duration_ms, quality_score, quality_level, evaluation_json, create_time, update_time, deleted)
                         VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                         ON DUPLICATE KEY UPDATE
-                          status = IF(VALUES(status) = 'RUNNING' AND status <> 'RUNNING', status, VALUES(status)),
+                          status = IF(
+                            (VALUES(status) = 'RUNNING' AND status <> 'RUNNING')
+                            OR (VALUES(status) = 'UNKNOWN'
+                                AND status IN ('COMPLETED', 'DEGRADED', 'FAILED')),
+                            status,
+                            VALUES(status)
+                          ),
                           finished_at = COALESCE(VALUES(finished_at), finished_at),
                           duration_ms = COALESCE(VALUES(duration_ms), duration_ms),
                           quality_score = COALESCE(VALUES(quality_score), quality_score),
@@ -336,9 +369,9 @@ public class AgentRunTraceService {
                 defaultText(channel, "api"),
                 defaultText(userId, "unknown"),
                 runStatus,
-                now,
-                "RUNNING".equals(runStatus) ? null : now,
-                "RUNNING".equals(runStatus) ? null : event.durationMs(),
+                startedAt == null ? now : startedAt,
+                finishedAt,
+                durationMs,
                 event.qualityScore(),
                 emptyToNull(event.qualityLevel()),
                 emptyToNull(event.evaluationJson()),
@@ -561,14 +594,45 @@ public class AgentRunTraceService {
         return (max == null ? 0 : max) + 1;
     }
 
-    private String toRunStatus(AgentRunTraceEvent event) {
-        if (event == null) {
-            return "RUNNING";
+    /**
+     * Resolves the structured run status from canonical lifecycle state. Trace
+     * events no longer infer status; if no canonical run exists the projection
+     * is {@code UNKNOWN} and diagnostic trace persistence may still continue.
+     */
+    private String canonicalStatus(RunState state) {
+        return state == null ? "UNKNOWN" : state.status().name();
+    }
+
+    private LocalDateTime canonicalTime(java.time.Instant value) {
+        return value == null
+                ? null
+                : LocalDateTime.ofInstant(value, ZoneId.systemDefault());
+    }
+
+    private LocalDateTime canonicalStart(RunState state) {
+        if (state == null) {
+            return null;
         }
-        if ("final".equalsIgnoreCase(event.type())) {
-            return "failed".equalsIgnoreCase(event.status()) ? "FAILED" : "COMPLETED";
+        return canonicalTime(
+                state.startedAt() == null ? state.acceptedAt() : state.startedAt()
+        );
+    }
+
+    private Long canonicalDurationMs(RunState state) {
+        if (state == null || state.finishedAt() == null) {
+            return null;
         }
-        return "failed".equalsIgnoreCase(event.status()) ? "FAILED" : "RUNNING";
+        java.time.Instant start = state.startedAt() == null
+                ? state.acceptedAt()
+                : state.startedAt();
+        return Duration.between(start, state.finishedAt()).toMillis();
+    }
+
+    private RunState canonicalRun(String requestId) {
+        if (runStateRepository == null || !StringUtils.hasText(requestId)) {
+            return null;
+        }
+        return runStateRepository.findByRunId(requestId.trim()).orElse(null);
     }
 
     private String defaultText(String value, String fallback) {

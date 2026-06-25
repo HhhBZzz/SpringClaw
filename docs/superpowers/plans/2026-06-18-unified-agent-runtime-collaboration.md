@@ -1374,3 +1374,69 @@ Next dependency:
     whether to delete or permanently quarantine ContextAssembler and
     SemanticMemoryAdvisor legacy retrieval paths.
 ```
+
+## Update: Phase 3A5 accepted-run smoke and confirmation approval guard
+
+```text
+Task: Phase 3A5 accepted-run smoke and confirmation approval guard
+Branch:
+  - codex/unified-runtime-phase-3a5-smoke-confirmation
+Design and plan:
+  - docs/superpowers/plans/2026-06-25-unified-runtime-phase-3a5-accepted-run-smoke-and-confirmation-guard.md
+Implementation commits:
+  - 65aab2c fix: guard confirmation approval state
+  - 8d40ce5 test: smoke canonical accepted run lifecycle
+Modified paths:
+  - src/main/java/com/springclaw/runtime/lifecycle/RunCoordinator.java
+  - src/test/java/com/springclaw/runtime/lifecycle/RunCoordinatorTest.java
+  - src/test/java/com/springclaw/service/chat/impl/AcceptedRunCanonicalSmokeTest.java
+Behavior:
+  - RunCoordinator.confirmationApproved now explicitly requires
+    WAITING_CONFIRMATION, matching confirmationRejected's state guard
+  - stale approval before WAITING_CONFIRMATION fails with a clear boundary
+    message and does not mutate the run state
+  - accepted-run canonical smoke uses real InMemoryRunLifecycleStore,
+    RunCoordinator, ContextSnapshotFactory, RunStateContextSnapshotRequestFactory,
+    CanonicalContextReadyProjector, LegacyContextViewAdapter, and
+    LegacyLifecycleObserver
+  - smoke mocks external dependencies only: auth/session/model/routing/skill
+    lookup and memory retrieval source
+Smoke event sequence:
+  - RUN_CREATED
+  - CONTEXT_READY
+  - DECISION_MADE
+  - STRATEGY_STARTED
+  - VERIFICATION_COMPLETED
+  - RUN_DEGRADED
+Verification (2026-06-25, Asia/Shanghai):
+  - RED check for confirmation approval guard failed before implementation
+    because the lower-level transition/schema validation raised a non-specific
+    error instead of the confirmation WAITING_CONFIRMATION boundary
+  - RunCoordinatorTest:
+    10 tests, 0 failures, 0 errors, 0 skipped
+  - AcceptedRunCanonicalSmokeTest:
+    1 test, 0 failures, 0 errors, 0 skipped
+  - focused Phase 3A5 gate:
+    11 tests, 0 failures, 0 errors, 0 skipped
+  - full suite:
+    778 tests, 0 failures, 0 errors, 0 skipped
+  - full gate loaded local
+    /Users/hanbingzheng/springclaw/.env.local without printing secrets
+  - full gate used MAVEN_OPTS=-Djdk.lang.Process.launchMechanism=FORK
+  - full gate overrode spring.datasource.url with allowPublicKeyRetrieval=true
+    for the local MySQL auth mode
+Known limitations:
+  - smoke is production-like but still not a live HTTP/controller test and does
+    not call a real model provider
+  - ContextAssembler and SemanticMemoryAdvisor remain present for rollback
+  - ChatContext still reflects the normalized request identity while canonical
+    snapshot construction reads the accepted RunState; controller normalization
+    remains the production boundary for mismatched request identity
+Rollback order:
+  - revert 8d40ce5 to remove the accepted-run smoke test
+  - revert 65aab2c to restore the previous confirmationApproved behavior
+Next dependency:
+  - after PR review/merge, decide whether Phase 3B should add an HTTP-level
+    accepted-run smoke or proceed to permanently quarantining legacy retrieval
+    behind explicit rollback flags.
+```

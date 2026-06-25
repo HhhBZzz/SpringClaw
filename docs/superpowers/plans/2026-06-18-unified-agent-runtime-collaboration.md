@@ -1440,3 +1440,54 @@ Next dependency:
     accepted-run smoke or proceed to permanently quarantining legacy retrieval
     behind explicit rollback flags.
 ```
+
+## Update: Phase 3B HTTP accepted-run smoke
+
+```text
+Task: Phase 3B HTTP accepted-run smoke
+Branch:
+  - codex/unified-runtime-phase-3b-http-smoke
+Design and plan:
+  - docs/superpowers/plans/2026-06-25-unified-runtime-phase-3b-http-accepted-run-smoke.md
+Modified paths:
+  - src/test/java/com/springclaw/service/chat/impl/ChatControllerCanonicalHttpSmokeTest.java
+Runtime path proven:
+  - MockMvc POST /api/chat/send
+  - real ChatController normalizes the authenticated request
+  - real DefaultLegacyRuntimeBridge accepts the run
+  - real ChatServiceImpl consumes AcceptedChatCommand with the same runId
+  - real ChatContextFactory builds canonical ContextSnapshot
+  - real CanonicalContextReadyProjector advances the run to CONTEXT_READY
+  - real LegacyLifecycleObserver in canonical mode emits decision/running/terminal
+  - external model/session/auth/skill/routing/memory source dependencies are mocked
+Smoke event sequence:
+  - RUN_CREATED
+  - CONTEXT_READY
+  - DECISION_MADE
+  - STRATEGY_STARTED
+  - VERIFICATION_COMPLETED
+  - RUN_DEGRADED
+Verification (2026-06-25, Asia/Shanghai):
+  - ChatControllerCanonicalHttpSmokeTest:
+    1 test, 0 failures, 0 errors, 0 skipped
+  - focused Phase 3B gate:
+    12 tests, 0 failures, 0 errors, 0 skipped
+  - full suite:
+    779 tests, 0 failures, 0 errors, 0 skipped
+  - full gate loaded local
+    /Users/hanbingzheng/springclaw/.env.local without printing secrets
+  - full gate used MAVEN_OPTS=-Djdk.lang.Process.launchMechanism=FORK
+  - full gate overrode spring.datasource.url with allowPublicKeyRetrieval=true
+    for the local MySQL auth mode
+Known limitations:
+  - smoke uses MockMvc standalone rather than a full SpringBoot web server
+  - smoke does not call a real model provider, real Redis memory source, or real
+    MySQL session store
+  - ContextAssembler and SemanticMemoryAdvisor remain present for rollback and
+    were not deleted in this phase
+Rollback order:
+  - revert the Phase 3B smoke test commit
+Next dependency:
+  - ask for review, merge if accepted, then decide between full SpringBoot HTTP
+    integration smoke or permanent legacy retrieval removal/quarantine work.
+```

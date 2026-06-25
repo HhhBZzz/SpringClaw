@@ -4,7 +4,6 @@ import com.springclaw.runtime.contract.RunEvent;
 import com.springclaw.runtime.contract.RunState;
 import com.springclaw.runtime.contract.RunStatus;
 import com.springclaw.runtime.contract.RunTransitionPolicy;
-import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,7 +12,6 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-@Component
 public final class InMemoryRunLifecycleStore implements RunLifecycleStore {
 
     private final ConcurrentMap<String, RunState> states = new ConcurrentHashMap<>();

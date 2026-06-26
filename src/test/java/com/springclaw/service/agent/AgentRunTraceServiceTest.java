@@ -426,6 +426,95 @@ class AgentRunTraceServiceTest {
                 .listRequestEvents(any(), any(), any(), any(), any(Integer.class), any(Boolean.class));
     }
 
+    @Test
+    void recentRunsPrefersCanonicalRunStatesOverLegacyTraceRows() {
+        InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+        RunCoordinator coordinator = new RunCoordinator(store);
+        Instant acceptedAt = Instant.parse("2026-06-26T00:00:00Z");
+        coordinator.accept(new RunAcceptance(
+                "req-canonical-run-list", "s1", "api", "u1",
+                claim("s1", "u1"), "USER", "hi", "agent",
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+        coordinator.toolStarted("req-canonical-run-list", acceptedAt.plusSeconds(3));
+
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        AgentRunTraceService service = new AgentRunTraceService(
+                messageEventService, new ObjectMapper(), (JdbcTemplate) null, null, store);
+
+        List<Map<String, Object>> rows = service.recentRuns("u1", 10);
+
+        assertThat(rows).singleElement().satisfies(row -> {
+            assertThat(row).containsEntry("requestId", "req-canonical-run-list");
+            assertThat(row).containsEntry("sessionKey", "s1");
+            assertThat(row).containsEntry("userId", "u1");
+            assertThat(row).containsEntry("status", "CREATED");
+            assertThat(row).containsEntry("lastStep", "tool.started");
+            assertThat(row).containsEntry("source", "canonical");
+        });
+        verify(messageEventService, org.mockito.Mockito.never())
+                .pageQuery(any(), any(), any(), any(), any(Integer.class), any(Integer.class));
+    }
+
+    @Test
+    void recentRunsFallsBackToLegacyRowsWhenCanonicalRowsAreAbsent() throws Exception {
+        InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        MessageEvent event = new MessageEvent();
+        event.setSessionKey("legacy-session");
+        event.setUserId("u1");
+        event.setContent(objectMapper.writeValueAsString(new AgentRunTraceEvent(
+                "req-legacy-run-list",
+                "legacy final",
+                "final",
+                "success",
+                "done",
+                9L,
+                1710000000000L
+        )));
+        Page<MessageEvent> page = new Page<>(1, 500);
+        page.setRecords(List.of(event));
+        when(messageEventService.pageQuery(null, "u1", "SYSTEM", "TRACE", 1, 500))
+                .thenReturn(page);
+        AgentRunTraceService service = new AgentRunTraceService(
+                messageEventService, objectMapper, (JdbcTemplate) null, null, store);
+
+        List<Map<String, Object>> rows = service.recentRuns("u1", 10);
+
+        assertThat(rows).singleElement().satisfies(row -> {
+            assertThat(row).containsEntry("requestId", "req-legacy-run-list");
+            assertThat(row).containsEntry("sessionKey", "legacy-session");
+            assertThat(row).containsEntry("lastStep", "legacy final");
+        });
+    }
+
+    @Test
+    void recentRunsFiltersCanonicalRowsByUser() {
+        InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+        RunCoordinator coordinator = new RunCoordinator(store);
+        Instant acceptedAt = Instant.parse("2026-06-26T00:00:00Z");
+        coordinator.accept(new RunAcceptance(
+                "req-visible-run", "s1", "api", "u1",
+                claim("s1", "u1"), "USER", "hi", "agent",
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+        coordinator.accept(new RunAcceptance(
+                "req-hidden-run", "s2", "api", "u2",
+                claim("s2", "u2"), "USER", "hi", "agent",
+                acceptedAt.plusSeconds(1), acceptedAt.plus(Duration.ofMinutes(30))));
+
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        AgentRunTraceService service = new AgentRunTraceService(
+                messageEventService, new ObjectMapper(), (JdbcTemplate) null, null, store);
+
+        List<Map<String, Object>> rows = service.recentRuns("u1", 1);
+
+        assertThat(rows)
+                .extracting(row -> row.get("requestId"))
+                .containsExactly("req-visible-run");
+        verify(messageEventService, org.mockito.Mockito.never())
+                .pageQuery(any(), any(), any(), any(), any(Integer.class), any(Integer.class));
+    }
+
     private static SessionAccessClaim claim(String sessionKey, String userId) {
         return SessionAccessClaim.personal(
                 SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,

@@ -1856,3 +1856,68 @@ Next dependency:
   - request review/merge, then migrate runtime-console runs or admin replay in
     another small slice
 ```
+
+## Update: Phase 3I canonical runs list read
+
+```text
+Task: Phase 3I canonical runs list read
+Branch:
+  - codex/unified-runtime-phase-3i-canonical-runs-list
+Design and plan:
+  - docs/superpowers/plans/2026-06-26-unified-runtime-phase-3i-canonical-runs-list.md
+Modified paths:
+  - src/main/java/com/springclaw/runtime/lifecycle/RunStateRepository.java
+  - src/main/java/com/springclaw/runtime/lifecycle/InMemoryRunLifecycleStore.java
+  - src/main/java/com/springclaw/runtime/lifecycle/MySqlRunLifecycleStore.java
+  - src/main/java/com/springclaw/service/agent/AgentRunTraceService.java
+  - src/test/java/com/springclaw/runtime/lifecycle/InMemoryRunLifecycleStoreTest.java
+  - src/test/java/com/springclaw/runtime/lifecycle/MySqlRunLifecycleStoreIT.java
+  - src/test/java/com/springclaw/service/agent/AgentRunTraceServiceTest.java
+Runtime path tightened:
+  - /api/runtime-console/runs and the runtime-console overview now prefer
+    canonical RunState rows through AgentRunTraceService.recentRuns()
+  - canonical rows are projected into the existing public map shape:
+    requestId, sessionKey, userId, lastStep, status, detail, timestamp,
+    channel, and responseMode
+  - latest canonical RunEvent supplies lastStep/detail/timestamp when present
+  - legacy message_event SYSTEM/TRACE rows remain the fallback when no
+    canonical rows are available for the requested user
+  - user filtering is applied before returning canonical rows; the read path
+    fetches a bounded canonical window before filtering so another user's newer
+    runs do not incorrectly hide the current user's runs
+RED evidence:
+  - mvn -q -Dtest=AgentRunTraceServiceTest#recentRunsPrefersCanonicalRunStatesOverLegacyTraceRows test
+  - failed because recentRuns() still queried legacy message_event rows first
+Verification (2026-06-26, Asia/Shanghai):
+  - trace service gate:
+    mvn -q -Dtest=AgentRunTraceServiceTest test
+    passed
+  - in-memory lifecycle recent query gate:
+    mvn -q -Dtest=InMemoryRunLifecycleStoreTest test
+    passed
+  - runtime-console controller regression:
+    mvn -q -Dtest=RuntimeConsoleControllerTest test
+    passed
+  - MySQL lifecycle recent query gate:
+    set -a; . /Users/hanbingzheng/springclaw/.env.local; set +a;
+    mvn -q -Dtest=MySqlRunLifecycleStoreIT test
+    passed
+  - focused Phase 3I gate:
+    mvn -q -Dtest=AgentRunTraceServiceTest,RuntimeConsoleControllerTest,InMemoryRunLifecycleStoreTest test
+    passed
+  - compile gate:
+    mvn -q -DskipTests test
+    passed
+Known limitations:
+  - admin replay still reads legacy structured trace/run tables
+  - legacy message_event trace rows and structured agent_run tables are not
+    deleted in this phase
+  - the canonical recent query is intentionally bounded to 500 rows for this
+    small read-path slice; deeper paging/search can be designed separately
+Rollback order:
+  - revert the Phase 3I commit to restore runtime-console run lists to
+    legacy-only message_event reads
+Next dependency:
+  - request review/merge, then migrate admin replay or plan the next rollback
+    component retirement slice
+```

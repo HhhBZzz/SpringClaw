@@ -343,6 +343,89 @@ class AgentRunTraceServiceTest {
         assertThat(values.getValue()[8]).isEqualTo(7000L);
     }
 
+    @Test
+    void listTracePrefersCanonicalRunEventsOverLegacyTraceRows() {
+        InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+        RunCoordinator coordinator = new RunCoordinator(store);
+        Instant acceptedAt = Instant.parse("2026-06-26T00:00:00Z");
+        coordinator.accept(new RunAcceptance(
+                "req-canonical-trace", "s1", "api", "u1",
+                claim("s1", "u1"), "USER", "hi", "agent",
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+        coordinator.toolStarted("req-canonical-trace", acceptedAt.plusSeconds(2));
+
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        AgentRunTraceService service = new AgentRunTraceService(
+                messageEventService, new ObjectMapper(), (JdbcTemplate) null, null, store);
+
+        List<AgentRunTraceEvent> trace = service.listTrace(
+                "req-canonical-trace", "u1", 20);
+
+        assertThat(trace)
+                .extracting(AgentRunTraceEvent::stepName)
+                .containsExactly("run.created", "tool.started");
+        assertThat(trace.get(0).requestId()).isEqualTo("req-canonical-trace");
+        assertThat(trace.get(0).type()).isEqualTo("lifecycle");
+        assertThat(trace.get(0).status()).isEqualTo("CREATED");
+        assertThat(trace.get(0).timestamp()).isEqualTo(acceptedAt.toEpochMilli());
+        assertThat(trace.get(0).source()).isEqualTo("canonical");
+        verify(messageEventService, org.mockito.Mockito.never())
+                .listRequestEvents(any(), any(), any(), any(), any(Integer.class), any(Boolean.class));
+    }
+
+    @Test
+    void listTraceFallsBackToLegacyRowsWhenCanonicalEventsAreAbsent() throws Exception {
+        InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        ObjectMapper objectMapper = new ObjectMapper();
+        MessageEvent legacy = new MessageEvent();
+        legacy.setContent(objectMapper.writeValueAsString(new AgentRunTraceEvent(
+                "req-legacy-trace",
+                "legacy step",
+                "legacy",
+                "success",
+                "legacy detail",
+                7L,
+                1710000000000L
+        )));
+        when(messageEventService.listRequestEvents(
+                "req-legacy-trace", "u1", "SYSTEM", "TRACE", 20, true
+        )).thenReturn(List.of(legacy));
+        AgentRunTraceService service = new AgentRunTraceService(
+                messageEventService, objectMapper, (JdbcTemplate) null, null, store);
+
+        List<AgentRunTraceEvent> trace = service.listTrace(
+                "req-legacy-trace", "u1", 20);
+
+        assertThat(trace)
+                .extracting(AgentRunTraceEvent::stepName)
+                .containsExactly("legacy step");
+        verify(messageEventService).listRequestEvents(
+                "req-legacy-trace", "u1", "SYSTEM", "TRACE", 20, true);
+    }
+
+    @Test
+    void listTraceDoesNotFallbackToLegacyWhenCanonicalRunBelongsToAnotherUser() {
+        InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+        RunCoordinator coordinator = new RunCoordinator(store);
+        Instant acceptedAt = Instant.parse("2026-06-26T00:00:00Z");
+        coordinator.accept(new RunAcceptance(
+                "req-private-trace", "s1", "api", "owner-user",
+                claim("s1", "owner-user"), "USER", "hi", "agent",
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        AgentRunTraceService service = new AgentRunTraceService(
+                messageEventService, new ObjectMapper(), (JdbcTemplate) null, null, store);
+
+        List<AgentRunTraceEvent> trace = service.listTrace(
+                "req-private-trace", "other-user", 20);
+
+        assertThat(trace).isEmpty();
+        verify(messageEventService, org.mockito.Mockito.never())
+                .listRequestEvents(any(), any(), any(), any(), any(Integer.class), any(Boolean.class));
+    }
+
     private static SessionAccessClaim claim(String sessionKey, String userId) {
         return SessionAccessClaim.personal(
                 SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,

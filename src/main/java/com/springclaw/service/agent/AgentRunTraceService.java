@@ -4,8 +4,10 @@ import com.springclaw.common.util.TextUtils;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.domain.entity.MessageEvent;
+import com.springclaw.runtime.contract.RunEvent;
 import com.springclaw.runtime.contract.RunState;
 import com.springclaw.runtime.contract.RunStatus;
+import com.springclaw.runtime.lifecycle.RunEventStore;
 import com.springclaw.runtime.lifecycle.RunStateRepository;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.memory.AgentLearningService;
@@ -37,18 +39,21 @@ public class AgentRunTraceService {
     private final JdbcTemplate jdbcTemplate;
     private final AgentLearningService agentLearningService;
     private final RunStateRepository runStateRepository;
+    private final RunEventStore runEventStore;
 
     @Autowired
     public AgentRunTraceService(MessageEventService messageEventService,
                                 ObjectMapper objectMapper,
                                 ObjectProvider<JdbcTemplate> jdbcTemplateProvider,
                                 ObjectProvider<AgentLearningService> agentLearningServiceProvider,
-                                RunStateRepository runStateRepository) {
+                                RunStateRepository runStateRepository,
+                                ObjectProvider<RunEventStore> runEventStoreProvider) {
         this(messageEventService,
                 objectMapper,
                 jdbcTemplateProvider == null ? null : jdbcTemplateProvider.getIfAvailable(),
                 agentLearningServiceProvider == null ? null : agentLearningServiceProvider.getIfAvailable(),
-                runStateRepository);
+                runStateRepository,
+                runEventStoreProvider == null ? null : runEventStoreProvider.getIfAvailable());
     }
 
     public AgentRunTraceService(MessageEventService messageEventService,
@@ -77,11 +82,26 @@ public class AgentRunTraceService {
                          JdbcTemplate jdbcTemplate,
                          AgentLearningService agentLearningService,
                          RunStateRepository runStateRepository) {
+        this(messageEventService,
+                objectMapper,
+                jdbcTemplate,
+                agentLearningService,
+                runStateRepository,
+                runStateRepository instanceof RunEventStore eventStore ? eventStore : null);
+    }
+
+    AgentRunTraceService(MessageEventService messageEventService,
+                         ObjectMapper objectMapper,
+                         JdbcTemplate jdbcTemplate,
+                         AgentLearningService agentLearningService,
+                         RunStateRepository runStateRepository,
+                         RunEventStore runEventStore) {
         this.messageEventService = messageEventService;
         this.objectMapper = objectMapper;
         this.jdbcTemplate = jdbcTemplate;
         this.agentLearningService = agentLearningService;
         this.runStateRepository = runStateRepository;
+        this.runEventStore = runEventStore;
     }
 
     public AgentRunTraceEvent record(String sessionKey,
@@ -176,12 +196,64 @@ public class AgentRunTraceService {
         if (!StringUtils.hasText(requestId)) {
             return List.of();
         }
+        if (canonicalTraceAccessDenied(requestId, userId)) {
+            return List.of();
+        }
+        List<AgentRunTraceEvent> canonical = listCanonicalTrace(requestId, limit);
+        if (!canonical.isEmpty()) {
+            return canonical;
+        }
         return messageEventService.listRequestEvents(requestId.trim(), userId, "SYSTEM", "TRACE", limit, true)
                 .stream()
                 .map(MessageEvent::getContent)
                 .map(this::parseTrace)
                 .filter(event -> event != null)
                 .toList();
+    }
+
+    private List<AgentRunTraceEvent> listCanonicalTrace(
+            String requestId,
+            int limit
+    ) {
+        if (runEventStore == null || !StringUtils.hasText(requestId)) {
+            return List.of();
+        }
+        String normalizedRequestId = requestId.trim();
+        int safeLimit = Math.max(1, Math.min(limit, 500));
+        return runEventStore.findEventsByRunId(normalizedRequestId)
+                .stream()
+                .limit(safeLimit)
+                .map(this::toTraceEvent)
+                .toList();
+    }
+
+    private boolean canonicalTraceAccessDenied(String requestId, String userId) {
+        RunState state = canonicalRun(requestId);
+        return state != null
+                && StringUtils.hasText(userId)
+                && !state.userId().equalsIgnoreCase(userId.trim());
+    }
+
+    private AgentRunTraceEvent toTraceEvent(RunEvent event) {
+        String action = event.eventType().wireName();
+        return new AgentRunTraceEvent(
+                event.runId(),
+                action,
+                event.stage(),
+                event.status() == null ? action : event.status().name(),
+                event.payload(),
+                event.durationMs(),
+                event.timestamp().toEpochMilli(),
+                null,
+                "",
+                null,
+                AgentRunTraceEvent.TIMELINE_STEP_SCHEMA,
+                "runtime",
+                action,
+                event.stage(),
+                "canonical",
+                ""
+        );
     }
 
     public void recordRunMetadata(String sessionKey,

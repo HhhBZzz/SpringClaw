@@ -8,7 +8,7 @@ import com.springclaw.dto.chat.ChatHistoryMessage;
 import com.springclaw.dto.chat.ChatHistoryResponse;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
-import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
+import com.springclaw.runtime.bridge.RunLifecycleBridge;
 import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.identity.RunIdentityFactory;
 import com.springclaw.runtime.lifecycle.RunAcceptance;
@@ -71,7 +71,7 @@ public class ChatController {
     private final AgentRunTraceService agentRunTraceService;
     private final RunIdentityFactory runIdentityFactory;
     private final AuthService authService;
-    private final LegacyRuntimeBridge runtimeBridge;
+    private final RunLifecycleBridge runtimeBridge;
 
     @Autowired
     public ChatController(ChatService chatService,
@@ -83,7 +83,7 @@ public class ChatController {
                           AgentRunTraceService agentRunTraceService,
                           RunIdentityFactory runIdentityFactory,
                           AuthService authService,
-                          LegacyRuntimeBridge runtimeBridge) {
+                          RunLifecycleBridge runtimeBridge) {
         this.chatService = chatService;
         this.chatMessageProducer = chatMessageProducer;
         this.asyncChatResultStore = asyncChatResultStore;
@@ -103,7 +103,7 @@ public class ChatController {
                    AiProviderService aiProviderService,
                    RunIdentityFactory runIdentityFactory,
                    AuthService authService,
-                   LegacyRuntimeBridge runtimeBridge) {
+                   RunLifecycleBridge runtimeBridge) {
         this(
                 chatService,
                 chatMessageProducer,

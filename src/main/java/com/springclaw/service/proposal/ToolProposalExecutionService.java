@@ -1,6 +1,6 @@
 package com.springclaw.service.proposal;
 
-import com.springclaw.runtime.bridge.LegacyLifecycleObserver;
+import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.tool.runtime.ToolExecutionContext;
 import com.springclaw.tool.runtime.ToolExecutionContextHolder;
 import org.slf4j.Logger;
@@ -27,11 +27,11 @@ public class ToolProposalExecutionService {
 
     private final ToolInvocationProposalService proposalService;
     private final ToolInvoker toolInvoker;
-    private final LegacyLifecycleObserver lifecycleObserver;
+    private final RunLifecycleObserver lifecycleObserver;
 
     public ToolProposalExecutionService(ToolInvocationProposalService proposalService,
                                         ToolInvoker toolInvoker,
-                                        LegacyLifecycleObserver lifecycleObserver) {
+                                        RunLifecycleObserver lifecycleObserver) {
         this.proposalService = proposalService;
         this.toolInvoker = toolInvoker;
         this.lifecycleObserver = lifecycleObserver;

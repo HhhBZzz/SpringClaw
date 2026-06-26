@@ -3,7 +3,7 @@ package com.springclaw.service.chat.impl;
 import com.springclaw.common.util.TextUtils;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
-import com.springclaw.runtime.bridge.LegacyLifecycleObserver;
+import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.runtime.identity.DefaultRunIdentityFactory;
 import com.springclaw.runtime.identity.RunIdentityFactory;
 import com.springclaw.service.ai.AiProviderService;
@@ -65,7 +65,7 @@ public class ChatServiceImpl implements ChatService {
     private final LocalExecutionSupport localExecutionSupport;
     private final SseEventBridge sseEventBridge;
     private final ToolInvocationProposalService proposalService;
-    private final LegacyLifecycleObserver lifecycleObserver;
+    private final RunLifecycleObserver lifecycleObserver;
     private final RunIdentityFactory runIdentityFactory;
     private final boolean modelLedStreamingEnabled;
     private final boolean basicStreamingEnabled;
@@ -89,7 +89,7 @@ public class ChatServiceImpl implements ChatService {
                            LocalExecutionSupport localExecutionSupport,
                            SseEventBridge sseEventBridge,
                            ToolInvocationProposalService proposalService,
-                           LegacyLifecycleObserver lifecycleObserver,
+                           RunLifecycleObserver lifecycleObserver,
                            RunIdentityFactory runIdentityFactory,
                            @Value("${springclaw.chat.model-led-streaming-enabled:false}") boolean modelLedStreamingEnabled,
                            @Value("${springclaw.chat.basic-streaming-enabled:true}") boolean basicStreamingEnabled) {

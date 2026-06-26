@@ -1682,3 +1682,63 @@ Next dependency:
   - request review/merge, then continue to the next legacy runtime retirement
     task once Phase 3E is accepted
 ```
+
+## Update: Phase 3F legacy lifecycle name retirement
+
+```text
+Task: Phase 3F legacy lifecycle name retirement
+Branch:
+  - codex/unified-runtime-phase-3f-legacy-retirement
+Design and plan:
+  - docs/superpowers/plans/2026-06-26-unified-runtime-phase-3f-legacy-lifecycle-name-retirement.md
+Modified paths:
+  - src/main/java/com/springclaw/runtime/bridge/RunLifecycleBridge.java
+  - src/main/java/com/springclaw/runtime/bridge/DefaultRunLifecycleBridge.java
+  - src/main/java/com/springclaw/runtime/bridge/RunLifecycleObserver.java
+  - src/main/java/com/springclaw/runtime/bridge/LegacyRuntimeBridge.java
+  - src/main/java/com/springclaw/runtime/bridge/DefaultLegacyRuntimeBridge.java
+  - src/main/java/com/springclaw/runtime/bridge/LegacyLifecycleObserver.java
+  - src/main/java/com/springclaw/controller/ChatController.java
+  - src/main/java/com/springclaw/service/webhook/WebhookRouterService.java
+  - src/main/java/com/springclaw/service/task/executor/TaskExecutionService.java
+  - src/main/java/com/springclaw/service/chat/impl/ChatServiceImpl.java
+  - src/main/java/com/springclaw/service/chat/impl/BasicStreamEngine.java
+  - src/main/java/com/springclaw/service/chat/impl/ModelLedStreamEngine.java
+  - src/main/java/com/springclaw/service/chat/impl/AutonomousLoopEngine.java
+  - src/main/java/com/springclaw/service/proposal/ToolProposalExecutionService.java
+  - src/main/java/com/springclaw/service/proposal/ToolProposalLifecycleListener.java
+  - src/main/java/com/springclaw/scheduled/ToolProposalCleanupTask.java
+Runtime path tightened:
+  - production code now injects RunLifecycleBridge and RunLifecycleObserver
+    instead of LegacyRuntimeBridge and LegacyLifecycleObserver
+  - LegacyRuntimeBridge, DefaultLegacyRuntimeBridge, and
+    LegacyLifecycleObserver remain as deprecated compatibility shims
+  - no rollback/default context or advisor components were deleted
+  - an architecture test now prevents production code outside runtime/bridge
+    from importing the retired legacy lifecycle names
+RED evidence:
+  - mvn -q -Dtest=LegacyLifecycleNameQuarantineTest test
+    failed while production callers still imported LegacyRuntimeBridge and
+    LegacyLifecycleObserver
+  - mvn -q -Dtest=RunLifecycleBridgeTest,RunLifecycleObserverTest test
+    failed because the canonical bridge and observer did not exist yet
+Verification (2026-06-26, Asia/Shanghai):
+  - lifecycle name quarantine + compatibility gate:
+    mvn -q -Dtest=LegacyLifecycleNameQuarantineTest,RunLifecycleBridgeTest,RunLifecycleObserverTest,LegacyRuntimeBridgeTest,LegacyLifecycleObserverTest,LegacyLifecycleObserverCanonicalModeTest,ChatControllerAuthTest,WebhookRouterServiceTest,TaskExecutionServiceTest,ChatServiceImplLifecycleProjectionTest,ToolProposalLifecycleListenerTest,ToolProposalCleanupTaskTest,ToolProposalExecutionServiceTest test
+    passed
+  - canonical smoke + MySQL lifecycle gate:
+    set -a; . /Users/hanbingzheng/springclaw/.env.local; set +a;
+    mvn -q -Dtest=CanonicalRetrievalBoundaryTest,ConversationAdvisorSupportCanonicalModeTest,ChatControllerCanonicalHttpSmokeTest,ChatControllerSpringBootCanonicalSmokeIT,MySqlRunLifecycleStoreIT test
+    passed
+Known limitations:
+  - legacy lifecycle compatibility tests still instantiate the deprecated
+    classes intentionally to prove older code paths remain source-compatible
+  - this phase does not delete ContextAssembler, SemanticMemoryAdvisor,
+    MessageChatMemoryAdvisor, LegacyRunContextAdapter, or LegacyContextViewAdapter
+Rollback order:
+  - revert the Phase 3F commit to restore LegacyRuntimeBridge and
+    LegacyLifecycleObserver as production-facing injection names
+Next dependency:
+  - review and merge Phase 3F, then decide whether the next safe slice is
+    endpoint/API contract hardening or a deeper rollback-component deletion plan
+```

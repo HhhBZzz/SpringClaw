@@ -1,6 +1,6 @@
 package com.springclaw.scheduled;
 
-import com.springclaw.runtime.bridge.LegacyLifecycleObserver;
+import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.service.proposal.ToolInvocationProposal;
 import com.springclaw.service.proposal.ToolInvocationProposalRepository;
 import com.springclaw.service.proposal.ToolInvocationProposalService;
@@ -27,11 +27,11 @@ public class ToolProposalCleanupTask {
 
     private final ToolInvocationProposalRepository repository;
     private final ToolInvocationProposalService proposalService;
-    private final LegacyLifecycleObserver lifecycleObserver;
+    private final RunLifecycleObserver lifecycleObserver;
 
     public ToolProposalCleanupTask(ToolInvocationProposalRepository repository,
                                    ToolInvocationProposalService proposalService,
-                                   LegacyLifecycleObserver lifecycleObserver) {
+                                   RunLifecycleObserver lifecycleObserver) {
         this.repository = repository;
         this.proposalService = proposalService;
         this.lifecycleObserver = lifecycleObserver;

@@ -1,7 +1,7 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.common.util.TextUtils;
-import com.springclaw.runtime.bridge.LegacyLifecycleObserver;
+import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
@@ -59,7 +59,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
     private final SseEventBridge sseEventBridge;
     private final ChatResultPersister chatResultPersister;
     private final ChatGuardService chatGuardService;
-    private final LegacyLifecycleObserver lifecycleObserver;
+    private final RunLifecycleObserver lifecycleObserver;
     private final boolean localFallbackEnabled;
     private final int maxAutonomousSteps;
 
@@ -73,7 +73,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
                                 SseEventBridge sseEventBridge,
                                 ChatResultPersister chatResultPersister,
                                 ChatGuardService chatGuardService,
-                                LegacyLifecycleObserver lifecycleObserver,
+                                RunLifecycleObserver lifecycleObserver,
                                 @Value("${springclaw.chat.local-fallback-enabled:true}") boolean localFallbackEnabled,
                                 @Value("${springclaw.chat.max-autonomous-steps:5}") int maxAutonomousSteps) {
         this.aiProviderService = aiProviderService;

@@ -1,6 +1,6 @@
 package com.springclaw.service.proposal;
 
-import com.springclaw.runtime.bridge.LegacyLifecycleObserver;
+import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -21,9 +21,9 @@ public class ToolProposalLifecycleListener {
 
     private static final Logger log = LoggerFactory.getLogger(ToolProposalLifecycleListener.class);
 
-    private final LegacyLifecycleObserver observer;
+    private final RunLifecycleObserver observer;
 
-    public ToolProposalLifecycleListener(LegacyLifecycleObserver observer) {
+    public ToolProposalLifecycleListener(RunLifecycleObserver observer) {
         this.observer = observer;
     }
 

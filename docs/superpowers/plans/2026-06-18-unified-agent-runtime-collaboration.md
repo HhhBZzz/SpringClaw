@@ -1921,3 +1921,60 @@ Next dependency:
   - request review/merge, then migrate admin replay or plan the next rollback
     component retirement slice
 ```
+
+## Update: Phase 3J canonical admin replay read
+
+```text
+Task: Phase 3J canonical admin replay read
+Branch:
+  - codex/unified-runtime-phase-3j-canonical-replay
+Design and plan:
+  - docs/superpowers/plans/2026-06-27-unified-runtime-phase-3j-canonical-admin-replay.md
+Modified paths:
+  - src/main/java/com/springclaw/service/agent/AgentRunTraceService.java
+  - src/test/java/com/springclaw/service/agent/AgentRunTraceServiceTest.java
+Runtime path tightened:
+  - /api/admin/manage/runs/{requestId}/replay now prefers canonical
+    RunState + RunEvent data through AgentRunTraceService.replayRun()
+  - canonical replay returns the existing broad replay map contract with
+    request_id, session_key, channel, user_id, response_mode, status,
+    started_at, finished_at, duration_ms, error_message, steps, and
+    toolInvocations
+  - canonical replay rows include source=canonical to make provenance explicit
+  - legacy agent_run / agent_run_step / tool_invocation SQL replay remains the
+    fallback when canonical state is absent
+  - controller 404 behavior remains unchanged because empty service result still
+    means Run not found
+RED evidence:
+  - mvn -q -Dtest=AgentRunTraceServiceTest#replayRunPrefersCanonicalLifecycleOverLegacyStructuredTables test
+  - first failed as expected because replayRun() returned an empty legacy result
+    for a canonical-only run instead of projecting canonical lifecycle data
+Verification (2026-06-27, Asia/Shanghai):
+  - focused canonical replay gate:
+    mvn -q -Dtest=AgentRunTraceServiceTest#replayRunPrefersCanonicalLifecycleOverLegacyStructuredTables test
+    passed
+  - trace service gate:
+    mvn -q -Dtest=AgentRunTraceServiceTest test
+    passed
+  - legacy replay contract fallback:
+    mvn -q -Dtest=TurnContractTest test
+    passed
+  - focused Phase 3J gate:
+    mvn -q -Dtest=AgentRunTraceServiceTest,TurnContractTest,RuntimeConsoleControllerTest test
+    passed
+  - compile gate:
+    mvn -q -DskipTests test
+    passed
+Known limitations:
+  - legacy structured runtime tables are still written and retained for
+    fallback compatibility
+  - canonical replay is a read projection only; no schema or migration changes
+  - replay remains admin-only at the controller layer and does not add per-user
+    filtering
+Rollback order:
+  - revert the Phase 3J commit to restore admin replay to legacy-only
+    structured-table reads
+Next dependency:
+  - request review/merge, then the remaining work is rollback/legacy component
+    retirement planning rather than another obvious external read-path migration
+```

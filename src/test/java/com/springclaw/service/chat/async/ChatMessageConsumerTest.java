@@ -62,7 +62,13 @@ class ChatMessageConsumerTest {
         when(repository.requireByRunId(message.requestId()))
                 .thenReturn(createdRun(message));
         when(chatService.chat(any(AcceptedChatCommand.class)))
-                .thenReturn(new ChatResponse("session", "answer", "model", 123L));
+                .thenReturn(new ChatResponse(
+                        message.requestId(),
+                        "session",
+                        "answer",
+                        "model",
+                        123L
+                ));
         AsyncChatResultPayload payload = new AsyncChatResultPayload(
                 message.requestId(), "COMPLETED", message.sessionKey(),
                 message.channel(), "answer", "model", message.createdAt(),

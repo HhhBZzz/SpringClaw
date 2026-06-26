@@ -216,7 +216,13 @@ class TransportParityCharacterizationTest {
                         message.responseMode()
                 )
         );
-        ChatResponse response = new ChatResponse(message.sessionKey(), "answer", "model", 123L);
+        ChatResponse response = new ChatResponse(
+                message.requestId(),
+                message.sessionKey(),
+                "answer",
+                "model",
+                123L
+        );
         AsyncChatResultPayload payload = new AsyncChatResultPayload(
                 message.requestId(),
                 "COMPLETED",

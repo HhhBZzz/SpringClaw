@@ -1742,3 +1742,71 @@ Next dependency:
   - review and merge Phase 3F, then decide whether the next safe slice is
     endpoint/API contract hardening or a deeper rollback-component deletion plan
 ```
+
+## Update: Phase 3G API contract hardening
+
+```text
+Task: Phase 3G API contract hardening
+Branch:
+  - codex/unified-runtime-phase-3g-api-contract
+Design and plan:
+  - docs/superpowers/plans/2026-06-26-unified-runtime-phase-3g-api-contract-hardening.md
+Modified paths:
+  - src/main/java/com/springclaw/dto/chat/ChatResponse.java
+  - src/main/java/com/springclaw/service/chat/impl/ChatServiceImpl.java
+  - src/test/java/com/springclaw/controller/ChatControllerAuthTest.java
+  - src/test/java/com/springclaw/service/chat/impl/ChatServiceImplLifecycleProjectionTest.java
+  - src/test/java/com/springclaw/service/chat/impl/ChatControllerCanonicalHttpSmokeTest.java
+  - src/test/java/com/springclaw/service/chat/async/ChatMessageConsumerTest.java
+  - src/test/java/com/springclaw/service/webhook/WebhookRouterServiceTest.java
+  - src/test/java/com/springclaw/architecture/CanonicalTransportIdentityTest.java
+  - src/test/java/com/springclaw/architecture/TransportParityCharacterizationTest.java
+Runtime path tightened:
+  - synchronous chat responses now expose data.requestId equal to the accepted
+    canonical run id
+  - ChatServiceImpl propagates AcceptedChatCommand.runId into ChatResponse
+  - async/result/trace/proposal APIs remain on the same requestId correlation
+    model
+  - response change is additive: sessionKey, answer, model, and timestamp remain
+RED evidence:
+  - mvn -q -Dtest=ChatControllerAuthTest#syncAndStreamCreateCanonicalRunsBeforeLegacyExecution test
+  - failed at test compile because ChatResponse had no requestId accessor and
+    no five-argument constructor
+Verification (2026-06-26, Asia/Shanghai):
+  - sync controller identity contract:
+    mvn -q -Dtest=ChatControllerAuthTest#syncAndStreamCreateCanonicalRunsBeforeLegacyExecution test
+    passed
+  - service lifecycle identity contract:
+    mvn -q -Dtest=ChatServiceImplLifecycleProjectionTest test
+    passed
+  - HTTP contract smoke:
+    set -a; . /Users/hanbingzheng/springclaw/.env.local; set +a;
+    mvn -q -Dtest=ChatControllerCanonicalHttpSmokeTest test
+    passed
+  - API contract gate:
+    mvn -q -Dtest=ChatControllerAuthTest,ChatServiceImplLifecycleProjectionTest,ChatMessageConsumerTest,WebhookControllerTest,ToolProposalControllerTest,RuntimeConsoleControllerTest test
+    passed
+  - review fix: public DTO shape architecture gate:
+    mvn -q -Dtest=CanonicalTransportIdentityTest test
+    passed
+  - expanded API contract gate after review fix:
+    mvn -q -Dtest=CanonicalTransportIdentityTest,TransportParityCharacterizationTest,ChatControllerAuthTest,ChatServiceImplLifecycleProjectionTest,ChatMessageConsumerTest,WebhookControllerTest,ToolProposalControllerTest,RuntimeConsoleControllerTest test
+    passed
+  - canonical HTTP/MySQL smoke:
+    set -a; . /Users/hanbingzheng/springclaw/.env.local; set +a;
+    mvn -q -Dtest=ChatControllerCanonicalHttpSmokeTest,ChatControllerSpringBootCanonicalSmokeIT,MySqlRunLifecycleStoreIT test
+    passed
+  - compile gate:
+    mvn -q -DskipTests test
+    passed
+Known limitations:
+  - SSE event payloads already include requestId in SseEventBridge but were not
+    redesigned in this phase
+  - this phase does not delete rollback/memory/lifecycle components
+Rollback order:
+  - revert the Phase 3G commit to remove the additive ChatResponse.requestId
+    field and restore the previous four-field ChatResponse constructor
+Next dependency:
+  - request review/merge, then choose between SSE event contract hardening and
+    rollback-component deletion analysis
+```

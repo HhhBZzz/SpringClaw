@@ -51,7 +51,13 @@ class WebhookRouterServiceTest {
         when(authService.resolveRoleByUserId("user-A")).thenReturn("USER");
         when(chatService.chat(any(
                 AcceptedChatCommand.class
-        ))).thenReturn(new ChatResponse("session-A", "answer", "model", 1L));
+        ))).thenReturn(new ChatResponse(
+                "req-webhook-1",
+                "session-A",
+                "answer",
+                "model",
+                1L
+        ));
         WebhookRouterService service = new WebhookRouterService(
                 adapterFactory,
                 chatService,
@@ -115,6 +121,7 @@ class WebhookRouterServiceTest {
         when(authService.resolveRoleByUserId("alice")).thenReturn("USER");
         when(chatService.chat(any(AcceptedChatCommand.class)))
                 .thenReturn(new ChatResponse(
+                        "req-webhook-2",
                         "feishu:group:g1",
                         "answer",
                         "model",
@@ -161,6 +168,7 @@ class WebhookRouterServiceTest {
         when(authService.resolveRoleByUserId("alice")).thenReturn("USER");
         when(chatService.chat(any(AcceptedChatCommand.class)))
                 .thenReturn(new ChatResponse(
+                        "req-webhook-3",
                         "feishu:group:g1",
                         "answer",
                         "model",

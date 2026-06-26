@@ -85,7 +85,16 @@ class ChatControllerAuthTest {
                 mock(LegacyRuntimeBridge.class)
         );
         when(chatService.chat(any(AcceptedChatCommand.class)))
-                .thenReturn(new ChatResponse("s1", "ok", "m1", 1L));
+                .thenAnswer(invocation -> {
+                    AcceptedChatCommand command = invocation.getArgument(0);
+                    return new ChatResponse(
+                            command.runId(),
+                            "s1",
+                            "ok",
+                            "m1",
+                            1L
+                    );
+                });
         RequestUserContextHolder.set(new RequestUserContext("user_local", "USER", System.currentTimeMillis() + 60_000));
 
         ApiResponse<ChatResponse> response = controller.send(new ChatRequest("s1", null, "你好", "api", "agent"));
@@ -108,7 +117,16 @@ class ChatControllerAuthTest {
                 .thenReturn("11111111111111111111111111111111")
                 .thenReturn("22222222222222222222222222222222");
         when(chatService.chat(any(AcceptedChatCommand.class)))
-                .thenReturn(new ChatResponse("s1", "ok", "m1", 1L));
+                .thenAnswer(invocation -> {
+                    AcceptedChatCommand command = invocation.getArgument(0);
+                    return new ChatResponse(
+                            command.runId(),
+                            "s1",
+                            "ok",
+                            "m1",
+                            1L
+                    );
+                });
         when(chatService.stream(any(AcceptedChatCommand.class)))
                 .thenReturn(new SseEmitter());
         ChatController controller = new ChatController(
@@ -127,8 +145,12 @@ class ChatControllerAuthTest {
                 System.currentTimeMillis() + 60_000
         ));
 
-        controller.send(new ChatRequest("s1", null, "你好", "api", "agent"));
+        ApiResponse<ChatResponse> syncResponse =
+                controller.send(new ChatRequest("s1", null, "你好", "api", "agent"));
         controller.stream(new ChatRequest("s1", null, "继续", "api", "agent"));
+
+        assertThat(syncResponse.getData().requestId())
+                .isEqualTo("11111111111111111111111111111111");
 
         ArgumentCaptor<RunAcceptance> acceptances =
                 ArgumentCaptor.forClass(RunAcceptance.class);
@@ -221,7 +243,13 @@ class ChatControllerAuthTest {
         ChatService chatService = mock(ChatService.class);
         LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
         when(chatService.chat(any(AcceptedChatCommand.class)))
-                .thenReturn(new ChatResponse("feishu:group:g1", "ok", "m1", 1L));
+                .thenReturn(new ChatResponse(
+                        "req-feishu-group",
+                        "feishu:group:g1",
+                        "ok",
+                        "m1",
+                        1L
+                ));
         ChatController controller = new ChatController(
                 chatService,
                 mock(ChatMessageProducer.class),
@@ -266,7 +294,16 @@ class ChatControllerAuthTest {
                 .thenReturn("44444444444444444444444444444444")
                 .thenReturn("55555555555555555555555555555555");
         when(chatService.chat(any(AcceptedChatCommand.class)))
-                .thenReturn(new ChatResponse("s1", "ok", "m1", 1L));
+                .thenAnswer(invocation -> {
+                    AcceptedChatCommand command = invocation.getArgument(0);
+                    return new ChatResponse(
+                            command.runId(),
+                            "s1",
+                            "ok",
+                            "m1",
+                            1L
+                    );
+                });
         ChatController controller = new ChatController(
                 chatService,
                 producer,

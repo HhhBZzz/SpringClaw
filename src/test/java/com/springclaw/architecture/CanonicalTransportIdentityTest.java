@@ -42,6 +42,7 @@ class CanonicalTransportIdentityTest {
                 "responseMode:String"
         );
         assertThat(recordShape(ChatResponse.class)).containsExactly(
+                "requestId:String",
                 "sessionKey:String",
                 "answer:String",
                 "model:String",
@@ -82,6 +83,7 @@ class CanonicalTransportIdentityTest {
                 repository
         );
         ChatResponse response = new ChatResponse(
+                message.requestId(),
                 "session",
                 "answer",
                 "model",

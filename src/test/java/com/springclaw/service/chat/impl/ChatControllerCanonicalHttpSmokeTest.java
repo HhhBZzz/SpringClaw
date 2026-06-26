@@ -111,6 +111,7 @@ class ChatControllerCanonicalHttpSmokeTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(0))
+                .andExpect(jsonPath("$.data.requestId").value(RUN_ID))
                 .andExpect(jsonPath("$.data.sessionKey").value("session-1"))
                 .andExpect(jsonPath("$.data.answer").value("http smoke answer"))
                 .andExpect(jsonPath("$.data.model").value("provider:model"));

@@ -5,7 +5,7 @@ import com.springclaw.common.support.ConversationScopeSupport;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
 import com.springclaw.dto.webhook.WebhookDispatchResponse;
-import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
+import com.springclaw.runtime.bridge.RunLifecycleBridge;
 import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.identity.RunIdentityFactory;
 import com.springclaw.runtime.lifecycle.RunAcceptance;
@@ -47,7 +47,7 @@ public class WebhookRouterService {
     private final ChannelOutboundDispatcher channelOutboundDispatcher;
     private final RunIdentityFactory runIdentityFactory;
     private final AuthService authService;
-    private final LegacyRuntimeBridge runtimeBridge;
+    private final RunLifecycleBridge runtimeBridge;
 
     public WebhookRouterService(ChannelAdapterFactory channelAdapterFactory,
                                 ChatService chatService,
@@ -55,7 +55,7 @@ public class WebhookRouterService {
                                 ChannelOutboundDispatcher channelOutboundDispatcher,
                                 RunIdentityFactory runIdentityFactory,
                                 AuthService authService,
-                                LegacyRuntimeBridge runtimeBridge) {
+                                RunLifecycleBridge runtimeBridge) {
         this.channelAdapterFactory = channelAdapterFactory;
         this.chatService = chatService;
         this.messageEventService = messageEventService;

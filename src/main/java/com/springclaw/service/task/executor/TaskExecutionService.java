@@ -8,7 +8,7 @@ import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.domain.entity.ScheduledTask;
 import com.springclaw.domain.entity.ScheduledTaskExecution;
 import com.springclaw.dto.chat.ChatRequest;
-import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
+import com.springclaw.runtime.bridge.RunLifecycleBridge;
 import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.lifecycle.RunAcceptance;
 import com.springclaw.service.auth.AuthService;
@@ -61,7 +61,7 @@ public class TaskExecutionService {
     private final SoulPromptService soulPromptService;
     private final ChannelOutboundDispatcher channelOutboundDispatcher;
     private final AuthService authService;
-    private final LegacyRuntimeBridge runtimeBridge;
+    private final RunLifecycleBridge runtimeBridge;
     private final ObjectMapper objectMapper;
     private final boolean feishuDeliveryEnabled;
 
@@ -77,7 +77,7 @@ public class TaskExecutionService {
                                 SoulPromptService soulPromptService,
                                 ChannelOutboundDispatcher channelOutboundDispatcher,
                                 AuthService authService,
-                                LegacyRuntimeBridge runtimeBridge,
+                                RunLifecycleBridge runtimeBridge,
                                 ObjectMapper objectMapper,
                                 @Value("${springclaw.task.delivery.feishu-enabled:true}") boolean feishuDeliveryEnabled) {
         this.scheduledTaskService = scheduledTaskService;

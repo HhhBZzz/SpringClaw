@@ -1,7 +1,7 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.common.util.TextUtils;
-import com.springclaw.runtime.bridge.LegacyLifecycleObserver;
+import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
 import com.springclaw.service.ai.AiProviderService;
@@ -43,7 +43,7 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
     private final SseEventBridge sseEventBridge;
     private final ChatResultPersister chatResultPersister;
     private final ChatGuardService chatGuardService;
-    private final LegacyLifecycleObserver lifecycleObserver;
+    private final RunLifecycleObserver lifecycleObserver;
     private final boolean modelLedStreamingEnabled;
 
     public ModelLedStreamEngine(ConversationAdvisorSupport conversationAdvisorSupport,
@@ -55,7 +55,7 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
                                 SseEventBridge sseEventBridge,
                                 ChatResultPersister chatResultPersister,
                                 ChatGuardService chatGuardService,
-                                LegacyLifecycleObserver lifecycleObserver,
+                                RunLifecycleObserver lifecycleObserver,
                                 @Value("${springclaw.chat.model-led-streaming-enabled:false}") boolean modelLedStreamingEnabled) {
         this.conversationAdvisorSupport = conversationAdvisorSupport;
         this.modelTransportGuardService = modelTransportGuardService;

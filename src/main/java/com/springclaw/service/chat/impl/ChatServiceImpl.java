@@ -153,6 +153,7 @@ public class ChatServiceImpl implements ChatService {
                 acceptedRunId
         );
         return new ChatResponse(
+                acceptedRunId,
                 result.sessionKey(),
                 result.answer(),
                 aiProviderService.activeClient().displayName(),

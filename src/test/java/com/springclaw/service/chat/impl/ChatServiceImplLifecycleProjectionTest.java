@@ -72,6 +72,7 @@ class ChatServiceImplLifecycleProjectionTest {
                 f.service.chat(new ChatRequest("s1", "u1", "你好", "api"));
 
         assertThat(response.answer()).isEqualTo("answer");
+        assertThat(response.requestId()).isEqualTo(RUN_ID);
         assertThat(store.requireByRunId(RUN_ID).status()).isEqualTo(RunStatus.DEGRADED);
     }
 

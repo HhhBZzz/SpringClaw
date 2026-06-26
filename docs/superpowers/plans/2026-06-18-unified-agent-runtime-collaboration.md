@@ -1810,3 +1810,49 @@ Next dependency:
   - request review/merge, then choose between SSE event contract hardening and
     rollback-component deletion analysis
 ```
+
+## Update: Phase 3H canonical trace read
+
+```text
+Task: Phase 3H canonical trace read
+Branch:
+  - codex/unified-runtime-phase-3h-canonical-trace-read
+Design and plan:
+  - docs/superpowers/plans/2026-06-26-unified-runtime-phase-3h-canonical-trace-read.md
+Modified paths:
+  - src/main/java/com/springclaw/service/agent/AgentRunTraceService.java
+  - src/test/java/com/springclaw/service/agent/AgentRunTraceServiceTest.java
+Runtime path tightened:
+  - /api/chat/runs/{requestId}/trace now prefers canonical RunEventStore
+    events through AgentRunTraceService.listTrace()
+  - canonical RunEvent values are projected into the existing public
+    AgentRunTraceEvent response shape
+  - legacy message_event SYSTEM/TRACE rows remain the fallback when canonical
+    events are absent
+  - user isolation is preserved: if canonical RunState exists and the requested
+    userId does not match, the trace read returns empty and does not fall back
+    to legacy message_event rows
+RED evidence:
+  - mvn -q -Dtest=AgentRunTraceServiceTest#listTracePrefersCanonicalRunEventsOverLegacyTraceRows test
+  - failed because listTrace() returned no canonical events and still relied on
+    legacy message_event rows
+Verification (2026-06-26, Asia/Shanghai):
+  - trace service gate:
+    mvn -q -Dtest=AgentRunTraceServiceTest test
+    passed
+  - focused Phase 3H gate:
+    mvn -q -Dtest=AgentRunTraceServiceTest,ChatControllerAuthTest,ChatControllerCanonicalHttpSmokeTest test
+    passed
+  - compile gate:
+    mvn -q -DskipTests test
+    passed
+Known limitations:
+  - admin replay and runtime-console runs still read legacy structured tables
+  - this phase does not delete message_event trace fallback or legacy structured
+    trace tables
+Rollback order:
+  - revert the Phase 3H commit to restore listTrace() to legacy-only reads
+Next dependency:
+  - request review/merge, then migrate runtime-console runs or admin replay in
+    another small slice
+```

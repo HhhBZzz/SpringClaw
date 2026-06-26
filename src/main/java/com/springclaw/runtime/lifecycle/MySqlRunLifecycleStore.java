@@ -56,6 +56,21 @@ public class MySqlRunLifecycleStore implements RunLifecycleStore {
     }
 
     @Override
+    public List<RunState> findRecent(int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 500));
+        return jdbcTemplate.query(
+                """
+                        SELECT state_json
+                        FROM runtime_run_state
+                        ORDER BY updated_at DESC, run_id DESC
+                        LIMIT ?
+                        """,
+                (rs, rowNum) -> read(rs.getString("state_json"), RunState.class),
+                safeLimit
+        );
+    }
+
+    @Override
     public List<RunEvent> findEventsByRunId(String runId) {
         if (runId == null || runId.isBlank()) {
             return List.of();

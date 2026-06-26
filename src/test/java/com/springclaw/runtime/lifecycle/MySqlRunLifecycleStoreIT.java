@@ -143,6 +143,25 @@ class MySqlRunLifecycleStoreIT {
                 .hasMessageContaining("conflicting");
     }
 
+    @Test
+    void listsRecentStatesByUpdatedAtDescending() {
+        store.create(
+                createdStateAt("phase3e-recent-1", T0),
+                event("phase3e-recent-1", RunEventType.RUN_CREATED, RunStatus.CREATED, T0)
+        );
+        store.create(
+                createdStateAt("phase3e-recent-2", T0.plusSeconds(1)),
+                event("phase3e-recent-2", RunEventType.RUN_CREATED, RunStatus.CREATED, T0.plusSeconds(1))
+        );
+
+        assertThat(store.findRecent(1))
+                .extracting(RunState::runId)
+                .containsExactly("phase3e-recent-2");
+        assertThat(store.findRecent(10))
+                .extracting(RunState::runId)
+                .contains("phase3e-recent-2", "phase3e-recent-1");
+    }
+
     private void cleanLifecycleRows() {
         jdbcTemplate.update("DELETE FROM runtime_run_event WHERE run_id LIKE 'phase3e%'");
         jdbcTemplate.update("DELETE FROM runtime_run_state WHERE run_id LIKE 'phase3e%'");
@@ -156,11 +175,19 @@ class MySqlRunLifecycleStoreIT {
     }
 
     private static RunState createdState(String runId, String message) {
+        return createdStateAt(runId, T0, message);
+    }
+
+    private static RunState createdStateAt(String runId, Instant at) {
+        return createdStateAt(runId, at, "hello");
+    }
+
+    private static RunState createdStateAt(String runId, Instant at, String message) {
         return new RunState(
                 runId, runId, 0, RunStatus.CREATED,
                 "session-1", "api", "user-1", claim(),
                 "USER", message, "agent",
-                T0, null, T0, null, T0.plusSeconds(300),
+                at, null, at, null, at.plusSeconds(300),
                 null, null, "", 1, "", List.of(), null, null, Map.of(), null
         );
     }

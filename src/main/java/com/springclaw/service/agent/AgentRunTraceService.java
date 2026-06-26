@@ -316,6 +316,10 @@ public class AgentRunTraceService {
 
     public List<Map<String, Object>> recentRuns(String userId, int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 50));
+        List<Map<String, Object>> canonicalRows = recentCanonicalRuns(userId, safeLimit);
+        if (!canonicalRows.isEmpty()) {
+            return canonicalRows;
+        }
         List<Map<String, Object>> rows = messageEventService.pageQuery(null, userId, "SYSTEM", "TRACE", 1, 500).getRecords().stream()
                 .map(this::toRunRow)
                 .filter(row -> !row.isEmpty())
@@ -328,6 +332,38 @@ public class AgentRunTraceService {
                 .toList();
         enrichProductMode(rows);
         return rows;
+    }
+
+    private List<Map<String, Object>> recentCanonicalRuns(String userId, int limit) {
+        if (runStateRepository == null) {
+            return List.of();
+        }
+        return runStateRepository.findRecent(500)
+                .stream()
+                .filter(state -> !StringUtils.hasText(userId)
+                        || state.userId().equalsIgnoreCase(userId.trim()))
+                .limit(limit)
+                .map(this::toCanonicalRunRow)
+                .toList();
+    }
+
+    private Map<String, Object> toCanonicalRunRow(RunState state) {
+        List<RunEvent> events = runEventStore == null
+                ? List.of()
+                : runEventStore.findEventsByRunId(state.runId());
+        RunEvent latest = events.isEmpty() ? null : events.get(events.size() - 1);
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("requestId", state.requestId());
+        row.put("sessionKey", state.sessionKey());
+        row.put("userId", state.userId());
+        row.put("lastStep", latest == null ? state.status().name() : latest.eventType().wireName());
+        row.put("status", state.status().name());
+        row.put("detail", latest == null ? "" : latest.payload());
+        row.put("timestamp", (latest == null ? state.updatedAt() : latest.timestamp()).toEpochMilli());
+        row.put("channel", state.channel());
+        row.put("responseMode", state.responseMode());
+        row.put("source", "canonical");
+        return row;
     }
 
     private Map<String, Object> toRunRow(MessageEvent event) {

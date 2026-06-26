@@ -6,6 +6,7 @@ import com.springclaw.runtime.contract.RunStatus;
 import com.springclaw.runtime.contract.RunTransitionPolicy;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -21,6 +22,16 @@ public final class InMemoryRunLifecycleStore implements RunLifecycleStore {
     @Override
     public Optional<RunState> findByRunId(String runId) {
         return Optional.ofNullable(states.get(runId));
+    }
+
+    @Override
+    public List<RunState> findRecent(int limit) {
+        int safeLimit = Math.max(1, Math.min(limit, 500));
+        return states.values().stream()
+                .sorted(Comparator.comparing(RunState::updatedAt).reversed()
+                        .thenComparing(RunState::runId, Comparator.reverseOrder()))
+                .limit(safeLimit)
+                .toList();
     }
 
     @Override

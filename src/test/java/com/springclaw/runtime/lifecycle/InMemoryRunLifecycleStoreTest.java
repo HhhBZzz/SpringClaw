@@ -39,6 +39,21 @@ class InMemoryRunLifecycleStoreTest {
     }
 
     @Test
+    void listsRecentStatesByUpdatedAtDescending() {
+        RunState first = createdState("run-recent-1", T0);
+        RunState second = createdState("run-recent-2", T1);
+        store.create(first, event("run-recent-1", RunEventType.RUN_CREATED, RunStatus.CREATED, T0));
+        store.create(second, event("run-recent-2", RunEventType.RUN_CREATED, RunStatus.CREATED, T1));
+
+        assertThat(store.findRecent(1))
+                .extracting(RunState::runId)
+                .containsExactly("run-recent-2");
+        assertThat(store.findRecent(10))
+                .extracting(RunState::runId)
+                .containsExactly("run-recent-2", "run-recent-1");
+    }
+
+    @Test
     void identicalCreationIsIdempotentButConflictingCreationFails() {
         RunState created = createdState("hello");
         store.create(created, event(RunEventType.RUN_CREATED, RunStatus.CREATED, T0));
@@ -182,6 +197,16 @@ class InMemoryRunLifecycleStoreTest {
         );
     }
 
+    private static RunState createdState(String runId, Instant at) {
+        return new RunState(
+                runId, runId, 0, RunStatus.CREATED,
+                "session-1", "api", "user-1", claim(),
+                "USER", "hello", "agent",
+                at, null, at, null, at.plusSeconds(300),
+                null, null, "", 1, "", List.of(), null, null, Map.of(), null
+        );
+    }
+
     private static RunState failedState() {
         return new RunState(
                 RUN_ID, RUN_ID, 1, RunStatus.FAILED,
@@ -197,9 +222,18 @@ class InMemoryRunLifecycleStoreTest {
             RunStatus status,
             Instant timestamp
     ) {
+        return event(RUN_ID, type, status, timestamp);
+    }
+
+    private static RunEvent.Draft event(
+            String runId,
+            RunEventType type,
+            RunStatus status,
+            Instant timestamp
+    ) {
         return new RunEvent.Draft(
-                RUN_ID, type, "lifecycle", status, timestamp, 0,
-                "springclaw.runtime.lifecycle.v1", "{}", null, RUN_ID
+                runId, type, "lifecycle", status, timestamp, 0,
+                "springclaw.runtime.lifecycle.v1", "{}", null, runId
         );
     }
 

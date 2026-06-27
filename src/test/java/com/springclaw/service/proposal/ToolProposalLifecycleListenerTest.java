@@ -1,8 +1,8 @@
 package com.springclaw.service.proposal;
 
 import com.springclaw.domain.entity.AgentSession;
-import com.springclaw.runtime.bridge.DefaultLegacyRuntimeBridge;
-import com.springclaw.runtime.bridge.LegacyLifecycleObserver;
+import com.springclaw.runtime.bridge.DefaultRunLifecycleBridge;
+import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.runtime.bridge.LegacyExecutionDecisionAdapter;
 import com.springclaw.runtime.bridge.LegacyRunContextAdapter;
 import com.springclaw.runtime.bridge.LegacyRunResultAdapter;
@@ -34,7 +34,7 @@ class ToolProposalLifecycleListenerTest {
     void onProposalCreatedCallsConfirmationRequiredAfterCommit() {
         InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
         RunCoordinator coordinator = new RunCoordinator(store);
-        LegacyLifecycleObserver observer = realObserver(coordinator);
+        RunLifecycleObserver observer = realObserver(coordinator);
         advanceToRunning(coordinator, observer);
         ToolProposalLifecycleListener listener = new ToolProposalLifecycleListener(observer);
 
@@ -48,7 +48,7 @@ class ToolProposalLifecycleListenerTest {
     void onProposalCreatedSkipsBlankRunId() {
         InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
         RunCoordinator coordinator = new RunCoordinator(store);
-        LegacyLifecycleObserver observer = realObserver(coordinator);
+        RunLifecycleObserver observer = realObserver(coordinator);
         ToolProposalLifecycleListener listener = new ToolProposalLifecycleListener(observer);
 
         listener.onProposalCreated(new ToolProposalCreatedEvent("tip-2", ""));
@@ -60,7 +60,7 @@ class ToolProposalLifecycleListenerTest {
     void onProposalRejectedCallsConfirmationRejectedAfterCommit() {
         InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
         RunCoordinator coordinator = new RunCoordinator(store);
-        LegacyLifecycleObserver observer = realObserver(coordinator);
+        RunLifecycleObserver observer = realObserver(coordinator);
         advanceToRunning(coordinator, observer);
         coordinator.waitingConfirmation(RUN_ID, "tip-3", T0.plusSeconds(4));
         ToolProposalLifecycleListener listener = new ToolProposalLifecycleListener(observer);
@@ -76,7 +76,7 @@ class ToolProposalLifecycleListenerTest {
         // throws, but the listener must not propagate it.
         InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
         RunCoordinator coordinator = new RunCoordinator(store);
-        LegacyLifecycleObserver observer = realObserver(coordinator);
+        RunLifecycleObserver observer = realObserver(coordinator);
         ToolProposalLifecycleListener listener = new ToolProposalLifecycleListener(observer);
 
         listener.onProposalCreated(new ToolProposalCreatedEvent("tip-4", "run-missing"));
@@ -84,9 +84,9 @@ class ToolProposalLifecycleListenerTest {
         assertThat(store.findByRunId("run-missing")).isEmpty();
     }
 
-    private static LegacyLifecycleObserver realObserver(RunCoordinator coordinator) {
-        return new LegacyLifecycleObserver(
-                new DefaultLegacyRuntimeBridge(coordinator),
+    private static RunLifecycleObserver realObserver(RunCoordinator coordinator) {
+        return new RunLifecycleObserver(
+                new DefaultRunLifecycleBridge(coordinator),
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),
                 new LegacyRunResultAdapter(),
@@ -94,7 +94,7 @@ class ToolProposalLifecycleListenerTest {
         );
     }
 
-    private static void advanceToRunning(RunCoordinator coordinator, LegacyLifecycleObserver observer) {
+    private static void advanceToRunning(RunCoordinator coordinator, RunLifecycleObserver observer) {
         coordinator.accept(new RunAcceptance(
                 RUN_ID, "session", "api", "user",
                 SessionAccessClaim.personal(

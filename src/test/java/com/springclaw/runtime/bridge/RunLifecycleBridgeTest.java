@@ -43,12 +43,12 @@ class RunLifecycleBridgeTest {
         ));
         bridge.contextObserved(
                 RUN_ID,
-                LegacyLifecycleObserverCanonicalModeTestContext.snapshot(RUN_ID, T0.plusSeconds(1)),
+                RunLifecycleObserverTestContext.snapshot(RUN_ID, T0.plusSeconds(1)),
                 T0.plusSeconds(1)
         );
         bridge.decisionObserved(
                 RUN_ID,
-                LegacyLifecycleObserverCanonicalModeTestContext.decision(RUN_ID, T0.plusSeconds(2)),
+                RunLifecycleObserverTestContext.decision(RUN_ID, T0.plusSeconds(2)),
                 T0.plusSeconds(2)
         );
         bridge.executionStarted(RUN_ID, "agent-runtime", T0.plusSeconds(3));

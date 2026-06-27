@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.domain.entity.ScheduledTask;
 import com.springclaw.domain.entity.ScheduledTaskExecution;
 import com.springclaw.dto.chat.ChatRequest;
-import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
+import com.springclaw.runtime.bridge.RunLifecycleBridge;
 import com.springclaw.runtime.lifecycle.RunAcceptance;
 import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.service.auth.AuthService;
@@ -50,7 +50,7 @@ class TaskExecutionServiceTest {
         SoulPromptService soulPromptService = mock(SoulPromptService.class);
         ChannelOutboundDispatcher dispatcher = mock(ChannelOutboundDispatcher.class);
         AuthService authService = mock(AuthService.class);
-        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        RunLifecycleBridge runtimeBridge = mock(RunLifecycleBridge.class);
         when(authService.resolveRoleByUserId("tester")).thenReturn("USER");
 
         TaskExecutionService service = new TaskExecutionService(
@@ -140,7 +140,7 @@ class TaskExecutionServiceTest {
         SoulPromptService soulPromptService = mock(SoulPromptService.class);
         ChannelOutboundDispatcher dispatcher = mock(ChannelOutboundDispatcher.class);
         AuthService authService = mock(AuthService.class);
-        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        RunLifecycleBridge runtimeBridge = mock(RunLifecycleBridge.class);
         when(authService.resolveRoleByUserId("tester")).thenReturn("USER");
 
         TaskExecutionService service = new TaskExecutionService(
@@ -209,7 +209,7 @@ class TaskExecutionServiceTest {
         SoulPromptService soulPromptService = mock(SoulPromptService.class);
         ChannelOutboundDispatcher dispatcher = mock(ChannelOutboundDispatcher.class);
         AuthService authService = mock(AuthService.class);
-        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        RunLifecycleBridge runtimeBridge = mock(RunLifecycleBridge.class);
         when(authService.resolveRoleByUserId("tester")).thenReturn("USER");
 
         TaskExecutionService service = new TaskExecutionService(
@@ -297,7 +297,7 @@ class TaskExecutionServiceTest {
         SkillRuntimeService skillRuntimeService = mock(SkillRuntimeService.class);
         ChatServiceImpl chatService = mock(ChatServiceImpl.class);
         AuthService authService = mock(AuthService.class);
-        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        RunLifecycleBridge runtimeBridge = mock(RunLifecycleBridge.class);
         when(authService.resolveRoleByUserId("tester")).thenReturn("USER");
         when(runtimeBridge.accepted(any(RunAcceptance.class)))
                 .thenThrow(new IllegalStateException("lifecycle unavailable"));

@@ -1,7 +1,7 @@
 package com.springclaw.service.webhook;
 
 import com.springclaw.dto.chat.ChatResponse;
-import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
+import com.springclaw.runtime.bridge.RunLifecycleBridge;
 import com.springclaw.runtime.identity.RunIdentityFactory;
 import com.springclaw.runtime.lifecycle.RunAcceptance;
 import com.springclaw.runtime.contract.SessionAccessClaim;
@@ -36,7 +36,7 @@ class WebhookRouterServiceTest {
         ChannelOutboundDispatcher dispatcher = mock(ChannelOutboundDispatcher.class);
         RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
         AuthService authService = mock(AuthService.class);
-        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        RunLifecycleBridge runtimeBridge = mock(RunLifecycleBridge.class);
         ChannelAdapter adapter = mock(ChannelAdapter.class);
         UnifiedInboundMessage inbound = new UnifiedInboundMessage(
                 "feishu",
@@ -105,7 +105,7 @@ class WebhookRouterServiceTest {
         ChatService chatService = mock(ChatService.class);
         RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
         AuthService authService = mock(AuthService.class);
-        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        RunLifecycleBridge runtimeBridge = mock(RunLifecycleBridge.class);
         ChannelAdapter adapter = mock(ChannelAdapter.class);
         when(adapterFactory.getRequired("feishu")).thenReturn(adapter);
         when(adapter.adapt(Map.of("event", "group-message"))).thenReturn(
@@ -152,7 +152,7 @@ class WebhookRouterServiceTest {
         ChatService chatService = mock(ChatService.class);
         RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
         AuthService authService = mock(AuthService.class);
-        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        RunLifecycleBridge runtimeBridge = mock(RunLifecycleBridge.class);
         ChannelAdapter adapter = mock(ChannelAdapter.class);
         when(adapterFactory.getRequired("feishu")).thenReturn(adapter);
         when(adapter.adapt(Map.of("event", "trusted-group-message"))).thenReturn(
@@ -206,7 +206,7 @@ class WebhookRouterServiceTest {
         ChatService chatService = mock(ChatService.class);
         RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
         AuthService authService = mock(AuthService.class);
-        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        RunLifecycleBridge runtimeBridge = mock(RunLifecycleBridge.class);
         ChannelAdapter adapter = mock(ChannelAdapter.class);
         when(adapterFactory.getRequired("feishu")).thenReturn(adapter);
         when(adapter.adapt(Map.of("event", "message"))).thenReturn(

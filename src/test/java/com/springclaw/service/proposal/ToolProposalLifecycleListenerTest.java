@@ -3,9 +3,9 @@ package com.springclaw.service.proposal;
 import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.runtime.bridge.DefaultRunLifecycleBridge;
 import com.springclaw.runtime.bridge.RunLifecycleObserver;
-import com.springclaw.runtime.bridge.LegacyExecutionDecisionAdapter;
-import com.springclaw.runtime.bridge.LegacyRunContextAdapter;
-import com.springclaw.runtime.bridge.LegacyRunResultAdapter;
+import com.springclaw.runtime.bridge.RunExecutionDecisionProjector;
+import com.springclaw.runtime.bridge.RollbackRunContextAdapter;
+import com.springclaw.runtime.bridge.RunResultProjector;
 import com.springclaw.runtime.contract.RunStatus;
 import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.lifecycle.InMemoryRunLifecycleStore;
@@ -87,9 +87,9 @@ class ToolProposalLifecycleListenerTest {
     private static RunLifecycleObserver realObserver(RunCoordinator coordinator) {
         return new RunLifecycleObserver(
                 new DefaultRunLifecycleBridge(coordinator),
-                new LegacyRunContextAdapter(),
-                new LegacyExecutionDecisionAdapter(),
-                new LegacyRunResultAdapter(),
+                new RollbackRunContextAdapter(),
+                new RunExecutionDecisionProjector(),
+                new RunResultProjector(),
                 false
         );
     }

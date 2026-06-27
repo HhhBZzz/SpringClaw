@@ -21,9 +21,9 @@ class RunLifecycleObserverTest {
         RunLifecycleBridge bridge = mock(RunLifecycleBridge.class);
         RunLifecycleObserver observer = new RunLifecycleObserver(
                 bridge,
-                new LegacyRunContextAdapter(),
-                new LegacyExecutionDecisionAdapter(),
-                new LegacyRunResultAdapter(),
+                new RollbackRunContextAdapter(),
+                new RunExecutionDecisionProjector(),
+                new RunResultProjector(),
                 true
         );
         ChatContext context = RunLifecycleObserverTestContext.context(RUN_ID);
@@ -39,9 +39,9 @@ class RunLifecycleObserverTest {
         RunLifecycleBridge bridge = mock(RunLifecycleBridge.class);
         RunLifecycleObserver observer = new RunLifecycleObserver(
                 bridge,
-                new LegacyRunContextAdapter(),
-                new LegacyExecutionDecisionAdapter(),
-                new LegacyRunResultAdapter(),
+                new RollbackRunContextAdapter(),
+                new RunExecutionDecisionProjector(),
+                new RunResultProjector(),
                 false
         );
         ChatContext context = RunLifecycleObserverTestContext.context(RUN_ID);

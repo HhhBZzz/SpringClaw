@@ -2100,3 +2100,64 @@ Next dependency:
   - request review/merge, then consider renaming active Legacy* projection
     adapters or planning structured trace write retirement
 ```
+
+## Update: Phase 3K2 active runtime projection adapter rename
+
+```text
+Task: Phase 3K2 active runtime projection adapter rename
+Branch:
+  - codex/unified-runtime-phase-3k2-rename-active-adapters
+Design and plan:
+  - docs/superpowers/plans/2026-06-27-unified-runtime-phase-3k2-rename-active-projection-adapters.md
+Renamed production files:
+  - src/main/java/com/springclaw/runtime/bridge/LegacyExecutionDecisionAdapter.java
+    -> src/main/java/com/springclaw/runtime/bridge/RunExecutionDecisionProjector.java
+  - src/main/java/com/springclaw/runtime/bridge/LegacyRunResultAdapter.java
+    -> src/main/java/com/springclaw/runtime/bridge/RunResultProjector.java
+  - src/main/java/com/springclaw/runtime/bridge/LegacyRunContextAdapter.java
+    -> src/main/java/com/springclaw/runtime/bridge/RollbackRunContextAdapter.java
+Modified tests:
+  - src/test/java/com/springclaw/architecture/RuntimeProjectionAdapterNameQuarantineTest.java
+  - src/test/java/com/springclaw/runtime/bridge/RuntimeProjectionAdaptersTest.java
+  - lifecycle/proposal/chat tests updated to instantiate the renamed adapters
+Runtime path tightened:
+  - active lifecycle projection adapters no longer use misleading Legacy* class
+    names
+  - decision projection is named RunExecutionDecisionProjector
+  - degraded result projection is named RunResultProjector
+  - rollback-only context projection is named RollbackRunContextAdapter
+  - rollback context observation remains active when
+    springclaw.context.snapshot.factory-enabled=false
+RED evidence:
+  - mvn -q -Dtest=RuntimeProjectionAdapterNameQuarantineTest test
+  - failed because LegacyRunResultAdapter.java and the other old adapter source
+    names still existed
+Verification (2026-06-27, Asia/Shanghai):
+  - core adapter/lifecycle gate:
+    mvn -q -Dtest=RuntimeProjectionAdapterNameQuarantineTest,RuntimeProjectionAdaptersTest,RunLifecycleObserverTest,RunLifecycleObserverIntegrationTest,RunLifecycleObserverCanonicalModeTest,CanonicalContextReadyProjectorTest test
+    passed
+  - chat/proposal/async/smoke regression:
+    mvn -q -Dtest=ChatServiceImplLifecycleProjectionTest,ToolProposalLifecycleListenerTest,ToolProposalCleanupTaskTest,ToolProposalExecutionServiceTest,AsyncChatResultStoreProjectionTest,AcceptedRunCanonicalSmokeTest,ChatControllerCanonicalHttpSmokeTest test
+    passed
+  - old active adapter name scan:
+    rg -n "LegacyExecutionDecisionAdapter|LegacyRunResultAdapter|LegacyRunContextAdapter|LegacyRuntimeAdaptersTest" src/main/java src/test/java
+    returned no output
+  - compile gate:
+    mvn -q -DskipTests test
+    passed
+  - diff whitespace gate:
+    git diff --check
+    passed
+Known limitations:
+  - LegacyContextViewAdapter and LegacyContextView remain intentionally because
+    existing engines still consume legacy-shaped context views derived from
+    canonical ContextSnapshot
+  - ContextAssembler, SemanticMemoryAdvisor, MessageChatMemoryAdvisor,
+    message_event TRACE fallback, and structured trace double-write remain
+    untouched
+Rollback order:
+  - revert the Phase 3K2 commit to restore the previous active adapter names
+Next dependency:
+  - request review/merge, then choose between Phase 3L engine context migration
+    planning and Phase 3M structured trace write retirement
+```

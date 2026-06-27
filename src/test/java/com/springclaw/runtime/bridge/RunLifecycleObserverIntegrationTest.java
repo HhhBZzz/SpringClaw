@@ -38,9 +38,9 @@ class RunLifecycleObserverIntegrationTest {
         ));
         RunLifecycleObserver observer = new RunLifecycleObserver(
                 new DefaultRunLifecycleBridge(coordinator),
-                new LegacyRunContextAdapter(),
-                new LegacyExecutionDecisionAdapter(),
-                new LegacyRunResultAdapter(),
+                new RollbackRunContextAdapter(),
+                new RunExecutionDecisionProjector(),
+                new RunResultProjector(),
                 false
         );
         ChatContext context = context();
@@ -79,9 +79,9 @@ class RunLifecycleObserverIntegrationTest {
         ));
         RunLifecycleObserver observer = new RunLifecycleObserver(
                 new DefaultRunLifecycleBridge(coordinator),
-                new LegacyRunContextAdapter(),
-                new LegacyExecutionDecisionAdapter(),
-                new LegacyRunResultAdapter(),
+                new RollbackRunContextAdapter(),
+                new RunExecutionDecisionProjector(),
+                new RunResultProjector(),
                 false
         );
 

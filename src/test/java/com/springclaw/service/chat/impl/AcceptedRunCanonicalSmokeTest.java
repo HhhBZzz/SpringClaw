@@ -5,10 +5,10 @@ import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.runtime.bridge.CanonicalContextReadyProjector;
 import com.springclaw.runtime.bridge.DefaultRunLifecycleBridge;
 import com.springclaw.runtime.bridge.LegacyContextViewAdapter;
-import com.springclaw.runtime.bridge.LegacyExecutionDecisionAdapter;
+import com.springclaw.runtime.bridge.RunExecutionDecisionProjector;
 import com.springclaw.runtime.bridge.RunLifecycleObserver;
-import com.springclaw.runtime.bridge.LegacyRunContextAdapter;
-import com.springclaw.runtime.bridge.LegacyRunResultAdapter;
+import com.springclaw.runtime.bridge.RollbackRunContextAdapter;
+import com.springclaw.runtime.bridge.RunResultProjector;
 import com.springclaw.runtime.bridge.RunStateContextSnapshotRequestFactory;
 import com.springclaw.runtime.contract.ContextSnapshotFactory;
 import com.springclaw.runtime.contract.RunEvent;
@@ -92,9 +92,9 @@ class AcceptedRunCanonicalSmokeTest {
         );
         RunLifecycleObserver observer = new RunLifecycleObserver(
                 new DefaultRunLifecycleBridge(coordinator),
-                new LegacyRunContextAdapter(),
-                new LegacyExecutionDecisionAdapter(),
-                new LegacyRunResultAdapter(),
+                new RollbackRunContextAdapter(),
+                new RunExecutionDecisionProjector(),
+                new RunResultProjector(),
                 true
         );
 

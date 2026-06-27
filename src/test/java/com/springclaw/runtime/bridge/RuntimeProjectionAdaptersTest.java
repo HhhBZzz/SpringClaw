@@ -19,7 +19,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class LegacyRuntimeAdaptersTest {
+class RuntimeProjectionAdaptersTest {
 
     private static final String RUN_ID = "0123456789abcdef0123456789abcdef";
     private static final Instant AT = Instant.parse("2026-06-22T00:00:00Z");
@@ -27,7 +27,7 @@ class LegacyRuntimeAdaptersTest {
     @Test
     void contextAdapterUsesAlreadyAssembledLegacyContextAndProducesStableHash() {
         ChatContext context = context();
-        LegacyRunContextAdapter adapter = new LegacyRunContextAdapter();
+        RollbackRunContextAdapter adapter = new RollbackRunContextAdapter();
 
         ContextSnapshot first = adapter.adapt(context, AT);
         ContextSnapshot second = adapter.adapt(context, AT);
@@ -46,7 +46,7 @@ class LegacyRuntimeAdaptersTest {
 
     @Test
     void decisionAdapterTranslatesExistingDecisionWithoutSelectingAgain() {
-        ExecutionDecision decision = new LegacyExecutionDecisionAdapter().adapt(
+        ExecutionDecision decision = new RunExecutionDecisionProjector().adapt(
                 context(),
                 AT
         );
@@ -63,8 +63,8 @@ class LegacyRuntimeAdaptersTest {
 
     @Test
     void resultAdapterNeverClaimsCanonicalCompletionWithoutVerifier() {
-        LegacyRunResultAdapter.TerminalObservation observation =
-                new LegacyRunResultAdapter().adaptDegraded(
+        RunResultProjector.TerminalObservation observation =
+                new RunResultProjector().adaptDegraded(
                         context(),
                         new ChatExecutionResult(
                                 "observe", "plan", "action", "reflect", true

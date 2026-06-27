@@ -2004,6 +2004,10 @@ Runtime path tightened:
     ContextInjection are not safe deletion targets yet
   - confirmed message_event and structured agent_run / agent_run_step /
     tool_invocation tables remain product/fallback data, not deletion targets
+  - incorporated parallel audit finding that trace legacy is still active
+    double-write in canonical mode, not only read fallback:
+    AgentRunTraceService.record() writes message_event TRACE and
+    recordStructuredTrace() writes agent_run / agent_run_step / tool_invocation
 Verification (2026-06-27, Asia/Shanghai):
   - baseline compile gate:
     mvn -q -DskipTests test
@@ -2019,6 +2023,8 @@ Key decision:
     formally retired
   - do not delete structured trace tables until canonical ToolInvocation details
     and historical data policy are resolved
+  - do not treat ShortTermMemoryRecoveryService as rollback legacy; it is a
+    default-off canonical memory recovery helper
 Known limitations:
   - this phase did not modify or remove any production class
   - audit uses static references plus current tests; runtime production metrics

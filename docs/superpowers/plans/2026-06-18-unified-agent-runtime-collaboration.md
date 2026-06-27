@@ -2212,3 +2212,66 @@ Rollback order:
 Next dependency:
   - request review/merge, then implement Memory R2 as a small code PR
 ```
+
+## Update: Memory B product differentiation roadmap amendment
+
+```text
+Task: Memory B product differentiation roadmap amendment
+Branch:
+  - codex/memory-b-product-differentiation
+Design and plan:
+  - docs/superpowers/plans/2026-06-28-memory-b-product-differentiation-roadmap.md
+  - docs/superpowers/plans/2026-06-28-memory-r1-architecture-consolidation.md
+Modified paths:
+  - docs/superpowers/plans/2026-06-28-memory-b-product-differentiation-roadmap.md
+  - docs/superpowers/plans/2026-06-28-memory-r1-architecture-consolidation.md
+  - docs/superpowers/plans/2026-06-18-unified-agent-runtime-collaboration.md
+Runtime path tightened:
+  - documentation-only roadmap amendment; no production Java, schema, or
+    configuration behavior changed
+  - keeps R1/R2/R3 as stability prerequisites
+  - inserts R3.5 before R4/R5 to fill the semantic write gap after retiring
+    direct VectorMemoryService.storeConversationTurn authority behavior
+  - defines R3.5 semantic write L1:
+    terminal async extraction from message_event into memory_record SEMANTIC
+    candidates, evidence-grounded and reviewed
+  - defines R3.5 terminal reflection L2:
+    asynchronous run-end reflection into EPISODIC candidate memory with evidence
+    refs and no main-path blocking
+  - defines R6 effectiveness redlines and consolidation L3:
+    preference recall, conflict replacement, irrelevant memory rejection,
+    selective forgetting, budget saturation, stale vector rejection, and
+    injected-memory usage trace
+Key decisions:
+  - extractor provider: coding-plan
+  - judge provider: primary
+  - fallback provider: deepseek
+  - call timing: terminal asynchronous only, after message_event and lifecycle
+    terminal state are durable; never in first-token/SSE completion path
+  - review UI: R3.5 includes backend review queue plus minimal Runtime Console
+    Memory Candidates panel; extraction must stay disabled-by-default until that
+    review surface exists
+  - R6 evaluation: deterministic JUnit fixtures become CI redlines; real
+    provider quality runs use a separate/manual or nightly harness
+Verification (2026-06-28, Asia/Shanghai):
+  - roadmap decision scan:
+    rg -n "R3\\.5|R6|coding-plan|judge-provider-id|Memory Candidates|redline|consolidation" docs/superpowers/plans/2026-06-28-memory-b-product-differentiation-roadmap.md
+    passed
+  - amended-route scan:
+    rg -n "Memory B|R3\\.5|R6" docs/superpowers/plans/2026-06-18-unified-agent-runtime-collaboration.md docs/superpowers/plans/2026-06-28-memory-r1-architecture-consolidation.md
+    passed
+  - diff whitespace gate:
+    git diff --check
+    passed
+Known limitations:
+  - this amendment does not implement extraction, reflection, review APIs, UI,
+    or evaluation harness code
+  - provider defaults are documented but not yet added to application.yml
+  - R2 still needs a corrected TDD anchor focused on default activation and
+    recovery behavior
+Rollback order:
+  - revert the Memory B documentation commit to restore the R1-only R1-R5 route
+Next dependency:
+  - request review/merge, then implement Memory R2 with the corrected default
+    activation/recovery TDD anchor; after R3, implement R3.5 before R4/R5
+```

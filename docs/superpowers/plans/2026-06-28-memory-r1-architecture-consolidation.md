@@ -134,6 +134,24 @@ Do not let failure traces automatically create unlimited active prompt rules.
 
 ## 4. Recommended implementation phases
 
+### B-target amendment
+
+After review, the primary memory objective is product differentiation: make the
+agent visibly understand the user. The R1-R5 stability route remains valid, but
+must be amended by
+[`2026-06-28-memory-b-product-differentiation-roadmap.md`](2026-06-28-memory-b-product-differentiation-roadmap.md).
+
+Updated order:
+
+```text
+R1 -> R2 -> R3 -> R3.5 -> R4 -> R5 -> R6
+```
+
+R3.5 adds semantic write L1 and terminal reflection L2. R6 adds effectiveness
+redlines and consolidation L3. Do not skip R3.5 after retiring
+`VectorMemoryService.storeConversationTurn(...)` authority behavior in R3,
+otherwise the system becomes safer but stops learning durable user preferences.
+
 ### Memory R2: Promote Redis short-term as canonical hot context
 
 **Goal:** Make canonical `MemoryCoordinator` prefer Redis short-term by default while keeping MySQL `message_event` as the recovery source.

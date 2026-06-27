@@ -2161,3 +2161,54 @@ Next dependency:
   - request review/merge, then choose between Phase 3L engine context migration
     planning and Phase 3M structured trace write retirement
 ```
+
+## Update: Memory R1 architecture consolidation audit
+
+```text
+Task: Memory R1 architecture consolidation audit
+Branch:
+  - codex/memory-r1-architecture-consolidation
+Design and plan:
+  - docs/superpowers/plans/2026-06-28-memory-r1-architecture-consolidation.md
+Modified paths:
+  - docs/superpowers/plans/2026-06-28-memory-r1-architecture-consolidation.md
+  - docs/superpowers/plans/2026-06-18-unified-agent-runtime-collaboration.md
+Runtime path tightened:
+  - documentation-only memory architecture audit; no production Java, schema,
+    or configuration behavior changed
+  - clarified that MySQL remains the authority for message_event, memory_record,
+    memory_index_outbox, audit, and Redis recovery
+  - clarified that Redis short-term memory is appropriate for hot context
+    windows but must not become the durable authority
+  - clarified that Redis VectorStore should become a derived index behind
+    memory_record rather than an independent long-term memory authority
+  - clarified that Memory Bank and Knowledge Source are project memory, not user
+    long-term memory
+  - clarified that Agent Learning must remain reviewed, status-filtered, and
+    bounded before entering runtime context
+Recommended next implementation:
+  - Memory R2: promote Redis short-term as the canonical hot context source for
+    MemoryCoordinator while keeping MySQL message_event as recovery/audit source
+  - Memory R3: unify durable long-term memory behind memory_record and treat
+    Redis VectorStore as a checked derived index
+  - Memory R4: migrate engine prompt rendering away from legacy AssembledContext
+    after typed ContextSnapshot sections are ready
+  - Memory R5: controlled Knowledge Source injection into project memory only
+Verification (2026-06-28, Asia/Shanghai):
+  - plan content scan:
+    rg -n "Memory R1|Memory R2|Redis short-term|memory_record|ContextAssembler" docs/superpowers/plans/2026-06-28-memory-r1-architecture-consolidation.md
+    passed
+  - diff whitespace gate:
+    git diff --check
+    passed
+Known limitations:
+  - R1 does not implement Redis short-term default activation
+  - R1 does not change VectorMemoryService authority behavior
+  - R1 does not migrate engine prompt rendering
+  - R1 does not remove rollback ContextAssembler or advisors
+Rollback order:
+  - revert the Memory R1 documentation commit if the architecture decision needs
+    to be rewritten
+Next dependency:
+  - request review/merge, then implement Memory R2 as a small code PR
+```

@@ -177,3 +177,12 @@ git commit -m "feat: read admin replay from canonical lifecycle"
 - Empty canonical + empty legacy still returns an empty map.
 - Controller 404 behavior remains unchanged.
 - No SSE/runtime-console/memory/schema/rollback behavior changes.
+
+## Known Limitation
+
+- Canonical replay currently projects `toolInvocations` from `RunState.toolInvocations()`.
+  The current `RunCoordinator` records tool lifecycle as `RunEvent` rows and does
+  not yet populate `RunState.toolInvocations()`, so canonical replay exposes tool
+  activity through `steps` while `toolInvocations` remains empty. Legacy SQL
+  fallback still returns structured `tool_invocation` rows when canonical state is
+  absent.

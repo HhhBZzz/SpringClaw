@@ -1969,6 +1969,10 @@ Known limitations:
   - legacy structured runtime tables are still written and retained for
     fallback compatibility
   - canonical replay is a read projection only; no schema or migration changes
+  - canonical replay projects toolInvocations from RunState.toolInvocations();
+    the current RunCoordinator records tool lifecycle as RunEvent rows but does
+    not yet populate RunState.toolInvocations(), so canonical replay exposes
+    tool activity through steps while toolInvocations remains empty
   - replay remains admin-only at the controller layer and does not add per-user
     filtering
 Rollback order:

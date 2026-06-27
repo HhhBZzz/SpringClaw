@@ -542,6 +542,9 @@ class AgentRunTraceServiceTest {
         assertThat((List<Map<String, Object>>) replay.get("steps"))
                 .extracting(step -> step.get("step_name"))
                 .containsExactly("run.created", "tool.started");
+        assertThat((List<Map<String, Object>>) replay.get("toolInvocations"))
+                .as("canonical RunState does not yet persist ToolInvocation details; steps carry tool lifecycle events")
+                .isEmpty();
         verify(jdbcTemplate, org.mockito.Mockito.never())
                 .queryForList(any(String.class), any(Object[].class));
     }

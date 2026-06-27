@@ -76,7 +76,7 @@ class CanonicalContextReadyProjectorTest {
         coordinator.contextReady(RUN_ID, snapshot, T0.plusSeconds(1));
         coordinator.decided(
                 RUN_ID,
-                new LegacyExecutionDecisionAdapter().adapt(TestChatContexts.context(RUN_ID), T0.plusSeconds(2)),
+                new RunExecutionDecisionProjector().adapt(TestChatContexts.context(RUN_ID), T0.plusSeconds(2)),
                 T0.plusSeconds(2)
         );
         CanonicalContextReadyProjector projector =

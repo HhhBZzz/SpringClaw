@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.Map;
 
 @Component
-public final class LegacyRunContextAdapter {
+public final class RollbackRunContextAdapter {
 
     public ContextSnapshot adapt(ChatContext context, Instant capturedAt) {
         AssembledContext assembled = context.assembled();

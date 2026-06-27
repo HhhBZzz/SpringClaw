@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 @Component
-public final class LegacyExecutionDecisionAdapter {
+public final class RunExecutionDecisionProjector {
 
     public ExecutionDecision adapt(ChatContext context, Instant decidedAt) {
         AgentDecision decision = context.decision() == null

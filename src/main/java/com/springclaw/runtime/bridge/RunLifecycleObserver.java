@@ -14,17 +14,17 @@ import java.util.Objects;
 public class RunLifecycleObserver {
 
     private final RunLifecycleBridge bridge;
-    private final LegacyRunContextAdapter contextAdapter;
-    private final LegacyExecutionDecisionAdapter decisionAdapter;
-    private final LegacyRunResultAdapter resultAdapter;
+    private final RollbackRunContextAdapter contextAdapter;
+    private final RunExecutionDecisionProjector decisionAdapter;
+    private final RunResultProjector resultAdapter;
     private final boolean contextSnapshotFactoryEnabled;
 
     @Autowired
     public RunLifecycleObserver(
             RunLifecycleBridge bridge,
-            LegacyRunContextAdapter contextAdapter,
-            LegacyExecutionDecisionAdapter decisionAdapter,
-            LegacyRunResultAdapter resultAdapter,
+            RollbackRunContextAdapter contextAdapter,
+            RunExecutionDecisionProjector decisionAdapter,
+            RunResultProjector resultAdapter,
             @Value("${springclaw.context.snapshot.factory-enabled:true}")
             boolean contextSnapshotFactoryEnabled
     ) {
@@ -37,9 +37,9 @@ public class RunLifecycleObserver {
 
     public RunLifecycleObserver(
             RunLifecycleBridge bridge,
-            LegacyRunContextAdapter contextAdapter,
-            LegacyExecutionDecisionAdapter decisionAdapter,
-            LegacyRunResultAdapter resultAdapter
+            RollbackRunContextAdapter contextAdapter,
+            RunExecutionDecisionProjector decisionAdapter,
+            RunResultProjector resultAdapter
     ) {
         this(bridge, contextAdapter, decisionAdapter, resultAdapter, true);
     }
@@ -114,7 +114,7 @@ public class RunLifecycleObserver {
             Instant at
     ) {
         bridge.verificationStarted(context.requestId(), at);
-        LegacyRunResultAdapter.TerminalObservation observation =
+        RunResultProjector.TerminalObservation observation =
                 resultAdapter.adaptDegraded(context, executionResult, answer, at);
         bridge.degraded(
                 context.requestId(),

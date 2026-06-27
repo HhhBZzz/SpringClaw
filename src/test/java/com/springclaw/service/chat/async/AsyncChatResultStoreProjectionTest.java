@@ -1,9 +1,9 @@
 package com.springclaw.service.chat.async;
 
 import com.springclaw.domain.entity.AgentSession;
-import com.springclaw.runtime.bridge.DefaultLegacyRuntimeBridge;
+import com.springclaw.runtime.bridge.DefaultRunLifecycleBridge;
 import com.springclaw.runtime.bridge.LegacyExecutionDecisionAdapter;
-import com.springclaw.runtime.bridge.LegacyLifecycleObserver;
+import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.runtime.bridge.LegacyRunContextAdapter;
 import com.springclaw.runtime.bridge.LegacyRunResultAdapter;
 import com.springclaw.runtime.contract.RunState;
@@ -53,7 +53,7 @@ class AsyncChatResultStoreProjectionTest {
     @Test
     void markCompletedProjectsDegradedCanonicalRunAsLegacyCompleted() {
         InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
-        LegacyLifecycleObserver observer = advanceToDegraded(store);
+        RunLifecycleObserver observer = advanceToDegraded(store);
 
         AsyncChatResultStore resultStore = newStore(store);
         AsyncChatResultPayload payload = resultStore.markCompleted(message(), "answer", "model");
@@ -112,11 +112,11 @@ class AsyncChatResultStoreProjectionTest {
                 .hasMessageContaining("canonical run not found");
     }
 
-    private static LegacyLifecycleObserver advanceToDegraded(InMemoryRunLifecycleStore store) {
+    private static RunLifecycleObserver advanceToDegraded(InMemoryRunLifecycleStore store) {
         RunCoordinator coordinator = new RunCoordinator(store);
         acceptRun(coordinator);
-        LegacyLifecycleObserver observer = new LegacyLifecycleObserver(
-                new DefaultLegacyRuntimeBridge(coordinator),
+        RunLifecycleObserver observer = new RunLifecycleObserver(
+                new DefaultRunLifecycleBridge(coordinator),
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),
                 new LegacyRunResultAdapter(),

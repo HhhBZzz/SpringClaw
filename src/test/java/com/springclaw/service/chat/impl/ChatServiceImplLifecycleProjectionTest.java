@@ -2,8 +2,8 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.dto.chat.ChatRequest;
-import com.springclaw.runtime.bridge.DefaultLegacyRuntimeBridge;
-import com.springclaw.runtime.bridge.LegacyLifecycleObserver;
+import com.springclaw.runtime.bridge.DefaultRunLifecycleBridge;
+import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.runtime.bridge.LegacyExecutionDecisionAdapter;
 import com.springclaw.runtime.bridge.LegacyRunContextAdapter;
 import com.springclaw.runtime.bridge.LegacyRunResultAdapter;
@@ -51,8 +51,8 @@ class ChatServiceImplLifecycleProjectionTest {
         InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
         RunCoordinator coordinator = new RunCoordinator(store);
         acceptRun(coordinator);
-        LegacyLifecycleObserver observer = new LegacyLifecycleObserver(
-                new DefaultLegacyRuntimeBridge(coordinator),
+        RunLifecycleObserver observer = new RunLifecycleObserver(
+                new DefaultRunLifecycleBridge(coordinator),
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),
                 new LegacyRunResultAdapter(),
@@ -81,8 +81,8 @@ class ChatServiceImplLifecycleProjectionTest {
         InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
         RunCoordinator coordinator = new RunCoordinator(store);
         acceptRun(coordinator);
-        LegacyLifecycleObserver observer = new LegacyLifecycleObserver(
-                new DefaultLegacyRuntimeBridge(coordinator),
+        RunLifecycleObserver observer = new RunLifecycleObserver(
+                new DefaultRunLifecycleBridge(coordinator),
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),
                 new LegacyRunResultAdapter(),
@@ -110,8 +110,8 @@ class ChatServiceImplLifecycleProjectionTest {
         InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
         RunCoordinator coordinator = new RunCoordinator(store);
         acceptRun(coordinator);
-        LegacyLifecycleObserver observer = new LegacyLifecycleObserver(
-                new DefaultLegacyRuntimeBridge(coordinator),
+        RunLifecycleObserver observer = new RunLifecycleObserver(
+                new DefaultRunLifecycleBridge(coordinator),
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),
                 new LegacyRunResultAdapter(),
@@ -171,7 +171,7 @@ class ChatServiceImplLifecycleProjectionTest {
         final RunIdentityFactory runIdentityFactory = mock(RunIdentityFactory.class);
         final ChatServiceImpl service;
 
-        Fixture(LegacyLifecycleObserver observer) {
+        Fixture(RunLifecycleObserver observer) {
             AgentSession session = new AgentSession();
             session.setSessionKey("s1");
             session.setUserId("u1");

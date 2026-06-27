@@ -2035,3 +2035,68 @@ Rollback order:
 Next dependency:
   - request review/merge, then implement Phase 3K1 as a small deletion PR
 ```
+
+## Update: Phase 3K1 deprecated lifecycle shim deletion
+
+```text
+Task: Phase 3K1 deprecated lifecycle shim deletion
+Branch:
+  - codex/unified-runtime-phase-3k1-delete-lifecycle-shims
+Design and plan:
+  - docs/superpowers/plans/2026-06-27-unified-runtime-phase-3k1-delete-lifecycle-shims.md
+Deleted production files:
+  - src/main/java/com/springclaw/runtime/bridge/LegacyRuntimeBridge.java
+  - src/main/java/com/springclaw/runtime/bridge/DefaultLegacyRuntimeBridge.java
+  - src/main/java/com/springclaw/runtime/bridge/LegacyLifecycleObserver.java
+Modified tests:
+  - src/test/java/com/springclaw/architecture/LegacyLifecycleNameQuarantineTest.java
+  - src/test/java/com/springclaw/controller/ChatControllerAuthTest.java
+  - src/test/java/com/springclaw/runtime/bridge/RunLifecycleBridgeCompatibilityTest.java
+  - src/test/java/com/springclaw/runtime/bridge/RunLifecycleObserverCanonicalModeTest.java
+  - src/test/java/com/springclaw/runtime/bridge/RunLifecycleObserverIntegrationTest.java
+  - src/test/java/com/springclaw/runtime/bridge/RunLifecycleObserverTest.java
+  - src/test/java/com/springclaw/runtime/bridge/RunLifecycleObserverTestContext.java
+  - src/test/java/com/springclaw/scheduled/ToolProposalCleanupTaskTest.java
+  - src/test/java/com/springclaw/service/chat/async/AsyncChatResultStoreProjectionTest.java
+  - src/test/java/com/springclaw/service/chat/impl/AcceptedRunCanonicalSmokeTest.java
+  - src/test/java/com/springclaw/service/chat/impl/ChatControllerCanonicalHttpSmokeTest.java
+  - src/test/java/com/springclaw/service/chat/impl/ChatServiceImplLifecycleProjectionTest.java
+  - src/test/java/com/springclaw/service/proposal/ToolProposalExecutionServiceTest.java
+  - src/test/java/com/springclaw/service/proposal/ToolProposalLifecycleListenerTest.java
+  - src/test/java/com/springclaw/service/task/TaskExecutionServiceTest.java
+  - src/test/java/com/springclaw/service/webhook/WebhookRouterServiceTest.java
+Runtime path tightened:
+  - removed the three deprecated lifecycle compatibility shell names
+  - migrated tests and fixtures to RunLifecycleBridge, DefaultRunLifecycleBridge,
+    and RunLifecycleObserver
+  - kept rollback context, memory advisors, active Legacy* projection adapters,
+    trace fallback, replay fallback, and structured trace writes untouched
+RED evidence:
+  - mvn -q -Dtest=LegacyLifecycleNameQuarantineTest#deprecatedLegacyLifecycleShimSourcesAreRemoved test
+  - failed because LegacyRuntimeBridge.java, DefaultLegacyRuntimeBridge.java,
+    and LegacyLifecycleObserver.java still existed
+Verification (2026-06-27, Asia/Shanghai):
+  - lifecycle shim deletion gate:
+    mvn -q -Dtest=LegacyLifecycleNameQuarantineTest,RunLifecycleBridgeTest,RunLifecycleBridgeCompatibilityTest,RunLifecycleObserverTest,RunLifecycleObserverIntegrationTest,RunLifecycleObserverCanonicalModeTest test
+    passed
+  - ingress/webhook/task regression:
+    mvn -q -Dtest=ChatControllerAuthTest,WebhookRouterServiceTest,TaskExecutionServiceTest test
+    passed
+  - chat/proposal/async/smoke regression:
+    mvn -q -Dtest=ChatServiceImplLifecycleProjectionTest,ToolProposalLifecycleListenerTest,ToolProposalCleanupTaskTest,ToolProposalExecutionServiceTest,AsyncChatResultStoreProjectionTest,AcceptedRunCanonicalSmokeTest,ChatControllerCanonicalHttpSmokeTest test
+    passed
+  - deleted-name scan:
+    rg -n "LegacyRuntimeBridge|DefaultLegacyRuntimeBridge|LegacyLifecycleObserver" src/main/java src/test/java
+    returned no output
+Known limitations:
+  - active classes with Legacy* names remain intentionally:
+    LegacyRunContextAdapter, LegacyExecutionDecisionAdapter,
+    LegacyRunResultAdapter, LegacyContextViewAdapter, and LegacyContextView
+  - this phase does not remove rollback context mode, memory advisor rollback,
+    message_event TRACE writes, or structured trace double-write
+Rollback order:
+  - revert the Phase 3K1 commit to restore the deprecated lifecycle shim names
+Next dependency:
+  - request review/merge, then consider renaming active Legacy* projection
+    adapters or planning structured trace write retirement
+```

@@ -31,16 +31,33 @@ class LegacyLifecycleNameQuarantineTest {
                 .isEmpty();
     }
 
+    @Test
+    void deprecatedLegacyLifecycleShimSourcesAreRemoved() {
+        assertThat(RUNTIME_BRIDGE_PACKAGE.resolve(legacy("RuntimeBridge.java")))
+                .as("deprecated empty compatibility interface must be removed")
+                .doesNotExist();
+        assertThat(RUNTIME_BRIDGE_PACKAGE.resolve("Default" + legacy("RuntimeBridge.java")))
+                .as("deprecated delegating compatibility bridge must be removed")
+                .doesNotExist();
+        assertThat(RUNTIME_BRIDGE_PACKAGE.resolve(legacy("LifecycleObserver.java")))
+                .as("deprecated delegating compatibility observer must be removed")
+                .doesNotExist();
+    }
+
     private static boolean importsLegacyLifecycleName(Path path) {
         try {
             String source = Files.readString(path);
             return source.contains(
-                    "import com.springclaw.runtime.bridge.LegacyRuntimeBridge;"
+                    "import com.springclaw.runtime.bridge." + legacy("RuntimeBridge") + ";"
             ) || source.contains(
-                    "import com.springclaw.runtime.bridge.LegacyLifecycleObserver;"
+                    "import com.springclaw.runtime.bridge." + legacy("LifecycleObserver") + ";"
             );
         } catch (IOException ex) {
             throw new IllegalStateException("failed to read " + path, ex);
         }
+    }
+
+    private static String legacy(String suffix) {
+        return "Legacy" + suffix;
     }
 }

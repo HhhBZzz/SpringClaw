@@ -1,10 +1,10 @@
 package com.springclaw.scheduled;
 
 import com.springclaw.runtime.bridge.LegacyExecutionDecisionAdapter;
-import com.springclaw.runtime.bridge.LegacyLifecycleObserver;
+import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.runtime.bridge.LegacyRunContextAdapter;
 import com.springclaw.runtime.bridge.LegacyRunResultAdapter;
-import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
+import com.springclaw.runtime.bridge.RunLifecycleBridge;
 import com.springclaw.service.proposal.ToolInvocationProposal;
 import com.springclaw.service.proposal.ToolInvocationProposalRepository;
 import com.springclaw.service.proposal.ToolInvocationProposalService;
@@ -26,8 +26,8 @@ class ToolProposalCleanupTaskTest {
 
     private final ToolInvocationProposalRepository repository = mock(ToolInvocationProposalRepository.class);
     private final ToolInvocationProposalService proposalService = mock(ToolInvocationProposalService.class);
-    private final LegacyRuntimeBridge lifecycleBridge = mock(LegacyRuntimeBridge.class);
-    private final LegacyLifecycleObserver lifecycleObserver = new LegacyLifecycleObserver(
+    private final RunLifecycleBridge lifecycleBridge = mock(RunLifecycleBridge.class);
+    private final RunLifecycleObserver lifecycleObserver = new RunLifecycleObserver(
             lifecycleBridge,
             new LegacyRunContextAdapter(),
             new LegacyExecutionDecisionAdapter(),

@@ -26,7 +26,7 @@ class RunLifecycleObserverTest {
                 new LegacyRunResultAdapter(),
                 true
         );
-        ChatContext context = LegacyLifecycleObserverCanonicalModeTestContext.context(RUN_ID);
+        ChatContext context = RunLifecycleObserverTestContext.context(RUN_ID);
 
         observer.contextAndDecisionObserved(context, T0);
 
@@ -44,7 +44,7 @@ class RunLifecycleObserverTest {
                 new LegacyRunResultAdapter(),
                 false
         );
-        ChatContext context = LegacyLifecycleObserverCanonicalModeTestContext.context(RUN_ID);
+        ChatContext context = RunLifecycleObserverTestContext.context(RUN_ID);
 
         observer.contextAndDecisionObserved(context, T0);
 

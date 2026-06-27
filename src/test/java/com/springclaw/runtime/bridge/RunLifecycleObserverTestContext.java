@@ -16,9 +16,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
-final class LegacyLifecycleObserverCanonicalModeTestContext {
+final class RunLifecycleObserverTestContext {
 
-    private LegacyLifecycleObserverCanonicalModeTestContext() {
+    private RunLifecycleObserverTestContext() {
     }
 
     static ChatContext context(String runId) {

@@ -25,15 +25,15 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
-class LegacyLifecycleObserverCanonicalModeTest {
+class RunLifecycleObserverCanonicalModeTest {
 
     private static final String RUN_ID = "0123456789abcdef0123456789abcdef";
     private static final Instant T0 = Instant.parse("2026-06-24T00:00:00Z");
 
     @Test
     void canonicalModeSkipsContextObservationButKeepsDecisionObservation() {
-        LegacyRuntimeBridge bridge = mock(LegacyRuntimeBridge.class);
-        LegacyLifecycleObserver observer = new LegacyLifecycleObserver(
+        RunLifecycleBridge bridge = mock(RunLifecycleBridge.class);
+        RunLifecycleObserver observer = new RunLifecycleObserver(
                 bridge,
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),
@@ -70,8 +70,8 @@ class LegacyLifecycleObserverCanonicalModeTest {
                 new LegacyRunContextAdapter().adapt(context, T0.plusSeconds(1)),
                 T0.plusSeconds(1)
         );
-        LegacyLifecycleObserver observer = new LegacyLifecycleObserver(
-                new DefaultLegacyRuntimeBridge(coordinator),
+        RunLifecycleObserver observer = new RunLifecycleObserver(
+                new DefaultRunLifecycleBridge(coordinator),
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),
                 new LegacyRunResultAdapter(),
@@ -112,8 +112,8 @@ class LegacyLifecycleObserverCanonicalModeTest {
                         new LegacyRunContextAdapter().adapt(context, T0.plusSeconds(1)),
                         T0.plusSeconds(1)
                 );
-        LegacyLifecycleObserver observer = new LegacyLifecycleObserver(
-                new DefaultLegacyRuntimeBridge(coordinator),
+        RunLifecycleObserver observer = new RunLifecycleObserver(
+                new DefaultRunLifecycleBridge(coordinator),
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),
                 new LegacyRunResultAdapter(),
@@ -133,8 +133,8 @@ class LegacyLifecycleObserverCanonicalModeTest {
 
     @Test
     void legacyModeKeepsContextAndDecisionObservation() {
-        LegacyRuntimeBridge bridge = mock(LegacyRuntimeBridge.class);
-        LegacyLifecycleObserver observer = new LegacyLifecycleObserver(
+        RunLifecycleBridge bridge = mock(RunLifecycleBridge.class);
+        RunLifecycleObserver observer = new RunLifecycleObserver(
                 bridge,
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),

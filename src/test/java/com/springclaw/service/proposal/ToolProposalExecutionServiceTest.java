@@ -1,10 +1,10 @@
 package com.springclaw.service.proposal;
 
-import com.springclaw.runtime.bridge.LegacyLifecycleObserver;
+import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.runtime.bridge.LegacyExecutionDecisionAdapter;
 import com.springclaw.runtime.bridge.LegacyRunContextAdapter;
 import com.springclaw.runtime.bridge.LegacyRunResultAdapter;
-import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
+import com.springclaw.runtime.bridge.RunLifecycleBridge;
 import com.springclaw.tool.runtime.ToolExecutionContext;
 import com.springclaw.tool.runtime.ToolExecutionContextHolder;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,15 +24,15 @@ class ToolProposalExecutionServiceTest {
 
     private ToolInvocationProposalService proposalService;
     private ToolInvoker toolInvoker;
-    private LegacyRuntimeBridge lifecycleBridge;
+    private RunLifecycleBridge lifecycleBridge;
     private ToolProposalExecutionService executor;
 
     @BeforeEach
     void setUp() {
         proposalService = Mockito.mock(ToolInvocationProposalService.class);
         toolInvoker = Mockito.mock(ToolInvoker.class);
-        lifecycleBridge = Mockito.mock(LegacyRuntimeBridge.class);
-        LegacyLifecycleObserver lifecycleObserver = new LegacyLifecycleObserver(
+        lifecycleBridge = Mockito.mock(RunLifecycleBridge.class);
+        RunLifecycleObserver lifecycleObserver = new RunLifecycleObserver(
                 lifecycleBridge,
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),

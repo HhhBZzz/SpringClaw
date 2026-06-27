@@ -1,9 +1,9 @@
 package com.springclaw.service.proposal;
 
 import com.springclaw.runtime.bridge.RunLifecycleObserver;
-import com.springclaw.runtime.bridge.LegacyExecutionDecisionAdapter;
-import com.springclaw.runtime.bridge.LegacyRunContextAdapter;
-import com.springclaw.runtime.bridge.LegacyRunResultAdapter;
+import com.springclaw.runtime.bridge.RunExecutionDecisionProjector;
+import com.springclaw.runtime.bridge.RollbackRunContextAdapter;
+import com.springclaw.runtime.bridge.RunResultProjector;
 import com.springclaw.runtime.bridge.RunLifecycleBridge;
 import com.springclaw.tool.runtime.ToolExecutionContext;
 import com.springclaw.tool.runtime.ToolExecutionContextHolder;
@@ -34,9 +34,9 @@ class ToolProposalExecutionServiceTest {
         lifecycleBridge = Mockito.mock(RunLifecycleBridge.class);
         RunLifecycleObserver lifecycleObserver = new RunLifecycleObserver(
                 lifecycleBridge,
-                new LegacyRunContextAdapter(),
-                new LegacyExecutionDecisionAdapter(),
-                new LegacyRunResultAdapter()
+                new RollbackRunContextAdapter(),
+                new RunExecutionDecisionProjector(),
+                new RunResultProjector()
         );
         executor = new ToolProposalExecutionService(proposalService, toolInvoker, lifecycleObserver);
     }

@@ -83,10 +83,11 @@ Everything else either still backs an explicit rollback path, still feeds engine
 | `SemanticMemoryAdvisor` | Still wired into `ConversationAdvisorSupport`; suppressed when canonical snapshot mode is enabled | `ConversationAdvisorSupportCanonicalModeTest`, characterization tests | Keep-for-rollback | Delete only after rollback advisor mode is removed |
 | `MessageChatMemoryAdvisor` / `ChatMemoryConfig` | Bean still exists; used only when `springclaw.chat.spring-ai-chat-memory-enabled=true` and canonical snapshot mode is false | advisor tests | Keep-for-rollback / optional product flag | Do not delete without removing Spring AI chat memory feature flag |
 | `MemoryCoordinator` / memory frame contracts | Active canonical context dependency through `ContextSnapshotFactory` | memory frame tests, Spring wiring tests | Keep | Canonical, not legacy |
+| `ShortTermMemoryRecoveryService` | Default-off recovery helper from MySQL `message_event` to Redis short-term memory | `ShortTermMemoryRecoveryServiceTest` | Keep | Not legacy rollback; belongs to canonical memory recovery |
 | `message_event` chat history | Still product data source for chat history, audit pages, provider/routing audits, webhook/task records, recovery, and legacy trace fallback | controller/service tests | Keep-as-product-data | Do not delete table/service |
-| `message_event` SYSTEM/TRACE fallback | Fallback for `listTrace()` and `recentRuns()` when canonical data is absent | `AgentRunTraceServiceTest` | Keep-for-fallback | Can be retired only after canonical lifecycle is durable by default and old rows are migrated or accepted as historical-only |
-| `agent_run` / `agent_run_step` / `tool_invocation` structured tables | Still written by `AgentRunTraceService.record*`; replay fallback; quality/product metadata; runtime schema tests | `TurnContractTest`, schema tests, trace tests | Migrate-first | Do not delete until canonical replaces structured trace writes and ToolInvocation details are populated |
-| `AgentRunTraceService.recordStructuredTrace` writes | Still writes legacy structured runtime rows | `AgentRunTraceServiceTest`, `TurnContractTest` | Migrate-first | Next major migration candidate, not a deletion-only task |
+| `message_event` SYSTEM/TRACE writes and fallback | `AgentRunTraceService.record()` still writes TRACE rows; `listTrace()` / `recentRuns()` still have fallback reads | `AgentRunTraceServiceTest` | Migrate-first | Can retire TRACE-only use after canonical trace history policy is settled; do not delete `message_event` table |
+| `agent_run` / `agent_run_step` / `tool_invocation` structured tables | Still actively double-written by `AgentRunTraceService.recordStructuredTrace`; replay fallback; quality/product metadata; runtime schema tests | `TurnContractTest`, schema tests, trace tests | Migrate-first | Do not delete until canonical replaces structured trace writes and ToolInvocation details are populated |
+| `AgentRunTraceService.recordStructuredTrace` writes | Still actively writes legacy structured runtime rows in canonical mode | `AgentRunTraceServiceTest`, `TurnContractTest` | Migrate-first | Current biggest trace cleanup target, but not a deletion-only task |
 | Admin replay legacy SQL fallback | Still fallback when canonical state absent | `TurnContractTest`, Phase 3J tests | Keep-for-fallback | Can retire after canonical durability + historical compatibility decision |
 | Runtime-console schema initializer | Owns legacy structured tables and quality/product columns | schema tests | Migrate-first | Keep until structured table writes are retired |
 
@@ -206,12 +207,22 @@ Why separate:
 
 Scope:
 
+- Stop writing duplicate TRACE rows to `message_event`.
 - Stop writing duplicate structured rows to `agent_run`, `agent_run_step`, `tool_invocation` once canonical has equivalent data.
 - First fill the known gap: `RunState.toolInvocations()` is currently not populated, so canonical replay cannot yet replace structured `tool_invocation` details.
+- Move `product_mode`, `response_mode`, `execution_mode`, and `intent` enrichment from legacy `agent_run` reads to canonical state or a canonical metadata projection.
 
 Hard boundary:
 
-- Do not remove schema/migrations until product owners accept historical data behavior.
+- Do not remove the `message_event` table; only retire TRACE usage when safe.
+- Do not remove structured runtime schemas/migrations until product owners accept historical data behavior.
+
+Why separate:
+
+- Trace legacy is not just read fallback. It is active double-write in canonical mode:
+  `AgentRunTraceService.record()` writes `message_event` TRACE, then
+  `recordStructuredTrace()` writes `agent_run`, `agent_run_step`, and
+  tool-specific `tool_invocation` rows.
 
 ### Phase 3N — Remove rollback context mode
 
@@ -247,6 +258,28 @@ Do not delete these in Phase 3K1:
 - `agent_run_step`
 - `tool_invocation`
 - `RuntimeConsoleSchemaInitializer`
+- `ShortTermMemoryRecoveryService`
+
+---
+
+## Cross-check with parallel audit
+
+Claude's independent Phase 3K audit agrees with the main decision:
+
+- first deletion slice should only remove the three deprecated lifecycle shims;
+- active `Legacy*` adapters are naming debt, not deletion targets;
+- rollback context/memory components must stay until the rollback flags are formally removed;
+- `message_event` must stay as product data even if TRACE usage is later retired.
+
+The parallel audit adds one important emphasis adopted here: trace legacy is
+still active double-write, not only read fallback. Therefore Phase 3M must first
+replace or intentionally retire:
+
+- `message_event` TRACE writes;
+- `agent_run` metadata writes;
+- `agent_run_step` writes;
+- `tool_invocation` writes;
+- legacy product-mode enrichment from `agent_run`.
 
 ---
 

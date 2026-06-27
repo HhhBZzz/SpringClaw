@@ -1982,3 +1982,50 @@ Next dependency:
   - request review/merge, then the remaining work is rollback/legacy component
     retirement planning rather than another obvious external read-path migration
 ```
+
+## Update: Phase 3K legacy / rollback retirement audit
+
+```text
+Task: Phase 3K legacy / rollback retirement audit
+Branch:
+  - codex/unified-runtime-phase-3k-legacy-retirement-audit
+Design and plan:
+  - docs/superpowers/plans/2026-06-27-unified-runtime-phase-3k-legacy-retirement-audit.md
+Modified paths:
+  - docs/superpowers/plans/2026-06-27-unified-runtime-phase-3k-legacy-retirement-audit.md
+  - docs/superpowers/plans/2026-06-18-unified-agent-runtime-collaboration.md
+Runtime path tightened:
+  - documentation-only audit; no production code changed
+  - classified remaining legacy/rollback/runtime trace components after PR #1-#13
+  - identified the first safe deletion slice as deprecated lifecycle name shims:
+    LegacyRuntimeBridge, DefaultLegacyRuntimeBridge, and LegacyLifecycleObserver
+  - confirmed ContextAssembler, SemanticMemoryAdvisor, MessageChatMemoryAdvisor,
+    LegacyRunContextAdapter, LegacyContextViewAdapter, AssembledContext, and
+    ContextInjection are not safe deletion targets yet
+  - confirmed message_event and structured agent_run / agent_run_step /
+    tool_invocation tables remain product/fallback data, not deletion targets
+Verification (2026-06-27, Asia/Shanghai):
+  - baseline compile gate:
+    mvn -q -DskipTests test
+    passed
+  - production/test reference scans:
+    rg legacy/context/memory/trace/replay patterns across src/main/java,
+    src/test/java, docs/superpowers/plans, and docs
+    completed
+Key decision:
+  - next implementation phase should be Phase 3K1: delete deprecated lifecycle
+    name shims only
+  - do not delete rollback context/memory components until rollback mode is
+    formally retired
+  - do not delete structured trace tables until canonical ToolInvocation details
+    and historical data policy are resolved
+Known limitations:
+  - this phase did not modify or remove any production class
+  - audit uses static references plus current tests; runtime production metrics
+    should still be checked before removing rollback flags in a later release
+Rollback order:
+  - revert this documentation-only commit if the audit classification needs to
+    be rewritten
+Next dependency:
+  - request review/merge, then implement Phase 3K1 as a small deletion PR
+```

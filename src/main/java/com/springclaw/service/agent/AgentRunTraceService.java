@@ -7,6 +7,7 @@ import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.runtime.contract.RunEvent;
 import com.springclaw.runtime.contract.RunState;
 import com.springclaw.runtime.contract.RunStatus;
+import com.springclaw.runtime.contract.ToolInvocation;
 import com.springclaw.runtime.lifecycle.RunEventStore;
 import com.springclaw.runtime.lifecycle.RunStateRepository;
 import com.springclaw.service.event.MessageEventService;
@@ -765,19 +766,27 @@ public class AgentRunTraceService {
     /**
      * 重放一次 turn 的完整 timeline。
      *
-     * <p>给定一个 requestId，从三张结构化表（agent_run / agent_run_step /
-     * tool_invocation）拼出完整的执行 timeline，供 admin 调试和合规审计使用。
+     * <p>给定一个 requestId，优先从 canonical lifecycle（RunState / RunEvent）
+     * 拼出完整的执行 timeline，供 admin 调试和合规审计使用。canonical 数据缺失时
+     * 回退到三张结构化表（agent_run / agent_run_step / tool_invocation）。
      *
      * <p>区别于 {@link #listTrace(String, String, int)}：那个方法从非结构化的
-     * message_event 表读 SYSTEM/TRACE 事件并做用户隔离；这个方法直接读结构化
-     * 表，返回 admin 视角下的完整数据（不做用户过滤，由调用端用 @RequireRole(ADMIN)
+     * message_event 表读 SYSTEM/TRACE 事件并做用户隔离；这个方法返回 admin 视角
+     * 下的完整数据（不做用户过滤，由调用端用 @RequireRole(ADMIN)
      * 控制访问）。
      *
      * @return agent_run 主记录 + steps（按 sequence_no 升序）+ toolInvocations
      *         （按 create_time 升序）；agent_run 不存在时返回空 Map。
      */
     public Map<String, Object> replayRun(String requestId) {
-        if (jdbcTemplate == null || !StringUtils.hasText(requestId)) {
+        if (!StringUtils.hasText(requestId)) {
+            return Map.of();
+        }
+        Map<String, Object> canonical = canonicalReplayRun(requestId);
+        if (!canonical.isEmpty()) {
+            return canonical;
+        }
+        if (jdbcTemplate == null) {
             return Map.of();
         }
         List<Map<String, Object>> runRows = jdbcTemplate.queryForList(
@@ -808,5 +817,104 @@ public class AgentRunTraceService {
         result.put("steps", steps);
         result.put("toolInvocations", toolInvocations);
         return result;
+    }
+
+    private Map<String, Object> canonicalReplayRun(String requestId) {
+        RunState state = canonicalRun(requestId);
+        if (state == null) {
+            return Map.of();
+        }
+        List<RunEvent> events = runEventStore == null
+                ? List.of()
+                : runEventStore.findEventsByRunId(state.runId());
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("request_id", state.requestId());
+        result.put("session_key", state.sessionKey());
+        result.put("channel", state.channel());
+        result.put("user_id", state.userId());
+        result.put("response_mode", state.responseMode());
+        result.put("status", state.status().name());
+        result.put("started_at", canonicalStart(state));
+        result.put("finished_at", canonicalTime(state.finishedAt()));
+        result.put("duration_ms", canonicalDurationMs(state));
+        result.put("error_message", state.failure() == null ? null : state.failure().message());
+        result.put("source", "canonical");
+        result.put("steps", canonicalReplaySteps(events));
+        result.put("toolInvocations", canonicalReplayToolInvocations(state));
+        return result;
+    }
+
+    private List<Map<String, Object>> canonicalReplaySteps(List<RunEvent> events) {
+        return events.stream()
+                .map(event -> {
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("sequence_no", event.sequence());
+                    row.put("step_name", event.eventType().wireName());
+                    row.put("step_type", event.stage());
+                    row.put("status", event.status() == null ? "" : event.status().name());
+                    row.put("detail_json", event.payload());
+                    row.put("started_at", canonicalTime(event.timestamp()));
+                    row.put("finished_at", canonicalTime(event.timestamp()));
+                    row.put("duration_ms", event.durationMs());
+                    row.put("source", "canonical");
+                    return row;
+                })
+                .toList();
+    }
+
+    private List<Map<String, Object>> canonicalReplayToolInvocations(RunState state) {
+        return state.toolInvocations().stream()
+                .map(invocation -> canonicalReplayToolInvocation(state, invocation))
+                .toList();
+    }
+
+    private Map<String, Object> canonicalReplayToolInvocation(
+            RunState state,
+            ToolInvocation invocation
+    ) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("id", invocation.invocationId());
+        row.put("tool_name", invocation.toolName());
+        row.put("skill_id", invocation.operationId());
+        row.put("toolset", invocation.toolsetId());
+        row.put("risk_level", invocation.riskLevel().name());
+        row.put("status", invocation.status().name());
+        row.put("duration_ms", canonicalToolDurationMs(invocation));
+        row.put("input_summary", invocation.canonicalArgumentsJson());
+        row.put("output_summary", invocation.outcome() == null ? null : invocation.outcome().summary());
+        row.put("error_message", canonicalToolError(invocation));
+        row.put("create_time", canonicalTime(canonicalToolCreatedAt(state, invocation)));
+        row.put("source", "canonical");
+        return row;
+    }
+
+    private Long canonicalToolDurationMs(ToolInvocation invocation) {
+        if (invocation.startedAt() == null || invocation.finishedAt() == null) {
+            return null;
+        }
+        return Duration.between(invocation.startedAt(), invocation.finishedAt()).toMillis();
+    }
+
+    private String canonicalToolError(ToolInvocation invocation) {
+        if (invocation.outcome() == null) {
+            return null;
+        }
+        return switch (invocation.status()) {
+            case FAILED, DENIED -> invocation.outcome().summary();
+            default -> null;
+        };
+    }
+
+    private java.time.Instant canonicalToolCreatedAt(
+            RunState state,
+            ToolInvocation invocation
+    ) {
+        if (invocation.startedAt() != null) {
+            return invocation.startedAt();
+        }
+        if (invocation.finishedAt() != null) {
+            return invocation.finishedAt();
+        }
+        return state.updatedAt();
     }
 }

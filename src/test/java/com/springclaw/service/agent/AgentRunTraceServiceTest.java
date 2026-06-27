@@ -515,6 +515,40 @@ class AgentRunTraceServiceTest {
                 .pageQuery(any(), any(), any(), any(), any(Integer.class), any(Integer.class));
     }
 
+    @Test
+    void replayRunPrefersCanonicalLifecycleOverLegacyStructuredTables() {
+        InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+        RunCoordinator coordinator = new RunCoordinator(store);
+        Instant acceptedAt = Instant.parse("2026-06-27T00:00:00Z");
+        coordinator.accept(new RunAcceptance(
+                "req-canonical-replay", "s1", "api", "u1",
+                claim("s1", "u1"), "USER", "hi", "agent",
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+        coordinator.toolStarted("req-canonical-replay", acceptedAt.plusSeconds(2));
+
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
+        AgentRunTraceService service = new AgentRunTraceService(
+                messageEventService, new ObjectMapper(), jdbcTemplate, null, store);
+
+        Map<String, Object> replay = service.replayRun("req-canonical-replay");
+
+        assertThat(replay)
+                .containsEntry("source", "canonical")
+                .containsEntry("request_id", "req-canonical-replay")
+                .containsEntry("session_key", "s1")
+                .containsEntry("user_id", "u1")
+                .containsEntry("status", "CREATED");
+        assertThat((List<Map<String, Object>>) replay.get("steps"))
+                .extracting(step -> step.get("step_name"))
+                .containsExactly("run.created", "tool.started");
+        assertThat((List<Map<String, Object>>) replay.get("toolInvocations"))
+                .as("canonical RunState does not yet persist ToolInvocation details; steps carry tool lifecycle events")
+                .isEmpty();
+        verify(jdbcTemplate, org.mockito.Mockito.never())
+                .queryForList(any(String.class), any(Object[].class));
+    }
+
     private static SessionAccessClaim claim(String sessionKey, String userId) {
         return SessionAccessClaim.personal(
                 SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,

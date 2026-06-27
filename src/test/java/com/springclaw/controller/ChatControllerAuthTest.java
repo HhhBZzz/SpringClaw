@@ -7,7 +7,7 @@ import com.springclaw.dto.chat.AsyncChatAcceptedResponse;
 import com.springclaw.dto.chat.ChatHistoryResponse;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
-import com.springclaw.runtime.bridge.LegacyRuntimeBridge;
+import com.springclaw.runtime.bridge.RunLifecycleBridge;
 import com.springclaw.runtime.identity.DefaultRunIdentityFactory;
 import com.springclaw.runtime.identity.RunIdentityFactory;
 import com.springclaw.runtime.lifecycle.RunAcceptance;
@@ -60,7 +60,7 @@ class ChatControllerAuthTest {
             context.registerBean(AgentRunTraceService.class, () -> mock(AgentRunTraceService.class));
             context.registerBean(RunIdentityFactory.class, () -> mock(RunIdentityFactory.class));
             context.registerBean(AuthService.class, () -> mock(AuthService.class));
-            context.registerBean(LegacyRuntimeBridge.class, () -> mock(LegacyRuntimeBridge.class));
+            context.registerBean(RunLifecycleBridge.class, () -> mock(RunLifecycleBridge.class));
             context.register(ChatController.class);
 
             context.refresh();
@@ -82,7 +82,7 @@ class ChatControllerAuthTest {
                 mock(AiProviderService.class),
                 new DefaultRunIdentityFactory(),
                 mock(AuthService.class),
-                mock(LegacyRuntimeBridge.class)
+                mock(RunLifecycleBridge.class)
         );
         when(chatService.chat(any(AcceptedChatCommand.class)))
                 .thenAnswer(invocation -> {
@@ -112,7 +112,7 @@ class ChatControllerAuthTest {
         ChatService chatService = mock(ChatService.class);
         RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
         AuthService authService = mock(AuthService.class);
-        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        RunLifecycleBridge runtimeBridge = mock(RunLifecycleBridge.class);
         when(identityFactory.create())
                 .thenReturn("11111111111111111111111111111111")
                 .thenReturn("22222222222222222222222222222222");
@@ -196,7 +196,7 @@ class ChatControllerAuthTest {
         AsyncChatResultStore resultStore = mock(AsyncChatResultStore.class);
         RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
         AuthService authService = mock(AuthService.class);
-        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        RunLifecycleBridge runtimeBridge = mock(RunLifecycleBridge.class);
         when(identityFactory.create())
                 .thenReturn("33333333333333333333333333333333");
         ChatController controller = new ChatController(
@@ -241,7 +241,7 @@ class ChatControllerAuthTest {
     @Test
     void authenticatedApiCannotMintSharedClaimFromFeishuGroupStrings() {
         ChatService chatService = mock(ChatService.class);
-        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        RunLifecycleBridge runtimeBridge = mock(RunLifecycleBridge.class);
         when(chatService.chat(any(AcceptedChatCommand.class)))
                 .thenReturn(new ChatResponse(
                         "req-feishu-group",
@@ -289,7 +289,7 @@ class ChatControllerAuthTest {
         ChatMessageProducer producer = mock(ChatMessageProducer.class);
         AsyncChatResultStore resultStore = mock(AsyncChatResultStore.class);
         RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
-        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        RunLifecycleBridge runtimeBridge = mock(RunLifecycleBridge.class);
         when(identityFactory.create())
                 .thenReturn("44444444444444444444444444444444")
                 .thenReturn("55555555555555555555555555555555");
@@ -353,7 +353,7 @@ class ChatControllerAuthTest {
         ChatMessageProducer producer = mock(ChatMessageProducer.class);
         AsyncChatResultStore resultStore = mock(AsyncChatResultStore.class);
         RunIdentityFactory identityFactory = mock(RunIdentityFactory.class);
-        LegacyRuntimeBridge runtimeBridge = mock(LegacyRuntimeBridge.class);
+        RunLifecycleBridge runtimeBridge = mock(RunLifecycleBridge.class);
         when(identityFactory.create()).thenReturn("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         when(runtimeBridge.accepted(any(RunAcceptance.class)))
                 .thenThrow(new IllegalStateException("lifecycle unavailable"));
@@ -396,7 +396,7 @@ class ChatControllerAuthTest {
                 mock(AiProviderService.class),
                 new DefaultRunIdentityFactory(),
                 mock(AuthService.class),
-                mock(LegacyRuntimeBridge.class)
+                mock(RunLifecycleBridge.class)
         );
         RequestUserContextHolder.set(new RequestUserContext("user_local", "USER", System.currentTimeMillis() + 60_000));
 
@@ -417,7 +417,7 @@ class ChatControllerAuthTest {
                 mock(AiProviderService.class),
                 new DefaultRunIdentityFactory(),
                 mock(AuthService.class),
-                mock(LegacyRuntimeBridge.class)
+                mock(RunLifecycleBridge.class)
         );
         RequestUserContextHolder.set(new RequestUserContext("user_local", "USER", System.currentTimeMillis() + 60_000));
         when(messageEventService.countSessionEvents(eq("s1"), eq(null), eq(null), eq("CHAT")))
@@ -452,7 +452,7 @@ class ChatControllerAuthTest {
                 mock(AiProviderService.class),
                 new DefaultRunIdentityFactory(),
                 mock(AuthService.class),
-                mock(LegacyRuntimeBridge.class)
+                mock(RunLifecycleBridge.class)
         );
         RequestUserContextHolder.set(new RequestUserContext("user_local", "USER", System.currentTimeMillis() + 60_000));
         when(messageEventService.countSessionEvents(eq("s1"), eq(null), eq(null), eq("CHAT")))

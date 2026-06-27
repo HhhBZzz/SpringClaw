@@ -22,7 +22,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class LegacyLifecycleObserverTest {
+class RunLifecycleObserverIntegrationTest {
 
     private static final String RUN_ID = "0123456789abcdef0123456789abcdef";
     private static final Instant T0 = Instant.parse("2026-06-22T00:00:00Z");
@@ -36,8 +36,8 @@ class LegacyLifecycleObserverTest {
                 claim(), "USER", "original",
                 "agent", T0, T0.plusSeconds(300)
         ));
-        LegacyLifecycleObserver observer = new LegacyLifecycleObserver(
-                new DefaultLegacyRuntimeBridge(coordinator),
+        RunLifecycleObserver observer = new RunLifecycleObserver(
+                new DefaultRunLifecycleBridge(coordinator),
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),
                 new LegacyRunResultAdapter(),
@@ -77,8 +77,8 @@ class LegacyLifecycleObserverTest {
                 claim(), "USER", "original",
                 "agent", T0, T0.plusSeconds(300)
         ));
-        LegacyLifecycleObserver observer = new LegacyLifecycleObserver(
-                new DefaultLegacyRuntimeBridge(coordinator),
+        RunLifecycleObserver observer = new RunLifecycleObserver(
+                new DefaultRunLifecycleBridge(coordinator),
                 new LegacyRunContextAdapter(),
                 new LegacyExecutionDecisionAdapter(),
                 new LegacyRunResultAdapter(),

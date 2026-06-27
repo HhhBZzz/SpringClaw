@@ -2,10 +2,10 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.controller.ChatController;
 import com.springclaw.runtime.bridge.CanonicalContextReadyProjector;
-import com.springclaw.runtime.bridge.DefaultLegacyRuntimeBridge;
+import com.springclaw.runtime.bridge.DefaultRunLifecycleBridge;
 import com.springclaw.runtime.bridge.LegacyContextViewAdapter;
 import com.springclaw.runtime.bridge.LegacyExecutionDecisionAdapter;
-import com.springclaw.runtime.bridge.LegacyLifecycleObserver;
+import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.runtime.bridge.LegacyRunContextAdapter;
 import com.springclaw.runtime.bridge.LegacyRunResultAdapter;
 import com.springclaw.runtime.bridge.RunStateContextSnapshotRequestFactory;
@@ -186,8 +186,8 @@ class ChatControllerCanonicalHttpSmokeTest {
                     authService,
                     memoryCoordinator
             );
-            LegacyLifecycleObserver observer = new LegacyLifecycleObserver(
-                    new DefaultLegacyRuntimeBridge(coordinator),
+            RunLifecycleObserver observer = new RunLifecycleObserver(
+                    new DefaultRunLifecycleBridge(coordinator),
                     new LegacyRunContextAdapter(),
                     new LegacyExecutionDecisionAdapter(),
                     new LegacyRunResultAdapter(),
@@ -227,7 +227,7 @@ class ChatControllerCanonicalHttpSmokeTest {
                     mock(AgentRunTraceService.class),
                     identityFactory,
                     authService,
-                    new DefaultLegacyRuntimeBridge(coordinator)
+                    new DefaultRunLifecycleBridge(coordinator)
             );
         }
 

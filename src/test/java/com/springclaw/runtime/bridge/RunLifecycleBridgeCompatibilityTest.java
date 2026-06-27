@@ -16,14 +16,14 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class LegacyRuntimeBridgeTest {
+class RunLifecycleBridgeCompatibilityTest {
 
     private static final String RUN_ID = "0123456789abcdef0123456789abcdef";
 
     @Test
     void acceptedDelegatesToCanonicalCoordinator() {
         InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
-        LegacyRuntimeBridge bridge = new DefaultLegacyRuntimeBridge(
+        RunLifecycleBridge bridge = new DefaultRunLifecycleBridge(
                 new RunCoordinator(store)
         );
 
@@ -45,11 +45,11 @@ class LegacyRuntimeBridgeTest {
 
     @Test
     void bridgeIsNotRuntimeStrategyAndHasNoLegacyExecutionDependencies() {
-        assertThat(RuntimeStrategy.class.isAssignableFrom(LegacyRuntimeBridge.class))
+        assertThat(RuntimeStrategy.class.isAssignableFrom(RunLifecycleBridge.class))
                 .isFalse();
 
-        Set<String> signatureTypes = Arrays.stream(LegacyRuntimeBridge.class.getMethods())
-                .flatMap(LegacyRuntimeBridgeTest::signatureTypes)
+        Set<String> signatureTypes = Arrays.stream(RunLifecycleBridge.class.getMethods())
+                .flatMap(RunLifecycleBridgeCompatibilityTest::signatureTypes)
                 .map(Class::getName)
                 .collect(Collectors.toSet());
 

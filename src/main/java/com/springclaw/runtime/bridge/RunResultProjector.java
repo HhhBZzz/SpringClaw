@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 @Component
-public final class LegacyRunResultAdapter {
+public final class RunResultProjector {
 
     public TerminalObservation adaptDegraded(
             ChatContext context,

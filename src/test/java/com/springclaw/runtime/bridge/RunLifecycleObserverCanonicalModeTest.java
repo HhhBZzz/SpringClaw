@@ -35,9 +35,9 @@ class RunLifecycleObserverCanonicalModeTest {
         RunLifecycleBridge bridge = mock(RunLifecycleBridge.class);
         RunLifecycleObserver observer = new RunLifecycleObserver(
                 bridge,
-                new LegacyRunContextAdapter(),
-                new LegacyExecutionDecisionAdapter(),
-                new LegacyRunResultAdapter(),
+                new RollbackRunContextAdapter(),
+                new RunExecutionDecisionProjector(),
+                new RunResultProjector(),
                 true
         );
         ChatContext context = context(RUN_ID);
@@ -67,14 +67,14 @@ class RunLifecycleObserverCanonicalModeTest {
         ChatContext context = context(RUN_ID);
         coordinator.contextReady(
                 RUN_ID,
-                new LegacyRunContextAdapter().adapt(context, T0.plusSeconds(1)),
+                new RollbackRunContextAdapter().adapt(context, T0.plusSeconds(1)),
                 T0.plusSeconds(1)
         );
         RunLifecycleObserver observer = new RunLifecycleObserver(
                 new DefaultRunLifecycleBridge(coordinator),
-                new LegacyRunContextAdapter(),
-                new LegacyExecutionDecisionAdapter(),
-                new LegacyRunResultAdapter(),
+                new RollbackRunContextAdapter(),
+                new RunExecutionDecisionProjector(),
+                new RunResultProjector(),
                 true
         );
 
@@ -109,14 +109,14 @@ class RunLifecycleObserverCanonicalModeTest {
         new CanonicalContextReadyProjector(coordinator, store)
                 .project(
                         RUN_ID,
-                        new LegacyRunContextAdapter().adapt(context, T0.plusSeconds(1)),
+                        new RollbackRunContextAdapter().adapt(context, T0.plusSeconds(1)),
                         T0.plusSeconds(1)
                 );
         RunLifecycleObserver observer = new RunLifecycleObserver(
                 new DefaultRunLifecycleBridge(coordinator),
-                new LegacyRunContextAdapter(),
-                new LegacyExecutionDecisionAdapter(),
-                new LegacyRunResultAdapter(),
+                new RollbackRunContextAdapter(),
+                new RunExecutionDecisionProjector(),
+                new RunResultProjector(),
                 true
         );
 
@@ -136,9 +136,9 @@ class RunLifecycleObserverCanonicalModeTest {
         RunLifecycleBridge bridge = mock(RunLifecycleBridge.class);
         RunLifecycleObserver observer = new RunLifecycleObserver(
                 bridge,
-                new LegacyRunContextAdapter(),
-                new LegacyExecutionDecisionAdapter(),
-                new LegacyRunResultAdapter(),
+                new RollbackRunContextAdapter(),
+                new RunExecutionDecisionProjector(),
+                new RunResultProjector(),
                 false
         );
         ChatContext context = context(RUN_ID);

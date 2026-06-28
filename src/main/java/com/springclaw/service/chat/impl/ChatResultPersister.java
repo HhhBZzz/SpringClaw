@@ -4,7 +4,6 @@ import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.event.MessageEventReceipt;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.event.MessageEventWrite;
-import com.springclaw.service.memory.MemoryService;
 import com.springclaw.service.memory.ShortTermMemoryWriter;
 import com.springclaw.service.prompt.SoulPromptService;
 import com.springclaw.service.session.AgentSessionService;
@@ -22,18 +21,15 @@ public class ChatResultPersister {
     private static final Logger log = LoggerFactory.getLogger(ChatResultPersister.class);
 
     private final AgentSessionService agentSessionService;
-    private final MemoryService memoryService;
     private final MessageEventService messageEventService;
     private final SoulPromptService soulPromptService;
     private final ShortTermMemoryWriter shortTermMemoryWriter;
 
     public ChatResultPersister(AgentSessionService agentSessionService,
-                               MemoryService memoryService,
                                MessageEventService messageEventService,
                                SoulPromptService soulPromptService,
                                ShortTermMemoryWriter shortTermMemoryWriter) {
         this.agentSessionService = agentSessionService;
-        this.memoryService = memoryService;
         this.messageEventService = messageEventService;
         this.soulPromptService = soulPromptService;
         this.shortTermMemoryWriter = shortTermMemoryWriter;
@@ -62,13 +58,6 @@ public class ChatResultPersister {
                 context.effectiveUserMessage(),
                 assistantMessage,
                 soulPromptService.soulVersion()
-        );
-        memoryService.storeConversationTurn(
-                sessionKey,
-                channel,
-                userId,
-                context.effectiveUserMessage(),
-                normalizeAssistantForMemory(assistantMessage)
         );
         String assistantForMemory = normalizeAssistantForMemory(assistantMessage);
         MessageEventReceipt userReceipt = messageEventService.append(new MessageEventWrite(

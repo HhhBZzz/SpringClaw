@@ -4,7 +4,6 @@ import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.service.event.MessageEventReceipt;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.event.MessageEventWrite;
-import com.springclaw.service.memory.MemoryService;
 import com.springclaw.service.memory.ShortTermMemoryWriter;
 import com.springclaw.service.prompt.SoulPromptService;
 import com.springclaw.service.session.AgentSessionService;
@@ -26,14 +25,13 @@ import static org.mockito.Mockito.when;
  * Phase 3A1 Task 5：ChatResultPersister 按 intent 区分终端写与挂起写。
  *
  * 守住不变量：
- *   - TERMINAL_RESULT：写 user/assistant 消息、记忆 turn、事件流；
+ *   - TERMINAL_RESULT：写 user/assistant 消息、事件流和 Redis short-term shadow；
  *   - CONFIRMATION_SUSPENSION：只写 user 消息 + chat:&lt;runId&gt;:user 事件，
- *     不调 MemoryService.storeConversationTurn，不写终端 assistant 事件。
+ *     不写终端 assistant 事件。
  */
 class ChatResultPersisterTest {
 
     private final AgentSessionService agentSessionService = mock(AgentSessionService.class);
-    private final MemoryService memoryService = mock(MemoryService.class);
     private final MessageEventService messageEventService = mock(MessageEventService.class);
     private final SoulPromptService soulPromptService = mock(SoulPromptService.class);
     private final ShortTermMemoryWriter shortTermMemoryWriter =
@@ -42,8 +40,8 @@ class ChatResultPersisterTest {
     private ChatResultPersister persister() {
         when(soulPromptService.soulVersion()).thenReturn("v1");
         return new ChatResultPersister(
-                agentSessionService, memoryService, messageEventService,
-                soulPromptService, shortTermMemoryWriter);
+                agentSessionService, messageEventService, soulPromptService,
+                shortTermMemoryWriter);
     }
 
     private static ChatContext context() {
@@ -57,7 +55,7 @@ class ChatResultPersisterTest {
     }
 
     @Test
-    void terminalResultWritesConversationMemoryAndEvents() {
+    void terminalResultDoesNotWriteDirectSemanticTurnMemory() {
         ChatResultPersister persister = persister();
         ChatContext context = context();
         ChatExecutionResult result = new ChatExecutionResult(
@@ -67,8 +65,6 @@ class ChatResultPersisterTest {
 
         verify(agentSessionService).persistConversation(
                 eq(context.session()), eq("你好"), eq("answer"), eq("v1"));
-        verify(memoryService).storeConversationTurn(
-                "s1", "api", "u1", "你好", "answer");
     }
 
     @Test
@@ -126,8 +122,6 @@ class ChatResultPersisterTest {
         persister.persist(
                 context, "请确认", result, ChatPersistenceIntent.CONFIRMATION_SUSPENSION);
 
-        verify(memoryService, never()).storeConversationTurn(
-                any(), any(), any(), any(), any());
         verify(agentSessionService).persistUserMessage(
                 eq(context.session()), eq(context.effectiveUserMessage()), anyString());
         verify(messageEventService).append(argThat((MessageEventWrite write) ->

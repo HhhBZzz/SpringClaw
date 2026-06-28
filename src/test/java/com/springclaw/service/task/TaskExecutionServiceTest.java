@@ -10,7 +10,6 @@ import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.chat.impl.ChatServiceImpl;
 import com.springclaw.service.event.MessageEventService;
-import com.springclaw.service.memory.MemoryService;
 import com.springclaw.service.prompt.SoulPromptService;
 import com.springclaw.service.session.AgentSessionService;
 import com.springclaw.service.skill.SkillService;
@@ -45,7 +44,6 @@ class TaskExecutionServiceTest {
         SkillService skillService = mock(SkillService.class);
         ChatServiceImpl chatService = mock(ChatServiceImpl.class);
         AgentSessionService agentSessionService = mock(AgentSessionService.class);
-        MemoryService memoryService = mock(MemoryService.class);
         MessageEventService messageEventService = mock(MessageEventService.class);
         SoulPromptService soulPromptService = mock(SoulPromptService.class);
         ChannelOutboundDispatcher dispatcher = mock(ChannelOutboundDispatcher.class);
@@ -61,7 +59,6 @@ class TaskExecutionServiceTest {
                 skillService,
                 chatService,
                 agentSessionService,
-                memoryService,
                 messageEventService,
                 soulPromptService,
                 dispatcher,
@@ -135,7 +132,6 @@ class TaskExecutionServiceTest {
         SkillService skillService = mock(SkillService.class);
         ChatServiceImpl chatService = mock(ChatServiceImpl.class);
         AgentSessionService agentSessionService = mock(AgentSessionService.class);
-        MemoryService memoryService = mock(MemoryService.class);
         MessageEventService messageEventService = mock(MessageEventService.class);
         SoulPromptService soulPromptService = mock(SoulPromptService.class);
         ChannelOutboundDispatcher dispatcher = mock(ChannelOutboundDispatcher.class);
@@ -151,7 +147,6 @@ class TaskExecutionServiceTest {
                 skillService,
                 chatService,
                 agentSessionService,
-                memoryService,
                 messageEventService,
                 soulPromptService,
                 dispatcher,
@@ -197,6 +192,84 @@ class TaskExecutionServiceTest {
     }
 
     @Test
+    void persistedSkillTaskDoesNotWriteDirectSemanticTurnMemory() {
+        ScheduledTaskService scheduledTaskService = mock(ScheduledTaskService.class);
+        ScheduledTaskExecutionService executionService = mock(ScheduledTaskExecutionService.class);
+        TaskScheduleSupport scheduleSupport = new TaskScheduleSupport();
+        SkillRuntimeService skillRuntimeService = mock(SkillRuntimeService.class);
+        SkillService skillService = mock(SkillService.class);
+        ChatServiceImpl chatService = mock(ChatServiceImpl.class);
+        AgentSessionService agentSessionService = mock(AgentSessionService.class);
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        SoulPromptService soulPromptService = mock(SoulPromptService.class);
+        ChannelOutboundDispatcher dispatcher = mock(ChannelOutboundDispatcher.class);
+        AuthService authService = mock(AuthService.class);
+        RunLifecycleBridge runtimeBridge = mock(RunLifecycleBridge.class);
+        when(authService.resolveRoleByUserId("tester")).thenReturn("USER");
+        when(soulPromptService.soulVersion()).thenReturn("v1");
+
+        TaskExecutionService service = new TaskExecutionService(
+                scheduledTaskService,
+                executionService,
+                scheduleSupport,
+                skillRuntimeService,
+                skillService,
+                chatService,
+                agentSessionService,
+                messageEventService,
+                soulPromptService,
+                dispatcher,
+                authService,
+                runtimeBridge,
+                new ObjectMapper(),
+                true
+        );
+
+        ScheduledTask task = new ScheduledTask();
+        task.setTaskId("task_persisted_skill");
+        task.setOwnerUserId("tester");
+        task.setName("持久化 Skill 任务");
+        task.setChannel("api");
+        task.setTargetType("skill");
+        task.setTargetRef("repo_inspector");
+        task.setInputPayload("分析项目结构");
+        task.setPersistToSession(1);
+        task.setNextRunAt(LocalDateTime.now().plusMinutes(10));
+
+        when(skillService.resolveAllowedToolPacks("api", "tester")).thenReturn(Set.of("script"));
+        when(executionService.start(anyString(), anyString(), anyString())).thenAnswer(invocation -> {
+            var record = new ScheduledTaskExecution();
+            record.setExecutionId("exec_persisted_skill");
+            return record;
+        });
+        when(skillRuntimeService.executeBySkillId("repo_inspector", "分析项目结构", Set.of("script")))
+                .thenReturn("结构分析完成");
+        com.springclaw.domain.entity.AgentSession session =
+                new com.springclaw.domain.entity.AgentSession();
+        session.setSessionKey("task:task_persisted_skill");
+        session.setChannel("api");
+        session.setUserId("tester");
+        when(agentSessionService.getOrCreate(
+                "task:task_persisted_skill", "api", "tester"
+        )).thenReturn(session);
+
+        TaskExecutionOutcome outcome = service.runTask(task, "MANUAL");
+
+        assertThat(outcome.resultPayload()).isEqualTo("结构分析完成");
+        verify(agentSessionService).persistConversation(
+                session, "分析项目结构", "结构分析完成", "v1");
+        verify(messageEventService).recordTurn(
+                "task:task_persisted_skill",
+                "api",
+                "tester",
+                "分析项目结构",
+                "结构分析完成",
+                "TASK",
+                outcome.requestId()
+        );
+    }
+
+    @Test
     void shouldExecuteAgentTaskThroughChatService() {
         ScheduledTaskService scheduledTaskService = mock(ScheduledTaskService.class);
         ScheduledTaskExecutionService executionService = mock(ScheduledTaskExecutionService.class);
@@ -204,7 +277,6 @@ class TaskExecutionServiceTest {
         SkillService skillService = mock(SkillService.class);
         ChatServiceImpl chatService = mock(ChatServiceImpl.class);
         AgentSessionService agentSessionService = mock(AgentSessionService.class);
-        MemoryService memoryService = mock(MemoryService.class);
         MessageEventService messageEventService = mock(MessageEventService.class);
         SoulPromptService soulPromptService = mock(SoulPromptService.class);
         ChannelOutboundDispatcher dispatcher = mock(ChannelOutboundDispatcher.class);
@@ -220,7 +292,6 @@ class TaskExecutionServiceTest {
                 skillService,
                 chatService,
                 agentSessionService,
-                memoryService,
                 messageEventService,
                 soulPromptService,
                 dispatcher,
@@ -309,7 +380,6 @@ class TaskExecutionServiceTest {
                 mock(SkillService.class),
                 chatService,
                 mock(AgentSessionService.class),
-                mock(MemoryService.class),
                 mock(MessageEventService.class),
                 mock(SoulPromptService.class),
                 mock(ChannelOutboundDispatcher.class),

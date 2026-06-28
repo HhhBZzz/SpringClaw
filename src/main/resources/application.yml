@@ -251,7 +251,7 @@ springclaw:
   memory:
     core:
       enabled: ${SPRINGCLAW_MEMORY_CORE_ENABLED:false}
-      short-term-shadow-enabled: ${SPRINGCLAW_MEMORY_SHORT_TERM_SHADOW_ENABLED:false}
+      short-term-shadow-enabled: ${SPRINGCLAW_MEMORY_SHORT_TERM_SHADOW_ENABLED:true}
       index-worker-enabled: ${SPRINGCLAW_MEMORY_INDEX_WORKER_ENABLED:false}
       schema-auto-init: ${SPRINGCLAW_MEMORY_SCHEMA_AUTO_INIT:true}
       short-term-max-messages: ${SPRINGCLAW_MEMORY_SHORT_TERM_MAX_MESSAGES:40}

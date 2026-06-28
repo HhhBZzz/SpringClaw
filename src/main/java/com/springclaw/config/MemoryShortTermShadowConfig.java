@@ -12,7 +12,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Disabled-by-default short-term memory shadow wiring.
+ * Default-on Redis short-term memory wiring when Redis integration is enabled.
+ *
+ * <p>The historical {@code short-term-shadow-enabled} property is retained as
+ * an explicit rollback switch: set it to {@code false} to disable Redis
+ * short-term hot context while keeping MySQL {@code message_event} as the
+ * recovery source.
  */
 @Configuration(proxyBeanMethods = false)
 public class MemoryShortTermShadowConfig {
@@ -20,9 +25,15 @@ public class MemoryShortTermShadowConfig {
     @Bean
     @ConditionalOnMissingBean(ShortTermMemoryStore.class)
     @ConditionalOnProperty(
+            prefix = "springclaw.redisson",
+            name = "enabled",
+            havingValue = "true"
+    )
+    @ConditionalOnProperty(
             prefix = "springclaw.memory.core",
             name = "short-term-shadow-enabled",
-            havingValue = "true"
+            havingValue = "true",
+            matchIfMissing = true
     )
     public ShortTermMemoryStore redisShortTermMemoryStore(
             RedissonClient redissonClient,
@@ -37,9 +48,15 @@ public class MemoryShortTermShadowConfig {
     @Bean
     @ConditionalOnMissingBean(ShortTermMemoryRecoveryService.class)
     @ConditionalOnProperty(
+            prefix = "springclaw.redisson",
+            name = "enabled",
+            havingValue = "true"
+    )
+    @ConditionalOnProperty(
             prefix = "springclaw.memory.core",
             name = "short-term-shadow-enabled",
-            havingValue = "true"
+            havingValue = "true",
+            matchIfMissing = true
     )
     public ShortTermMemoryRecoveryService shortTermMemoryRecoveryService(
             RedissonClient redissonClient,

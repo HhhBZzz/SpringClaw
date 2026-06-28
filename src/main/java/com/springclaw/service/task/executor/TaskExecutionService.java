@@ -14,7 +14,6 @@ import com.springclaw.runtime.lifecycle.RunAcceptance;
 import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.chat.impl.ChatServiceImpl;
 import com.springclaw.service.event.MessageEventService;
-import com.springclaw.service.memory.MemoryService;
 import com.springclaw.service.prompt.SoulPromptService;
 import com.springclaw.service.session.AgentSessionService;
 import com.springclaw.service.skill.SkillService;
@@ -56,7 +55,6 @@ public class TaskExecutionService {
     private final SkillService skillService;
     private final ChatServiceImpl chatService;
     private final AgentSessionService agentSessionService;
-    private final MemoryService memoryService;
     private final MessageEventService messageEventService;
     private final SoulPromptService soulPromptService;
     private final ChannelOutboundDispatcher channelOutboundDispatcher;
@@ -72,7 +70,6 @@ public class TaskExecutionService {
                                 SkillService skillService,
                                 ChatServiceImpl chatService,
                                 AgentSessionService agentSessionService,
-                                MemoryService memoryService,
                                 MessageEventService messageEventService,
                                 SoulPromptService soulPromptService,
                                 ChannelOutboundDispatcher channelOutboundDispatcher,
@@ -87,7 +84,6 @@ public class TaskExecutionService {
         this.skillService = skillService;
         this.chatService = chatService;
         this.agentSessionService = agentSessionService;
-        this.memoryService = memoryService;
         this.messageEventService = messageEventService;
         this.soulPromptService = soulPromptService;
         this.channelOutboundDispatcher = channelOutboundDispatcher;
@@ -234,7 +230,6 @@ public class TaskExecutionService {
     private void persistTaskTurn(ScheduledTask task, String requestId, String sessionKey, String userMessage, String assistantMessage) {
         AgentSession session = agentSessionService.getOrCreate(sessionKey, task.getChannel(), task.getOwnerUserId());
         agentSessionService.persistConversation(session, userMessage, assistantMessage, soulPromptService.soulVersion());
-        memoryService.storeConversationTurn(sessionKey, task.getChannel(), task.getOwnerUserId(), userMessage, assistantMessage);
         messageEventService.recordTurn(sessionKey, task.getChannel(), task.getOwnerUserId(), userMessage, assistantMessage, "TASK", requestId);
         messageEventService.recordSingle(
                 sessionKey,

@@ -43,6 +43,11 @@ public interface MemoryRecordStore {
             int limit
     );
 
+    List<MemoryRecordVersion> findByStatus(
+            MemoryStatus status,
+            int limit
+    );
+
     default List<MemoryRecordVersion> findActiveAfterRecordId(
             long afterRecordId,
             int limit

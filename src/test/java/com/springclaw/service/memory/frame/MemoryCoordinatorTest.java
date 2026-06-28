@@ -93,6 +93,31 @@ class MemoryCoordinatorTest {
     }
 
     @Test
+    void includesCrossSessionUserMemoriesForPersonalScope() {
+        MemoryScope currentSession = MemoryScope.from(personalClaim("alice"));
+        MemoryScope userScope = MemoryScope.user("api", "session-previous", "alice");
+        InMemoryMemoryRecordStore recordStore = new InMemoryMemoryRecordStore();
+        recordStore.insert(record(userScope, "logical-user-pref", "version-user-pref", MemoryType.SEMANTIC, "hash-user-pref"));
+
+        MemoryCoordinator coordinator = new MemoryCoordinator(
+                recordStore,
+                () -> null,
+                ignored -> List.of(),
+                CLOCK,
+                6000,
+                20
+        );
+
+        MemoryFrameResult result = coordinator.retrieve(new MemoryFrameRequest(
+                "run-1", currentSession, "question"
+        ));
+
+        assertThat(result.frame().semanticFacts())
+                .extracting(item -> item.sourceId())
+                .containsExactly("version-user-pref");
+    }
+
+    @Test
     void deduplicatesByContentHashAndRecordsOmission() {
         MemoryScope scope = MemoryScope.from(personalClaim("alice"));
         InMemoryMemoryRecordStore recordStore = new InMemoryMemoryRecordStore();

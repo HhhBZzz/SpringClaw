@@ -134,6 +134,28 @@ public class MySqlMemoryRecordStore implements MemoryRecordStore {
     }
 
     @Override
+    public List<MemoryRecordVersion> findByStatus(
+            MemoryStatus status,
+            int limit
+    ) {
+        if (status == null) {
+            throw new IllegalArgumentException("status must not be null");
+        }
+        if (limit <= 0) {
+            throw new IllegalArgumentException("limit must be positive");
+        }
+        QueryWrapper<MemoryRecordEntity> qw = new QueryWrapper<>();
+        qw.eq("status", status.name())
+          .eq("deleted", 0)
+          .orderByDesc("update_time")
+          .orderByDesc("memory_version_id")
+          .last("LIMIT " + limit);
+        return mapper.selectList(qw).stream()
+                .map(MemoryRecordEntity::toDomain)
+                .toList();
+    }
+
+    @Override
     public List<MemoryRecordVersion> findActiveAfterRecordId(
             long afterRecordId,
             int limit

@@ -116,6 +116,26 @@ public final class InMemoryMemoryRecordStore implements MemoryRecordStore {
     }
 
     @Override
+    public List<MemoryRecordVersion> findByStatus(
+            MemoryStatus status,
+            int limit
+    ) {
+        Objects.requireNonNull(status, "status");
+        if (limit <= 0) {
+            throw new IllegalArgumentException("limit must be positive");
+        }
+        return executeExclusively(() -> recordsByVersionId.values().stream()
+                .filter(record -> !record.deleted())
+                .filter(record -> record.status() == status)
+                .sorted(Comparator
+                        .comparing(MemoryRecordVersion::updatedAt)
+                        .reversed()
+                        .thenComparing(MemoryRecordVersion::memoryVersionId))
+                .limit(limit)
+                .toList());
+    }
+
+    @Override
     public List<MemoryRecordVersion> findActiveAfterRecordId(
             long afterRecordId,
             int limit

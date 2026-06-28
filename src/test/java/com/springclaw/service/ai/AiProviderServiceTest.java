@@ -91,6 +91,24 @@ class AiProviderServiceTest {
     }
 
     @Test
+    void clientForProviderDoesNotSwitchGlobalActiveProvider() {
+        SpringClawAiProperties properties = new SpringClawAiProperties();
+        properties.getProviders().getPrimary().setApiKey("primary-test-key");
+        properties.getProviders().getPrimary().setBaseUrl("https://api.example.com");
+        properties.getProviders().getPrimary().setModel("claude-opus-4-6");
+        properties.getProviders().getCodingPlan().setApiKey("coding-plan-test-key");
+        properties.getProviders().getCodingPlan().setBaseUrl("https://coding.dashscope.aliyuncs.com/v1");
+        properties.getProviders().getCodingPlan().setModel("qwen3.5-plus");
+        properties.setActiveProvider("primary");
+        AiProviderService service = newService(properties);
+
+        AiProviderService.ActiveChatClient codingPlan = service.clientForProvider("coding-plan");
+
+        assertThat(codingPlan.providerId()).isEqualTo("coding-plan");
+        assertThat(service.activeClient().providerId()).isEqualTo("primary");
+    }
+
+    @Test
     void shouldRejectDeepSeekThinkingModelsOnSpringAiChatPath() {
         SpringClawAiProperties properties = new SpringClawAiProperties();
         properties.getProviders().getPrimary().setApiKey("primary-test-key");

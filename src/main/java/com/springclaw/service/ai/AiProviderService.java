@@ -148,6 +148,20 @@ public class AiProviderService {
         );
     }
 
+    public ActiveChatClient clientForProvider(String providerId) {
+        String normalizedProvider = normalizeProviderId(providerId);
+        AiProviderRuntime runtime = requireAvailableProvider(normalizedProvider);
+        sanitizeRuntimeModel(runtime);
+        return new ActiveChatClient(
+                runtime.providerId(),
+                runtime.currentModel(),
+                runtime.baseUrl(),
+                runtime.activeChatClient(),
+                runtime.available(),
+                runtime.availableReason()
+        );
+    }
+
     public synchronized ProviderView switchActiveProvider(String providerId) {
         return switchActiveProvider(providerId, "runtime");
     }

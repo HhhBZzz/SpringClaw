@@ -8,6 +8,7 @@ import com.springclaw.runtime.memory.contract.MemoryFrameSourceKind;
 import com.springclaw.runtime.memory.contract.MemoryRetrievalTrace;
 import com.springclaw.runtime.memory.contract.MemoryRecordVersion;
 import com.springclaw.runtime.memory.contract.MemoryScope;
+import com.springclaw.runtime.memory.contract.MemoryScopeType;
 import com.springclaw.runtime.memory.contract.MemoryType;
 import com.springclaw.runtime.memory.contract.ProjectMemoryItem;
 import com.springclaw.runtime.memory.contract.ShortTermMemoryEntry;
@@ -205,11 +206,24 @@ public class MemoryCoordinator {
             MemoryScope scope,
             SourceTally sourceCounts
     ) {
-        List<MemoryRecordVersion> records = recordStore.findActiveByScope(
+        List<MemoryRecordVersion> records = new ArrayList<>(recordStore.findActiveByScope(
                 scope,
                 Set.of(MemoryType.EPISODIC, MemoryType.SEMANTIC, MemoryType.PROCEDURAL),
                 ACTIVE_RECORD_LIMIT
-        );
+        ));
+        if (scope.crossSessionUserMemoryAllowed()
+                && scope.scopeType() != MemoryScopeType.USER) {
+            MemoryScope userScope = MemoryScope.user(
+                    scope.channel(),
+                    scope.sessionKey(),
+                    scope.requestingUserId()
+            );
+            records.addAll(recordStore.findActiveByScope(
+                    userScope,
+                    Set.of(MemoryType.EPISODIC, MemoryType.SEMANTIC, MemoryType.PROCEDURAL),
+                    ACTIVE_RECORD_LIMIT
+            ));
+        }
         sourceCounts.add("memoryRecord", records.size());
         return records.stream()
                 .map(this::fromRecord)

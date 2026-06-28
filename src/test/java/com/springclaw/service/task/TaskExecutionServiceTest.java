@@ -10,6 +10,7 @@ import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.chat.impl.ChatServiceImpl;
 import com.springclaw.service.event.MessageEventService;
+import com.springclaw.service.memory.extraction.MemoryExtractionTrigger;
 import com.springclaw.service.prompt.SoulPromptService;
 import com.springclaw.service.session.AgentSessionService;
 import com.springclaw.service.skill.SkillService;
@@ -201,6 +202,7 @@ class TaskExecutionServiceTest {
         ChatServiceImpl chatService = mock(ChatServiceImpl.class);
         AgentSessionService agentSessionService = mock(AgentSessionService.class);
         MessageEventService messageEventService = mock(MessageEventService.class);
+        MemoryExtractionTrigger memoryExtractionTrigger = mock(MemoryExtractionTrigger.class);
         SoulPromptService soulPromptService = mock(SoulPromptService.class);
         ChannelOutboundDispatcher dispatcher = mock(ChannelOutboundDispatcher.class);
         AuthService authService = mock(AuthService.class);
@@ -222,6 +224,7 @@ class TaskExecutionServiceTest {
                 authService,
                 runtimeBridge,
                 new ObjectMapper(),
+                memoryExtractionTrigger,
                 true
         );
 
@@ -266,6 +269,10 @@ class TaskExecutionServiceTest {
                 "结构分析完成",
                 "TASK",
                 outcome.requestId()
+        );
+        verify(memoryExtractionTrigger).afterTerminalPersistence(
+                outcome.requestId(),
+                "tester"
         );
     }
 

@@ -32,4 +32,17 @@ public class AsyncSchedulingConfig {
         exec.initialize();
         return exec;
     }
+
+    @Bean("memoryExtractionExecutor")
+    public TaskExecutor memoryExtractionExecutor() {
+        ThreadPoolTaskExecutor exec = new ThreadPoolTaskExecutor();
+        exec.setCorePoolSize(1);
+        exec.setMaxPoolSize(2);
+        exec.setQueueCapacity(128);
+        exec.setThreadNamePrefix("memory-extract-");
+        exec.setWaitForTasksToCompleteOnShutdown(true);
+        exec.setAwaitTerminationSeconds(20);
+        exec.initialize();
+        return exec;
+    }
 }

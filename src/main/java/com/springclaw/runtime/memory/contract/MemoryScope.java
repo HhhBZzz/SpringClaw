@@ -76,6 +76,23 @@ public final class MemoryScope {
         );
     }
 
+    public static MemoryScope user(
+            String channel,
+            String sessionKey,
+            String userId
+    ) {
+        String normalizedUserId = requireText(userId, "userId");
+        return new MemoryScope(
+                MemoryScopeType.USER,
+                normalizedUserId,
+                requireText(channel, "channel"),
+                requireText(sessionKey, "sessionKey"),
+                normalizedUserId,
+                normalizedUserId,
+                true
+        );
+    }
+
     public MemoryScopeType scopeType() {
         return scopeType;
     }

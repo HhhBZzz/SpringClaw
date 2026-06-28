@@ -14,6 +14,7 @@ import com.springclaw.runtime.lifecycle.RunAcceptance;
 import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.chat.impl.ChatServiceImpl;
 import com.springclaw.service.event.MessageEventService;
+import com.springclaw.service.memory.extraction.MemoryExtractionTrigger;
 import com.springclaw.service.prompt.SoulPromptService;
 import com.springclaw.service.session.AgentSessionService;
 import com.springclaw.service.skill.SkillService;
@@ -26,6 +27,7 @@ import com.springclaw.strategy.channel.model.UnifiedInboundMessage;
 import com.springclaw.strategy.channel.outbound.ChannelOutboundDispatcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -61,6 +63,7 @@ public class TaskExecutionService {
     private final AuthService authService;
     private final RunLifecycleBridge runtimeBridge;
     private final ObjectMapper objectMapper;
+    private final MemoryExtractionTrigger memoryExtractionTrigger;
     private final boolean feishuDeliveryEnabled;
 
     public TaskExecutionService(ScheduledTaskService scheduledTaskService,
@@ -77,6 +80,41 @@ public class TaskExecutionService {
                                 RunLifecycleBridge runtimeBridge,
                                 ObjectMapper objectMapper,
                                 @Value("${springclaw.task.delivery.feishu-enabled:true}") boolean feishuDeliveryEnabled) {
+        this(
+                scheduledTaskService,
+                scheduledTaskExecutionService,
+                taskScheduleSupport,
+                skillRuntimeService,
+                skillService,
+                chatService,
+                agentSessionService,
+                messageEventService,
+                soulPromptService,
+                channelOutboundDispatcher,
+                authService,
+                runtimeBridge,
+                objectMapper,
+                null,
+                feishuDeliveryEnabled
+        );
+    }
+
+    @Autowired
+    public TaskExecutionService(ScheduledTaskService scheduledTaskService,
+                                ScheduledTaskExecutionService scheduledTaskExecutionService,
+                                TaskScheduleSupport taskScheduleSupport,
+                                SkillRuntimeService skillRuntimeService,
+                                SkillService skillService,
+                                ChatServiceImpl chatService,
+                                AgentSessionService agentSessionService,
+                                MessageEventService messageEventService,
+                                SoulPromptService soulPromptService,
+                                ChannelOutboundDispatcher channelOutboundDispatcher,
+                                AuthService authService,
+                                RunLifecycleBridge runtimeBridge,
+                                ObjectMapper objectMapper,
+                                MemoryExtractionTrigger memoryExtractionTrigger,
+                                @Value("${springclaw.task.delivery.feishu-enabled:true}") boolean feishuDeliveryEnabled) {
         this.scheduledTaskService = scheduledTaskService;
         this.scheduledTaskExecutionService = scheduledTaskExecutionService;
         this.taskScheduleSupport = taskScheduleSupport;
@@ -90,6 +128,7 @@ public class TaskExecutionService {
         this.authService = authService;
         this.runtimeBridge = runtimeBridge;
         this.objectMapper = objectMapper;
+        this.memoryExtractionTrigger = memoryExtractionTrigger;
         this.feishuDeliveryEnabled = feishuDeliveryEnabled;
     }
 
@@ -240,6 +279,19 @@ public class TaskExecutionService {
                 "taskId=%s, trigger=%s, target=%s/%s".formatted(task.getTaskId(), "SYSTEM", task.getTargetType(), task.getTargetRef()),
                 requestId
         );
+        triggerMemoryExtraction(requestId, task.getOwnerUserId());
+    }
+
+    private void triggerMemoryExtraction(String requestId, String userId) {
+        if (memoryExtractionTrigger == null) {
+            return;
+        }
+        try {
+            memoryExtractionTrigger.afterTerminalPersistence(requestId, userId);
+        } catch (RuntimeException ex) {
+            log.warn("定时任务终态记忆抽取触发失败，忽略。requestId={}, reason={}",
+                    requestId, ex.getMessage());
+        }
     }
 
     private void deliverIfNeeded(ScheduledTask task, String answer) {

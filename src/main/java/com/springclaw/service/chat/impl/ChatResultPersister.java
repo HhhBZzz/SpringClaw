@@ -5,10 +5,12 @@ import com.springclaw.service.event.MessageEventReceipt;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.event.MessageEventWrite;
 import com.springclaw.service.memory.ShortTermMemoryWriter;
+import com.springclaw.service.memory.extraction.MemoryExtractionTrigger;
 import com.springclaw.service.prompt.SoulPromptService;
 import com.springclaw.service.session.AgentSessionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -24,15 +26,26 @@ public class ChatResultPersister {
     private final MessageEventService messageEventService;
     private final SoulPromptService soulPromptService;
     private final ShortTermMemoryWriter shortTermMemoryWriter;
+    private final MemoryExtractionTrigger memoryExtractionTrigger;
 
     public ChatResultPersister(AgentSessionService agentSessionService,
                                MessageEventService messageEventService,
                                SoulPromptService soulPromptService,
                                ShortTermMemoryWriter shortTermMemoryWriter) {
+        this(agentSessionService, messageEventService, soulPromptService, shortTermMemoryWriter, null);
+    }
+
+    @Autowired
+    public ChatResultPersister(AgentSessionService agentSessionService,
+                               MessageEventService messageEventService,
+                               SoulPromptService soulPromptService,
+                               ShortTermMemoryWriter shortTermMemoryWriter,
+                               MemoryExtractionTrigger memoryExtractionTrigger) {
         this.agentSessionService = agentSessionService;
         this.messageEventService = messageEventService;
         this.soulPromptService = soulPromptService;
         this.shortTermMemoryWriter = shortTermMemoryWriter;
+        this.memoryExtractionTrigger = memoryExtractionTrigger;
     }
 
     public void persist(ChatContext context,
@@ -88,6 +101,7 @@ public class ChatResultPersister {
                 "ACT=" + TextUtils.truncate(executionResult.action(), 1200),
                 requestId
         );
+        triggerMemoryExtraction(requestId, userId);
     }
 
     private void persistSuspension(ChatContext context,
@@ -154,6 +168,18 @@ public class ChatResultPersister {
             return "系统处于降级模式，返回了兜底响应。";
         }
         return answer;
+    }
+
+    private void triggerMemoryExtraction(String requestId, String userId) {
+        if (memoryExtractionTrigger == null) {
+            return;
+        }
+        try {
+            memoryExtractionTrigger.afterTerminalPersistence(requestId, userId);
+        } catch (RuntimeException ex) {
+            log.warn("终态记忆抽取触发失败，忽略。requestId={}, reason={}",
+                    requestId, ex.getMessage());
+        }
     }
 
 }

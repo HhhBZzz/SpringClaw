@@ -4,6 +4,7 @@ import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.service.event.MessageEventReceipt;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.event.MessageEventWrite;
+import com.springclaw.service.memory.extraction.MemoryExtractionTrigger;
 import com.springclaw.service.memory.ShortTermMemoryWriter;
 import com.springclaw.service.prompt.SoulPromptService;
 import com.springclaw.service.session.AgentSessionService;
@@ -36,12 +37,21 @@ class ChatResultPersisterTest {
     private final SoulPromptService soulPromptService = mock(SoulPromptService.class);
     private final ShortTermMemoryWriter shortTermMemoryWriter =
             mock(ShortTermMemoryWriter.class);
+    private final MemoryExtractionTrigger memoryExtractionTrigger =
+            mock(MemoryExtractionTrigger.class);
 
     private ChatResultPersister persister() {
         when(soulPromptService.soulVersion()).thenReturn("v1");
         return new ChatResultPersister(
                 agentSessionService, messageEventService, soulPromptService,
                 shortTermMemoryWriter);
+    }
+
+    private ChatResultPersister persisterWithExtractionTrigger() {
+        when(soulPromptService.soulVersion()).thenReturn("v1");
+        return new ChatResultPersister(
+                agentSessionService, messageEventService, soulPromptService,
+                shortTermMemoryWriter, memoryExtractionTrigger);
     }
 
     private static ChatContext context() {
@@ -113,6 +123,21 @@ class ChatResultPersisterTest {
     }
 
     @Test
+    void terminalResultQueuesMemoryExtractionAfterTerminalEventsArePersisted() {
+        ChatResultPersister persister = persisterWithExtractionTrigger();
+        ChatContext context = context();
+        ChatExecutionResult result = new ChatExecutionResult(
+                "observe", "PLAN", "ACT", "answer", true);
+
+        persister.persist(context, "answer", result, ChatPersistenceIntent.TERMINAL_RESULT);
+
+        verify(memoryExtractionTrigger).afterTerminalPersistence(
+                context.requestId(),
+                context.userId()
+        );
+    }
+
+    @Test
     void confirmationSuspensionDoesNotWriteAssistantSemanticMemory() {
         ChatResultPersister persister = persister();
         ChatContext context = context();
@@ -128,5 +153,6 @@ class ChatResultPersisterTest {
                 write.eventKey().equals("chat:" + context.requestId() + ":user")));
         verify(messageEventService).append(argThat((MessageEventWrite write) ->
                 write.eventKey().equals("chat:" + context.requestId() + ":suspension")));
+        verify(memoryExtractionTrigger, never()).afterTerminalPersistence(anyString(), anyString());
     }
 }

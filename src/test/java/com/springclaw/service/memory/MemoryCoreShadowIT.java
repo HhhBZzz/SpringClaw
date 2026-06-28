@@ -23,38 +23,56 @@ import org.springframework.context.annotation.Import;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Phase 3A1 Task 9：验证 memory core shadow wiring 默认关闭，不改变当前
- * active context/input path。
+ * Memory R2：验证 Redis short-term memory 默认成为 canonical hot context，
+ * 同时保留显式关闭开关。
  */
 class MemoryCoreShadowIT {
 
     private final ApplicationContextRunner shortTermContext =
             new ApplicationContextRunner()
-                    .withUserConfiguration(ShortTermShadowConfig.class);
+                    .withUserConfiguration(ShortTermShadowConfig.class)
+                    .withPropertyValues("springclaw.redisson.enabled=true")
+                    .withBean(RedissonClient.class, () -> Mockito.mock(RedissonClient.class))
+                    .withBean(MessageEventService.class, () -> Mockito.mock(MessageEventService.class));
+
+    private final ApplicationContextRunner shortTermContextWithoutRedis =
+            new ApplicationContextRunner()
+                    .withUserConfiguration(ShortTermShadowWithoutRedisConfig.class)
+                    .withPropertyValues("springclaw.redisson.enabled=false");
 
     private final ApplicationContextRunner localStoreContext =
             new ApplicationContextRunner()
                     .withUserConfiguration(LocalStoreConfig.class);
 
     @Test
-    void shortTermShadowBeansAreInactiveByDefaultEvenWhenRedisExists() {
+    void shortTermBeansAreActiveByDefaultWhenRedisExists() {
         shortTermContext.run(context -> {
-            assertThat(context).doesNotHaveBean(ShortTermMemoryStore.class);
-            assertThat(context).doesNotHaveBean(RedisShortTermMemoryStore.class);
-            assertThat(context).doesNotHaveBean(ShortTermMemoryRecoveryService.class);
+            assertThat(context).hasSingleBean(ShortTermMemoryStore.class);
+            assertThat(context).hasSingleBean(RedisShortTermMemoryStore.class);
+            assertThat(context).hasSingleBean(ShortTermMemoryRecoveryService.class);
         });
     }
 
     @Test
-    void shortTermShadowBeansActivateOnlyWhenExplicitlyEnabled() {
+    void shortTermBeansCanBeExplicitlyDisabled() {
         shortTermContext
                 .withPropertyValues(
-                        "springclaw.memory.core.short-term-shadow-enabled=true")
+                        "springclaw.memory.core.short-term-shadow-enabled=false")
                 .run(context -> {
-                    assertThat(context).hasSingleBean(ShortTermMemoryStore.class);
-                    assertThat(context).hasSingleBean(RedisShortTermMemoryStore.class);
-                    assertThat(context).hasSingleBean(ShortTermMemoryRecoveryService.class);
+                    assertThat(context).doesNotHaveBean(ShortTermMemoryStore.class);
+                    assertThat(context).doesNotHaveBean(RedisShortTermMemoryStore.class);
+                    assertThat(context).doesNotHaveBean(ShortTermMemoryRecoveryService.class);
                 });
+    }
+
+    @Test
+    void shortTermBeansStayInactiveWhenRedisClientIsMissing() {
+        shortTermContextWithoutRedis.run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context).doesNotHaveBean(ShortTermMemoryStore.class);
+            assertThat(context).doesNotHaveBean(RedisShortTermMemoryStore.class);
+            assertThat(context).doesNotHaveBean(ShortTermMemoryRecoveryService.class);
+        });
     }
 
     @Test
@@ -85,11 +103,13 @@ class MemoryCoreShadowIT {
             MemoryShortTermShadowConfig.class
     })
     static class ShortTermShadowConfig {
+    }
 
-        @Bean
-        RedissonClient redissonClient() {
-            return Mockito.mock(RedissonClient.class);
-        }
+    @Configuration(proxyBeanMethods = false)
+    @Import({
+            MemoryShortTermShadowConfig.class
+    })
+    static class ShortTermShadowWithoutRedisConfig {
 
         @Bean
         MessageEventService messageEventService() {

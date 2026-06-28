@@ -8,12 +8,19 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.redisson.Redisson;
+import org.redisson.api.RScript;
 import org.redisson.api.RedissonClient;
+import org.redisson.client.codec.StringCodec;
 
 import java.time.Instant;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Phase 3A1 Task 6：Redis 短期记忆影子存储。
@@ -137,6 +144,26 @@ class RedisShortTermMemoryStoreTest {
         assertThat(store.readRecent(scope, 10))
                 .extracting(ShortTermMemoryEntry::eventId)
                 .containsExactly(10L, 11L);
+    }
+
+    @Test
+    void appendFailureDoesNotPropagateToChatPath() {
+        RedissonClient failingRedisson = mock(RedissonClient.class);
+        RScript script = mock(RScript.class);
+        when(failingRedisson.getScript(StringCodec.INSTANCE)).thenReturn(script);
+        when(script.eval(
+                eq(RScript.Mode.READ_WRITE),
+                any(String.class),
+                eq(RScript.ReturnType.INTEGER),
+                any(List.class),
+                any()
+        )).thenThrow(new IllegalStateException("redis unavailable"));
+
+        RedisShortTermMemoryStore failingStore =
+                new RedisShortTermMemoryStore(failingRedisson, 40, 3600);
+
+        assertThatCode(() -> failingStore.append(scope, entry(10, "event-10")))
+                .doesNotThrowAnyException();
     }
 
     private static ShortTermMemoryEntry entry(long id, String eventKey) {

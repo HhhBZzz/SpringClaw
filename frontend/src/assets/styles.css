@@ -6490,6 +6490,7 @@ button.runtime-nav-item {
 .learning-review-card,
 .knowledge-source-card,
 .knowledge-source-snapshot,
+.memory-consolidation-panel,
 .learning-review-summary,
 .runtime-usage-card {
   min-width: 0;
@@ -6577,6 +6578,7 @@ button.runtime-nav-item {
 
 .learning-review-summary,
 .tool-proposal-card,
+.memory-consolidation-panel,
 .learning-review-card,
 .knowledge-source-card {
   display: grid;
@@ -6604,6 +6606,41 @@ button.runtime-nav-item {
 
 .learning-review-summary small {
   grid-column: 1 / -1;
+}
+
+.memory-consolidation-panel {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.memory-consolidation-panel label {
+  display: grid;
+  gap: 6px;
+}
+
+.memory-consolidation-panel input {
+  min-height: 38px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 7px;
+  padding: 0 10px;
+  color: #f5f7fb;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.memory-consolidation-panel button {
+  min-height: 38px;
+  border: 1px solid rgba(246, 201, 69, 0.24);
+  border-radius: 7px;
+  padding: 0 12px;
+  color: #0d1117;
+  background: #f6c945;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.memory-consolidation-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
 }
 
 .learning-review-filters {

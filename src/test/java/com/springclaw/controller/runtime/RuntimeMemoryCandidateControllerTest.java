@@ -2,6 +2,9 @@ package com.springclaw.controller.runtime;
 
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.common.response.ApiResponse;
+import com.springclaw.runtime.memory.contract.MemoryScope;
+import com.springclaw.service.memory.consolidation.MemoryConsolidationRunResult;
+import com.springclaw.service.memory.consolidation.MemoryConsolidationService;
 import com.springclaw.service.memory.review.MemoryCandidateReviewService;
 import com.springclaw.web.auth.RequireRole;
 import org.junit.jupiter.api.Test;
@@ -12,6 +15,8 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -21,7 +26,7 @@ class RuntimeMemoryCandidateControllerTest {
     @Test
     void shouldListMemoryCandidatesThroughRuntimeConsole() {
         MemoryCandidateReviewService reviewService = mock(MemoryCandidateReviewService.class);
-        RuntimeMemoryCandidateController controller = new RuntimeMemoryCandidateController(reviewService);
+        RuntimeMemoryCandidateController controller = controller(reviewService);
         List<MemoryCandidateReviewService.MemoryCandidateReviewItem> items = List.of(item());
         when(reviewService.list("CANDIDATE", 12)).thenReturn(items);
 
@@ -36,7 +41,7 @@ class RuntimeMemoryCandidateControllerTest {
     @Test
     void shouldUpdateMemoryCandidateStatusThroughRuntimeConsole() {
         MemoryCandidateReviewService reviewService = mock(MemoryCandidateReviewService.class);
-        RuntimeMemoryCandidateController controller = new RuntimeMemoryCandidateController(reviewService);
+        RuntimeMemoryCandidateController controller = controller(reviewService);
         MemoryCandidateReviewService.MemoryCandidateStatusUpdate update =
                 new MemoryCandidateReviewService.MemoryCandidateStatusUpdate(
                         "version-1",
@@ -60,15 +65,63 @@ class RuntimeMemoryCandidateControllerTest {
     }
 
     @Test
+    void shouldRunMemoryConsolidationThroughRuntimeConsole() {
+        MemoryConsolidationService consolidationService = mock(MemoryConsolidationService.class);
+        RuntimeMemoryCandidateController controller = new RuntimeMemoryCandidateController(
+                mock(MemoryCandidateReviewService.class),
+                consolidationService
+        );
+        MemoryConsolidationRunResult result = new MemoryConsolidationRunResult(
+                false,
+                null,
+                List.of()
+        );
+        when(consolidationService.consolidate(argThat(scope ->
+                scope != null
+                        && scope.scopeId().equals("alice")
+                        && scope.channel().equals("api")
+                        && scope.sessionKey().equals("consolidation")
+        ), eq(20))).thenReturn(result);
+
+        ApiResponse<MemoryConsolidationRunResult> response =
+                controller.consolidateMemory(new RuntimeMemoryCandidateController.ConsolidateMemoryRequest(
+                        "alice",
+                        "api",
+                        20
+                ));
+
+        assertThat(response.getCode()).isZero();
+        assertThat(response.getData()).isEqualTo(result);
+        verify(consolidationService).consolidate(argThat(scope ->
+                scope != null && scope.equals(MemoryScope.user("api", "consolidation", "alice"))
+        ), eq(20));
+    }
+
+    @Test
     void shouldRejectMissingCandidateStatusUpdateTarget() {
         RuntimeMemoryCandidateController controller =
-                new RuntimeMemoryCandidateController(mock(MemoryCandidateReviewService.class));
+                controller(mock(MemoryCandidateReviewService.class));
 
         BusinessException ex = assertThrows(BusinessException.class,
                 () -> controller.updateCandidateStatus(new RuntimeMemoryCandidateController.UpdateMemoryCandidateStatusRequest(
                         "",
                         "ACTIVE",
                         "approved"
+                )));
+
+        assertThat(ex.getCode()).isEqualTo(40103);
+    }
+
+    @Test
+    void shouldRejectMissingConsolidationUserId() {
+        RuntimeMemoryCandidateController controller =
+                controller(mock(MemoryCandidateReviewService.class));
+
+        BusinessException ex = assertThrows(BusinessException.class,
+                () -> controller.consolidateMemory(new RuntimeMemoryCandidateController.ConsolidateMemoryRequest(
+                        "",
+                        "api",
+                        20
                 )));
 
         assertThat(ex.getCode()).isEqualTo(40103);
@@ -85,9 +138,21 @@ class RuntimeMemoryCandidateControllerTest {
                 "updateCandidateStatus",
                 RuntimeMemoryCandidateController.UpdateMemoryCandidateStatusRequest.class
         );
+        Method consolidate = RuntimeMemoryCandidateController.class.getMethod(
+                "consolidateMemory",
+                RuntimeMemoryCandidateController.ConsolidateMemoryRequest.class
+        );
 
         assertThat(list.getAnnotation(RequireRole.class).value()).containsExactly("ADMIN");
         assertThat(update.getAnnotation(RequireRole.class).value()).containsExactly("ADMIN");
+        assertThat(consolidate.getAnnotation(RequireRole.class).value()).containsExactly("ADMIN");
+    }
+
+    private static RuntimeMemoryCandidateController controller(MemoryCandidateReviewService reviewService) {
+        return new RuntimeMemoryCandidateController(
+                reviewService,
+                mock(MemoryConsolidationService.class)
+        );
     }
 
     private static MemoryCandidateReviewService.MemoryCandidateReviewItem item() {

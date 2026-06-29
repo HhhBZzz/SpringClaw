@@ -26,6 +26,7 @@ import type {
   RuntimeMemoryCandidateReviewItem,
   RuntimeMemoryCandidateReviewStatus,
   RuntimeMemoryCandidateStatusUpdate,
+  RuntimeMemoryConsolidationResult,
   RuntimeMemoryUsageTrace,
   RuntimeModelProviders,
   RuntimeOverview,
@@ -229,6 +230,17 @@ export function updateRuntimeMemoryCandidateStatus(memoryVersionId: string, stat
   return request<RuntimeMemoryCandidateStatusUpdate>('/api/runtime-console/memory/candidates/status', {
     method: 'POST',
     body: JSON.stringify({ memoryVersionId, status, reason })
+  });
+}
+
+export function runRuntimeMemoryConsolidation(input: { userId: string; channel?: string; limit?: number }) {
+  return request<RuntimeMemoryConsolidationResult>('/api/runtime-console/memory/candidates/consolidate', {
+    method: 'POST',
+    body: JSON.stringify({
+      userId: input.userId,
+      channel: input.channel || 'api',
+      limit: input.limit ?? 50
+    })
   });
 }
 

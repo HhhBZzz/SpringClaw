@@ -11,6 +11,14 @@ import java.util.Map;
 class OparPromptSupport {
 
     String renderReflectPrompt(AssembledContext context, String plan, String action) {
+        return renderReflectPrompt(question(context), plan, action);
+    }
+
+    String renderReflectPrompt(ChatContext context, String plan, String action) {
+        return renderReflectPrompt(TypedContextPromptRenderer.question(context), plan, action);
+    }
+
+    private String renderReflectPrompt(String question, String plan, String action) {
         PromptTemplate template = new PromptTemplate("""
                 请基于以下信息，直接给用户一个自然、简洁、有帮助的答复。
                 
@@ -37,13 +45,21 @@ class OparPromptSupport {
                 {action}
                 """);
         return template.render(Map.of(
-                "question", TextUtils.safe(context == null ? null : context.question()),
+                "question", TextUtils.safe(question),
                 "plan", TextUtils.safe(plan),
                 "action", TextUtils.safe(action)
         ));
     }
 
     String renderMetaRepairPrompt(AssembledContext context, String plan, String action, String badAnswer) {
+        return renderMetaRepairPrompt(question(context), plan, action, badAnswer);
+    }
+
+    String renderMetaRepairPrompt(ChatContext context, String plan, String action, String badAnswer) {
+        return renderMetaRepairPrompt(TypedContextPromptRenderer.question(context), plan, action, badAnswer);
+    }
+
+    private String renderMetaRepairPrompt(String question, String plan, String action, String badAnswer) {
         PromptTemplate template = new PromptTemplate("""
                 你上一版回答包含了与任务无关的“身份/系统/阶段”内容，请重写。
                 重写要求：
@@ -64,7 +80,7 @@ class OparPromptSupport {
                 {badAnswer}
                 """);
         return template.render(Map.of(
-                "question", TextUtils.safe(context == null ? null : context.question()),
+                "question", TextUtils.safe(question),
                 "plan", TextUtils.safe(plan),
                 "action", TextUtils.safe(action),
                 "badAnswer", TextUtils.truncate(TextUtils.safe(badAnswer), 500)
@@ -72,6 +88,24 @@ class OparPromptSupport {
     }
 
     String renderPlanPrompt(AssembledContext context, String history, int stepNo, String structuredFormat) {
+        return renderPlanPrompt(question(context), observe(context), history, stepNo, structuredFormat);
+    }
+
+    String renderPlanPrompt(ChatContext context, String history, int stepNo, String structuredFormat) {
+        return renderPlanPrompt(
+                TypedContextPromptRenderer.question(context),
+                TypedContextPromptRenderer.promptPrefix(context),
+                history,
+                stepNo,
+                structuredFormat
+        );
+    }
+
+    private String renderPlanPrompt(String question,
+                                    String observe,
+                                    String history,
+                                    int stepNo,
+                                    String structuredFormat) {
         PromptTemplate template = new PromptTemplate("""
                 你是 Agent Planner，请根据当前问题、会话历史和已知上下文，判断是否已经可以回答，或是否需要继续行动。
                 要求：
@@ -99,13 +133,31 @@ class OparPromptSupport {
         return template.render(Map.of(
                 "stepNo", stepNo,
                 "history", TextUtils.safe(history),
-                "question", TextUtils.safe(context == null ? null : context.question()),
-                "observe", TextUtils.safe(context == null ? null : context.observePrompt()),
+                "question", TextUtils.safe(question),
+                "observe", TextUtils.safe(observe),
                 "format", TextUtils.safe(structuredFormat)
         ));
     }
 
     String renderActionPrompt(AssembledContext context, String plan, String history, int stepNo) {
+        return renderActionPrompt(question(context), observe(context), plan, history, stepNo);
+    }
+
+    String renderActionPrompt(ChatContext context, String plan, String history, int stepNo) {
+        return renderActionPrompt(
+                TypedContextPromptRenderer.question(context),
+                TypedContextPromptRenderer.promptPrefix(context),
+                plan,
+                history,
+                stepNo
+        );
+    }
+
+    private String renderActionPrompt(String question,
+                                      String observe,
+                                      String plan,
+                                      String history,
+                                      int stepNo) {
         PromptTemplate template = new PromptTemplate("""
                 根据以下计划执行当前步骤的行动。
                 如果计划需要工具，请调用工具并基于工具结果输出行动结论；
@@ -133,9 +185,16 @@ class OparPromptSupport {
                 "stepNo", stepNo,
                 "plan", TextUtils.safe(plan),
                 "history", TextUtils.safe(history),
-                "question", TextUtils.safe(context == null ? null : context.question()),
-                "observe", TextUtils.safe(context == null ? null : context.observePrompt())
+                "question", TextUtils.safe(question),
+                "observe", TextUtils.safe(observe)
         ));
     }
 
+    private static String question(AssembledContext context) {
+        return context == null ? "" : context.question();
+    }
+
+    private static String observe(AssembledContext context) {
+        return context == null ? "" : context.observePrompt();
+    }
 }

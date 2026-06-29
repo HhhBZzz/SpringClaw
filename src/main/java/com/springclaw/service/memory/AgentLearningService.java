@@ -47,7 +47,7 @@ public class AgentLearningService {
 
     public AgentLearningService(@Value("${springclaw.learning.enabled:true}") boolean enabled,
                                 @Value("${springclaw.learning.trace-failure-enabled:true}") boolean traceFailureEnabled,
-                                @Value("${springclaw.learning.root:${user.dir}/docs/memory-bank}") String root,
+                                @Value("${springclaw.learning.root:${user.dir}/data/memory-bank}") String root,
                                 @Value("${springclaw.learning.max-field-chars:600}") int maxFieldChars) {
         this.enabled = enabled;
         this.traceFailureEnabled = traceFailureEnabled;

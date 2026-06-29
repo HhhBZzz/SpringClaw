@@ -276,8 +276,13 @@ springclaw:
     recall-max-chars: 400
     local-max-turns: 12
     bank-enabled: true
-    bank-root: ${SPRINGCLAW_MEMORY_BANK_ROOT:${user.dir}/docs/memory-bank}
+    bank-root: ${SPRINGCLAW_MEMORY_BANK_ROOT:${user.dir}/data/memory-bank}
     bank-max-chars: ${SPRINGCLAW_MEMORY_BANK_MAX_CHARS:2400}
+  learning:
+    enabled: ${SPRINGCLAW_LEARNING_ENABLED:true}
+    trace-failure-enabled: ${SPRINGCLAW_LEARNING_TRACE_FAILURE_ENABLED:true}
+    root: ${SPRINGCLAW_LEARNING_ROOT:${user.dir}/data/memory-bank}
+    max-field-chars: ${SPRINGCLAW_LEARNING_MAX_FIELD_CHARS:600}
   tools:
     file:
       root: ${SPRINGCLAW_TOOL_FILE_ROOT:${user.dir}}

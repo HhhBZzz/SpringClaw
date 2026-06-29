@@ -46,9 +46,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * Characterization test — records the current routing behaviour so the
- * unified-runtime spec has a falsifiable baseline. Does not modify production
- * code. Findings are referenced from
- * docs/architecture/runtime-current-state-audit.md sections 2 and 14.
+ * unified-runtime work has a falsifiable baseline. Does not modify production
+ * code.
  *
  * <p>Documented finding under test: routing today flows through three
  * sequential deciders — {@link ChatRoutingPolicyService},

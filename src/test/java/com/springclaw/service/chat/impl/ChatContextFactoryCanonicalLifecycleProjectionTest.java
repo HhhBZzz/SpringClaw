@@ -36,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -58,6 +59,26 @@ class ChatContextFactoryCanonicalLifecycleProjectionTest {
         );
 
         verify(fixture.projector).project(eq(RUN_ID), eq(fixture.snapshot), any());
+    }
+
+    @Test
+    void canonicalModeExposesTypedSnapshotBeforeLegacyViewProjection() {
+        Fixture fixture = new Fixture();
+
+        ChatContext context = fixture.factory.build(
+                new ChatRequest("session-1", "user-1", "hello", "api", "agent"),
+                true,
+                RUN_ID
+        );
+
+        assertThat(context.contextSnapshot()).isSameAs(fixture.snapshot);
+        assertThat(context.contextSnapshot().shortTermEvents())
+                .containsExactly("recent user turn");
+        assertThat(context.contextSnapshot().semanticRecallItems())
+                .containsExactly("verified semantic fact");
+        assertThat(context.contextSnapshot().activeLearningRules())
+                .containsExactly("follow project rule");
+        verify(fixture.viewAdapter).adapt(fixture.snapshot);
     }
 
     private static final class Fixture {
@@ -261,9 +282,9 @@ class ChatContextFactoryCanonicalLifecycleProjectionTest {
                 "hello",
                 "system",
                 "project",
-                List.of(),
-                List.of(),
-                List.of(),
+                List.of("recent user turn"),
+                List.of("verified semantic fact"),
+                List.of("follow project rule"),
                 List.of("web"),
                 Map.of("providerId", "provider"),
                 Map.of("schema", "test"),

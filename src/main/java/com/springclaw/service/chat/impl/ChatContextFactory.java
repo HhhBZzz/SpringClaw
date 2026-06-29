@@ -183,6 +183,7 @@ public class ChatContextFactory {
         AiProviderService.ActiveChatClient activeClient = aiProviderService.activeClient();
         AssembledContext assembled;
         ContextInjection injection;
+        ContextSnapshot contextSnapshot = null;
         if (contextSnapshotFactoryEnabled) {
             ContextSnapshotFactory snapshotFactory =
                     contextSnapshotFactoryProvider.getIfAvailable();
@@ -211,6 +212,7 @@ public class ChatContextFactory {
                     decision.selectedCapabilities(),
                     providerSnapshot(activeClient)
             ));
+            contextSnapshot = snapshot;
             contextReadyProjector.project(
                     requestId,
                     snapshot,
@@ -254,7 +256,8 @@ public class ChatContextFactory {
                 routingDecision.responseMode(),
                 decision.intent(),
                 decision,
-                injection
+                injection,
+                contextSnapshot
         );
     }
 

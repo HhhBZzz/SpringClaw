@@ -26,6 +26,7 @@ import type {
   RuntimeMemoryCandidateReviewItem,
   RuntimeMemoryCandidateReviewStatus,
   RuntimeMemoryCandidateStatusUpdate,
+  RuntimeMemoryUsageTrace,
   RuntimeModelProviders,
   RuntimeOverview,
   RuntimeSkill,
@@ -252,6 +253,10 @@ export function getRuntimeRuns(limit = 20) {
 
 export function getRunTrace(requestId: string, limit = 80) {
   return request<AgentTraceEvent[]>(`/api/chat/runs/${encodeURIComponent(requestId)}/trace?limit=${encodeURIComponent(String(limit))}`);
+}
+
+export function getRunMemoryUsage(requestId: string) {
+  return request<RuntimeMemoryUsageTrace>(`/api/runtime-console/runs/memory-usage?requestId=${encodeURIComponent(requestId)}`);
 }
 
 export function getAuditLogs(input: { page?: number; size?: number } = {}) {

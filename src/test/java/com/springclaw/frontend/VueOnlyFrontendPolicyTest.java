@@ -202,6 +202,80 @@ class VueOnlyFrontendPolicyTest {
     }
 
     @Test
+    void runtimeConsoleShouldExposeMemoryCandidateReviewPanelUsingMemoryRecordContract() throws IOException {
+        String agentView = Files.readString(projectRoot.resolve("frontend/src/views/AgentView.vue"));
+        String api = Files.readString(projectRoot.resolve("frontend/src/services/api.ts"));
+        String types = Files.readString(projectRoot.resolve("frontend/src/types.ts"));
+
+        assertThat(agentView)
+                .contains("nav-memory-candidates")
+                .contains("runtimeMemoryCandidates")
+                .contains("Memory Candidates")
+                .contains("memory-candidate-list")
+                .contains("memory-candidate-card")
+                .contains("memoryCandidateReviewReasons")
+                .contains("memoryCandidateReviewPendingVersionId")
+                .contains("let memoryCandidateLoadSeq = 0")
+                .contains("reviewMemoryCandidate")
+                .contains("clearRuntimeMemoryCandidates")
+                .contains("memoryCandidateLoadSeq += 1;")
+                .contains("const loadSeq = ++memoryCandidateLoadSeq;")
+                .contains("if (loadSeq !== memoryCandidateLoadSeq) return null;\n    runtimeMemoryCandidates.value = candidates;")
+                .contains("if (loadSeq === memoryCandidateLoadSeq) {\n      clearRuntimeMemoryCandidates();\n      throw error;\n    }\n    return null;")
+                .contains("if (refreshedCandidates === null) return;")
+                .contains("getRuntimeMemoryCandidates")
+                .contains("updateRuntimeMemoryCandidateStatus")
+                .contains("const refreshedCandidates = await refreshRuntimeMemoryCandidates();\n    runtimeResourceError.value = '';")
+                .contains("item.memoryVersionId")
+                .contains("item.memoryType")
+                .contains("item.content")
+                .contains("item.summary")
+                .contains("item.ownerUserId")
+                .contains("item.importance")
+                .contains("item.confidence")
+                .contains("item.evidenceRefs")
+                .contains("item.tags")
+                .contains("item.sourceKind")
+                .contains("item.sourceIdentity")
+                .contains("item.extractionPolicyVersion")
+                .contains("item.updatedAt")
+                .contains("@click=\"reviewMemoryCandidate(item, 'ACTIVE')\"")
+                .contains("@click=\"reviewMemoryCandidate(item, 'REJECTED')\"")
+                .contains("@click=\"reviewMemoryCandidate(item, 'EXPIRED')\"")
+                .contains("@click=\"reviewMemoryCandidate(item, 'SUPERSEDED')\"")
+                .doesNotContain("reviewMemoryCandidate(item, 'approved')")
+                .doesNotContain("memoryCandidateReviewReasons[item.signature]")
+                .doesNotContain("if (view === 'memory-candidates') {\n      clearRuntimeMemoryCandidates();\n    }")
+                .doesNotContain("const candidates = await getRuntimeMemoryCandidates('CANDIDATE', 50);\n    runtimeMemoryCandidates.value = candidates;")
+                .doesNotContain("runtimeMemoryCandidates.value = await getRuntimeMemoryCandidates(50);")
+                .doesNotContain("Memory Candidate ${item.signature");
+
+        assertThat(api)
+                .contains("getRuntimeMemoryCandidates")
+                .contains("updateRuntimeMemoryCandidateStatus")
+                .contains("/api/runtime-console/memory/candidates?status=${encodeURIComponent(status)}")
+                .contains("status: RuntimeMemoryCandidateListStatus = 'CANDIDATE'")
+                .contains("/api/runtime-console/memory/candidates/status")
+                .contains("memoryVersionId")
+                .contains("status")
+                .doesNotContain("/api/runtime-console/memory-candidates")
+                .doesNotContain("updateRuntimeMemoryCandidateStatus(signature")
+                .doesNotContain("RuntimeMemoryCandidateStatusUpdate>('/api/runtime-console/memory/candidates/status', {\n    method: 'POST',\n    body: JSON.stringify({ signature");
+
+        assertThat(types)
+                .contains("'memory-candidates'")
+                .contains("RuntimeMemoryCandidateReviewItem")
+                .contains("RuntimeMemoryCandidateReviewStatus")
+                .contains("RuntimeMemoryCandidateStatusUpdate")
+                .contains("memoryVersionId: string")
+                .contains("evidenceRefs: string[]")
+                .contains("tags: string[]")
+                .contains("'ACTIVE' | 'REJECTED' | 'EXPIRED' | 'SUPERSEDED'")
+                .doesNotContain("extends RuntimeLearningReviewItem")
+                .doesNotContain("RuntimeMemoryCandidateReviewStatus = 'approved'");
+    }
+
+    @Test
     void runtimeConsoleShouldExposeToolProposalAuditPanel() throws IOException {
         String agentView = Files.readString(projectRoot.resolve("frontend/src/views/AgentView.vue"));
         String api = Files.readString(projectRoot.resolve("frontend/src/services/api.ts"));

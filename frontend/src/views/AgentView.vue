@@ -21,14 +21,16 @@ import {
   getRuntimeLearningEntries,
   getRuntimeKnowledgeSources,
   getRuntimeKnowledgeSourceSnapshot,
+  getRuntimeMemoryCandidates,
   rejectToolProposal,
   streamChat,
   switchRuntimeModelProvider,
   updateRuntimeKnowledgeSourceStatus,
-  updateRuntimeLearningStatus
+  updateRuntimeLearningStatus,
+  updateRuntimeMemoryCandidateStatus
 } from '../services/api';
 import { useAuthStore } from '../stores/auth';
-import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
+import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeMemoryCandidateReviewItem, RuntimeMemoryCandidateReviewStatus, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
 
 type LearningReviewStatusFilter = 'all' | RuntimeLearningReviewStatus;
 type ToolProposalScopeFilter = 'current-session' | 'all-visible';
@@ -100,6 +102,7 @@ const runtimeTools = ref<RuntimeTool[]>([]);
 const runtimeToolProposals = ref<RuntimeToolProposal[]>([]);
 const runtimeTasks = ref<{ total?: number; enabled?: number; disabled?: number; scope?: string; tasks?: RuntimeTask[] } | null>(null);
 const runtimeLearningItems = ref<RuntimeLearningReviewItem[]>([]);
+const runtimeMemoryCandidates = ref<RuntimeMemoryCandidateReviewItem[]>([]);
 const runtimeKnowledgeSources = ref<RuntimeKnowledgeSourceReviewItem[]>([]);
 const runtimeKnowledgeSnapshot = ref<RuntimeKnowledgeSourceSnapshot | null>(null);
 const runtimeUsage = ref<RuntimeUsageSummary | null>(null);
@@ -107,6 +110,8 @@ const runtimeRuns = ref<NonNullable<RuntimeOverview['agentRuns']>>([]);
 const runtimeModelProviders = ref<RuntimeModelProviders | null>(null);
 const learningReviewPendingSignature = ref('');
 const learningReviewReasons = ref<Record<string, string>>({});
+const memoryCandidateReviewPendingVersionId = ref('');
+const memoryCandidateReviewReasons = ref<Record<string, string>>({});
 const knowledgeReviewPendingPath = ref('');
 const knowledgeReviewReasons = ref<Record<string, string>>({});
 const learningReviewStatusFilter = ref<LearningReviewStatusFilter>('all');
@@ -124,6 +129,7 @@ let scrollQueued = false;
 let elapsedTimer: number | undefined;
 let activeStreamController: AbortController | null = null;
 let toolProposalLoadSeq = 0;
+let memoryCandidateLoadSeq = 0;
 
 const modeActions = [
   {
@@ -159,6 +165,7 @@ const engineerNavItems: Array<{ key: RuntimeResourceView; label: string; classNa
   { key: 'proposals', label: 'Proposals', className: 'nav-proposals' },
   { key: 'tasks', label: 'Tasks', className: 'nav-tasks' },
   { key: 'learning', label: 'Learning', className: 'nav-learning' },
+  { key: 'memory-candidates', label: 'Memory Candidates', className: 'nav-memory-candidates' },
   { key: 'knowledge', label: 'Knowledge', className: 'nav-knowledge' },
   { key: 'usage', label: 'Usage', className: 'nav-usage' }
 ];
@@ -529,6 +536,8 @@ const runtimeResourceTitle = computed(() => {
       return 'Scheduled Tasks';
     case 'learning':
       return 'Learning Review';
+    case 'memory-candidates':
+      return 'Memory Candidates';
     case 'knowledge':
       return 'Knowledge Source';
     case 'usage':
@@ -554,6 +563,8 @@ const runtimeResourceSubtitle = computed(() => {
       return 'User-accessible scheduled tasks, next run time, and latest status.';
     case 'learning':
       return 'Review rules distilled from failed runs before they keep influencing context.';
+    case 'memory-candidates':
+      return 'Review CANDIDATE memory_record versions before they become active, rejected, expired, or superseded.';
     case 'knowledge':
       return 'Project knowledge imported from Wiki.js or Obsidian Markdown; eligibility is visible here, but not injected into runtime prompt yet.';
     case 'usage':
@@ -644,6 +655,8 @@ const runtimeResourceCount = computed(() => {
       return runtimeTaskItems.value.length;
     case 'learning':
       return runtimeLearningItems.value.length;
+    case 'memory-candidates':
+      return runtimeMemoryCandidates.value.length;
     case 'knowledge':
       return runtimeKnowledgeSources.value.length;
     case 'usage':
@@ -711,6 +724,7 @@ watch(() => auth.profile?.username, (username) => {
   } else {
     modelStatus.value = null;
     modelStatusError.value = '';
+    clearRuntimeMemoryCandidates();
   }
 });
 
@@ -770,6 +784,29 @@ function setRuntimeStatus(message: string) {
   runtimeActionStatus.value = message;
 }
 
+function clearRuntimeMemoryCandidates() {
+  memoryCandidateLoadSeq += 1;
+  runtimeMemoryCandidates.value = [];
+  memoryCandidateReviewReasons.value = {};
+  memoryCandidateReviewPendingVersionId.value = '';
+}
+
+async function refreshRuntimeMemoryCandidates() {
+  const loadSeq = ++memoryCandidateLoadSeq;
+  try {
+    const candidates = await getRuntimeMemoryCandidates('CANDIDATE', 50);
+    if (loadSeq !== memoryCandidateLoadSeq) return null;
+    runtimeMemoryCandidates.value = candidates;
+    return candidates;
+  } catch (error) {
+    if (loadSeq === memoryCandidateLoadSeq) {
+      clearRuntimeMemoryCandidates();
+      throw error;
+    }
+    return null;
+  }
+}
+
 function toggleSessionSearch() {
   sessionSearchOpen.value = !sessionSearchOpen.value;
   setRuntimeStatus(sessionSearchOpen.value ? '已打开 Sessions 搜索。' : '已关闭 Sessions 搜索。');
@@ -796,12 +833,13 @@ async function activateRuntimeNav(key: RuntimeNavKey) {
   }
   if (key === 'agents') activeInspectorTab.value = 'trace';
   if (key === 'skills' || key === 'tools' || key === 'proposals') activeInspectorTab.value = 'tools';
-  if (key === 'learning' || key === 'knowledge') activeInspectorTab.value = 'memory';
+  if (key === 'learning' || key === 'memory-candidates' || key === 'knowledge') activeInspectorTab.value = 'memory';
   await loadRuntimeResource(key);
 }
 
 async function loadRuntimeResource(view: RuntimeResourceView = activeResourceView.value) {
   if (!auth.profile) {
+    clearRuntimeMemoryCandidates();
     runtimeResourceError.value = '当前资源需要登录后访问。';
     setRuntimeStatus('请先登录后查看 Runtime Console 资源。');
     return;
@@ -829,6 +867,9 @@ async function loadRuntimeResource(view: RuntimeResourceView = activeResourceVie
       runtimeTasks.value = await getRuntimeTasks(30);
     } else if (view === 'learning') {
       runtimeLearningItems.value = await getRuntimeLearningEntries(50);
+    } else if (view === 'memory-candidates') {
+      const refreshedCandidates = await refreshRuntimeMemoryCandidates();
+      if (refreshedCandidates === null) return;
     } else if (view === 'knowledge') {
       const [sources, snapshot] = await Promise.all([
         getRuntimeKnowledgeSources(50),
@@ -883,6 +924,28 @@ async function reviewLearningItem(item: RuntimeLearningReviewItem, status: Runti
     setRuntimeStatus(message);
   } finally {
     learningReviewPendingSignature.value = '';
+  }
+}
+
+async function reviewMemoryCandidate(item: RuntimeMemoryCandidateReviewItem, status: RuntimeMemoryCandidateReviewStatus) {
+  if (!item.memoryVersionId || memoryCandidateReviewPendingVersionId.value) return;
+  memoryCandidateReviewPendingVersionId.value = item.memoryVersionId;
+  try {
+    const reason = memoryCandidateReviewReasons.value[item.memoryVersionId]?.trim() || `Runtime Console memory candidate review: ${status}`;
+    await updateRuntimeMemoryCandidateStatus(item.memoryVersionId, status, reason);
+    memoryCandidateReviewReasons.value[item.memoryVersionId] = '';
+    const refreshedCandidates = await refreshRuntimeMemoryCandidates();
+    runtimeResourceError.value = '';
+    setRuntimeStatus(
+      `Memory Candidate ${item.memoryVersionId.slice(0, 8)} 已更新为 ${status}，`
+      + (refreshedCandidates === null ? '候选列表刷新已被新的请求接管。' : '列表已刷新。')
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Memory candidate review update failed.';
+    runtimeResourceError.value = message;
+    setRuntimeStatus(message);
+  } finally {
+    memoryCandidateReviewPendingVersionId.value = '';
   }
 }
 
@@ -1514,6 +1577,10 @@ function formatMetric(value: number | string | undefined) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(numberValue);
 }
 
+function formatList(value?: string[]) {
+  return value?.length ? value.join(', ') : '-';
+}
+
 function responseModeLabel(value?: string) {
   const mode = responseModes.find((item) => item.value === value);
   return mode?.label || 'Auto';
@@ -2093,6 +2160,76 @@ onUnmounted(() => {
                   </article>
                   <div v-if="!runtimeLearningItems.length" class="empty-history">暂无可审阅 learning 规则。</div>
                   <div v-else-if="!filteredRuntimeLearningItems.length" class="empty-history">当前状态没有 learning 规则。</div>
+                </div>
+
+                <div v-else-if="activeResourceView === 'memory-candidates'" class="learning-review-list memory-candidate-list">
+                  <div class="learning-review-summary">
+                    <span>Memory Candidates / 候选记忆</span>
+                    <strong>{{ formatMetric(runtimeMemoryCandidates.length) }}</strong>
+                    <small>来自 memory_record 权威表的 CANDIDATE 项。</small>
+                  </div>
+                  <article v-for="item in runtimeMemoryCandidates" :key="item.memoryVersionId" class="learning-review-card memory-candidate-card">
+                    <header>
+                      <span>{{ item.status || 'CANDIDATE' }}</span>
+                      <strong>{{ item.memoryType || 'MEMORY' }}</strong>
+                    </header>
+                    <p>{{ item.content || 'No content captured.' }}</p>
+                    <div class="learning-review-meta">
+                      <small>version {{ item.memoryVersionId }}</small>
+                      <small>owner {{ item.ownerUserId || '-' }}</small>
+                      <small>updated {{ formatDateTimeLabel(item.updatedAt) }}</small>
+                    </div>
+                    <div v-if="item.summary" class="learning-review-impact">
+                      <span>摘要</span>
+                      <small>{{ item.summary }}</small>
+                    </div>
+                    <div class="knowledge-source-snapshot">
+                      <div>
+                        <span>重要性</span>
+                        <strong>{{ formatMetric(item.importance) }}</strong>
+                        <small>memory weight</small>
+                      </div>
+                      <div>
+                        <span>置信度</span>
+                        <strong>{{ formatMetric(item.confidence) }}</strong>
+                        <small>extraction confidence</small>
+                      </div>
+                    </div>
+                    <div class="learning-review-evidence">
+                      <span>证据 refs</span>
+                      <small>{{ formatList(item.evidenceRefs) }}</small>
+                    </div>
+                    <div class="learning-review-category">
+                      <span>标签</span>
+                      <small>{{ formatList(item.tags) }}</small>
+                    </div>
+                    <div class="learning-review-counterexample">
+                      <span>来源</span>
+                      <small>{{ item.sourceKind || '-' }} / {{ item.sourceIdentity || '-' }}</small>
+                    </div>
+                    <div class="learning-review-impact muted">
+                      <span>抽取策略</span>
+                      <small>{{ item.extractionPolicyVersion || '-' }}</small>
+                    </div>
+                    <label class="learning-review-reason">
+                      <span>Review reason / 审核原因</span>
+                      <input
+                        v-model="memoryCandidateReviewReasons[item.memoryVersionId]"
+                        type="text"
+                        placeholder="记录通过、拒绝、过期/禁用或替代原因"
+                      />
+                    </label>
+                    <footer>
+                      <small>{{ item.memoryVersionId }}</small>
+                      <div class="learning-review-status-actions">
+                        <button type="button" :disabled="!!memoryCandidateReviewPendingVersionId" @click="reviewMemoryCandidate(item, 'ACTIVE')">通过</button>
+                        <button type="button" :disabled="!!memoryCandidateReviewPendingVersionId" @click="reviewMemoryCandidate(item, 'REJECTED')">拒绝</button>
+                        <button type="button" :disabled="!!memoryCandidateReviewPendingVersionId" @click="reviewMemoryCandidate(item, 'EXPIRED')">过期/禁用</button>
+                        <button type="button" :disabled="!!memoryCandidateReviewPendingVersionId" @click="reviewMemoryCandidate(item, 'SUPERSEDED')">标记替代</button>
+                      </div>
+                    </footer>
+                  </article>
+                  <div v-if="!runtimeMemoryCandidates.length" class="empty-history">暂无 Memory Candidate。新的 CANDIDATE memory_record 会在这里等待 review。</div>
                 </div>
 
                 <div v-else-if="activeResourceView === 'knowledge'" class="knowledge-source-list">

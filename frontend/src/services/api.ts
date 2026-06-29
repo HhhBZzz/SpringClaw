@@ -1,4 +1,41 @@
-import type { AdminDashboard, AgentActionProposal, AgentActionProposalResult, AgentCapabilityEvent, AgentDecisionEvent, AgentTraceEvent, AgentVerificationEvent, ApiEnvelope, AuditLogPage, AuthProfileResponse, AuthTokenResponse, ChatHistoryResponse, ChatResponse, ChatResponseMode, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeKnowledgeSourceStatusUpdate, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeLearningStatusUpdate, RuntimeModelProviders, RuntimeOverview, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent, ToolProposalResult } from '../types';
+import type {
+  AdminDashboard,
+  AgentActionProposal,
+  AgentActionProposalResult,
+  AgentCapabilityEvent,
+  AgentDecisionEvent,
+  AgentTraceEvent,
+  AgentVerificationEvent,
+  ApiEnvelope,
+  AuditLogPage,
+  AuthProfileResponse,
+  AuthTokenResponse,
+  ChatHistoryResponse,
+  ChatResponse,
+  ChatResponseMode,
+  ChatStreamMeta,
+  ModelStatusResponse,
+  RuntimeKnowledgeSourceReviewItem,
+  RuntimeKnowledgeSourceReviewStatus,
+  RuntimeKnowledgeSourceSnapshot,
+  RuntimeKnowledgeSourceStatusUpdate,
+  RuntimeLearningReviewItem,
+  RuntimeLearningReviewStatus,
+  RuntimeLearningStatusUpdate,
+  RuntimeMemoryCandidateListStatus,
+  RuntimeMemoryCandidateReviewItem,
+  RuntimeMemoryCandidateReviewStatus,
+  RuntimeMemoryCandidateStatusUpdate,
+  RuntimeModelProviders,
+  RuntimeOverview,
+  RuntimeSkill,
+  RuntimeTask,
+  RuntimeTool,
+  RuntimeToolProposal,
+  RuntimeUsageSummary,
+  ToolActionRequiredEvent,
+  ToolProposalResult
+} from '../types';
 
 const TOKEN_KEY = 'springclaw.frontend.token';
 let memoryToken = '';
@@ -161,6 +198,10 @@ export function getRuntimeLearningEntries(limit = 50) {
   return request<RuntimeLearningReviewItem[]>(`/api/runtime-console/learning?limit=${encodeURIComponent(String(limit))}`);
 }
 
+export function getRuntimeMemoryCandidates(status: RuntimeMemoryCandidateListStatus = 'CANDIDATE', limit = 50) {
+  return request<RuntimeMemoryCandidateReviewItem[]>(`/api/runtime-console/memory/candidates?status=${encodeURIComponent(status)}&limit=${encodeURIComponent(String(limit))}`);
+}
+
 export function getRuntimeKnowledgeSources(limit = 50) {
   return request<RuntimeKnowledgeSourceReviewItem[]>(`/api/runtime-console/knowledge-sources?limit=${encodeURIComponent(String(limit))}`);
 }
@@ -180,6 +221,13 @@ export function updateRuntimeLearningStatus(signature: string, status: RuntimeLe
   return request<RuntimeLearningStatusUpdate>('/api/runtime-console/learning/status', {
     method: 'POST',
     body: JSON.stringify({ signature, status, reason })
+  });
+}
+
+export function updateRuntimeMemoryCandidateStatus(memoryVersionId: string, status: RuntimeMemoryCandidateReviewStatus, reason?: string) {
+  return request<RuntimeMemoryCandidateStatusUpdate>('/api/runtime-console/memory/candidates/status', {
+    method: 'POST',
+    body: JSON.stringify({ memoryVersionId, status, reason })
   });
 }
 

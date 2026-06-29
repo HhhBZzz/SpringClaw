@@ -294,7 +294,7 @@ export interface AdminDashboard {
   }>;
 }
 
-export type RuntimeResourceView = 'console' | 'sessions' | 'agents' | 'skills' | 'tools' | 'proposals' | 'tasks' | 'learning' | 'knowledge' | 'usage';
+export type RuntimeResourceView = 'console' | 'sessions' | 'agents' | 'skills' | 'tools' | 'proposals' | 'tasks' | 'learning' | 'memory-candidates' | 'knowledge' | 'usage';
 
 export interface RuntimeSkill {
   skillId: string;
@@ -374,6 +374,33 @@ export interface RuntimeLearningStatusUpdate {
   signature: string;
   previousStatus?: string;
   status: RuntimeLearningReviewStatus | string;
+  reason?: string;
+}
+
+export type RuntimeMemoryCandidateListStatus = 'CANDIDATE';
+export type RuntimeMemoryCandidateReviewStatus = 'ACTIVE' | 'REJECTED' | 'EXPIRED' | 'SUPERSEDED';
+
+export interface RuntimeMemoryCandidateReviewItem {
+  memoryVersionId: string;
+  memoryType: string;
+  status: RuntimeMemoryCandidateListStatus | RuntimeMemoryCandidateReviewStatus | string;
+  content: string;
+  summary?: string;
+  ownerUserId?: string;
+  importance: number;
+  confidence: number;
+  evidenceRefs: string[];
+  tags: string[];
+  sourceKind?: string;
+  sourceIdentity?: string;
+  extractionPolicyVersion?: string;
+  updatedAt?: string;
+}
+
+export interface RuntimeMemoryCandidateStatusUpdate {
+  memoryVersionId: string;
+  previousStatus?: string;
+  status: RuntimeMemoryCandidateReviewStatus | string;
   reason?: string;
 }
 

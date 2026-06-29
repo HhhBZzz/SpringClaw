@@ -1,6 +1,7 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.domain.entity.AgentSession;
+import com.springclaw.runtime.contract.ContextSnapshot;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.context.AssembledContext;
@@ -24,7 +25,8 @@ public record ChatContext(AgentSession session,
                           String responseMode,
                           String intent,
                           AgentDecision decision,
-                          ContextInjection contextInjection) {
+                          ContextInjection contextInjection,
+                          ContextSnapshot contextSnapshot) {
 
     public ChatContext {
         contextInjection = contextInjection == null ? ContextInjection.empty() : contextInjection;
@@ -47,7 +49,8 @@ public record ChatContext(AgentSession session,
                 assembled, activeClient, executionMode, routingReason,
                 "agent", "general",
                 AgentDecision.general("兼容旧构造器，默认普通聊天。"),
-                ContextInjection.empty());
+                ContextInjection.empty(),
+                null);
     }
 
     // 兼容旧 15 参构造（无 contextInjection）
@@ -68,6 +71,30 @@ public record ChatContext(AgentSession session,
                        AgentDecision decision) {
         this(session, channel, userId, roleCode, userMessage, effectiveUserMessage, requestId, systemPrompt,
                 assembled, activeClient, executionMode, routingReason, responseMode, intent, decision,
-                ContextInjection.empty());
+                ContextInjection.empty(),
+                null);
+    }
+
+    // 兼容旧 16 参构造（无 contextSnapshot）
+    public ChatContext(AgentSession session,
+                       String channel,
+                       String userId,
+                       String roleCode,
+                       String userMessage,
+                       String effectiveUserMessage,
+                       String requestId,
+                       String systemPrompt,
+                       AssembledContext assembled,
+                       AiProviderService.ActiveChatClient activeClient,
+                       String executionMode,
+                       String routingReason,
+                       String responseMode,
+                       String intent,
+                       AgentDecision decision,
+                       ContextInjection contextInjection) {
+        this(session, channel, userId, roleCode, userMessage, effectiveUserMessage, requestId, systemPrompt,
+                assembled, activeClient, executionMode, routingReason, responseMode, intent, decision,
+                contextInjection,
+                null);
     }
 }

@@ -432,8 +432,8 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
     }
 
     String renderModelLedPrompt(ChatContext ctx) {
-        String injection = ctx.contextInjection().renderForPrompt();
-        String question = TextUtils.safe(ctx.assembled() == null ? null : ctx.assembled().question());
+        String injection = TypedContextPromptRenderer.promptPrefix(ctx);
+        String question = TypedContextPromptRenderer.question(ctx);
         return """
                 %s用户问题：
                 %s

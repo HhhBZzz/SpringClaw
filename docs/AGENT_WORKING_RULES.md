@@ -40,6 +40,14 @@
 
 正例：每个 commit 描述能写成单句 "X: do Y"，且只动一类文件。
 
+### 1.5 禁止「综述/审计文档」替代实现
+R2 之后不再为每个子阶段同时写 `spec + plan + design`。
+
+- 一个 PR 最多一份 plan；只有出现新的、不可逆的架构决策时，才允许单独写 design spec。
+- 已有 spec、contract 或测试没有失效时，不再创建 `architecture consolidation`、`current-state-audit`、`paradigm v2` 这类重述文档。
+- 不再维护跨 PR 的 collaboration ledger / status ledger；历史计划可以保留作证据，但不能继续追加当作当前状态源。
+- R3.5 / B 目标默认直接进入实现；semantic 写入、迁移代码和回归测试优先于新增规划文档。
+
 ---
 
 ## 二、必须遵守
@@ -65,7 +73,7 @@
 必须：
 - 有 `${VAR_NAME:default}` 形式的环境变量覆盖
 - 有 `ApplicationYamlPolicyTest` 中的断言（至少验证 key 存在 + 类型正确）
-- 在 `docs/CORE_MODULE_PROGRESS_*.md` 或本文档中提及
+- 在本文档、README 或贴近配置的运维文档中提及；不要新增 `CORE_MODULE_PROGRESS` / `PROJECT_STATUS` 类快照文档
 
 ### 2.4 任何新加 trace 字段
 必须：
@@ -80,6 +88,17 @@
 - e2e 验证一次「USER 角色尝试越界 → 被拒」
 - e2e 验证一次「ADMIN 角色合法操作 → 成功」
 - 改动后 `TEST_*` 临时文件**全部清理**（不要留 `TEST_AGENT_WRITE_CHECK.md` 这种残留）
+
+### 2.6 文档唯一真相源
+长期入口只保留少数几类：
+
+- `README.md` / `CLAUDE.md`：项目概览、运行方式和开发命令。
+- `docs/AGENT_WORKING_RULES.md`：协作规则和文档预算。
+- `docs/TURN_CONTRACT.md`：turn / trace 契约。
+- `docs/ACCEPTANCE_CHECKLIST.md`：验收清单。
+- `docs/superpowers/plans` / `docs/superpowers/specs`：只允许作为历史证据或单 PR 实施计划，不作为当前状态看板。
+
+`docs/memory-bank` 不再承载项目状态或架构摘要。运行时学习数据默认写入 `data/memory-bank`，并由 git ignore 管理，避免把自动生成记忆伪装成项目文档。
 
 ---
 

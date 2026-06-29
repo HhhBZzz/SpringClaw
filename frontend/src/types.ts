@@ -404,6 +404,12 @@ export interface RuntimeMemoryCandidateStatusUpdate {
   reason?: string;
 }
 
+export interface RuntimeMemoryConsolidationResult {
+  created: boolean;
+  candidate?: Record<string, unknown> | null;
+  sourceVersionIds: string[];
+}
+
 export type RuntimeKnowledgeSourceReviewStatus = 'active' | 'approved' | 'disabled' | 'rejected';
 
 export interface RuntimeKnowledgeSourceReviewItem {

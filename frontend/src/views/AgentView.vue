@@ -24,6 +24,7 @@ import {
   getRuntimeKnowledgeSourceSnapshot,
   getRuntimeMemoryCandidates,
   rejectToolProposal,
+  runRuntimeMemoryConsolidation,
   streamChat,
   switchRuntimeModelProvider,
   updateRuntimeKnowledgeSourceStatus,
@@ -114,6 +115,8 @@ const learningReviewPendingSignature = ref('');
 const learningReviewReasons = ref<Record<string, string>>({});
 const memoryCandidateReviewPendingVersionId = ref('');
 const memoryCandidateReviewReasons = ref<Record<string, string>>({});
+const memoryConsolidationUserId = ref('');
+const memoryConsolidationPending = ref(false);
 const knowledgeReviewPendingPath = ref('');
 const knowledgeReviewReasons = ref<Record<string, string>>({});
 const learningReviewStatusFilter = ref<LearningReviewStatusFilter>('all');
@@ -963,6 +966,37 @@ async function reviewMemoryCandidate(item: RuntimeMemoryCandidateReviewItem, sta
     setRuntimeStatus(message);
   } finally {
     memoryCandidateReviewPendingVersionId.value = '';
+  }
+}
+
+async function runMemoryConsolidation() {
+  if (memoryConsolidationPending.value) return;
+  const userId = memoryConsolidationUserId.value.trim() || auth.username || '';
+  if (!userId) {
+    runtimeResourceError.value = '请输入要 consolidation 的 userId。';
+    setRuntimeStatus(runtimeResourceError.value);
+    return;
+  }
+  memoryConsolidationPending.value = true;
+  try {
+    const result = await runRuntimeMemoryConsolidation({
+      userId,
+      channel: 'api',
+      limit: 50
+    });
+    const refreshedCandidates = await refreshRuntimeMemoryCandidates();
+    runtimeResourceError.value = '';
+    setRuntimeStatus(
+      result.created
+        ? `已为 ${userId} 生成 consolidation 候选，来源 ${formatMetric(result.sourceVersionIds.length)} 条 episodic。`
+        : `未生成新 consolidation 候选，${refreshedCandidates === null ? '候选列表刷新已被新的请求接管。' : '候选列表已刷新。'}`
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Memory consolidation failed.';
+    runtimeResourceError.value = message;
+    setRuntimeStatus(message);
+  } finally {
+    memoryConsolidationPending.value = false;
   }
 }
 
@@ -2191,6 +2225,19 @@ onUnmounted(() => {
                     <span>Memory Candidates / 候选记忆</span>
                     <strong>{{ formatMetric(runtimeMemoryCandidates.length) }}</strong>
                     <small>来自 memory_record 权威表的 CANDIDATE 项。</small>
+                  </div>
+                  <div class="memory-consolidation-panel">
+                    <label>
+                      <span>L3 Consolidation userId</span>
+                      <input
+                        v-model="memoryConsolidationUserId"
+                        type="text"
+                        :placeholder="auth.username || 'userId'"
+                      />
+                    </label>
+                    <button type="button" :disabled="memoryConsolidationPending" @click="runMemoryConsolidation">
+                      {{ memoryConsolidationPending ? 'Running...' : 'Run Consolidation' }}
+                    </button>
                   </div>
                   <article v-for="item in runtimeMemoryCandidates" :key="item.memoryVersionId" class="learning-review-card memory-candidate-card">
                     <header>

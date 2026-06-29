@@ -15,7 +15,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 文件化项目记忆，面向非 RAG 的 harness 上下文恢复。
+ * 文件化运行时记忆，面向非 RAG 的 harness 上下文恢复。
+ *
+ * <p>默认根目录在 data/memory-bank，避免把运行时学习数据写回 docs/ 并
+ * 变成新的状态快照文档。
  */
 @Service
 public class MemoryBankService {
@@ -30,7 +33,7 @@ public class MemoryBankService {
 
     @org.springframework.beans.factory.annotation.Autowired
     public MemoryBankService(@Value("${springclaw.memory.bank-enabled:true}") boolean enabled,
-                             @Value("${springclaw.memory.bank-root:${user.dir}/docs/memory-bank}") String root,
+                             @Value("${springclaw.memory.bank-root:${user.dir}/data/memory-bank}") String root,
                              @Value("${springclaw.memory.bank-max-chars:2400}") int maxChars) {
         this(enabled, root, maxChars, new MarkdownProjectMemorySource(root));
     }

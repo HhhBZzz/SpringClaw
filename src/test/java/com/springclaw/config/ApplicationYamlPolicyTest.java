@@ -11,9 +11,7 @@ class ApplicationYamlPolicyTest {
 
     @Test
     void defaultUserToolPolicyShouldAllowAuthorizedLocalFileReads() {
-        YamlPropertiesFactoryBean factory = new YamlPropertiesFactoryBean();
-        factory.setResources(new ClassPathResource("application.yml"));
-        Properties properties = factory.getObject();
+        Properties properties = applicationProperties();
 
         String denyTools = properties.getProperty("springclaw.auth.user-deny-tools", "");
 
@@ -22,5 +20,24 @@ class ApplicationYamlPolicyTest {
         Assertions.assertTrue(denyTools.contains("SystemToolPack.runCommand"));
         Assertions.assertTrue(denyTools.contains("FileToolPack.writeTextFile"));
         Assertions.assertTrue(denyTools.contains("WorkspaceEditToolPack.*"));
+    }
+
+    @Test
+    void runtimeMemoryDataShouldNotDefaultToDocsDirectory() {
+        Properties properties = applicationProperties();
+
+        String bankRoot = properties.getProperty("springclaw.memory.bank-root", "");
+        String learningRoot = properties.getProperty("springclaw.learning.root", "");
+
+        Assertions.assertTrue(bankRoot.contains("data/memory-bank"));
+        Assertions.assertTrue(learningRoot.contains("data/memory-bank"));
+        Assertions.assertFalse(bankRoot.contains("docs/memory-bank"));
+        Assertions.assertFalse(learningRoot.contains("docs/memory-bank"));
+    }
+
+    private Properties applicationProperties() {
+        YamlPropertiesFactoryBean factory = new YamlPropertiesFactoryBean();
+        factory.setResources(new ClassPathResource("application.yml"));
+        return factory.getObject();
     }
 }

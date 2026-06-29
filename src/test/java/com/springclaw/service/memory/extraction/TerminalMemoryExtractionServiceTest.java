@@ -139,6 +139,33 @@ class TerminalMemoryExtractionServiceTest {
     }
 
     @Test
+    void rejectsJudgeFlaggedSensitiveCandidateBeforeWritingMemory() {
+        when(messageEventService.listRequestEvents("run-1", "alice", null, null, 12, true))
+                .thenReturn(events());
+        extractor.result = new SemanticMemoryExtractionResult(
+                "springclaw.semantic-memory-extraction.v1",
+                List.of(candidate(0.9, 0.9, false))
+        );
+        judge.verdict = new SemanticMemoryJudgeVerdict(
+                "springclaw.semantic-memory-judge.v1",
+                "REJECT",
+                0.96,
+                true,
+                false,
+                true,
+                "candidate contains sensitive information"
+        );
+
+        TerminalMemoryExtractionResult result = service.extractTerminalRun("run-1", "alice");
+
+        assertThat(result.semanticWritten()).isZero();
+        assertThat(recordStore.findByStatus(MemoryStatus.CANDIDATE, 10)).isEmpty();
+        assertThat(recordStore.findActiveByScope(MemoryScope.user("api", "session-1", "alice"), null, 10)).isEmpty();
+        assertThat(judge.judged).hasSize(1);
+    }
+
+
+    @Test
     void repeatedExtractionIsIdempotentBySourceEventsNotCandidateText() {
         when(messageEventService.listRequestEvents("run-1", "alice", null, null, 12, true))
                 .thenReturn(events());
@@ -247,7 +274,7 @@ class TerminalMemoryExtractionServiceTest {
 
     private static final class FakeJudge implements SemanticMemoryJudge {
         private final List<SemanticMemoryCandidate> judged = new ArrayList<>();
-        private final SemanticMemoryJudgeVerdict verdict;
+        private SemanticMemoryJudgeVerdict verdict;
 
         private FakeJudge(SemanticMemoryJudgeVerdict verdict) {
             this.verdict = verdict;

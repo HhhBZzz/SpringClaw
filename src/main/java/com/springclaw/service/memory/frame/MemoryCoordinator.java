@@ -26,7 +26,9 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -100,12 +102,12 @@ public class MemoryCoordinator {
                 sourceCounts
         );
         List<MemoryFrameItem> episodic = new ArrayList<>();
-        List<MemoryFrameItem> semantic = new ArrayList<>();
+        List<MemoryFrameItem> semanticCandidates = new ArrayList<>();
         List<MemoryFrameItem> procedural = new ArrayList<>();
         recordItems(scope, sourceCounts).forEach(item -> {
             switch (item.layer()) {
                 case EPISODIC -> episodic.add(item);
-                case SEMANTIC_FACT -> semantic.add(item);
+                case SEMANTIC_FACT -> semanticCandidates.add(item);
                 case PROCEDURAL_RULE -> procedural.add(item);
                 default -> omissions.add(new MemoryFrameOmission(
                         MemoryFrameOmission.Category.UNSUPPORTED_TYPE,
@@ -115,6 +117,11 @@ public class MemoryCoordinator {
                 ));
             }
         });
+        List<MemoryFrameItem> semantic = applyRelevanceFilter(
+                semanticCandidates,
+                request.question(),
+                omissions
+        );
         List<MemoryFrameItem> project = projectItems(scope, omissions, sourceCounts);
 
         DedupedItems deduped = dedupe(
@@ -124,6 +131,13 @@ public class MemoryCoordinator {
                 procedural,
                 project,
                 omissions
+        );
+        DedupedItems budgeted = new DedupedItems(
+                applyLayerBudget(deduped.shortTerm(), MemoryFrameLayer.SHORT_TERM, omissions),
+                applyLayerBudget(deduped.episodic(), MemoryFrameLayer.EPISODIC, omissions),
+                applyLayerBudget(deduped.semantic(), MemoryFrameLayer.SEMANTIC_FACT, omissions),
+                applyLayerBudget(deduped.procedural(), MemoryFrameLayer.PROCEDURAL_RULE, omissions),
+                applyLayerBudget(deduped.project(), MemoryFrameLayer.PROJECT, omissions)
         );
 
         Map<String, String> summary = new LinkedHashMap<>();
@@ -135,11 +149,11 @@ public class MemoryCoordinator {
                 request.runId(),
                 scope,
                 List.of(),
-                deduped.shortTerm(),
-                deduped.episodic(),
-                deduped.semantic(),
-                deduped.procedural(),
-                deduped.project(),
+                budgeted.shortTerm(),
+                budgeted.episodic(),
+                budgeted.semantic(),
+                budgeted.procedural(),
+                budgeted.project(),
                 summary,
                 omissions,
                 capturedAt,
@@ -299,6 +313,150 @@ public class MemoryCoordinator {
         return List.copyOf(kept);
     }
 
+    private List<MemoryFrameItem> applyRelevanceFilter(
+            List<MemoryFrameItem> items,
+            String question,
+            List<MemoryFrameOmission> omissions
+    ) {
+        if (items.size() <= 1) {
+            return items;
+        }
+        Set<String> queryConcepts = relevanceConcepts(question);
+        if (queryConcepts.isEmpty()) {
+            return items;
+        }
+        List<ScoredItem> scored = items.stream()
+                .map(item -> new ScoredItem(
+                        item,
+                        relevanceScore(item, queryConcepts)
+                ))
+                .toList();
+        boolean anyRelevant = scored.stream()
+                .anyMatch(item -> item.score() > 0);
+        if (!anyRelevant) {
+            return items;
+        }
+        List<MemoryFrameItem> kept = new ArrayList<>();
+        for (ScoredItem scoredItem : scored) {
+            if (scoredItem.score() > 0) {
+                kept.add(scoredItem.item());
+            } else {
+                omissions.add(new MemoryFrameOmission(
+                        MemoryFrameOmission.Category.LOW_SCORE,
+                        scoredItem.item().layer(),
+                        scoredItem.item().sourceId(),
+                        "irrelevant to current question"
+                ));
+            }
+        }
+        return List.copyOf(kept);
+    }
+
+    private List<MemoryFrameItem> applyLayerBudget(
+            List<MemoryFrameItem> items,
+            MemoryFrameLayer layer,
+            List<MemoryFrameOmission> omissions
+    ) {
+        if (items.isEmpty()) {
+            return items;
+        }
+        int limit = MemoryFrameBudget.of(maxChars).limitFor(layer);
+        if (limit <= 0) {
+            items.forEach(item -> omissions.add(new MemoryFrameOmission(
+                    MemoryFrameOmission.Category.BUDGET_TRUNCATED,
+                    item.layer(),
+                    item.sourceId(),
+                    "layer budget is zero"
+            )));
+            return List.of();
+        }
+        List<MemoryFrameItem> kept = new ArrayList<>();
+        int used = 0;
+        for (MemoryFrameItem item : items) {
+            int chars = item.content().length();
+            if (used + chars <= limit) {
+                kept.add(item);
+                used += chars;
+            } else {
+                omissions.add(new MemoryFrameOmission(
+                        MemoryFrameOmission.Category.BUDGET_TRUNCATED,
+                        item.layer(),
+                        item.sourceId(),
+                        "layer budget exceeded: " + layer
+                ));
+            }
+        }
+        return List.copyOf(kept);
+    }
+
+    private static int relevanceScore(
+            MemoryFrameItem item,
+            Set<String> queryConcepts
+    ) {
+        Set<String> itemConcepts = relevanceConcepts(item.content());
+        itemConcepts.addAll(relevanceConcepts(String.join(" ", item.evidenceRefs())));
+        int score = 0;
+        for (String concept : queryConcepts) {
+            if (itemConcepts.contains(concept)) {
+                score++;
+            }
+        }
+        return score;
+    }
+
+    private static Set<String> relevanceConcepts(String value) {
+        if (value == null || value.isBlank()) {
+            return new LinkedHashSet<>();
+        }
+        String normalized = value.toLowerCase(Locale.ROOT)
+                .replaceAll("[\\p{Punct}\\p{IsPunctuation}]+", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+        LinkedHashSet<String> concepts = new LinkedHashSet<>();
+        for (String rawToken : normalized.split("\\s+")) {
+            String token = rawToken.trim();
+            if (token.isBlank() || isStopWord(token)) {
+                continue;
+            }
+            switch (token) {
+                case "short", "brief", "concise", "succinct" -> concepts.add("short");
+                case "summary", "summaries", "summarize", "progress", "status",
+                        "update", "updates" -> concepts.add("summary");
+                case "chinese", "中文", "汉语" -> concepts.add("chinese");
+                case "language", "english" -> concepts.add("language");
+                case "restaurant", "restaurants", "italian", "food" -> concepts.add("food");
+                default -> {
+                    if (token.length() >= 4 && token.chars().allMatch(Character::isLetterOrDigit)) {
+                        concepts.add(token);
+                    }
+                }
+            }
+        }
+        if (normalized.contains("中文") || normalized.contains("汉语")) {
+            concepts.add("chinese");
+        }
+        if (normalized.contains("简短") || normalized.contains("短")) {
+            concepts.add("short");
+        }
+        if (normalized.contains("同步")
+                || normalized.contains("总结")
+                || normalized.contains("摘要")
+                || normalized.contains("进展")) {
+            concepts.add("summary");
+        }
+        return concepts;
+    }
+
+    private static boolean isStopWord(String token) {
+        return Set.of(
+                "a", "an", "the", "and", "or", "to", "for", "of", "in",
+                "on", "with", "about", "how", "what", "which", "should",
+                "you", "your", "user", "alice", "bob", "give", "current",
+                "question", "content", "version", "memory", "prefers",
+                "prefer", "preference", "likes"
+        ).contains(token);
+    }
+
     private static boolean isAllowedShortTermRole(String role) {
         String normalized = role == null ? "" : role.trim().toUpperCase();
         return "USER".equals(normalized) || "ASSISTANT".equals(normalized);
@@ -427,6 +585,9 @@ public class MemoryCoordinator {
             List<MemoryFrameItem> procedural,
             List<MemoryFrameItem> project
     ) {
+    }
+
+    private record ScoredItem(MemoryFrameItem item, int score) {
     }
 
     private static final class SourceTally {

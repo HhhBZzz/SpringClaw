@@ -1,9 +1,15 @@
 package com.springclaw.service.chat.impl;
 
+import com.springclaw.runtime.contract.ContextSnapshot;
+import com.springclaw.runtime.contract.SessionAccessClaim;
+import com.springclaw.runtime.memory.contract.MemoryFrame;
+import com.springclaw.runtime.memory.contract.MemoryScope;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.context.ContextInjection;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -17,6 +23,7 @@ class PromptInjectionTest {
 
     private static final String OBSERVE_MARKER = "🪐MARKER-OBSERVE🪐";
     private static final String QUESTION = "测试问题";
+    private static final Instant T0 = Instant.parse("2026-06-18T00:00:00Z");
 
     private ContextInjection injection() {
         return new ContextInjection(
@@ -60,6 +67,28 @@ class PromptInjectionTest {
         );
     }
 
+    private ChatContext canonicalContextWithEmptyLegacyInjection() {
+        return new ChatContext(
+                null,
+                "api",
+                "u1",
+                "USER",
+                QUESTION,
+                "SNAPSHOT-QUESTION",
+                "req-1",
+                "system",
+                assembled(),
+                null,
+                "simplified",
+                "test",
+                "agent",
+                "general",
+                com.springclaw.service.agent.AgentDecision.general("test"),
+                ContextInjection.empty(),
+                snapshot()
+        );
+    }
+
     @Test
     void basicStreamEngine_prependsInjection() {
         BasicStreamEngine engine = new BasicStreamEngine(
@@ -78,6 +107,30 @@ class PromptInjectionTest {
         String prompt = engine.renderBasicChatPrompt(context());
         assertThat(prompt).contains(OBSERVE_MARKER);
         assertThat(prompt).contains(QUESTION);
+    }
+
+    @Test
+    void basicStreamEngine_rendersTypedSnapshotWhenCanonicalContextIsAvailable() {
+        BasicStreamEngine engine = new BasicStreamEngine(
+                mock(ModelCallExecutor.class),
+                mock(ConversationAdvisorSupport.class),
+                mock(ModelTransportGuardService.class),
+                mock(ChatResponsePolicyService.class),
+                mock(com.springclaw.service.usage.LlmUsageRecordService.class),
+                mock(OparLoopEngine.class),
+                mock(SseEventBridge.class),
+                mock(ChatResultPersister.class),
+                mock(com.springclaw.service.guard.ChatGuardService.class),
+                null,
+                true
+        );
+
+        String prompt = engine.renderBasicChatPrompt(canonicalContextWithEmptyLegacyInjection());
+
+        assertThat(prompt).contains("SNAPSHOT-QUESTION");
+        assertThat(prompt).contains("SNAPSHOT-SHORT-TERM");
+        assertThat(prompt).contains("SNAPSHOT-SEMANTIC");
+        assertThat(prompt).contains("SNAPSHOT-RULE");
     }
 
     @Test
@@ -139,5 +192,47 @@ class PromptInjectionTest {
         String prompt = engine.renderAutonomousPrompt(context(), new Object[0], "", "read");
         assertThat(prompt).contains(OBSERVE_MARKER);
         assertThat(prompt).contains(QUESTION);
+    }
+
+    private static ContextSnapshot snapshot() {
+        return new ContextSnapshot(
+                "req-1",
+                "session:test",
+                "u1",
+                "api",
+                "u1",
+                "USER",
+                QUESTION,
+                "SNAPSHOT-QUESTION",
+                "system",
+                "SNAPSHOT-PROJECT",
+                List.of("SNAPSHOT-SHORT-TERM"),
+                List.of("SNAPSHOT-SEMANTIC"),
+                List.of("SNAPSHOT-RULE"),
+                List.of("web"),
+                Map.of("providerId", "provider"),
+                Map.of("schema", "test"),
+                new MemoryFrame(
+                        "req-1",
+                        MemoryScope.from(SessionAccessClaim.personal(
+                                SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                                "api",
+                                "session:test",
+                                "u1"
+                        )),
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        Map.of("source", "test"),
+                        List.of(),
+                        T0,
+                        "frame-hash"
+                ),
+                T0,
+                "snapshot-hash"
+        );
     }
 }

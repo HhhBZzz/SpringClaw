@@ -153,6 +153,29 @@ class PromptInjectionTest {
     }
 
     @Test
+    void simplifiedOparEngine_rendersTypedSnapshotWhenCanonicalContextIsAvailable() {
+        SimplifiedOparEngine engine = new SimplifiedOparEngine(
+                mock(com.springclaw.service.ai.AiProviderService.class),
+                mock(com.springclaw.tool.runtime.ToolOrchestrator.class),
+                mock(com.springclaw.service.chat.LocalSkillFallbackService.class),
+                mock(LocalExecutionNarrator.class),
+                mock(ModelTransportGuardService.class),
+                mock(ModelCallExecutor.class),
+                mock(OparContextAwareSupport.class),
+                mock(ConversationAdvisorSupport.class),
+                mock(ChatResponsePolicyService.class),
+                mock(LocalExecutionSupport.class)
+        );
+
+        String prompt = engine.renderUserPrompt(canonicalContextWithEmptyLegacyInjection());
+
+        assertThat(prompt).contains("SNAPSHOT-QUESTION");
+        assertThat(prompt).contains("SNAPSHOT-SHORT-TERM");
+        assertThat(prompt).contains("SNAPSHOT-SEMANTIC");
+        assertThat(prompt).contains("SNAPSHOT-RULE");
+    }
+
+    @Test
     void modelLedStreamEngine_prependsInjection() {
         ModelLedStreamEngine engine = new ModelLedStreamEngine(
                 mock(ConversationAdvisorSupport.class),

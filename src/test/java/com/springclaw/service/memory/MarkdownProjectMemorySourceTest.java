@@ -3,6 +3,7 @@ package com.springclaw.service.memory;
 import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.memory.contract.MemoryScope;
 import com.springclaw.runtime.memory.contract.ProjectMemoryItem;
+import com.springclaw.service.knowledge.MarkdownKnowledgeSourceService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -118,6 +119,43 @@ class MarkdownProjectMemorySourceTest {
         // 其 reviewStatus 取决于文件内容中是否含 approved/active 学习条目。
         assertThat(items).hasSize(1);
         assertThat(items.get(0).reviewStatus()).isEqualTo(ProjectMemoryItem.ReviewStatus.APPROVED);
+    }
+
+    @Test
+    void injectsApprovedKnowledgeSourcesAsProjectMemoryItems() throws Exception {
+        Path knowledgeRoot = tempDir.resolve("knowledge-source");
+        Files.createDirectories(knowledgeRoot);
+        Files.writeString(knowledgeRoot.resolve("runtime.md"), """
+                ---
+                status: approved
+                ---
+
+                # Runtime rule
+                Use canonical run id for trace correlation.
+                """);
+        Files.writeString(knowledgeRoot.resolve("rejected.md"), """
+                ---
+                status: rejected
+                ---
+
+                This must not enter runtime context.
+                """);
+        MarkdownKnowledgeSourceService knowledgeSource =
+                new MarkdownKnowledgeSourceService(true, knowledgeRoot.toString(), 1200, 20);
+        MarkdownProjectMemorySource source =
+                new MarkdownProjectMemorySource(tempDir.resolve("memory-bank"), knowledgeSource);
+
+        List<ProjectMemoryItem> items = source.read(SCOPE);
+
+        assertThat(items).hasSize(1);
+        ProjectMemoryItem item = items.get(0);
+        assertThat(item.sourcePath()).isEqualTo("knowledge-source");
+        assertThat(item.sourceType()).isEqualTo(ProjectMemoryItem.SourceType.KNOWLEDGE_SOURCE);
+        assertThat(item.reviewStatus()).isEqualTo(ProjectMemoryItem.ReviewStatus.APPROVED);
+        assertThat(item.content())
+                .contains("knowledge-source/runtime.md")
+                .contains("Use canonical run id for trace correlation.")
+                .doesNotContain("This must not enter runtime context.");
     }
 
     @Test

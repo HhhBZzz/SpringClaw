@@ -3,6 +3,7 @@ package com.springclaw.service.memory;
 import com.springclaw.runtime.memory.contract.MemoryScope;
 import com.springclaw.runtime.memory.contract.ProjectMemoryItem;
 import com.springclaw.runtime.memory.port.ProjectMemorySource;
+import com.springclaw.service.knowledge.MarkdownKnowledgeSourceService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -73,41 +74,54 @@ public class MarkdownProjectMemorySource implements ProjectMemorySource {
     );
 
     private final Path rootPath;
+    private final MarkdownKnowledgeSourceService knowledgeSourceService;
 
     @org.springframework.beans.factory.annotation.Autowired
     public MarkdownProjectMemorySource(
-            @Value("${springclaw.memory.bank-root:${user.dir}/docs/memory-bank}") String root) {
+            @Value("${springclaw.memory.bank-root:${user.dir}/docs/memory-bank}") String root,
+            MarkdownKnowledgeSourceService knowledgeSourceService) {
         this.rootPath = Path.of(root).toAbsolutePath().normalize();
+        this.knowledgeSourceService = knowledgeSourceService;
+    }
+
+    /** 兼容手动构造：不注入 Knowledge Source。 */
+    public MarkdownProjectMemorySource(String root) {
+        this(Path.of(root), null);
     }
 
     /** 测试构造器：直接指定根目录。 */
     public MarkdownProjectMemorySource(Path rootPath) {
+        this(rootPath, null);
+    }
+
+    /** 测试/显式注入构造器：直接指定根目录和知识源。 */
+    public MarkdownProjectMemorySource(Path rootPath, MarkdownKnowledgeSourceService knowledgeSourceService) {
         this.rootPath = rootPath.toAbsolutePath().normalize();
+        this.knowledgeSourceService = knowledgeSourceService;
     }
 
     @Override
     public List<ProjectMemoryItem> read(MemoryScope scope) {
-        if (!Files.isDirectory(rootPath)) {
-            return List.of();
-        }
         List<ProjectMemoryItem> items = new ArrayList<>();
-        try (var stream = Files.list(rootPath)) {
-            List<Path> files = stream
-                    .filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().endsWith(".md"))
-                    .sorted(Comparator.comparingInt(this::fileOrder)
-                            .thenComparing(path -> path.getFileName().toString()))
-                    .toList();
-            for (Path file : files) {
-                ProjectMemoryItem item = readItem(file);
-                if (item != null) {
-                    items.add(item);
+        if (Files.isDirectory(rootPath)) {
+            try (var stream = Files.list(rootPath)) {
+                List<Path> files = stream
+                        .filter(Files::isRegularFile)
+                        .filter(path -> path.getFileName().toString().endsWith(".md"))
+                        .sorted(Comparator.comparingInt(this::fileOrder)
+                                .thenComparing(path -> path.getFileName().toString()))
+                        .toList();
+                for (Path file : files) {
+                    ProjectMemoryItem item = readItem(file);
+                    if (item != null) {
+                        items.add(item);
+                    }
                 }
+            } catch (IOException ex) {
+                log.warn("读取项目记忆目录失败，root={}, reason={}", rootPath, ex.getMessage());
             }
-        } catch (IOException ex) {
-            log.warn("读取项目记忆目录失败，root={}, reason={}", rootPath, ex.getMessage());
-            return List.of();
         }
+        appendKnowledgeSource(items);
         return List.copyOf(items);
     }
 
@@ -132,6 +146,25 @@ public class MarkdownProjectMemorySource implements ProjectMemorySource {
             log.warn("读取项目记忆文件失败，file={}, reason={}", file, ex.getMessage());
             return null;
         }
+    }
+
+    private void appendKnowledgeSource(List<ProjectMemoryItem> items) {
+        if (knowledgeSourceService == null) {
+            return;
+        }
+        MarkdownKnowledgeSourceService.KnowledgeSourceSnapshot snapshot =
+                knowledgeSourceService.renderSnapshot();
+        if (!StringUtils.hasText(snapshot.context())) {
+            return;
+        }
+        items.add(new ProjectMemoryItem(
+                "knowledge-source",
+                ProjectMemoryItem.SourceType.KNOWLEDGE_SOURCE,
+                snapshot.context(),
+                sha256(snapshot.context()),
+                ProjectMemoryItem.ReviewStatus.APPROVED,
+                Instant.now()
+        ));
     }
 
     private static ProjectMemoryItem.ReviewStatus reviewStatusOf(

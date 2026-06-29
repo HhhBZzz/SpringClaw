@@ -2,6 +2,7 @@ package com.springclaw.service.memory.frame;
 
 import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.memory.contract.MemoryFrameOmission;
+import com.springclaw.runtime.memory.contract.MemoryFrameSourceKind;
 import com.springclaw.runtime.memory.contract.MemoryRecordVersion;
 import com.springclaw.runtime.memory.contract.MemoryScope;
 import com.springclaw.runtime.memory.contract.MemoryStatus;
@@ -195,6 +196,37 @@ class MemoryCoordinatorTest {
         assertThat(result.frame().omissions())
                 .extracting(MemoryFrameOmission::category)
                 .contains(MemoryFrameOmission.Category.AUTHORIZATION_SCOPE_MISMATCH);
+    }
+
+    @Test
+    void knowledgeSourceProjectMemoryEntersProjectLayerNotMemoryRecordLayer() {
+        MemoryScope scope = MemoryScope.from(personalClaim("alice"));
+        ProjectMemorySource projectSource = ignored -> List.of(new ProjectMemoryItem(
+                "knowledge-source",
+                ProjectMemoryItem.SourceType.KNOWLEDGE_SOURCE,
+                "approved runtime knowledge",
+                "knowledge-source-hash",
+                ProjectMemoryItem.ReviewStatus.APPROVED,
+                T0
+        ));
+        MemoryCoordinator coordinator = new MemoryCoordinator(
+                new InMemoryMemoryRecordStore(),
+                () -> null,
+                projectSource,
+                CLOCK,
+                6000,
+                20
+        );
+
+        MemoryFrameResult result = coordinator.retrieve(new MemoryFrameRequest(
+                "run-1", scope, "question"
+        ));
+
+        assertThat(result.frame().projectItems()).hasSize(1);
+        assertThat(result.frame().projectItems().get(0).sourceKind())
+                .isEqualTo(MemoryFrameSourceKind.PROJECT_MARKDOWN);
+        assertThat(result.frame().semanticFacts()).isEmpty();
+        assertThat(result.trace().includedCounts()).containsEntry("project", 1);
     }
 
     private static SessionAccessClaim personalClaim(String userId) {

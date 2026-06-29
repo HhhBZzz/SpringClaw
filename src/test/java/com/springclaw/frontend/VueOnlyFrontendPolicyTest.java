@@ -276,6 +276,38 @@ class VueOnlyFrontendPolicyTest {
     }
 
     @Test
+    void runtimeConsoleShouldExposeMemoryUsageTracePanel() throws IOException {
+        String agentView = Files.readString(projectRoot.resolve("frontend/src/views/AgentView.vue"));
+        String api = Files.readString(projectRoot.resolve("frontend/src/services/api.ts"));
+        String types = Files.readString(projectRoot.resolve("frontend/src/types.ts"));
+
+        assertThat(agentView)
+                .contains("getRunMemoryUsage")
+                .contains("currentMemoryUsage")
+                .contains("memoryUsageStateLabel")
+                .contains("memoryUsageKindLabel")
+                .contains("memoryUsageRefsLabel")
+                .contains("memory-usage-card")
+                .contains("Memory Usage")
+                .contains("Memory Use")
+                .contains("memoryReferencedInAnswer")
+                .contains("referencedSourceIds")
+                .contains("trace 和 memory usage");
+
+        assertThat(api)
+                .contains("getRunMemoryUsage")
+                .contains("/api/runtime-console/runs/memory-usage?requestId=");
+
+        assertThat(types)
+                .contains("RuntimeMemoryUsageTrace")
+                .contains("memoryInjected: boolean")
+                .contains("memoryReferencedInAnswer: boolean")
+                .contains("memoryReferenceKind")
+                .contains("memoryUseJudgedBy: string")
+                .contains("referencedSourceIds: string[]");
+    }
+
+    @Test
     void runtimeConsoleShouldExposeToolProposalAuditPanel() throws IOException {
         String agentView = Files.readString(projectRoot.resolve("frontend/src/views/AgentView.vue"));
         String api = Files.readString(projectRoot.resolve("frontend/src/services/api.ts"));

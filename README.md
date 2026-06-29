@@ -273,6 +273,7 @@ curl -X POST http://127.0.0.1:18080/api/webhook/feishu \
 ## 面试资料
 
 1. [INTERVIEW_PROJECT_BRIEF.md](/Users/hanbingzheng/springclaw/docs/INTERVIEW_PROJECT_BRIEF.md)
-2. [PROJECT_STATUS.md](/Users/hanbingzheng/springclaw/docs/PROJECT_STATUS.md)
-3. [ACCEPTANCE_CHECKLIST.md](/Users/hanbingzheng/springclaw/docs/ACCEPTANCE_CHECKLIST.md)
-4. [RUN_REAL_ENVIRONMENT.md](/Users/hanbingzheng/springclaw/RUN_REAL_ENVIRONMENT.md)
+2. [ACCEPTANCE_CHECKLIST.md](/Users/hanbingzheng/springclaw/docs/ACCEPTANCE_CHECKLIST.md)
+3. [RUN_REAL_ENVIRONMENT.md](/Users/hanbingzheng/springclaw/RUN_REAL_ENVIRONMENT.md)
+
+项目当前状态以代码、测试、[CHANGELOG.md](/Users/hanbingzheng/springclaw/CHANGELOG.md) 和 PR 说明为准；不再维护 `PROJECT_STATUS` 类快照文档。

@@ -28,10 +28,12 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Phase 3A1 Task 8：把评审过的 Markdown 项目记忆文件映射为带类型的
+ * 把评审过的 Markdown 运行时记忆文件映射为带类型的
  * {@link ProjectMemoryItem}。
  *
- * <p>文件名 → {@link ProjectMemoryItem.SourceType} 映射：
+ * <p>文件名 → {@link ProjectMemoryItem.SourceType} 映射。除
+ * {@code agent-learnings.md} 外，这些文件都是可选输入，不是必须维护的
+ * docs 状态文档：
  * <pre>
  *   project-brief.md          → PROJECT_BRIEF
  *   current-state.md          → CURRENT_STATE
@@ -78,7 +80,7 @@ public class MarkdownProjectMemorySource implements ProjectMemorySource {
 
     @org.springframework.beans.factory.annotation.Autowired
     public MarkdownProjectMemorySource(
-            @Value("${springclaw.memory.bank-root:${user.dir}/docs/memory-bank}") String root,
+            @Value("${springclaw.memory.bank-root:${user.dir}/data/memory-bank}") String root,
             MarkdownKnowledgeSourceService knowledgeSourceService) {
         this.rootPath = Path.of(root).toAbsolutePath().normalize();
         this.knowledgeSourceService = knowledgeSourceService;

@@ -80,7 +80,8 @@ public class SimplifiedOparEngine implements AgentEngine {
                 ctx.requestId(),
                 fallbackResponder,
                 ctx.decision(),
-                ctx.contextInjection()
+                ctx.contextInjection(),
+                ctx
         );
     }
 
@@ -108,6 +109,17 @@ public class SimplifiedOparEngine implements AgentEngine {
                                    AgentEngine.FallbackResponder fallbackResponder,
                                    AgentDecision decision,
                                    ContextInjection injection) {
+        return run(activeClient, systemPrompt, assembled, requestId, fallbackResponder, decision, injection, null);
+    }
+
+    private ChatExecutionResult run(AiProviderService.ActiveChatClient activeClient,
+                                    String systemPrompt,
+                                    AssembledContext assembled,
+                                    String requestId,
+                                    AgentEngine.FallbackResponder fallbackResponder,
+                                    AgentDecision decision,
+                                    ContextInjection injection,
+                                    ChatContext chatContext) {
         // 本地短路三件套（context-aware / control-plane / priority structured）内部最终会通过
         // Spring AOP 反射调用 @Tool 方法（例如 SystemToolPack.now()）。
         // ToolRuntimeAspect 在拦截时读 ToolExecutionContextHolder，但本地短路路径之前没有 open()，
@@ -168,7 +180,9 @@ public class SimplifiedOparEngine implements AgentEngine {
                     client -> {
                         var requestSpec = client.chatClient().prompt()
                                 .system(systemPrompt)
-                                .user(renderUserPrompt(injection, assembled.question()));
+                                .user(chatContext == null
+                                        ? renderUserPrompt(injection, assembled.question())
+                                        : renderUserPrompt(chatContext));
                         if (DeepSeekChatCompatibility.supportsNativeToolCalling(client) && tools != null && tools.length > 0) {
                             requestSpec = requestSpec.tools(tools);
                         }
@@ -272,6 +286,17 @@ public class SimplifiedOparEngine implements AgentEngine {
 
     String renderUserPrompt(ContextInjection injection, String question) {
         String injectionText = injection == null ? "" : injection.renderForPrompt();
+        return renderUserPrompt(injectionText, question);
+    }
+
+    String renderUserPrompt(ChatContext ctx) {
+        return renderUserPrompt(
+                TypedContextPromptRenderer.promptPrefix(ctx),
+                TypedContextPromptRenderer.question(ctx)
+        );
+    }
+
+    private String renderUserPrompt(String injectionText, String question) {
         return """
                 %s
 

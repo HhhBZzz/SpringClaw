@@ -9,6 +9,7 @@ import {
   confirmToolProposal,
   getChatHistory,
   getModelStatus,
+  getRunMemoryUsage,
   getRunTrace,
   getRuntimeModelProviders,
   getRuntimeOverview,
@@ -30,7 +31,7 @@ import {
   updateRuntimeMemoryCandidateStatus
 } from '../services/api';
 import { useAuthStore } from '../stores/auth';
-import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeMemoryCandidateReviewItem, RuntimeMemoryCandidateReviewStatus, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
+import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeMemoryCandidateReviewItem, RuntimeMemoryCandidateReviewStatus, RuntimeMemoryUsageTrace, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
 
 type LearningReviewStatusFilter = 'all' | RuntimeLearningReviewStatus;
 type ToolProposalScopeFilter = 'current-session' | 'all-visible';
@@ -76,6 +77,7 @@ const sidebarCollapsed = ref(false);
 const streamStatus = ref('');
 const streamMeta = ref<ChatStreamMeta | null>(null);
 const traceEvents = ref<AgentTraceEvent[]>([]);
+const currentMemoryUsage = ref<RuntimeMemoryUsageTrace | null>(null);
 const capabilityEvents = ref<AgentCapabilityEvent[]>([]);
 const verificationEvent = ref<AgentVerificationEvent | null>(null);
 const agentDecision = ref<AgentDecisionEvent | null>(null);
@@ -366,6 +368,21 @@ const qualityMetricRows = computed(() => {
     { key: 'cost', label: 'Cost', score: quality.costScore },
     { key: 'risk', label: 'Risk', score: quality.riskScore }
   ];
+});
+
+const memoryUsageStateLabel = computed(() => {
+  const usage = currentMemoryUsage.value;
+  if (!usage) return 'No trace';
+  if (!usage.memoryInjected) return 'No memory injected';
+  if (usage.memoryReferencedInAnswer) return 'Used in answer';
+  return 'Injected but not referenced';
+});
+
+const memoryUsageKindLabel = computed(() => currentMemoryUsage.value?.memoryReferenceKind || 'NONE');
+
+const memoryUsageRefsLabel = computed(() => {
+  const refs = currentMemoryUsage.value?.referencedSourceIds || [];
+  return refs.length ? refs.join(', ') : '-';
 });
 
 const visibleRunSteps = computed(() => {
@@ -1032,9 +1049,14 @@ async function replayRunTrace(requestId?: string) {
     return;
   }
   try {
-    traceEvents.value = await getRunTrace(requestId, 80);
+    const [events, memoryUsage] = await Promise.all([
+      getRunTrace(requestId, 80),
+      getRunMemoryUsage(requestId)
+    ]);
+    traceEvents.value = events;
+    currentMemoryUsage.value = memoryUsage;
     activeInspectorTab.value = 'trace';
-    setRuntimeStatus(`已回放 ${requestId} 的 trace。`);
+    setRuntimeStatus(`已回放 ${requestId} 的 trace 和 memory usage。`);
   } catch (error) {
     setRuntimeStatus(error instanceof Error ? error.message : 'Trace 回放失败。');
   }
@@ -1168,6 +1190,7 @@ async function send() {
   streamStatus.value = '正在连接 Agent 流式通道';
   streamMeta.value = null;
   traceEvents.value = [];
+  currentMemoryUsage.value = null;
   capabilityEvents.value = [];
   verificationEvent.value = null;
   agentDecision.value = null;
@@ -1361,6 +1384,7 @@ function newSession() {
   messages.value = [];
   input.value = '';
   traceEvents.value = [];
+  currentMemoryUsage.value = null;
   capabilityEvents.value = [];
   verificationEvent.value = null;
   agentDecision.value = null;
@@ -2459,6 +2483,7 @@ onUnmounted(() => {
                   <div class="context-row"><span>Duration</span><strong>{{ runDurationLabel }}</strong></div>
                   <div class="context-row"><span>Model</span><strong>{{ runtimeModelDisplay }}</strong></div>
                   <div class="context-row"><span>Quality</span><strong>{{ agentQuality ? `${agentQuality.overallScore} · ${qualityLevelLabel}` : '-' }}</strong></div>
+                  <div class="context-row memory-usage-row"><span>Memory Use</span><strong>{{ memoryUsageStateLabel }}</strong></div>
                 </div>
                 <div v-if="agentQuality" class="quality-score-card" :class="`is-${agentQuality.level}`">
                   <div class="quality-score-head">
@@ -2476,6 +2501,16 @@ onUnmounted(() => {
                     </div>
                   </div>
                   <p>{{ agentQuality.reason || verificationEvent?.summary || '等待评分原因。' }}</p>
+                </div>
+                <div v-if="currentMemoryUsage" class="memory-usage-card current-step-card">
+                  <div class="panel-title-row">
+                    <strong>Memory Usage</strong>
+                    <span>{{ memoryUsageKindLabel }}</span>
+                  </div>
+                  <div class="context-row"><span>Injected</span><strong>{{ currentMemoryUsage.memoryInjected ? 'yes' : 'no' }}</strong></div>
+                  <div class="context-row"><span>Referenced</span><strong>{{ currentMemoryUsage.memoryReferencedInAnswer ? 'yes' : 'no' }}</strong></div>
+                  <div class="context-row"><span>Judge</span><strong>{{ currentMemoryUsage.memoryUseJudgedBy || '-' }}</strong></div>
+                  <div class="context-row"><span>Refs</span><strong>{{ memoryUsageRefsLabel }}</strong></div>
                 </div>
                 <div class="panel-title-row sub-panel-title">
                   <div>

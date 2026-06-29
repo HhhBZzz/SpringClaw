@@ -6,6 +6,8 @@ import com.springclaw.domain.entity.LlmUsageRecord;
 import com.springclaw.domain.entity.ScheduledTask;
 import com.springclaw.service.agent.AgentRunTraceService;
 import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.memory.evaluation.MemoryUsageTraceReader;
+import com.springclaw.service.memory.evaluation.MemoryUsageTraceView;
 import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.SkillService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
@@ -40,6 +42,7 @@ public class RuntimeConsoleController {
     private final LlmUsageRecordService llmUsageRecordService;
     private final AgentRunTraceService agentRunTraceService;
     private final CapabilityRegistry capabilityRegistry;
+    private final MemoryUsageTraceReader memoryUsageTraceReader;
 
     public RuntimeConsoleController(SkillRegistryService skillRegistryService,
                                     SkillService skillService,
@@ -47,7 +50,8 @@ public class RuntimeConsoleController {
                                     AiProviderService aiProviderService,
                                     LlmUsageRecordService llmUsageRecordService,
                                     AgentRunTraceService agentRunTraceService,
-                                    CapabilityRegistry capabilityRegistry) {
+                                    CapabilityRegistry capabilityRegistry,
+                                    MemoryUsageTraceReader memoryUsageTraceReader) {
         this.skillRegistryService = skillRegistryService;
         this.skillService = skillService;
         this.scheduledTaskService = scheduledTaskService;
@@ -55,6 +59,7 @@ public class RuntimeConsoleController {
         this.llmUsageRecordService = llmUsageRecordService;
         this.agentRunTraceService = agentRunTraceService;
         this.capabilityRegistry = capabilityRegistry;
+        this.memoryUsageTraceReader = memoryUsageTraceReader;
     }
 
     @GetMapping("/overview")
@@ -115,6 +120,18 @@ public class RuntimeConsoleController {
     public ApiResponse<List<Map<String, Object>>> runs(@RequestParam(defaultValue = "20") int limit) {
         RequestUserContext context = requireContext();
         return ApiResponse.success(agentRunTraceService.recentRuns(isAdmin(context) ? null : context.username(), limit));
+    }
+
+    @GetMapping("/runs/memory-usage")
+    public ApiResponse<MemoryUsageTraceView> runMemoryUsage(@RequestParam String requestId) {
+        RequestUserContext context = requireContext();
+        if (!StringUtils.hasText(requestId)) {
+            throw new BusinessException(40103, "requestId 不能为空");
+        }
+        return ApiResponse.success(memoryUsageTraceReader.readLatest(
+                requestId,
+                isAdmin(context) ? null : context.username()
+        ));
     }
 
     private Map<String, Object> buildSkills(RequestUserContext context) {

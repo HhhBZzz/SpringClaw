@@ -453,6 +453,17 @@ export interface RuntimeUsageSummary {
   recent?: Record<string, unknown>[];
 }
 
+export interface RuntimeMemoryUsageTrace {
+  requestId: string;
+  memoryInjected: boolean;
+  memoryReferencedInAnswer: boolean;
+  memoryReferenceKind: 'EXPLICIT' | 'PARAPHRASE' | 'NONE' | string;
+  memoryUseJudgedBy: string;
+  referencedSourceIds: string[];
+  sourceEventKey?: string | null;
+  observedAt?: string | null;
+}
+
 export interface RuntimeModelProvider {
   providerId: string;
   model?: string;

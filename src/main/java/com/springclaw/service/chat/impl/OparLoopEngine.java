@@ -98,7 +98,8 @@ public class OparLoopEngine implements AgentEngine {
                 ctx.assembled(),
                 ctx.requestId(),
                 fallbackResponder,
-                ctx.decision()
+                ctx.decision(),
+                ctx
         );
     }
 
@@ -116,6 +117,16 @@ public class OparLoopEngine implements AgentEngine {
                                        String requestId,
                                        AgentEngine.FallbackResponder fallbackResponder,
                                        AgentDecision decision) {
+        return runLoop(activeClient, systemPrompt, assembled, requestId, fallbackResponder, decision, null);
+    }
+
+    private ChatExecutionResult runLoop(AiProviderService.ActiveChatClient activeClient,
+                                        String systemPrompt,
+                                        AssembledContext assembled,
+                                        String requestId,
+                                        AgentEngine.FallbackResponder fallbackResponder,
+                                        AgentDecision decision,
+                                        ChatContext chatContext) {
         AiProviderService.ActiveChatClient currentClient = activeClient;
         // 本地短路四件套（decision-bound / control-plane / context-aware / priority structured）
         // 最终会通过 Spring AOP 反射调用 @Tool 方法（例如 SystemToolPack.now()）。
@@ -197,7 +208,7 @@ public class OparLoopEngine implements AgentEngine {
         String observePrompt = assembled.observePrompt();
         List<AgentStep> steps = new ArrayList<>();
         for (int stepNo = 1; stepNo <= maxAgentSteps; stepNo++) {
-            PlanCallResult planCall = runPlan(currentClient, systemPrompt, assembled, requestId, steps, stepNo);
+            PlanCallResult planCall = runPlan(currentClient, systemPrompt, assembled, requestId, steps, stepNo, chatContext);
             currentClient = planCall.client();
             PlanResult plan = planCall.plan();
             if (planCall.degraded()) {
@@ -219,7 +230,7 @@ public class OparLoopEngine implements AgentEngine {
                 break;
             }
 
-            ActionCallResult actionCall = runAction(currentClient, systemPrompt, assembled, plan, requestId, steps, stepNo, decision);
+            ActionCallResult actionCall = runAction(currentClient, systemPrompt, assembled, plan, requestId, steps, stepNo, decision, chatContext);
             currentClient = actionCall.client();
             ActionResult action = actionCall.action();
             steps.add(new AgentStep(stepNo, plan, action));
@@ -248,7 +259,15 @@ public class OparLoopEngine implements AgentEngine {
         return promptSupport.renderReflectPrompt(context, plan, action);
     }
 
+    public String renderReflectPrompt(ChatContext context, String plan, String action) {
+        return promptSupport.renderReflectPrompt(context, plan, action);
+    }
+
     public String renderMetaRepairPrompt(AssembledContext context, String plan, String action, String badAnswer) {
+        return promptSupport.renderMetaRepairPrompt(context, plan, action, badAnswer);
+    }
+
+    public String renderMetaRepairPrompt(ChatContext context, String plan, String action, String badAnswer) {
         return promptSupport.renderMetaRepairPrompt(context, plan, action, badAnswer);
     }
 
@@ -275,14 +294,23 @@ public class OparLoopEngine implements AgentEngine {
                                    AssembledContext assembled,
                                    String requestId,
                                    List<AgentStep> history,
-                                   int stepNo) {
+                                   int stepNo,
+                                   ChatContext chatContext) {
         try {
-            String planPrompt = promptSupport.renderPlanPrompt(
-                    assembled,
-                    renderHistory(history),
-                    stepNo,
-                    planOutputConverter.getFormat()
-            );
+            String renderedHistory = renderHistory(history);
+            String planPrompt = chatContext == null
+                    ? promptSupport.renderPlanPrompt(
+                            assembled,
+                            renderedHistory,
+                            stepNo,
+                            planOutputConverter.getFormat()
+                    )
+                    : promptSupport.renderPlanPrompt(
+                            chatContext,
+                            renderedHistory,
+                            stepNo,
+                            planOutputConverter.getFormat()
+                    );
             ModelCallExecutor.ModelCallResult<PlanResult> callResult = modelCallExecutor.executeChat(
                     activeClient,
                     "plan",
@@ -325,7 +353,8 @@ public class OparLoopEngine implements AgentEngine {
                                        String requestId,
                                        List<AgentStep> history,
                                        int stepNo,
-                                       AgentDecision decision) {
+                                       AgentDecision decision,
+                                       ChatContext chatContext) {
         Object[] tools = toolOrchestrator.selectTools(
                 assembled.channel(),
                 assembled.userId(),
@@ -345,7 +374,10 @@ public class OparLoopEngine implements AgentEngine {
         );
 
         try (ToolExecutionContextHolder.Scope ignored = ToolExecutionContextHolder.open(context)) {
-            String actionPrompt = promptSupport.renderActionPrompt(assembled, plan.planText(), renderHistory(history), stepNo);
+            String renderedHistory = renderHistory(history);
+            String actionPrompt = chatContext == null
+                    ? promptSupport.renderActionPrompt(assembled, plan.planText(), renderedHistory, stepNo)
+                    : promptSupport.renderActionPrompt(chatContext, plan.planText(), renderedHistory, stepNo);
             ModelCallExecutor.ModelCallResult<String> callResult = modelCallExecutor.executeChat(
                     activeClient,
                     "action",

@@ -499,7 +499,7 @@ public class ChatServiceImpl implements ChatService {
                                      AtomicReference<Disposable> disposableRef) {
         StringBuilder fullAnswer = new StringBuilder();
         AiProviderService.ActiveChatClient reflectClient = aiProviderService.activeClient();
-        String reflectPrompt = oparLoopEngine.renderReflectPrompt(context.assembled(), executionResult.plan(), executionResult.action());
+        String reflectPrompt = oparLoopEngine.renderReflectPrompt(context, executionResult.plan(), executionResult.action());
         final org.springframework.ai.chat.model.ChatResponse[] latestStreamResponse = new org.springframework.ai.chat.model.ChatResponse[1];
         Disposable disposable = conversationAdvisorSupport.apply(
                         reflectClient.chatClient().prompt()

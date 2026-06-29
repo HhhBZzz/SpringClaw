@@ -328,8 +328,8 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
     }
 
     String renderBasicChatPrompt(ChatContext ctx) {
-        String injection = ctx.contextInjection().renderForPrompt();
-        String question = TextUtils.safe(ctx.assembled() == null ? null : ctx.assembled().question());
+        String injection = TypedContextPromptRenderer.promptPrefix(ctx);
+        String question = TypedContextPromptRenderer.question(ctx);
         return """
                 %s## 用户当前问题
                 %s

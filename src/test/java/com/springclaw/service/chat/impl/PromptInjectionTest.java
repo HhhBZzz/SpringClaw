@@ -173,6 +173,30 @@ class PromptInjectionTest {
     }
 
     @Test
+    void modelLedStreamEngine_rendersTypedSnapshotWhenCanonicalContextIsAvailable() {
+        ModelLedStreamEngine engine = new ModelLedStreamEngine(
+                mock(ConversationAdvisorSupport.class),
+                mock(ModelTransportGuardService.class),
+                mock(ChatResponsePolicyService.class),
+                mock(com.springclaw.service.usage.LlmUsageRecordService.class),
+                mock(ModelCallExecutor.class),
+                mock(com.springclaw.tool.runtime.ToolOrchestrator.class),
+                mock(SseEventBridge.class),
+                mock(ChatResultPersister.class),
+                mock(com.springclaw.service.guard.ChatGuardService.class),
+                null,
+                false
+        );
+
+        String prompt = engine.renderModelLedPrompt(canonicalContextWithEmptyLegacyInjection());
+
+        assertThat(prompt).contains("SNAPSHOT-QUESTION");
+        assertThat(prompt).contains("SNAPSHOT-SHORT-TERM");
+        assertThat(prompt).contains("SNAPSHOT-SEMANTIC");
+        assertThat(prompt).contains("SNAPSHOT-RULE");
+    }
+
+    @Test
     void autonomousLoopEngine_prependsInjection() {
         AutonomousLoopEngine engine = new AutonomousLoopEngine(
                 mock(com.springclaw.service.ai.AiProviderService.class),
@@ -192,6 +216,37 @@ class PromptInjectionTest {
         String prompt = engine.renderAutonomousPrompt(context(), new Object[0], "", "read");
         assertThat(prompt).contains(OBSERVE_MARKER);
         assertThat(prompt).contains(QUESTION);
+    }
+
+    @Test
+    void autonomousLoopEngine_rendersTypedSnapshotWhenCanonicalContextIsAvailable() {
+        AutonomousLoopEngine engine = new AutonomousLoopEngine(
+                mock(com.springclaw.service.ai.AiProviderService.class),
+                mock(com.springclaw.tool.runtime.ToolOrchestrator.class),
+                mock(ModelTransportGuardService.class),
+                mock(ModelCallExecutor.class),
+                mock(ConversationAdvisorSupport.class),
+                mock(LocalExecutionSupport.class),
+                mock(ChatResponsePolicyService.class),
+                mock(SseEventBridge.class),
+                mock(ChatResultPersister.class),
+                mock(com.springclaw.service.guard.ChatGuardService.class),
+                null,
+                true,
+                5
+        );
+
+        String prompt = engine.renderAutonomousPrompt(
+                canonicalContextWithEmptyLegacyInjection(),
+                new Object[0],
+                "",
+                "read"
+        );
+
+        assertThat(prompt).contains("SNAPSHOT-QUESTION");
+        assertThat(prompt).contains("SNAPSHOT-SHORT-TERM");
+        assertThat(prompt).contains("SNAPSHOT-SEMANTIC");
+        assertThat(prompt).contains("SNAPSHOT-RULE");
     }
 
     private static ContextSnapshot snapshot() {

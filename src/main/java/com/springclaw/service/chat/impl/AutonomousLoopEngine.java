@@ -425,8 +425,8 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
     String renderAutonomousPrompt(ChatContext ctx, Object[] tools, String history, String riskLevel) {
         String toolList = renderToolList(tools);
         String completionRule = renderCompletionRule(riskLevel);
-        String injection = ctx == null ? "" : ctx.contextInjection().renderForPrompt();
-        String question = ctx == null || ctx.assembled() == null ? "" : ctx.assembled().question();
+        String injection = TypedContextPromptRenderer.promptPrefix(ctx);
+        String question = TypedContextPromptRenderer.question(ctx);
         String template = """
                 {{INJECTION}}# SpringClaw 自主 Agent 执行循环
 

@@ -5,6 +5,8 @@ import com.springclaw.service.event.MessageEventReceipt;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.event.MessageEventWrite;
 import com.springclaw.service.memory.ShortTermMemoryWriter;
+import com.springclaw.service.memory.evaluation.MemoryUsageTrace;
+import com.springclaw.service.memory.evaluation.MemoryUsageTraceEvaluator;
 import com.springclaw.service.memory.extraction.MemoryExtractionTrigger;
 import com.springclaw.service.prompt.SoulPromptService;
 import com.springclaw.service.session.AgentSessionService;
@@ -27,12 +29,23 @@ public class ChatResultPersister {
     private final SoulPromptService soulPromptService;
     private final ShortTermMemoryWriter shortTermMemoryWriter;
     private final MemoryExtractionTrigger memoryExtractionTrigger;
+    private final MemoryUsageTraceEvaluator memoryUsageTraceEvaluator;
 
     public ChatResultPersister(AgentSessionService agentSessionService,
                                MessageEventService messageEventService,
                                SoulPromptService soulPromptService,
                                ShortTermMemoryWriter shortTermMemoryWriter) {
-        this(agentSessionService, messageEventService, soulPromptService, shortTermMemoryWriter, null);
+        this(agentSessionService, messageEventService, soulPromptService,
+                shortTermMemoryWriter, null, null);
+    }
+
+    public ChatResultPersister(AgentSessionService agentSessionService,
+                               MessageEventService messageEventService,
+                               SoulPromptService soulPromptService,
+                               ShortTermMemoryWriter shortTermMemoryWriter,
+                               MemoryExtractionTrigger memoryExtractionTrigger) {
+        this(agentSessionService, messageEventService, soulPromptService,
+                shortTermMemoryWriter, memoryExtractionTrigger, null);
     }
 
     @Autowired
@@ -40,12 +53,14 @@ public class ChatResultPersister {
                                MessageEventService messageEventService,
                                SoulPromptService soulPromptService,
                                ShortTermMemoryWriter shortTermMemoryWriter,
-                               MemoryExtractionTrigger memoryExtractionTrigger) {
+                               MemoryExtractionTrigger memoryExtractionTrigger,
+                               MemoryUsageTraceEvaluator memoryUsageTraceEvaluator) {
         this.agentSessionService = agentSessionService;
         this.messageEventService = messageEventService;
         this.soulPromptService = soulPromptService;
         this.shortTermMemoryWriter = shortTermMemoryWriter;
         this.memoryExtractionTrigger = memoryExtractionTrigger;
+        this.memoryUsageTraceEvaluator = memoryUsageTraceEvaluator;
     }
 
     public void persist(ChatContext context,
@@ -101,6 +116,7 @@ public class ChatResultPersister {
                 "ACT=" + TextUtils.truncate(executionResult.action(), 1200),
                 requestId
         );
+        recordMemoryUsageTrace(context, assistantForMemory);
         triggerMemoryExtraction(requestId, userId);
     }
 
@@ -180,6 +196,41 @@ public class ChatResultPersister {
             log.warn("终态记忆抽取触发失败，忽略。requestId={}, reason={}",
                     requestId, ex.getMessage());
         }
+    }
+
+    private void recordMemoryUsageTrace(ChatContext context, String assistantForMemory) {
+        if (memoryUsageTraceEvaluator == null || context.contextSnapshot() == null) {
+            return;
+        }
+        try {
+            MemoryUsageTrace trace = memoryUsageTraceEvaluator.evaluate(
+                    context.contextSnapshot().memoryFrame(),
+                    assistantForMemory
+            );
+            messageEventService.recordSingle(
+                    context.session().getSessionKey(),
+                    context.channel(),
+                    context.userId(),
+                    "SYSTEM",
+                    "OPAR",
+                    TextUtils.truncate(renderMemoryUsageTrace(trace), 1200),
+                    context.requestId()
+            );
+        } catch (RuntimeException ex) {
+            log.warn("记忆使用 trace 记录失败，忽略。requestId={}, reason={}",
+                    context.requestId(), ex.getMessage());
+        }
+    }
+
+    private static String renderMemoryUsageTrace(MemoryUsageTrace trace) {
+        return "MEMORY_USAGE=memoryInjected=%s, memoryReferencedInAnswer=%s, kind=%s, judgedBy=%s, refs=%s"
+                .formatted(
+                        trace.memoryInjected(),
+                        trace.memoryReferencedInAnswer(),
+                        trace.memoryReferenceKind(),
+                        trace.memoryUseJudgedBy(),
+                        trace.referencedSourceIds()
+                );
     }
 
 }

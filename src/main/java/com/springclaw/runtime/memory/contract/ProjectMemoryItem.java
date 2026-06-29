@@ -18,6 +18,7 @@ public record ProjectMemoryItem(
         APPROVED_LEARNING,
         PROGRESS,
         USER_PREFERENCE,
+        KNOWLEDGE_SOURCE,
         OTHER_REVIEWED_PROJECT_MEMORY
     }
 

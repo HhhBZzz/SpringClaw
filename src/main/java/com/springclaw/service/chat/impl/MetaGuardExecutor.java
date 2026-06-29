@@ -47,7 +47,7 @@ public class MetaGuardExecutor {
 
     /** 执行带元话术防护的最终回答生成 */
     public String execute(ChatContext context, String plan, String action) throws Exception {
-        String prompt = oparLoopEngine.renderReflectPrompt(context.assembled(), plan, action);
+        String prompt = oparLoopEngine.renderReflectPrompt(context, plan, action);
         AiProviderService.ActiveChatClient currentClient = aiProviderService.activeClient();
         ModelCallExecutor.ModelCallResult<String> answerResult = modelCallExecutor.executeChat(
                 currentClient,
@@ -84,7 +84,7 @@ public class MetaGuardExecutor {
         log.warn("检测到身份/阶段元话术，触发重试。sessionKey={}", context.assembled().sessionKey());
         String repaired = answer;
         for (int i = 0; i < metaGuardRetryTimes; i++) {
-            String retryPrompt = oparLoopEngine.renderMetaRepairPrompt(context.assembled(), plan, action, repaired);
+            String retryPrompt = oparLoopEngine.renderMetaRepairPrompt(context, plan, action, repaired);
             ModelCallExecutor.ModelCallResult<String> retryResult = modelCallExecutor.executeChat(
                     currentClient,
                     "meta-repair",

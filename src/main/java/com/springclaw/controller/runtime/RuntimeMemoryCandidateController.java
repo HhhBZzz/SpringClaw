@@ -2,6 +2,9 @@ package com.springclaw.controller.runtime;
 
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.common.response.ApiResponse;
+import com.springclaw.runtime.memory.contract.MemoryScope;
+import com.springclaw.service.memory.consolidation.MemoryConsolidationRunResult;
+import com.springclaw.service.memory.consolidation.MemoryConsolidationService;
 import com.springclaw.service.memory.review.MemoryCandidateReviewService;
 import com.springclaw.web.auth.RequireRole;
 import org.springframework.util.StringUtils;
@@ -19,9 +22,14 @@ import java.util.List;
 public class RuntimeMemoryCandidateController {
 
     private final MemoryCandidateReviewService reviewService;
+    private final MemoryConsolidationService consolidationService;
 
-    public RuntimeMemoryCandidateController(MemoryCandidateReviewService reviewService) {
+    public RuntimeMemoryCandidateController(
+            MemoryCandidateReviewService reviewService,
+            MemoryConsolidationService consolidationService
+    ) {
         this.reviewService = reviewService;
+        this.consolidationService = consolidationService;
     }
 
     @GetMapping
@@ -55,10 +63,42 @@ public class RuntimeMemoryCandidateController {
         }
     }
 
+    @PostMapping("/consolidate")
+    @RequireRole({"ADMIN"})
+    public ApiResponse<MemoryConsolidationRunResult> consolidateMemory(
+            @RequestBody ConsolidateMemoryRequest request
+    ) {
+        if (request == null || !StringUtils.hasText(request.userId())) {
+            throw new BusinessException(40103, "userId 不能为空");
+        }
+        String channel = StringUtils.hasText(request.channel())
+                ? request.channel().trim()
+                : "api";
+        int safeLimit = Math.max(2, Math.min(
+                request.limit() == null ? 50 : request.limit(),
+                500
+        ));
+        try {
+            return ApiResponse.success(consolidationService.consolidate(
+                    MemoryScope.user(channel, "consolidation", request.userId()),
+                    safeLimit
+            ));
+        } catch (IllegalArgumentException | IllegalStateException ex) {
+            throw new BusinessException(40404, ex.getMessage());
+        }
+    }
+
     public record UpdateMemoryCandidateStatusRequest(
             String memoryVersionId,
             String status,
             String reason
+    ) {
+    }
+
+    public record ConsolidateMemoryRequest(
+            String userId,
+            String channel,
+            Integer limit
     ) {
     }
 }

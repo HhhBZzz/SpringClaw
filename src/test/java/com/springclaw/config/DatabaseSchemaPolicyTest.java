@@ -32,7 +32,9 @@ class DatabaseSchemaPolicyTest {
                 .contains("uk_skill_policy_scope_skill")
                 .contains("idx_llm_usage_cache_create")
                 .contains("idx_scheduled_task_due_dispatch")
-                .contains("idx_scheduled_task_execution_task_recent");
+                .contains("idx_scheduled_task_execution_task_recent")
+                .contains("CREATE TABLE IF NOT EXISTS `runtime_evaluation_run`")
+                .contains("idx_runtime_eval_type_time");
     }
 
     @Test
@@ -69,5 +71,17 @@ class DatabaseSchemaPolicyTest {
                 .contains("uk_tool_permission_role_tool")
                 .contains("uk_skill_policy_scope_skill")
                 .contains("idx_llm_usage_cache_create");
+    }
+
+    @Test
+    void runtimeConsoleMigrationShouldCreateEvaluationHistoryTable() throws Exception {
+        String migration = Files.readString(Path.of("src/main/resources/sql/migrations/2026-06-04-runtime-console-run-tables.sql"));
+
+        assertThat(migration)
+                .contains("CREATE TABLE IF NOT EXISTS `runtime_evaluation_run`")
+                .contains("evaluation_type")
+                .contains("schema_version")
+                .contains("result_json")
+                .contains("idx_runtime_eval_type_time");
     }
 }

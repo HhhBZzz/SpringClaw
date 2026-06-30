@@ -446,6 +446,21 @@ export interface RuntimeMemoryProviderEvaluationReport {
   evaluatedAt?: string;
 }
 
+export type RuntimeEvaluationType = 'MEMORY_REDLINE' | 'MEMORY_PROVIDER_HARNESS';
+
+export interface RuntimeEvaluationRun {
+  id?: number;
+  evaluationType: RuntimeEvaluationType | string;
+  schemaVersion: string;
+  enabled: boolean;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  resultJson: string;
+  createdAt?: string;
+}
+
 export type RuntimeKnowledgeSourceReviewStatus = 'active' | 'approved' | 'disabled' | 'rejected';
 
 export interface RuntimeKnowledgeSourceReviewItem {

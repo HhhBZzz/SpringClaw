@@ -6718,6 +6718,7 @@ button.runtime-nav-item {
 
 .memory-evaluation-latest-grid article,
 .memory-evaluation-status-card,
+.memory-evaluation-gate-card,
 .memory-evaluation-history-item {
   display: grid;
   gap: 5px;
@@ -6730,6 +6731,7 @@ button.runtime-nav-item {
 
 .memory-evaluation-latest-grid span,
 .memory-evaluation-status-card span,
+.memory-evaluation-gate-card span,
 .memory-evaluation-history-head span {
   color: #f6c945;
   font-size: 11px;
@@ -6786,6 +6788,45 @@ button.runtime-nav-item {
 }
 
 .memory-evaluation-status-card.status-fail strong {
+  color: #ff6f6f;
+}
+
+.memory-evaluation-gate-card {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-color: rgba(168, 176, 189, 0.22);
+}
+
+.memory-evaluation-gate-card div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.memory-evaluation-gate-card strong {
+  color: #f5f7fb;
+  font-size: 16px;
+}
+
+.memory-evaluation-gate-card small {
+  overflow: hidden;
+  color: #a8b0bd;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-evaluation-gate-card.gate-pass {
+  border-color: rgba(56, 217, 121, 0.32);
+}
+
+.memory-evaluation-gate-card.gate-pass strong {
+  color: #38d979;
+}
+
+.memory-evaluation-gate-card.gate-block {
+  border-color: rgba(255, 111, 111, 0.36);
+}
+
+.memory-evaluation-gate-card.gate-block strong {
   color: #ff6f6f;
 }
 

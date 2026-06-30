@@ -5,6 +5,7 @@ import com.springclaw.service.memory.evaluation.MemoryEffectivenessRedlineReport
 import com.springclaw.service.memory.evaluation.MemoryEffectivenessRedlineReportService;
 import com.springclaw.service.memory.evaluation.MemoryProviderEvaluationHarnessService;
 import com.springclaw.service.memory.evaluation.MemoryProviderEvaluationReport;
+import com.springclaw.service.memory.evaluation.RuntimeEvaluationGateReport;
 import com.springclaw.service.memory.evaluation.RuntimeEvaluationHistoryService;
 import com.springclaw.service.memory.evaluation.RuntimeEvaluationRun;
 import com.springclaw.service.memory.evaluation.RuntimeEvaluationStatusSummary;
@@ -87,5 +88,13 @@ public class RuntimeMemoryEvaluationController {
     @RequireRole({"ADMIN"})
     public ApiResponse<RuntimeEvaluationStatusSummary> evaluationSummary() {
         return ApiResponse.success(historyService.summary());
+    }
+
+    @GetMapping("/gate")
+    @RequireRole({"ADMIN"})
+    public ApiResponse<RuntimeEvaluationGateReport> evaluationGate(
+            @RequestParam(defaultValue = "5") int window
+    ) {
+        return ApiResponse.success(historyService.gateReport(window));
     }
 }

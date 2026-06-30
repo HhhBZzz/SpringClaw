@@ -137,6 +137,27 @@ public class RuntimeEvaluationHistoryService {
         );
     }
 
+    public RuntimeEvaluationGateReport gateReport(int window) {
+        int safeWindow = Math.max(2, Math.min(window, 20));
+        RuntimeEvaluationStatusSummary health = summary();
+        List<RuntimeEvaluationRun> redlineRecent =
+                store.listByType(MEMORY_REDLINE, safeWindow);
+        List<RuntimeEvaluationRun> providerRecent =
+                store.listByType(MEMORY_PROVIDER_HARNESS, safeWindow);
+        GateDecision gate = gateDecision(health.redlineLatest());
+        TrendDecision trend = trendDecision(redlineRecent);
+        return new RuntimeEvaluationGateReport(
+                gate.status(),
+                gate.passed(),
+                gate.reason(),
+                trend.trend(),
+                trend.reason(),
+                health,
+                redlineRecent,
+                providerRecent
+        );
+    }
+
     private String encode(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
@@ -151,6 +172,65 @@ public class RuntimeEvaluationHistoryService {
 
     private static String failureLabel(int failed) {
         return failed + " failing case" + (failed == 1 ? "" : "s");
+    }
+
+    private static GateDecision gateDecision(RuntimeEvaluationRun redline) {
+        if (redline == null) {
+            return new GateDecision(
+                    "BLOCK",
+                    false,
+                    "memory redline has not run"
+            );
+        }
+        if (redline.failed() > 0) {
+            return new GateDecision(
+                    "BLOCK",
+                    false,
+                    "latest redline has " + failureLabel(redline.failed())
+            );
+        }
+        return new GateDecision(
+                "PASS",
+                true,
+                "latest redline passed"
+        );
+    }
+
+    private static TrendDecision trendDecision(List<RuntimeEvaluationRun> redlineRecent) {
+        if (redlineRecent == null || redlineRecent.size() < 2) {
+            return new TrendDecision(
+                    "UNKNOWN",
+                    "not enough redline history"
+            );
+        }
+        RuntimeEvaluationRun latest = redlineRecent.get(0);
+        RuntimeEvaluationRun previous = redlineRecent.get(1);
+        int latestFailures = latest.failed();
+        int previousFailures = previous.failed();
+        if (latestFailures < previousFailures) {
+            return new TrendDecision(
+                    "IMPROVING",
+                    "redline failures decreased from "
+                            + previousFailures + " to " + latestFailures
+            );
+        }
+        if (latestFailures > previousFailures) {
+            return new TrendDecision(
+                    "REGRESSING",
+                    "redline failures increased from "
+                            + previousFailures + " to " + latestFailures
+            );
+        }
+        return new TrendDecision(
+                "STABLE",
+                "redline failures stayed at " + latestFailures
+        );
+    }
+
+    private record GateDecision(String status, boolean passed, String reason) {
+    }
+
+    private record TrendDecision(String trend, String reason) {
     }
 
     private static String normalizeType(String evaluationType) {

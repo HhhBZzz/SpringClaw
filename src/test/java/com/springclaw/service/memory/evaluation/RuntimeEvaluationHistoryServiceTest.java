@@ -170,6 +170,127 @@ class RuntimeEvaluationHistoryServiceTest {
         assertThat(summary.summary()).contains("provider harness has 1 failing case");
     }
 
+    @Test
+    void blocksGateWhenRedlineHasNotRunOrLatestRedlineFails() {
+        InMemoryStore store = new InMemoryStore();
+        RuntimeEvaluationHistoryService service =
+                new RuntimeEvaluationHistoryService(store, new ObjectMapper());
+
+        RuntimeEvaluationGateReport missing = service.gateReport(5);
+
+        assertThat(missing.gateStatus()).isEqualTo("BLOCK");
+        assertThat(missing.gatePassed()).isFalse();
+        assertThat(missing.gateReason()).contains("redline has not run");
+        assertThat(missing.trend()).isEqualTo("UNKNOWN");
+
+        store.insert(run(
+                "MEMORY_REDLINE",
+                true,
+                5,
+                4,
+                1,
+                0,
+                Instant.parse("2026-06-30T00:09:00Z")
+        ));
+
+        RuntimeEvaluationGateReport failed = service.gateReport(5);
+
+        assertThat(failed.gateStatus()).isEqualTo("BLOCK");
+        assertThat(failed.gatePassed()).isFalse();
+        assertThat(failed.gateReason()).contains("latest redline has 1 failing case");
+        assertThat(failed.health().status()).isEqualTo("FAIL");
+    }
+
+    @Test
+    void passesGateWhenLatestRedlinePassesAndReportsRedlineTrend() {
+        InMemoryStore store = new InMemoryStore();
+        RuntimeEvaluationHistoryService service =
+                new RuntimeEvaluationHistoryService(store, new ObjectMapper());
+        store.insert(run(
+                "MEMORY_REDLINE",
+                true,
+                5,
+                3,
+                2,
+                0,
+                Instant.parse("2026-06-30T00:10:00Z")
+        ));
+        store.insert(run(
+                "MEMORY_REDLINE",
+                true,
+                5,
+                5,
+                0,
+                0,
+                Instant.parse("2026-06-30T00:11:00Z")
+        ));
+        store.insert(run(
+                "MEMORY_PROVIDER_HARNESS",
+                false,
+                3,
+                0,
+                0,
+                3,
+                Instant.parse("2026-06-30T00:12:00Z")
+        ));
+
+        RuntimeEvaluationGateReport report = service.gateReport(5);
+
+        assertThat(report.gateStatus()).isEqualTo("PASS");
+        assertThat(report.gatePassed()).isTrue();
+        assertThat(report.gateReason()).contains("latest redline passed");
+        assertThat(report.trend()).isEqualTo("IMPROVING");
+        assertThat(report.trendReason()).contains("redline failures decreased from 2 to 0");
+        assertThat(report.health().status()).isEqualTo("DEGRADED");
+        assertThat(report.redlineRecent()).extracting(RuntimeEvaluationRun::failed)
+                .containsExactly(0, 2);
+    }
+
+    @Test
+    void reportsRegressingAndStableTrendsFromRecentRedlineRuns() {
+        InMemoryStore store = new InMemoryStore();
+        RuntimeEvaluationHistoryService service =
+                new RuntimeEvaluationHistoryService(store, new ObjectMapper());
+        store.insert(run(
+                "MEMORY_REDLINE",
+                true,
+                5,
+                5,
+                0,
+                0,
+                Instant.parse("2026-06-30T00:13:00Z")
+        ));
+        store.insert(run(
+                "MEMORY_REDLINE",
+                true,
+                5,
+                4,
+                1,
+                0,
+                Instant.parse("2026-06-30T00:14:00Z")
+        ));
+
+        RuntimeEvaluationGateReport regressing = service.gateReport(5);
+
+        assertThat(regressing.trend()).isEqualTo("REGRESSING");
+        assertThat(regressing.trendReason()).contains("redline failures increased from 0 to 1");
+
+        store.insert(run(
+                "MEMORY_REDLINE",
+                true,
+                5,
+                4,
+                1,
+                0,
+                Instant.parse("2026-06-30T00:15:00Z")
+        ));
+
+        RuntimeEvaluationGateReport stable = service.gateReport(5);
+
+        assertThat(stable.trend()).isEqualTo("STABLE");
+        assertThat(stable.trendReason()).contains("redline failures stayed at 1");
+    }
+
     private static MemoryEffectivenessRedlineReport redlineReport() {
         return new MemoryEffectivenessRedlineReport(
                 "springclaw.memory-effectiveness-redline.v1",

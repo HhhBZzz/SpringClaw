@@ -23,6 +23,7 @@ import {
   getRuntimeKnowledgeSources,
   getRuntimeKnowledgeSourceSnapshot,
   getRuntimeMemoryCandidates,
+  getRuntimeMemoryEvaluationGate,
   getRuntimeMemoryEvaluationHistory,
   getRuntimeMemoryEvaluationLatest,
   getRuntimeMemoryEvaluationSummary,
@@ -37,7 +38,7 @@ import {
   updateRuntimeMemoryCandidateStatus
 } from '../services/api';
 import { useAuthStore } from '../stores/auth';
-import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeEvaluationRun, RuntimeEvaluationStatusSummary, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeMemoryCandidateReviewItem, RuntimeMemoryCandidateReviewStatus, RuntimeMemoryEffectivenessRedlineReport, RuntimeMemoryProviderEvaluationReport, RuntimeMemoryUsageTrace, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
+import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeEvaluationGateReport, RuntimeEvaluationRun, RuntimeEvaluationStatusSummary, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeMemoryCandidateReviewItem, RuntimeMemoryCandidateReviewStatus, RuntimeMemoryEffectivenessRedlineReport, RuntimeMemoryProviderEvaluationReport, RuntimeMemoryUsageTrace, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
 
 type LearningReviewStatusFilter = 'all' | RuntimeLearningReviewStatus;
 type ToolProposalScopeFilter = 'current-session' | 'all-visible';
@@ -129,6 +130,7 @@ const memoryProviderEvaluationPending = ref(false);
 const runtimeMemoryEvaluationHistory = ref<RuntimeEvaluationRun[]>([]);
 const runtimeMemoryEvaluationLatest = ref<Record<string, RuntimeEvaluationRun | null>>({});
 const runtimeMemoryEvaluationSummary = ref<RuntimeEvaluationStatusSummary | null>(null);
+const runtimeMemoryEvaluationGate = ref<RuntimeEvaluationGateReport | null>(null);
 const knowledgeReviewPendingPath = ref('');
 const knowledgeReviewReasons = ref<Record<string, string>>({});
 const learningReviewStatusFilter = ref<LearningReviewStatusFilter>('all');
@@ -845,13 +847,15 @@ async function refreshMemoryEvaluationHistory() {
     providerHistory,
     redlineLatest,
     providerLatest,
-    summary
+    summary,
+    gate
   ] = await Promise.all([
     getRuntimeMemoryEvaluationHistory('MEMORY_REDLINE', 5),
     getRuntimeMemoryEvaluationHistory('MEMORY_PROVIDER_HARNESS', 5),
     getRuntimeMemoryEvaluationLatest('MEMORY_REDLINE'),
     getRuntimeMemoryEvaluationLatest('MEMORY_PROVIDER_HARNESS'),
-    getRuntimeMemoryEvaluationSummary()
+    getRuntimeMemoryEvaluationSummary(),
+    getRuntimeMemoryEvaluationGate(5)
   ]);
   runtimeMemoryEvaluationHistory.value = [...redlineHistory, ...providerHistory]
     .sort((left, right) => evaluationCreatedAtMillis(right) - evaluationCreatedAtMillis(left))
@@ -861,6 +865,7 @@ async function refreshMemoryEvaluationHistory() {
     MEMORY_PROVIDER_HARNESS: providerLatest
   };
   runtimeMemoryEvaluationSummary.value = summary;
+  runtimeMemoryEvaluationGate.value = gate;
 }
 
 function toggleSessionSearch() {
@@ -1790,6 +1795,11 @@ function memoryEvaluationStatusClass(status?: string) {
   return `status-${normalized}`;
 }
 
+function memoryEvaluationGateClass(status?: string) {
+  const normalized = (status || 'BLOCK').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  return `gate-${normalized}`;
+}
+
 function toolProposalStatusClass(status?: string) {
   const normalized = (status || 'unknown').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
   return `status-${normalized}`;
@@ -2404,6 +2414,21 @@ onUnmounted(() => {
                         redline {{ runtimeMemoryEvaluationSummary?.redlineLatest ? `${formatMetric(runtimeMemoryEvaluationSummary.redlineLatest.passed)}/${formatMetric(runtimeMemoryEvaluationSummary.redlineLatest.total)}` : '-' }}
                         · provider {{ runtimeMemoryEvaluationSummary?.providerLatest ? `${formatMetric(runtimeMemoryEvaluationSummary.providerLatest.passed)}/${formatMetric(runtimeMemoryEvaluationSummary.providerLatest.total)}` : '-' }}
                       </em>
+                    </article>
+                    <article
+                      class="memory-evaluation-gate-card"
+                      :class="memoryEvaluationGateClass(runtimeMemoryEvaluationGate?.gateStatus)"
+                    >
+                      <div>
+                        <span>Memory Gate</span>
+                        <strong>{{ runtimeMemoryEvaluationGate?.gateStatus || 'BLOCK' }}</strong>
+                        <small>{{ runtimeMemoryEvaluationGate?.gateReason || '等待 memory redline 运行后生成门禁结论。' }}</small>
+                      </div>
+                      <div>
+                        <span>Trend</span>
+                        <strong>{{ runtimeMemoryEvaluationGate?.trend || 'UNKNOWN' }}</strong>
+                        <small>{{ runtimeMemoryEvaluationGate?.trendReason || 'not enough redline history' }}</small>
+                      </div>
                     </article>
                     <header>
                       <div>

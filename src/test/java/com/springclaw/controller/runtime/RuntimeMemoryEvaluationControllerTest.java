@@ -7,6 +7,7 @@ import com.springclaw.service.memory.evaluation.MemoryEffectivenessRedlineReport
 import com.springclaw.service.memory.evaluation.MemoryProviderEvaluationCase;
 import com.springclaw.service.memory.evaluation.MemoryProviderEvaluationHarnessService;
 import com.springclaw.service.memory.evaluation.MemoryProviderEvaluationReport;
+import com.springclaw.service.memory.evaluation.RuntimeEvaluationGateReport;
 import com.springclaw.service.memory.evaluation.RuntimeEvaluationHistoryService;
 import com.springclaw.service.memory.evaluation.RuntimeEvaluationRun;
 import com.springclaw.service.memory.evaluation.RuntimeEvaluationStatusSummary;
@@ -171,6 +172,54 @@ class RuntimeMemoryEvaluationControllerTest {
     }
 
     @Test
+    void shouldExposeEvaluationGateReportThroughRuntimeConsole() {
+        MemoryEffectivenessRedlineReportService redlineService =
+                mock(MemoryEffectivenessRedlineReportService.class);
+        MemoryProviderEvaluationHarnessService providerEvaluationService =
+                mock(MemoryProviderEvaluationHarnessService.class);
+        RuntimeEvaluationHistoryService historyService =
+                mock(RuntimeEvaluationHistoryService.class);
+        RuntimeMemoryEvaluationController controller =
+                new RuntimeMemoryEvaluationController(redlineService, providerEvaluationService, historyService);
+        RuntimeEvaluationRun redline = new RuntimeEvaluationRun(
+                7L,
+                "MEMORY_REDLINE",
+                "springclaw.memory-effectiveness-redline.v1",
+                true,
+                5,
+                5,
+                0,
+                0,
+                "{\"schema\":\"springclaw.memory-effectiveness-redline.v1\"}",
+                Instant.parse("2026-06-30T00:02:00Z")
+        );
+        RuntimeEvaluationStatusSummary health = new RuntimeEvaluationStatusSummary(
+                "OK",
+                "memory redline and provider harness passed",
+                redline,
+                null
+        );
+        RuntimeEvaluationGateReport report = new RuntimeEvaluationGateReport(
+                "PASS",
+                true,
+                "latest redline passed",
+                "STABLE",
+                "redline failures stayed at 0",
+                health,
+                List.of(redline),
+                List.of()
+        );
+        when(historyService.gateReport(5)).thenReturn(report);
+
+        ApiResponse<RuntimeEvaluationGateReport> response =
+                controller.evaluationGate(5);
+
+        assertThat(response.getCode()).isZero();
+        assertThat(response.getData()).isEqualTo(report);
+        verify(historyService).gateReport(5);
+    }
+
+    @Test
     void redlineReportEndpointShouldRequireAdminRole() throws Exception {
         Method method = RuntimeMemoryEvaluationController.class.getMethod("redlineReport");
         Method providerHarness = RuntimeMemoryEvaluationController.class.getMethod(
@@ -188,12 +237,17 @@ class RuntimeMemoryEvaluationControllerTest {
         Method summary = RuntimeMemoryEvaluationController.class.getMethod(
                 "evaluationSummary"
         );
+        Method gate = RuntimeMemoryEvaluationController.class.getMethod(
+                "evaluationGate",
+                int.class
+        );
 
         RequireRole requireRole = method.getAnnotation(RequireRole.class);
         RequireRole providerHarnessRole = providerHarness.getAnnotation(RequireRole.class);
         RequireRole historyRole = history.getAnnotation(RequireRole.class);
         RequireRole latestRole = latest.getAnnotation(RequireRole.class);
         RequireRole summaryRole = summary.getAnnotation(RequireRole.class);
+        RequireRole gateRole = gate.getAnnotation(RequireRole.class);
 
         assertThat(requireRole).isNotNull();
         assertThat(requireRole.value()).containsExactly("ADMIN");
@@ -205,5 +259,7 @@ class RuntimeMemoryEvaluationControllerTest {
         assertThat(latestRole.value()).containsExactly("ADMIN");
         assertThat(summaryRole).isNotNull();
         assertThat(summaryRole.value()).containsExactly("ADMIN");
+        assertThat(gateRole).isNotNull();
+        assertThat(gateRole.value()).containsExactly("ADMIN");
     }
 }

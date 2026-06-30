@@ -1,0 +1,45 @@
+name: Bug report
+description: Report reproducible runtime, API, frontend, memory, tool, or skill behavior.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+      placeholder: Describe the observed behavior and the expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include commands, endpoint payloads, UI path, or configuration.
+      placeholder: |
+        1. Start with ...
+        2. Call ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: |
+        Spring profile:
+        Java version:
+        Maven version:
+        Docker mode:
+        Browser:
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Remove secrets, tokens, cookies, and API keys before posting.
+      render: shell
+    validations:
+      required: false

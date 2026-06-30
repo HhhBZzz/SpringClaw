@@ -1,220 +1,198 @@
-# SpringClaw — 企业级 AI Agent 运行时
+# SpringClaw
 
-基于 **Spring Boot 3.5 + Spring AI 1.1** 构建的企业内 AI Agent 后端平台。支持多模型对话、短期/长期记忆、Agent 自主决策、工具与技能治理、飞书/API 多渠道接入，以及 Vue 3 管理后台。
+**面向 Spring Boot 的企业级 AI Agent Runtime。**
+
+SpringClaw 基于 Spring Boot 3.5 和 Spring AI 1.1 构建，目标不是做一个简单聊天 Demo，而是沉淀一套可以长期运行、可治理、可审计、可扩展的 Java Agent 基座。它把多模型编排、记忆、工具治理、Skill 运行时、飞书/API 渠道接入和 Vue 管理后台放在同一个工程里，适合用于内部 AI 助手、研发工作台、企业自动化 Agent 的底层运行时。
+
+[English README](./README.md) · [真实环境运行指南](./RUN_REAL_ENVIRONMENT.md) · [变更日志](./CHANGELOG.md) · [Script Skill 指南](./docs/SCRIPT_SKILL_GUIDE.md)
 
 ---
+
+## 项目定位
+
+SpringClaw 关注的是 Agent 产品真正难维护的部分：
+
+- 模型不写死在业务代码里，支持 provider/model 切换、失败转移、流式输出、异步任务和用量统计。
+- 记忆不是临时变量，短期对话事件落 MySQL，长期语义记忆走 Redis Vector Store。
+- 工具不是裸奔调用，统一经过权限、限流、风险分级、动作确认和审计。
+- Skill 不是继续堆 Java 分支，而是以 `SKILL.md` 目录包的方式注册、查看、执行和统计。
+- 后台不是展示假数据，而是围绕模型、用户、角色、工具、Skill、记忆、缓存、审计、会话和 token 用量提供真实运维入口。
 
 ## 核心能力
 
-### 1. 多模型智能对话
-- 已接入 **Claude**、**DeepSeek**、**Qwen** 等多种模型
-- 支持 provider / model 运行时切换与故障自动转移
-- 默认 **simplified 模式**处理常规问答，**OPAR 完整循环**处理复杂多步任务
-- 复杂任务自动识别并升级链路，无需手动干预
+| 模块 | 能力 |
+| --- | --- |
+| Chat Runtime | 同步聊天、SSE 流式聊天、RabbitMQ 异步聊天 |
+| Agent 模式 | 默认 simplified 快速链路，复杂任务可走 OPAR 循环 |
+| 多模型 | 多 provider 配置、运行时切换、健康检查、失败转移、token 用量记录 |
+| 记忆 | MySQL 会话事件流、Redis 向量记忆、上下文组装和语义召回 |
+| 工具治理 | Spring AI `@Tool` 工具包、AOP 拦截、权限、限流、审计 |
+| 动作安全 | 写入、副作用、危险操作生成确认 proposal |
+| Skill 平台 | `SKILL.md` 目录化技能、Python/builtin/prompt 类型、受控脚本执行 |
+| 渠道接入 | REST API、飞书 Webhook、飞书长连接、Telegram/微信适配接口 |
+| 认证授权 | 登录、Token、HttpOnly Cookie、角色权限、ADMIN 后台 |
+| 运维后台 | Vue 3 控制台，覆盖模型、Skill、记忆、缓存、审计、会话和用量 |
 
-### 2. 双轨记忆系统
-- **短期记忆**：MySQL 会话事件流，重启不丢失
-- **长期记忆**：Redis Vector Store + Embedding 语义召回
-- 上下文组装自动注入相关历史记忆
+## 架构图
 
-### 3. Agent 决策与工具治理
-- 规则路由 + 轻量模型分类，精准判断用户意图
-- 写入、副作用、危险操作自动生成**确认提案（Proposal）**
-- 全链路 **requestId 追踪**，每一步可审计
-- AOP 统一拦截：权限校验、限流、审计日志
-
-### 4. Skill 技能平台
-- 目录化技能定义（`SKILL.md`），支持 Python / Builtin / Prompt 三种类型
-- 内置常用技能：代码分析、日志诊断、系统状态、内容摘要、加密货币价格、RSS 订阅等
-- 脚本技能可动态创建、热加载，无需重启服务
-
-### 5. 多渠道接入
-- **API**：RESTful 接口，支持同步/流式/异步三种聊天模式
-- **飞书**：Webhook + 长连接双模接入，私聊/群聊上下文隔离
-- 渠道适配器可扩展（含 Telegram、微信适配器接口）
-
-### 6. 企业治理与安全
-- 注册/登录/退出/Token 吊销，HttpOnly Cookie 登录态
-- 基于角色的权限控制（`@RequireRole` 注解）
-- 管理后台仅限 ADMIN 角色访问
-- 模型调用用量统计（总次数、Token 消耗、Top Provider/Model）
-
-### 7. Vue 3 管理后台
-- 用户与角色管理
-- 模型状态与切换
-- 工具权限与技能策略
-- 缓存、记忆、审计日志
-- 活跃 Token 会话监控
-- 模型用量可视化
-
-### 8. 高可用策略
-- **AI 优先，本地兜底**：模型可用时走 AI，不可用时自动降级到本地技能
-- 天气、汇率、新闻、系统信息等高频查询不依赖大模型
-- 优雅降级，绝不因单点故障影响整体可用性
-
----
-
-## 项目结构
-
+```mermaid
+flowchart LR
+    Client["REST / SSE / 飞书"] --> Controller["Spring MVC Controller"]
+    Controller --> Runtime["Chat Runtime"]
+    Runtime --> Engine["Simplified / OPAR Engine"]
+    Engine --> Model["Model Provider Layer"]
+    Engine --> ToolRuntime["Tool Runtime"]
+    Engine --> Memory["Context + Memory Runtime"]
+    ToolRuntime --> ToolPacks["@Tool Packs"]
+    ToolRuntime --> Skills["Skill Runtime"]
+    Memory --> MySQL["MySQL Event Stream"]
+    Memory --> Redis["Redis Vector Store"]
+    Runtime --> Trace["Trace / Audit / Usage"]
+    Trace --> Console["Vue Admin Console"]
 ```
-springclaw/
-├── src/main/java/com/springclaw/
-│   ├── controller/          # HTTP 接口层（聊天、认证、管理、Webhook）
-│   ├── service/
-│   │   ├── chat/            # 聊天主链路（SimplifiedEngine / OparLoopEngine）
-│   │   ├── agent/           # Agent 决策、路由、追踪
-│   │   ├── memory/          # 长期向量记忆
-│   │   ├── context/         # 上下文组装
-│   │   ├── skill/           # Skill 目录、运行时、脚手架
-│   │   └── ai/              # 模型 Provider 管理与故障转移
-│   ├── tool/
-│   │   ├── pack/            # Spring AI @Tool 工具包
-│   │   └── runtime/         # 工具 AOP 治理（权限、限流、审计）
-│   ├── strategy/            # 渠道适配器策略模式
-│   ├── web/auth/            # 认证与授权拦截器
-│   └── config/              # 配置类
-├── frontend/                # Vue 3 + Vite 前端
-├── skills/                  # Skill 技能目录（Python/Builtin）
-├── docker-compose.yml       # Docker 一键部署
-├── Dockerfile
-├── pom.xml
-└── SOUL.md                  # Agent 人格定义
-```
-
----
 
 ## 快速启动
 
-### 前置要求
-- **JDK 17+**
-- **Maven 3.8+**
-- （可选）Docker Desktop
+### 环境要求
 
-### 方式一：本地最简启动（无需数据库）
+- JDK 17+
+- Maven 3.8+
+- Docker Desktop，可选但推荐
+
+### 本地最简启动
 
 ```bash
-# 不配真实模型 Key 也能启动，走本地技能兜底
 OPENCLAW_PRIMARY_API_KEY=test-key mvn spring-boot:run
 ```
 
-启动后测试：
+服务默认运行在 `http://127.0.0.1:18080`。没有真实模型 key 也可以启动，用于验证本地技能和降级链路。
 
 ```bash
-# 健康检查
 curl http://127.0.0.1:18080/actuator/health
 
-# 发送聊天
 curl -X POST http://127.0.0.1:18080/api/chat/send \
   -H 'Content-Type: application/json' \
-  -d '{"sessionKey":"demo-1","userId":"u1","message":"你好，介绍一下你自己","channel":"api"}'
+  -d '{
+    "sessionKey": "demo-1",
+    "userId": "u1",
+    "message": "用一段话介绍 SpringClaw",
+    "channel": "api"
+  }'
 ```
 
-### 方式二：Docker 一键启动（含 MySQL + Redis + RabbitMQ）
+### Docker Compose 启动
 
 ```bash
 OPENCLAW_PRIMARY_API_KEY=test-key docker compose up -d --build
 ```
 
-这会把应用连同 MySQL 8.0、Redis Stack、RabbitMQ 一起启动，端口 `18080`。
+该模式会同时启动应用、MySQL 8、Redis Stack 和 RabbitMQ，适合验证持久化会话、向量记忆、分布式锁和异步聊天。
 
-### 方式三：配置真实大模型
-
-```bash
-export OPENCLAW_PRIMARY_API_KEY=你的真实Key
-export OPENCLAW_PRIMARY_BASE_URL=https://api.openai.com
-export OPENCLAW_PRIMARY_MODEL=gpt-4o
-mvn spring-boot:run
-```
-
-支持多 Provider 配置，详见 `application.yml` 中以 `${OPENCLAW_*}` 开头的环境变量。
-
----
-
-## 前端开发
+### 前端控制台
 
 ```bash
 cd frontend
 npm install
-npm run dev        # 开发模式 → http://localhost:5173/#/agent
-npm run build      # 生产构建 → frontend/dist/
+npm run dev
 ```
 
-Vite 自动将 `/api/*` 代理到后端 `localhost:18080`。
+访问 `http://localhost:5173/#/agent`。Vite 会把 `/api/*` 代理到后端 `localhost:18080`。
 
----
+## 常用配置
 
-## 主要 API 接口
-
-| 接口 | 方法 | 说明 |
-|------|------|------|
-| `/api/chat/send` | POST | 同步聊天 |
-| `/api/chat/stream` | POST | SSE 流式聊天 |
-| `/api/chat/async` | POST | 异步聊天（RabbitMQ） |
-| `/api/auth/register` | POST | 用户注册 |
-| `/api/auth/login` | POST | 用户登录 |
-| `/api/auth/me` | GET | 当前用户信息 |
-| `/api/webhook/feishu` | POST | 飞书 Webhook 入口 |
-| `/admin` | GET | 管理后台页面 |
-
----
-
-## 环境变量速查
-
-| 变量 | 说明 | 示例 |
-|------|------|------|
-| `OPENCLAW_PRIMARY_API_KEY` | 主模型 API Key | `sk-xxx` |
-| `OPENCLAW_CODING_PLAN_API_KEY` | Coding Plan 模型 Key | `sk-xxx` |
-| `OPENCLAW_DEEPSEEK_API_KEY` | DeepSeek 模型 Key | `sk-xxx` |
-| `OPENCLAW_EMBEDDING_API_KEY` | Embedding 模型 Key | `sk-xxx` |
-| `OPENCLAW_CHAT_AGENT_MODE` | 聊天模式 | `simplified` / `opar` |
+| 环境变量 | 说明 | 示例 |
+| --- | --- | --- |
+| `OPENCLAW_PRIMARY_API_KEY` | 主模型 API Key | `sk-...` |
+| `OPENCLAW_CODING_PLAN_API_KEY` | Coding Plan 模型 Key | `sk-...` |
+| `OPENCLAW_DEEPSEEK_API_KEY` | DeepSeek 模型 Key | `sk-...` |
+| `OPENCLAW_EMBEDDING_API_KEY` | Embedding API Key | `sk-...` |
+| `OPENCLAW_EMBEDDING_MODEL` | Embedding 模型 | `text-embedding-v4` |
+| `OPENCLAW_CHAT_AGENT_MODE` | Agent 模式 | `simplified` / `opar` |
 | `OPENCLAW_FEISHU_OUTBOUND_ENABLED` | 飞书主动回消息 | `true` / `false` |
 | `OPENCLAW_FEISHU_LONG_CONNECTION_ENABLED` | 飞书长连接模式 | `true` / `false` |
-| `MYSQL_ROOT_PASSWORD` | MySQL Root 密码 | `root` |
 | `SPRING_PROFILES_ACTIVE` | Spring Profile | `dev` / `prod` |
 
-完整配置参见 `application.yml` 和 `RUN_REAL_ENVIRONMENT.md`。
+完整部署说明见 [RUN_REAL_ENVIRONMENT.md](./RUN_REAL_ENVIRONMENT.md)。
 
----
+## 主要 API
+
+| 接口 | 方法 | 说明 |
+| --- | --- | --- |
+| `/api/chat/send` | `POST` | 同步聊天 |
+| `/api/chat/stream` | `POST` | SSE 流式聊天 |
+| `/api/chat/async` | `POST` | 异步聊天 |
+| `/api/auth/register` | `POST` | 用户注册 |
+| `/api/auth/login` | `POST` | 用户登录 |
+| `/api/auth/me` | `GET` | 当前用户信息 |
+| `/api/webhook/feishu` | `POST` | 飞书 Webhook 入口 |
+| `/admin` | `GET` | 管理后台入口 |
+
+更多请求样例见 [http/springclaw-api.http](./http/springclaw-api.http)。
+
+## 目录结构
+
+```text
+springclaw/
+├── src/main/java/com/springclaw/
+│   ├── controller/          # 聊天、认证、后台、runtime、webhook 接口
+│   ├── service/
+│   │   ├── chat/            # 聊天编排和 Agent 引擎
+│   │   ├── ai/              # 模型 provider 管理和调用
+│   │   ├── memory/          # 语义记忆、索引、学习、memory frame
+│   │   ├── context/         # 上下文组装
+│   │   ├── skill/           # Skill catalog、runtime、markdown/script 支持
+│   │   ├── task/            # 定时任务和异步任务执行
+│   │   └── usage/           # 模型用量统计
+│   ├── runtime/             # canonical runtime 身份、生命周期、memory contract
+│   ├── tool/                # 工具包和工具治理运行时
+│   ├── strategy/channel/    # 多渠道适配器
+│   ├── web/auth/            # 认证和角色拦截器
+│   └── config/              # Spring / AI / Cache / MQ / Redis / MyBatis 配置
+├── frontend/                # Vue 3 + Vite 运维控制台
+├── skills/                  # 目录化 Skill 包
+├── data/                    # 本地 runtime 数据占位
+├── docs/                    # 架构说明、运行手册、Skill 文档
+├── docker-compose.yml
+├── Dockerfile
+└── pom.xml
+```
 
 ## 技术栈
 
-| 层次 | 技术选型 |
-|------|----------|
-| 框架 | Spring Boot 3.5 |
-| AI | Spring AI 1.1.2 |
-| ORM | MyBatis-Plus 3.5.7 |
-| 数据库 | MySQL 8.0 |
-| 缓存/向量 | Redis Stack（RediSearch） |
+| 层次 | 技术 |
+| --- | --- |
+| 后端 | Java 17, Spring Boot 3.5, Spring MVC, Spring AOP |
+| AI | Spring AI 1.1, OpenAI-compatible providers, Redis Vector Store |
+| 存储 | MySQL 8, MyBatis-Plus |
+| 缓存与锁 | Redis Stack, Redisson |
 | 消息队列 | RabbitMQ |
-| 分布式锁 | Redisson 3.32 |
-| 定时任务 | XXL-JOB 2.4.1 |
-| 飞书 SDK | Lark OAPI 2.5.3 |
-| 前端 | Vue 3 + Vite + Pinia + Vue Router |
-| 构建 | Maven 3.8+, JDK 17 |
+| 定时任务 | XXL-JOB |
+| 渠道 SDK | Lark/Feishu OAPI |
+| 前端 | Vue 3, Vite, TypeScript, Pinia, Vue Router, GSAP |
+| 构建部署 | Maven, Docker, Docker Compose |
 
----
+## Skill 体系
 
-## 项目亮点
+Skill 存放在 `skills/` 目录下，由 `SKILL.md` 描述。当前支持三类：
 
-1. **多模型 Agent 运行时**：模型不硬编码，支持 provider/model 切换与故障转移。
-2. **平台化 Agent 能力**：决策、工具风险分级、动作确认、全链路追踪作为平台层能力，而非散落在业务代码中。
-3. **统一工具治理**：基于 Spring AI `@Tool` + AOP，权限、限流、审计集中收口。
-4. **Skill 生态**：类 Hermes 风格技能体系，Python/Builtin/Prompt 统一管理、热加载、使用统计。
-5. **AI 优先 + 本地兜底**：正常走大模型，异常时优雅降级，核心功能不受单点故障影响。
+- **Python/script skill**：执行受控本地脚本。
+- **Builtin skill**：由 Java runtime 实现。
+- **Prompt skill**：作为结构化说明和提示词资产。
 
----
+脚本执行默认受配置和白名单约束，避免把任意本地执行能力暴露给模型。格式与运行规则见 [docs/SCRIPT_SKILL_GUIDE.md](./docs/SCRIPT_SKILL_GUIDE.md)。
 
-## 相关文档
+## 路线图
 
-- [CHANGELOG.md](./CHANGELOG.md) — 变更日志
-- [RUN_REAL_ENVIRONMENT.md](./RUN_REAL_ENVIRONMENT.md) — 真实环境部署指南
-- [SOUL.md](./SOUL.md) — Agent 人格定义
-- [CLAUDE.md](./CLAUDE.md) — Claude Code 开发指引
-- [docs/](./docs/) — 面试资料、项目状态、验收清单等
+- 稳定 canonical run lifecycle 存储与 replay API。
+- 强化运行 trace 页面，展示工具调用、记忆读写、模型降级和失败原因。
+- 完善 Skill 导入、导出、权限审查和使用统计。
+- 扩展更多渠道适配器和 outbound delivery 策略。
+- 沉淀小团队内部 Agent 部署预设。
 
----
+## 贡献
 
-## GitHub
+欢迎提交 issue 和 PR。非小改动请先开 issue 对齐方向，PR 保持小而清晰。贡献说明见 [CONTRIBUTING.md](./CONTRIBUTING.md)，安全问题请按 [SECURITY.md](./SECURITY.md) 处理。
 
-- 仓库：[HhhBZzz/SpringClaw](https://github.com/HhhBZzz/SpringClaw)
-- 当前分支：[codex/bootstrap-github](https://github.com/HhhBZzz/SpringClaw/tree/codex/bootstrap-github)
+## 许可证
+
+SpringClaw 使用 [MIT License](./LICENSE)。

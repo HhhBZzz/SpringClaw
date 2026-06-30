@@ -6490,6 +6490,7 @@ button.runtime-nav-item {
 .learning-review-card,
 .knowledge-source-card,
 .knowledge-source-snapshot,
+.memory-redline-panel,
 .memory-consolidation-panel,
 .learning-review-summary,
 .runtime-usage-card {
@@ -6578,6 +6579,7 @@ button.runtime-nav-item {
 
 .learning-review-summary,
 .tool-proposal-card,
+.memory-redline-panel,
 .memory-consolidation-panel,
 .learning-review-card,
 .knowledge-source-card {
@@ -6641,6 +6643,61 @@ button.runtime-nav-item {
 .memory-consolidation-panel button:disabled {
   cursor: not-allowed;
   opacity: 0.56;
+}
+
+.memory-redline-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.memory-redline-panel header div,
+.memory-redline-case {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.memory-redline-panel button {
+  min-height: 38px;
+  border: 1px solid rgba(56, 217, 121, 0.24);
+  border-radius: 7px;
+  padding: 0 12px;
+  color: #07120b;
+  background: #38d979;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.memory-redline-panel button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.memory-redline-cases {
+  display: grid;
+  gap: 8px;
+}
+
+.memory-redline-case {
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 7px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.memory-redline-case.failed {
+  border-color: rgba(255, 111, 111, 0.28);
+}
+
+.memory-redline-case em {
+  overflow: hidden;
+  color: #8bd5ff;
+  font-size: 11px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .learning-review-filters {

@@ -6492,6 +6492,7 @@ button.runtime-nav-item {
 .knowledge-source-snapshot,
 .memory-redline-panel,
 .memory-provider-harness-panel,
+.memory-evaluation-history-panel,
 .memory-consolidation-panel,
 .learning-review-summary,
 .runtime-usage-card {
@@ -6582,6 +6583,7 @@ button.runtime-nav-item {
 .tool-proposal-card,
 .memory-redline-panel,
 .memory-provider-harness-panel,
+.memory-evaluation-history-panel,
 .memory-consolidation-panel,
 .learning-review-card,
 .knowledge-source-card {
@@ -6648,7 +6650,8 @@ button.runtime-nav-item {
 }
 
 .memory-redline-panel header,
-.memory-provider-harness-panel header {
+.memory-provider-harness-panel header,
+.memory-evaluation-history-panel header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -6657,6 +6660,7 @@ button.runtime-nav-item {
 
 .memory-redline-panel header div,
 .memory-provider-harness-panel header div,
+.memory-evaluation-history-panel header div,
 .memory-redline-case {
   display: grid;
   gap: 5px;
@@ -6704,6 +6708,53 @@ button.runtime-nav-item {
   font-style: normal;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.memory-evaluation-latest-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.memory-evaluation-latest-grid article,
+.memory-evaluation-history-item {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 7px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.memory-evaluation-latest-grid span,
+.memory-evaluation-history-head span {
+  color: #f6c945;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.memory-evaluation-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.memory-evaluation-history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.memory-evaluation-history-item.failed {
+  border-color: rgba(255, 111, 111, 0.28);
+}
+
+.memory-evaluation-history-item em {
+  color: #8bd5ff;
+  font-size: 11px;
+  font-style: normal;
 }
 
 .learning-review-filters {

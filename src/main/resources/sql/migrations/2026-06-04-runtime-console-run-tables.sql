@@ -79,3 +79,19 @@ CREATE TABLE IF NOT EXISTS `tool_invocation` (
   KEY `idx_tool_invocation_user_time` (`user_id`, `deleted`, `create_time`),
   KEY `idx_tool_invocation_tool_time` (`tool_name`, `deleted`, `create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE IF NOT EXISTS `runtime_evaluation_run` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `evaluation_type` VARCHAR(64) NOT NULL,
+  `schema_version` VARCHAR(128) NOT NULL,
+  `enabled` TINYINT NOT NULL DEFAULT 1,
+  `total` INT NOT NULL DEFAULT 0,
+  `passed` INT NOT NULL DEFAULT 0,
+  `failed` INT NOT NULL DEFAULT 0,
+  `skipped` INT NOT NULL DEFAULT 0,
+  `result_json` TEXT NOT NULL,
+  `create_time` DATETIME NOT NULL,
+  `deleted` TINYINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (`id`),
+  KEY `idx_runtime_eval_type_time` (`evaluation_type`, `deleted`, `create_time`, `id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

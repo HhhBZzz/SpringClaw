@@ -49,6 +49,16 @@ class ApplicationYamlPolicyTest {
         );
     }
 
+    @Test
+    void providerMemoryEvaluationHarnessShouldDefaultToDisabled() {
+        Properties properties = applicationProperties();
+
+        Assertions.assertEquals(
+                "${SPRINGCLAW_MEMORY_EVALUATION_PROVIDER_HARNESS_ENABLED:false}",
+                properties.getProperty("springclaw.memory.evaluation.provider-harness-enabled")
+        );
+    }
+
     private Properties applicationProperties() {
         YamlPropertiesFactoryBean factory = new YamlPropertiesFactoryBean();
         factory.setResources(new ClassPathResource("application.yml"));

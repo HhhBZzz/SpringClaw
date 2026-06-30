@@ -28,6 +28,7 @@ import type {
   RuntimeMemoryCandidateStatusUpdate,
   RuntimeMemoryConsolidationResult,
   RuntimeMemoryEffectivenessRedlineReport,
+  RuntimeMemoryProviderEvaluationReport,
   RuntimeMemoryUsageTrace,
   RuntimeModelProviders,
   RuntimeOverview,
@@ -247,6 +248,10 @@ export function runRuntimeMemoryConsolidation(input: { userId: string; channel?:
 
 export function getRuntimeMemoryRedlineReport() {
   return request<RuntimeMemoryEffectivenessRedlineReport>('/api/runtime-console/memory/evaluation/redline');
+}
+
+export function getRuntimeMemoryProviderEvaluationReport() {
+  return request<RuntimeMemoryProviderEvaluationReport>('/api/runtime-console/memory/evaluation/provider-harness');
 }
 
 export function getRuntimeUsage(recentLimit = 20) {

@@ -23,6 +23,7 @@ import {
   getRuntimeKnowledgeSources,
   getRuntimeKnowledgeSourceSnapshot,
   getRuntimeMemoryCandidates,
+  getRuntimeMemoryProviderEvaluationReport,
   getRuntimeMemoryRedlineReport,
   rejectToolProposal,
   runRuntimeMemoryConsolidation,
@@ -33,7 +34,7 @@ import {
   updateRuntimeMemoryCandidateStatus
 } from '../services/api';
 import { useAuthStore } from '../stores/auth';
-import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeMemoryCandidateReviewItem, RuntimeMemoryCandidateReviewStatus, RuntimeMemoryEffectivenessRedlineReport, RuntimeMemoryUsageTrace, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
+import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeMemoryCandidateReviewItem, RuntimeMemoryCandidateReviewStatus, RuntimeMemoryEffectivenessRedlineReport, RuntimeMemoryProviderEvaluationReport, RuntimeMemoryUsageTrace, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
 
 type LearningReviewStatusFilter = 'all' | RuntimeLearningReviewStatus;
 type ToolProposalScopeFilter = 'current-session' | 'all-visible';
@@ -120,6 +121,8 @@ const memoryConsolidationUserId = ref('');
 const memoryConsolidationPending = ref(false);
 const runtimeMemoryRedlineReport = ref<RuntimeMemoryEffectivenessRedlineReport | null>(null);
 const memoryRedlinePending = ref(false);
+const runtimeMemoryProviderEvaluationReport = ref<RuntimeMemoryProviderEvaluationReport | null>(null);
+const memoryProviderEvaluationPending = ref(false);
 const knowledgeReviewPendingPath = ref('');
 const knowledgeReviewReasons = ref<Record<string, string>>({});
 const learningReviewStatusFilter = ref<LearningReviewStatusFilter>('all');
@@ -1018,6 +1021,27 @@ async function runMemoryRedlineEvaluation() {
     setRuntimeStatus(message);
   } finally {
     memoryRedlinePending.value = false;
+  }
+}
+
+async function runMemoryProviderEvaluation() {
+  if (memoryProviderEvaluationPending.value) return;
+  memoryProviderEvaluationPending.value = true;
+  try {
+    runtimeMemoryProviderEvaluationReport.value = await getRuntimeMemoryProviderEvaluationReport();
+    runtimeResourceError.value = '';
+    const report = runtimeMemoryProviderEvaluationReport.value;
+    setRuntimeStatus(
+      report.enabled
+        ? `Memory provider harness: ${formatMetric(report.passed)}/${formatMetric(report.total)} passed.`
+        : 'Memory provider harness is disabled; no provider call was made.'
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Memory provider evaluation failed.';
+    runtimeResourceError.value = message;
+    setRuntimeStatus(message);
+  } finally {
+    memoryProviderEvaluationPending.value = false;
   }
 }
 
@@ -2286,6 +2310,34 @@ onUnmounted(() => {
                         <em>{{ formatList(item.evidence) }}</em>
                       </article>
                       <small>evaluated {{ formatDateTimeLabel(runtimeMemoryRedlineReport.evaluatedAt) }}</small>
+                    </div>
+                  </div>
+                  <div class="memory-provider-harness-panel">
+                    <header>
+                      <div>
+                        <span>Provider Evaluation Harness</span>
+                        <strong v-if="runtimeMemoryProviderEvaluationReport">
+                          {{ runtimeMemoryProviderEvaluationReport.enabled ? `${formatMetric(runtimeMemoryProviderEvaluationReport.passed)}/${formatMetric(runtimeMemoryProviderEvaluationReport.total)} passed` : 'Disabled' }}
+                        </strong>
+                        <strong v-else>Not evaluated</strong>
+                        <small>默认关闭；开启后调用真实 extractor / judge / reflection provider。</small>
+                      </div>
+                      <button type="button" :disabled="memoryProviderEvaluationPending" @click="runMemoryProviderEvaluation">
+                        {{ memoryProviderEvaluationPending ? 'Running...' : 'Run Provider Harness' }}
+                      </button>
+                    </header>
+                    <div v-if="runtimeMemoryProviderEvaluationReport" class="memory-redline-cases">
+                      <article
+                        v-for="item in runtimeMemoryProviderEvaluationReport.cases"
+                        :key="item.caseId"
+                        class="memory-redline-case"
+                        :class="{ failed: item.status === 'FAILED' }"
+                      >
+                        <strong>{{ item.status }} · {{ item.title }}</strong>
+                        <small>{{ item.summary }}</small>
+                        <em>{{ formatList(item.evidence) }}</em>
+                      </article>
+                      <small>evaluated {{ formatDateTimeLabel(runtimeMemoryProviderEvaluationReport.evaluatedAt) }}</small>
                     </div>
                   </div>
                   <article v-for="item in runtimeMemoryCandidates" :key="item.memoryVersionId" class="learning-review-card memory-candidate-card">

@@ -6491,6 +6491,7 @@ button.runtime-nav-item {
 .knowledge-source-card,
 .knowledge-source-snapshot,
 .memory-redline-panel,
+.memory-provider-harness-panel,
 .memory-consolidation-panel,
 .learning-review-summary,
 .runtime-usage-card {
@@ -6580,6 +6581,7 @@ button.runtime-nav-item {
 .learning-review-summary,
 .tool-proposal-card,
 .memory-redline-panel,
+.memory-provider-harness-panel,
 .memory-consolidation-panel,
 .learning-review-card,
 .knowledge-source-card {
@@ -6645,7 +6647,8 @@ button.runtime-nav-item {
   opacity: 0.56;
 }
 
-.memory-redline-panel header {
+.memory-redline-panel header,
+.memory-provider-harness-panel header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -6653,13 +6656,15 @@ button.runtime-nav-item {
 }
 
 .memory-redline-panel header div,
+.memory-provider-harness-panel header div,
 .memory-redline-case {
   display: grid;
   gap: 5px;
   min-width: 0;
 }
 
-.memory-redline-panel button {
+.memory-redline-panel button,
+.memory-provider-harness-panel button {
   min-height: 38px;
   border: 1px solid rgba(56, 217, 121, 0.24);
   border-radius: 7px;
@@ -6670,7 +6675,8 @@ button.runtime-nav-item {
   cursor: pointer;
 }
 
-.memory-redline-panel button:disabled {
+.memory-redline-panel button:disabled,
+.memory-provider-harness-panel button:disabled {
   cursor: not-allowed;
   opacity: 0.56;
 }

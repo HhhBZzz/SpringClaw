@@ -23,6 +23,8 @@ import {
   getRuntimeKnowledgeSources,
   getRuntimeKnowledgeSourceSnapshot,
   getRuntimeMemoryCandidates,
+  getRuntimeMemoryEvaluationHistory,
+  getRuntimeMemoryEvaluationLatest,
   getRuntimeMemoryProviderEvaluationReport,
   getRuntimeMemoryRedlineReport,
   rejectToolProposal,
@@ -34,7 +36,7 @@ import {
   updateRuntimeMemoryCandidateStatus
 } from '../services/api';
 import { useAuthStore } from '../stores/auth';
-import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeMemoryCandidateReviewItem, RuntimeMemoryCandidateReviewStatus, RuntimeMemoryEffectivenessRedlineReport, RuntimeMemoryProviderEvaluationReport, RuntimeMemoryUsageTrace, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
+import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeEvaluationRun, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeMemoryCandidateReviewItem, RuntimeMemoryCandidateReviewStatus, RuntimeMemoryEffectivenessRedlineReport, RuntimeMemoryProviderEvaluationReport, RuntimeMemoryUsageTrace, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
 
 type LearningReviewStatusFilter = 'all' | RuntimeLearningReviewStatus;
 type ToolProposalScopeFilter = 'current-session' | 'all-visible';
@@ -123,6 +125,8 @@ const runtimeMemoryRedlineReport = ref<RuntimeMemoryEffectivenessRedlineReport |
 const memoryRedlinePending = ref(false);
 const runtimeMemoryProviderEvaluationReport = ref<RuntimeMemoryProviderEvaluationReport | null>(null);
 const memoryProviderEvaluationPending = ref(false);
+const runtimeMemoryEvaluationHistory = ref<RuntimeEvaluationRun[]>([]);
+const runtimeMemoryEvaluationLatest = ref<Record<string, RuntimeEvaluationRun | null>>({});
 const knowledgeReviewPendingPath = ref('');
 const knowledgeReviewReasons = ref<Record<string, string>>({});
 const learningReviewStatusFilter = ref<LearningReviewStatusFilter>('all');
@@ -833,6 +837,27 @@ async function refreshRuntimeMemoryCandidates() {
   }
 }
 
+async function refreshMemoryEvaluationHistory() {
+  const [
+    redlineHistory,
+    providerHistory,
+    redlineLatest,
+    providerLatest
+  ] = await Promise.all([
+    getRuntimeMemoryEvaluationHistory('MEMORY_REDLINE', 5),
+    getRuntimeMemoryEvaluationHistory('MEMORY_PROVIDER_HARNESS', 5),
+    getRuntimeMemoryEvaluationLatest('MEMORY_REDLINE'),
+    getRuntimeMemoryEvaluationLatest('MEMORY_PROVIDER_HARNESS')
+  ]);
+  runtimeMemoryEvaluationHistory.value = [...redlineHistory, ...providerHistory]
+    .sort((left, right) => evaluationCreatedAtMillis(right) - evaluationCreatedAtMillis(left))
+    .slice(0, 10);
+  runtimeMemoryEvaluationLatest.value = {
+    MEMORY_REDLINE: redlineLatest,
+    MEMORY_PROVIDER_HARNESS: providerLatest
+  };
+}
+
 function toggleSessionSearch() {
   sessionSearchOpen.value = !sessionSearchOpen.value;
   setRuntimeStatus(sessionSearchOpen.value ? '已打开 Sessions 搜索。' : '已关闭 Sessions 搜索。');
@@ -896,6 +921,7 @@ async function loadRuntimeResource(view: RuntimeResourceView = activeResourceVie
     } else if (view === 'memory-candidates') {
       const refreshedCandidates = await refreshRuntimeMemoryCandidates();
       if (refreshedCandidates === null) return;
+      await refreshMemoryEvaluationHistory();
     } else if (view === 'knowledge') {
       const [sources, snapshot] = await Promise.all([
         getRuntimeKnowledgeSources(50),
@@ -1011,6 +1037,7 @@ async function runMemoryRedlineEvaluation() {
   memoryRedlinePending.value = true;
   try {
     runtimeMemoryRedlineReport.value = await getRuntimeMemoryRedlineReport();
+    await refreshMemoryEvaluationHistory();
     runtimeResourceError.value = '';
     setRuntimeStatus(
       `Memory redline: ${formatMetric(runtimeMemoryRedlineReport.value.passed)}/${formatMetric(runtimeMemoryRedlineReport.value.total)} passed.`
@@ -1029,6 +1056,7 @@ async function runMemoryProviderEvaluation() {
   memoryProviderEvaluationPending.value = true;
   try {
     runtimeMemoryProviderEvaluationReport.value = await getRuntimeMemoryProviderEvaluationReport();
+    await refreshMemoryEvaluationHistory();
     runtimeResourceError.value = '';
     const report = runtimeMemoryProviderEvaluationReport.value;
     setRuntimeStatus(
@@ -1740,6 +1768,18 @@ function formatDateTimeLabel(value?: string | number) {
   });
 }
 
+function evaluationCreatedAtMillis(run: RuntimeEvaluationRun) {
+  if (!run.createdAt) return 0;
+  const millis = new Date(run.createdAt).getTime();
+  return Number.isNaN(millis) ? 0 : millis;
+}
+
+function evaluationTypeLabel(type?: string) {
+  if (type === 'MEMORY_PROVIDER_HARNESS') return 'Provider Harness';
+  if (type === 'MEMORY_REDLINE') return 'Redline';
+  return type || 'Evaluation';
+}
+
 function toolProposalStatusClass(status?: string) {
   const normalized = (status || 'unknown').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
   return `status-${normalized}`;
@@ -2338,6 +2378,50 @@ onUnmounted(() => {
                         <em>{{ formatList(item.evidence) }}</em>
                       </article>
                       <small>evaluated {{ formatDateTimeLabel(runtimeMemoryProviderEvaluationReport.evaluatedAt) }}</small>
+                    </div>
+                  </div>
+                  <div class="memory-evaluation-history-panel">
+                    <header>
+                      <div>
+                        <span>Latest Evaluation</span>
+                        <strong>Persisted memory evaluation runs</strong>
+                        <small>保存 redline 与 provider harness 的运行结果，用于回看趋势和回归。</small>
+                      </div>
+                    </header>
+                    <div class="memory-evaluation-latest-grid">
+                      <article>
+                        <span>Redline</span>
+                        <strong v-if="runtimeMemoryEvaluationLatest.MEMORY_REDLINE">
+                          {{ formatMetric(runtimeMemoryEvaluationLatest.MEMORY_REDLINE.passed) }}/{{ formatMetric(runtimeMemoryEvaluationLatest.MEMORY_REDLINE.total) }} passed
+                        </strong>
+                        <strong v-else>No run</strong>
+                        <small>{{ formatDateTimeLabel(runtimeMemoryEvaluationLatest.MEMORY_REDLINE?.createdAt) }}</small>
+                      </article>
+                      <article>
+                        <span>Provider Harness</span>
+                        <strong v-if="runtimeMemoryEvaluationLatest.MEMORY_PROVIDER_HARNESS">
+                          {{ runtimeMemoryEvaluationLatest.MEMORY_PROVIDER_HARNESS.enabled ? `${formatMetric(runtimeMemoryEvaluationLatest.MEMORY_PROVIDER_HARNESS.passed)}/${formatMetric(runtimeMemoryEvaluationLatest.MEMORY_PROVIDER_HARNESS.total)} passed` : 'Disabled' }}
+                        </strong>
+                        <strong v-else>No run</strong>
+                        <small>{{ formatDateTimeLabel(runtimeMemoryEvaluationLatest.MEMORY_PROVIDER_HARNESS?.createdAt) }}</small>
+                      </article>
+                    </div>
+                    <div class="memory-evaluation-history-head">
+                      <span>Evaluation History</span>
+                      <small>{{ formatMetric(runtimeMemoryEvaluationHistory.length) }} recent runs</small>
+                    </div>
+                    <div class="memory-evaluation-history-list">
+                      <article
+                        v-for="item in runtimeMemoryEvaluationHistory"
+                        :key="`${item.evaluationType}-${item.id || item.createdAt}`"
+                        class="memory-evaluation-history-item"
+                        :class="{ failed: item.failed > 0 }"
+                      >
+                        <strong>{{ evaluationTypeLabel(item.evaluationType) }}</strong>
+                        <small>{{ formatMetric(item.passed) }}/{{ formatMetric(item.total) }} passed · failed {{ formatMetric(item.failed) }} · skipped {{ formatMetric(item.skipped) }}</small>
+                        <em>{{ formatDateTimeLabel(item.createdAt) }}</em>
+                      </article>
+                      <div v-if="!runtimeMemoryEvaluationHistory.length" class="empty-history">暂无持久化评估历史。</div>
                     </div>
                   </div>
                   <article v-for="item in runtimeMemoryCandidates" :key="item.memoryVersionId" class="learning-review-card memory-candidate-card">

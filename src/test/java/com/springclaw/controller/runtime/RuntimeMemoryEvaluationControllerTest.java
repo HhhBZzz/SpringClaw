@@ -7,6 +7,8 @@ import com.springclaw.service.memory.evaluation.MemoryEffectivenessRedlineReport
 import com.springclaw.service.memory.evaluation.MemoryProviderEvaluationCase;
 import com.springclaw.service.memory.evaluation.MemoryProviderEvaluationHarnessService;
 import com.springclaw.service.memory.evaluation.MemoryProviderEvaluationReport;
+import com.springclaw.service.memory.evaluation.RuntimeEvaluationHistoryService;
+import com.springclaw.service.memory.evaluation.RuntimeEvaluationRun;
 import com.springclaw.web.auth.RequireRole;
 import org.junit.jupiter.api.Test;
 
@@ -27,8 +29,10 @@ class RuntimeMemoryEvaluationControllerTest {
                 mock(MemoryEffectivenessRedlineReportService.class);
         MemoryProviderEvaluationHarnessService providerEvaluationService =
                 mock(MemoryProviderEvaluationHarnessService.class);
+        RuntimeEvaluationHistoryService historyService =
+                mock(RuntimeEvaluationHistoryService.class);
         RuntimeMemoryEvaluationController controller =
-                new RuntimeMemoryEvaluationController(service, providerEvaluationService);
+                new RuntimeMemoryEvaluationController(service, providerEvaluationService, historyService);
         MemoryEffectivenessRedlineReport report = new MemoryEffectivenessRedlineReport(
                 "springclaw.memory-effectiveness-redline.v1",
                 1,
@@ -51,6 +55,7 @@ class RuntimeMemoryEvaluationControllerTest {
         assertThat(response.getCode()).isZero();
         assertThat(response.getData()).isEqualTo(report);
         verify(service).evaluate();
+        verify(historyService).recordRedline(report);
     }
 
     @Test
@@ -59,8 +64,10 @@ class RuntimeMemoryEvaluationControllerTest {
                 mock(MemoryEffectivenessRedlineReportService.class);
         MemoryProviderEvaluationHarnessService providerEvaluationService =
                 mock(MemoryProviderEvaluationHarnessService.class);
+        RuntimeEvaluationHistoryService historyService =
+                mock(RuntimeEvaluationHistoryService.class);
         RuntimeMemoryEvaluationController controller =
-                new RuntimeMemoryEvaluationController(redlineService, providerEvaluationService);
+                new RuntimeMemoryEvaluationController(redlineService, providerEvaluationService, historyService);
         MemoryProviderEvaluationReport report = new MemoryProviderEvaluationReport(
                 "springclaw.memory-provider-evaluation.v1",
                 true,
@@ -85,6 +92,43 @@ class RuntimeMemoryEvaluationControllerTest {
         assertThat(response.getCode()).isZero();
         assertThat(response.getData()).isEqualTo(report);
         verify(providerEvaluationService).evaluate();
+        verify(historyService).recordProviderHarness(report);
+    }
+
+    @Test
+    void shouldExposeEvaluationHistoryAndLatestThroughRuntimeConsole() {
+        MemoryEffectivenessRedlineReportService redlineService =
+                mock(MemoryEffectivenessRedlineReportService.class);
+        MemoryProviderEvaluationHarnessService providerEvaluationService =
+                mock(MemoryProviderEvaluationHarnessService.class);
+        RuntimeEvaluationHistoryService historyService =
+                mock(RuntimeEvaluationHistoryService.class);
+        RuntimeMemoryEvaluationController controller =
+                new RuntimeMemoryEvaluationController(redlineService, providerEvaluationService, historyService);
+        RuntimeEvaluationRun run = new RuntimeEvaluationRun(
+                7L,
+                "MEMORY_REDLINE",
+                "springclaw.memory-effectiveness-redline.v1",
+                true,
+                5,
+                5,
+                0,
+                0,
+                "{\"schema\":\"springclaw.memory-effectiveness-redline.v1\"}",
+                Instant.parse("2026-06-30T00:02:00Z")
+        );
+        when(historyService.history("MEMORY_REDLINE", 20)).thenReturn(List.of(run));
+        when(historyService.latest("MEMORY_REDLINE")).thenReturn(java.util.Optional.of(run));
+
+        ApiResponse<List<RuntimeEvaluationRun>> history =
+                controller.evaluationHistory("MEMORY_REDLINE", 20);
+        ApiResponse<RuntimeEvaluationRun> latest =
+                controller.latestEvaluation("MEMORY_REDLINE");
+
+        assertThat(history.getData()).containsExactly(run);
+        assertThat(latest.getData()).isEqualTo(run);
+        verify(historyService).history("MEMORY_REDLINE", 20);
+        verify(historyService).latest("MEMORY_REDLINE");
     }
 
     @Test
@@ -93,13 +137,28 @@ class RuntimeMemoryEvaluationControllerTest {
         Method providerHarness = RuntimeMemoryEvaluationController.class.getMethod(
                 "providerHarnessReport"
         );
+        Method history = RuntimeMemoryEvaluationController.class.getMethod(
+                "evaluationHistory",
+                String.class,
+                int.class
+        );
+        Method latest = RuntimeMemoryEvaluationController.class.getMethod(
+                "latestEvaluation",
+                String.class
+        );
 
         RequireRole requireRole = method.getAnnotation(RequireRole.class);
         RequireRole providerHarnessRole = providerHarness.getAnnotation(RequireRole.class);
+        RequireRole historyRole = history.getAnnotation(RequireRole.class);
+        RequireRole latestRole = latest.getAnnotation(RequireRole.class);
 
         assertThat(requireRole).isNotNull();
         assertThat(requireRole.value()).containsExactly("ADMIN");
         assertThat(providerHarnessRole).isNotNull();
         assertThat(providerHarnessRole.value()).containsExactly("ADMIN");
+        assertThat(historyRole).isNotNull();
+        assertThat(historyRole.value()).containsExactly("ADMIN");
+        assertThat(latestRole).isNotNull();
+        assertThat(latestRole.value()).containsExactly("ADMIN");
     }
 }

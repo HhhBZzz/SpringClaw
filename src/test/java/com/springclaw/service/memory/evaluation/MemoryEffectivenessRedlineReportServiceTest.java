@@ -16,8 +16,8 @@ class MemoryEffectivenessRedlineReportServiceTest {
         MemoryEffectivenessRedlineReport report = service.evaluate();
 
         assertThat(report.schema()).isEqualTo("springclaw.memory-effectiveness-redline.v1");
-        assertThat(report.total()).isEqualTo(5);
-        assertThat(report.passed()).isEqualTo(5);
+        assertThat(report.total()).isEqualTo(10);
+        assertThat(report.passed()).isEqualTo(10);
         assertThat(report.failed()).isZero();
         assertThat(report.evaluatedAt()).isNotNull();
         assertThat(report.cases())
@@ -27,7 +27,12 @@ class MemoryEffectivenessRedlineReportServiceTest {
                         "conflict_replacement",
                         "irrelevant_memory_rejection",
                         "selective_forgetting",
-                        "token_budget_saturation"
+                        "token_budget_saturation",
+                        "source_evidence_preservation",
+                        "hypothetical_statement_rejection",
+                        "sensitive_data_non_write",
+                        "stale_vector_hit_rejection",
+                        "injected_memory_usage_trace"
                 );
         assertThat(report.cases())
                 .extracting(MemoryEffectivenessRedlineReportCase::passed)

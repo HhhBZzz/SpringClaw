@@ -1,7 +1,11 @@
 package com.springclaw.service.memory.evaluation;
 
 import com.springclaw.runtime.contract.SessionAccessClaim;
+import com.springclaw.runtime.memory.contract.MemoryFrame;
+import com.springclaw.runtime.memory.contract.MemoryFrameItem;
+import com.springclaw.runtime.memory.contract.MemoryFrameLayer;
 import com.springclaw.runtime.memory.contract.MemoryFrameOmission;
+import com.springclaw.runtime.memory.contract.MemoryFrameSourceKind;
 import com.springclaw.runtime.memory.contract.MemoryRecordVersion;
 import com.springclaw.runtime.memory.contract.MemoryScope;
 import com.springclaw.runtime.memory.contract.MemoryStatus;
@@ -23,6 +27,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 @Service
@@ -38,7 +43,12 @@ public class MemoryEffectivenessRedlineReportService {
                 conflictReplacement(),
                 irrelevantMemoryRejection(),
                 selectiveForgetting(),
-                tokenBudgetSaturation()
+                tokenBudgetSaturation(),
+                sourceEvidencePreservation(),
+                hypotheticalStatementRejection(),
+                sensitiveDataNonWrite(),
+                staleVectorHitRejection(),
+                injectedMemoryUsageTrace()
         );
         int passed = (int) cases.stream()
                 .filter(MemoryEffectivenessRedlineReportCase::passed)
@@ -279,6 +289,229 @@ public class MemoryEffectivenessRedlineReportService {
             );
         } catch (RuntimeException ex) {
             return failedCase(caseId, "Token budget saturation", ex);
+        }
+    }
+
+    private MemoryEffectivenessRedlineReportCase sourceEvidencePreservation() {
+        String caseId = "source_evidence_preservation";
+        try {
+            Fixture fixture = new Fixture();
+            MemoryScope scope = MemoryScope.user("api", "old-session", "alice");
+            List<String> expectedEvidence = List.of(
+                    "message_event:run-evidence:user",
+                    "message_event:run-evidence:assistant"
+            );
+            fixture.service.create(command(
+                    "pref:alice:review-style",
+                    MemoryType.SEMANTIC,
+                    scope,
+                    "Alice wants review comments tied to source evidence.",
+                    "run-evidence",
+                    List.of("chat:run-evidence:user"),
+                    expectedEvidence,
+                    List.of("preference", "evidence"),
+                    MemoryStatus.ACTIVE
+            ));
+
+            MemoryFrameResult result = fixture.retrieve(
+                    MemoryScope.from(personalClaim("alice", "new-session")),
+                    "How should review comments be written for Alice?"
+            );
+            boolean passed = result.frame().semanticFacts().size() == 1
+                    && result.frame().semanticFacts().get(0).evidenceRefs()
+                    .equals(expectedEvidence);
+            return reportCase(
+                    caseId,
+                    "Source evidence preservation",
+                    passed,
+                    passed
+                            ? "Retrieved memory preserved all source evidence refs."
+                            : "Retrieved memory lost or changed source evidence refs.",
+                    expectedEvidence
+            );
+        } catch (RuntimeException ex) {
+            return failedCase(caseId, "Source evidence preservation", ex);
+        }
+    }
+
+    private MemoryEffectivenessRedlineReportCase hypotheticalStatementRejection() {
+        String caseId = "hypothetical_statement_rejection";
+        try {
+            Fixture fixture = new Fixture();
+            MemoryScope scope = MemoryScope.user("api", "old-session", "alice");
+            fixture.service.create(command(
+                    "hypothetical:alice:dark-mode",
+                    MemoryType.SEMANTIC,
+                    scope,
+                    "Alice might prefer dark mode someday.",
+                    "run-hypothetical",
+                    List.of("chat:run-hypothetical:user"),
+                    List.of("message_event:run-hypothetical:user"),
+                    List.of("hypothetical", "preference"),
+                    MemoryStatus.CANDIDATE
+            ));
+
+            MemoryFrameResult result = fixture.retrieve(
+                    MemoryScope.from(personalClaim("alice", "new-session")),
+                    "Does Alice prefer dark mode?"
+            );
+            boolean passed = result.frame().semanticFacts().isEmpty();
+            return reportCase(
+                    caseId,
+                    "Hypothetical statement rejection",
+                    passed,
+                    passed
+                            ? "Hypothetical candidate memory was not injected."
+                            : "Hypothetical candidate memory became visible.",
+                    List.of("message_event:run-hypothetical:user")
+            );
+        } catch (RuntimeException ex) {
+            return failedCase(caseId, "Hypothetical statement rejection", ex);
+        }
+    }
+
+    private MemoryEffectivenessRedlineReportCase sensitiveDataNonWrite() {
+        String caseId = "sensitive_data_non_write";
+        try {
+            Fixture fixture = new Fixture();
+            MemoryScope scope = MemoryScope.user("api", "old-session", "alice");
+            fixture.service.create(command(
+                    "sensitive:alice:token",
+                    MemoryType.SEMANTIC,
+                    scope,
+                    "Alice's API token is sk-live-redline-secret.",
+                    "run-sensitive",
+                    List.of("chat:run-sensitive:user"),
+                    List.of("message_event:run-sensitive:user"),
+                    List.of("sensitive", "secret"),
+                    MemoryStatus.CANDIDATE
+            ));
+
+            MemoryFrameResult result = fixture.retrieve(
+                    MemoryScope.from(personalClaim("alice", "new-session")),
+                    "What API token should be used for Alice?"
+            );
+            boolean passed = result.frame().semanticFacts().isEmpty();
+            return reportCase(
+                    caseId,
+                    "Sensitive data non-write",
+                    passed,
+                    passed
+                            ? "Sensitive candidate memory was not injected."
+                            : "Sensitive candidate memory became visible.",
+                    List.of("message_event:run-sensitive:user")
+            );
+        } catch (RuntimeException ex) {
+            return failedCase(caseId, "Sensitive data non-write", ex);
+        }
+    }
+
+    private MemoryEffectivenessRedlineReportCase staleVectorHitRejection() {
+        String caseId = "stale_vector_hit_rejection";
+        try {
+            Fixture fixture = new Fixture();
+            MemoryScope scope = MemoryScope.user("api", "old-session", "alice");
+            MemoryRecordVersion old = fixture.service.create(command(
+                    "pref:alice:report-format",
+                    MemoryType.SEMANTIC,
+                    scope,
+                    "Alice prefers raw JSON reports.",
+                    "run-stale-1",
+                    List.of("chat:run-stale-1:user"),
+                    List.of("message_event:run-stale-1:user"),
+                    List.of("preference", "report"),
+                    MemoryStatus.ACTIVE
+            ));
+            fixture.service.supersede(old.memoryVersionId(), command(
+                    "pref:alice:report-format",
+                    MemoryType.SEMANTIC,
+                    scope,
+                    "Alice prefers concise bullet reports.",
+                    "run-stale-2",
+                    List.of("chat:run-stale-2:user"),
+                    List.of("message_event:run-stale-2:user"),
+                    List.of("preference", "report"),
+                    MemoryStatus.ACTIVE
+            ));
+
+            MemoryFrameResult result = fixture.retrieve(
+                    MemoryScope.from(personalClaim("alice", "new-session")),
+                    "Which report format should Alice receive?"
+            );
+            List<String> contents = result.frame().semanticFacts().stream()
+                    .map(MemoryFrameItem::content)
+                    .toList();
+            boolean passed = contents.contains("Alice prefers concise bullet reports.")
+                    && !contents.contains("Alice prefers raw JSON reports.");
+            return reportCase(
+                    caseId,
+                    "Stale vector hit rejection",
+                    passed,
+                    passed
+                            ? "Superseded stale fact was excluded while latest fact remained visible."
+                            : "Superseded stale fact was still visible or latest fact was missing.",
+                    List.of("message_event:run-stale-1:user", "message_event:run-stale-2:user")
+            );
+        } catch (RuntimeException ex) {
+            return failedCase(caseId, "Stale vector hit rejection", ex);
+        }
+    }
+
+    private MemoryEffectivenessRedlineReportCase injectedMemoryUsageTrace() {
+        String caseId = "injected_memory_usage_trace";
+        try {
+            Instant capturedAt = T0.plusSeconds(30);
+            MemoryFrameItem item = new MemoryFrameItem(
+                    "memory:alice:summary-style:v1",
+                    MemoryFrameSourceKind.MEMORY_RECORD,
+                    MemoryFrameLayer.SEMANTIC_FACT,
+                    "pref:alice:summary-style",
+                    "memory-version-1",
+                    MemoryType.SEMANTIC,
+                    MemoryScope.user("api", "old-session", "alice").scopeType(),
+                    MemoryScope.user("api", "old-session", "alice").scopeId(),
+                    "Alice prefers short Chinese progress summaries.",
+                    "hash-summary-style",
+                    List.of("message_event:run-usage:user"),
+                    0.85,
+                    0.9,
+                    0.95,
+                    1,
+                    capturedAt
+            );
+            MemoryFrame frame = new MemoryFrame(
+                    "run-usage",
+                    MemoryScope.from(personalClaim("alice", "new-session")),
+                    List.of(),
+                    List.of(),
+                    List.of(),
+                    List.of(item),
+                    List.of(),
+                    List.of(),
+                    Map.of("semantic", "1"),
+                    List.of(),
+                    capturedAt,
+                    "frame-hash-usage"
+            );
+            MemoryUsageTrace trace = new MemoryUsageTraceEvaluator().evaluate(
+                    frame,
+                    "Alice prefers short Chinese progress summaries."
+            );
+            boolean passed = trace.memoryInjected()
+                    && trace.memoryReferencedInAnswer()
+                    && trace.memoryReferenceKind() == MemoryUsageTrace.ReferenceKind.EXPLICIT
+                    && trace.referencedSourceIds().equals(List.of(item.sourceId()));
+            return reportCase(
+                    caseId,
+                    "Injected-memory usage trace",
+                    passed,
+                    passed
+                            ? "Deterministic evaluator detected explicit use of injected memory."
+                            : "Injected memory was not traced as referenced by the answer.",
+                    List.of("message_event:run-usage:user", item.sourceId())
+            );
+        } catch (RuntimeException ex) {
+            return failedCase(caseId, "Injected-memory usage trace", ex);
         }
     }
 

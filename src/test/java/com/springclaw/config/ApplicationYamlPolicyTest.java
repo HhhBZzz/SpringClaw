@@ -35,6 +35,20 @@ class ApplicationYamlPolicyTest {
         Assertions.assertFalse(learningRoot.contains("docs/memory-bank"));
     }
 
+    @Test
+    void memoryConsolidationAutoTriggerShouldHaveExplicitRollbackProperties() {
+        Properties properties = applicationProperties();
+
+        Assertions.assertEquals(
+                "${SPRINGCLAW_MEMORY_CONSOLIDATION_AUTO_ENABLED:true}",
+                properties.getProperty("springclaw.memory.consolidation.auto-enabled")
+        );
+        Assertions.assertEquals(
+                "${SPRINGCLAW_MEMORY_CONSOLIDATION_AUTO_EPISODE_LIMIT:50}",
+                properties.getProperty("springclaw.memory.consolidation.auto-episode-limit")
+        );
+    }
+
     private Properties applicationProperties() {
         YamlPropertiesFactoryBean factory = new YamlPropertiesFactoryBean();
         factory.setResources(new ClassPathResource("application.yml"));

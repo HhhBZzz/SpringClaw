@@ -1,10 +1,16 @@
 package com.springclaw.service.memory.review;
 
 import com.springclaw.runtime.memory.contract.MemoryRecordVersion;
+import com.springclaw.runtime.memory.contract.MemoryScope;
 import com.springclaw.runtime.memory.contract.MemoryStatus;
+import com.springclaw.runtime.memory.contract.MemoryType;
 import com.springclaw.runtime.memory.port.MemoryRecordStore;
 import com.springclaw.service.memory.MemoryManagementService;
+import com.springclaw.service.memory.consolidation.MemoryConsolidationService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -17,18 +23,31 @@ import java.util.Objects;
 @Service
 public class MemoryCandidateReviewService {
 
+    private static final Logger log = LoggerFactory.getLogger(MemoryCandidateReviewService.class);
+
     private final MemoryRecordStore recordStore;
     private final MemoryManagementService memoryManagementService;
+    private final MemoryConsolidationService consolidationService;
     private final Clock clock;
+    private final boolean consolidationEnabled;
+    private final int consolidationEpisodeLimit;
 
     public MemoryCandidateReviewService(
             MemoryRecordStore recordStore,
             MemoryManagementService memoryManagementService,
+            MemoryConsolidationService consolidationService,
+            @Value("${springclaw.memory.consolidation.auto-enabled:${SPRINGCLAW_MEMORY_CONSOLIDATION_AUTO_ENABLED:true}}")
+            boolean consolidationEnabled,
+            @Value("${springclaw.memory.consolidation.auto-episode-limit:${SPRINGCLAW_MEMORY_CONSOLIDATION_AUTO_EPISODE_LIMIT:50}}")
+            int consolidationEpisodeLimit,
             ObjectProvider<Clock> clockProvider
     ) {
         this.recordStore = Objects.requireNonNull(recordStore, "recordStore");
         this.memoryManagementService = Objects.requireNonNull(memoryManagementService, "memoryManagementService");
+        this.consolidationService = Objects.requireNonNull(consolidationService, "consolidationService");
         this.clock = clockProvider.getIfAvailable(Clock::systemUTC);
+        this.consolidationEnabled = consolidationEnabled;
+        this.consolidationEpisodeLimit = Math.max(2, Math.min(consolidationEpisodeLimit, 500));
     }
 
     public List<MemoryCandidateReviewItem> list(String status, int limit) {
@@ -60,12 +79,31 @@ public class MemoryCandidateReviewService {
                 next,
                 Instant.now(clock)
         );
+        maybeConsolidateApprovedEpisode(updated);
         return new MemoryCandidateStatusUpdate(
                 updated.memoryVersionId(),
                 current.status().name(),
                 updated.status().name(),
                 reason == null ? "" : reason.trim()
         );
+    }
+
+    private void maybeConsolidateApprovedEpisode(MemoryRecordVersion updated) {
+        if (!consolidationEnabled
+                || updated.memoryType() != MemoryType.EPISODIC
+                || updated.status() != MemoryStatus.ACTIVE
+                || !StringUtils.hasText(updated.ownerUserId())) {
+            return;
+        }
+        try {
+            consolidationService.consolidate(
+                    MemoryScope.user("api", "consolidation", updated.ownerUserId()),
+                    consolidationEpisodeLimit
+            );
+        } catch (RuntimeException ex) {
+            log.warn("memory consolidation after candidate approval failed, memoryVersionId={}, reason={}",
+                    updated.memoryVersionId(), ex.getMessage());
+        }
     }
 
     private MemoryCandidateReviewItem toItem(MemoryRecordVersion record) {

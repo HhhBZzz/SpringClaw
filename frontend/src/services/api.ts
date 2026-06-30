@@ -28,6 +28,7 @@ import type {
   RuntimeMemoryCandidateStatusUpdate,
   RuntimeMemoryConsolidationResult,
   RuntimeEvaluationRun,
+  RuntimeEvaluationStatusSummary,
   RuntimeEvaluationType,
   RuntimeMemoryEffectivenessRedlineReport,
   RuntimeMemoryProviderEvaluationReport,
@@ -266,6 +267,10 @@ export function getRuntimeMemoryEvaluationLatest(type: RuntimeEvaluationType) {
   return request<RuntimeEvaluationRun | null>(
     `/api/runtime-console/memory/evaluation/latest?type=${encodeURIComponent(type)}`
   );
+}
+
+export function getRuntimeMemoryEvaluationSummary() {
+  return request<RuntimeEvaluationStatusSummary>('/api/runtime-console/memory/evaluation/summary');
 }
 
 export function getRuntimeUsage(recentLimit = 20) {

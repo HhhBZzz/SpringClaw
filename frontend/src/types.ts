@@ -461,6 +461,13 @@ export interface RuntimeEvaluationRun {
   createdAt?: string;
 }
 
+export interface RuntimeEvaluationStatusSummary {
+  status: 'OK' | 'DEGRADED' | 'FAIL' | 'UNKNOWN' | string;
+  summary: string;
+  redlineLatest?: RuntimeEvaluationRun | null;
+  providerLatest?: RuntimeEvaluationRun | null;
+}
+
 export type RuntimeKnowledgeSourceReviewStatus = 'active' | 'approved' | 'disabled' | 'rejected';
 
 export interface RuntimeKnowledgeSourceReviewItem {

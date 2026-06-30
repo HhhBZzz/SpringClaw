@@ -23,6 +23,7 @@ import {
   getRuntimeKnowledgeSources,
   getRuntimeKnowledgeSourceSnapshot,
   getRuntimeMemoryCandidates,
+  getRuntimeMemoryRedlineReport,
   rejectToolProposal,
   runRuntimeMemoryConsolidation,
   streamChat,
@@ -32,7 +33,7 @@ import {
   updateRuntimeMemoryCandidateStatus
 } from '../services/api';
 import { useAuthStore } from '../stores/auth';
-import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeMemoryCandidateReviewItem, RuntimeMemoryCandidateReviewStatus, RuntimeMemoryUsageTrace, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
+import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeMemoryCandidateReviewItem, RuntimeMemoryCandidateReviewStatus, RuntimeMemoryEffectivenessRedlineReport, RuntimeMemoryUsageTrace, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
 
 type LearningReviewStatusFilter = 'all' | RuntimeLearningReviewStatus;
 type ToolProposalScopeFilter = 'current-session' | 'all-visible';
@@ -117,6 +118,8 @@ const memoryCandidateReviewPendingVersionId = ref('');
 const memoryCandidateReviewReasons = ref<Record<string, string>>({});
 const memoryConsolidationUserId = ref('');
 const memoryConsolidationPending = ref(false);
+const runtimeMemoryRedlineReport = ref<RuntimeMemoryEffectivenessRedlineReport | null>(null);
+const memoryRedlinePending = ref(false);
 const knowledgeReviewPendingPath = ref('');
 const knowledgeReviewReasons = ref<Record<string, string>>({});
 const learningReviewStatusFilter = ref<LearningReviewStatusFilter>('all');
@@ -997,6 +1000,24 @@ async function runMemoryConsolidation() {
     setRuntimeStatus(message);
   } finally {
     memoryConsolidationPending.value = false;
+  }
+}
+
+async function runMemoryRedlineEvaluation() {
+  if (memoryRedlinePending.value) return;
+  memoryRedlinePending.value = true;
+  try {
+    runtimeMemoryRedlineReport.value = await getRuntimeMemoryRedlineReport();
+    runtimeResourceError.value = '';
+    setRuntimeStatus(
+      `Memory redline: ${formatMetric(runtimeMemoryRedlineReport.value.passed)}/${formatMetric(runtimeMemoryRedlineReport.value.total)} passed.`
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Memory redline evaluation failed.';
+    runtimeResourceError.value = message;
+    setRuntimeStatus(message);
+  } finally {
+    memoryRedlinePending.value = false;
   }
 }
 
@@ -2238,6 +2259,34 @@ onUnmounted(() => {
                     <button type="button" :disabled="memoryConsolidationPending" @click="runMemoryConsolidation">
                       {{ memoryConsolidationPending ? 'Running...' : 'Run Consolidation' }}
                     </button>
+                  </div>
+                  <div class="memory-redline-panel">
+                    <header>
+                      <div>
+                        <span>Memory Effectiveness Redline</span>
+                        <strong v-if="runtimeMemoryRedlineReport">
+                          {{ formatMetric(runtimeMemoryRedlineReport.passed) }}/{{ formatMetric(runtimeMemoryRedlineReport.total) }} passed
+                        </strong>
+                        <strong v-else>Not evaluated</strong>
+                        <small>跨 session 偏好召回、冲突替换、无关拒绝、遗忘和预算饱和。</small>
+                      </div>
+                      <button type="button" :disabled="memoryRedlinePending" @click="runMemoryRedlineEvaluation">
+                        {{ memoryRedlinePending ? 'Running...' : 'Run Redline Evaluation' }}
+                      </button>
+                    </header>
+                    <div v-if="runtimeMemoryRedlineReport" class="memory-redline-cases">
+                      <article
+                        v-for="item in runtimeMemoryRedlineReport.cases"
+                        :key="item.caseId"
+                        class="memory-redline-case"
+                        :class="{ failed: !item.passed }"
+                      >
+                        <strong>{{ item.passed ? 'PASS' : 'FAIL' }} · {{ item.title }}</strong>
+                        <small>{{ item.summary }}</small>
+                        <em>{{ formatList(item.evidence) }}</em>
+                      </article>
+                      <small>evaluated {{ formatDateTimeLabel(runtimeMemoryRedlineReport.evaluatedAt) }}</small>
+                    </div>
                   </div>
                   <article v-for="item in runtimeMemoryCandidates" :key="item.memoryVersionId" class="learning-review-card memory-candidate-card">
                     <header>

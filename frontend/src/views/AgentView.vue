@@ -25,6 +25,7 @@ import {
   getRuntimeMemoryCandidates,
   getRuntimeMemoryEvaluationHistory,
   getRuntimeMemoryEvaluationLatest,
+  getRuntimeMemoryEvaluationSummary,
   getRuntimeMemoryProviderEvaluationReport,
   getRuntimeMemoryRedlineReport,
   rejectToolProposal,
@@ -36,7 +37,7 @@ import {
   updateRuntimeMemoryCandidateStatus
 } from '../services/api';
 import { useAuthStore } from '../stores/auth';
-import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeEvaluationRun, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeMemoryCandidateReviewItem, RuntimeMemoryCandidateReviewStatus, RuntimeMemoryEffectivenessRedlineReport, RuntimeMemoryProviderEvaluationReport, RuntimeMemoryUsageTrace, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
+import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeEvaluationRun, RuntimeEvaluationStatusSummary, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeMemoryCandidateReviewItem, RuntimeMemoryCandidateReviewStatus, RuntimeMemoryEffectivenessRedlineReport, RuntimeMemoryProviderEvaluationReport, RuntimeMemoryUsageTrace, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
 
 type LearningReviewStatusFilter = 'all' | RuntimeLearningReviewStatus;
 type ToolProposalScopeFilter = 'current-session' | 'all-visible';
@@ -127,6 +128,7 @@ const runtimeMemoryProviderEvaluationReport = ref<RuntimeMemoryProviderEvaluatio
 const memoryProviderEvaluationPending = ref(false);
 const runtimeMemoryEvaluationHistory = ref<RuntimeEvaluationRun[]>([]);
 const runtimeMemoryEvaluationLatest = ref<Record<string, RuntimeEvaluationRun | null>>({});
+const runtimeMemoryEvaluationSummary = ref<RuntimeEvaluationStatusSummary | null>(null);
 const knowledgeReviewPendingPath = ref('');
 const knowledgeReviewReasons = ref<Record<string, string>>({});
 const learningReviewStatusFilter = ref<LearningReviewStatusFilter>('all');
@@ -842,12 +844,14 @@ async function refreshMemoryEvaluationHistory() {
     redlineHistory,
     providerHistory,
     redlineLatest,
-    providerLatest
+    providerLatest,
+    summary
   ] = await Promise.all([
     getRuntimeMemoryEvaluationHistory('MEMORY_REDLINE', 5),
     getRuntimeMemoryEvaluationHistory('MEMORY_PROVIDER_HARNESS', 5),
     getRuntimeMemoryEvaluationLatest('MEMORY_REDLINE'),
-    getRuntimeMemoryEvaluationLatest('MEMORY_PROVIDER_HARNESS')
+    getRuntimeMemoryEvaluationLatest('MEMORY_PROVIDER_HARNESS'),
+    getRuntimeMemoryEvaluationSummary()
   ]);
   runtimeMemoryEvaluationHistory.value = [...redlineHistory, ...providerHistory]
     .sort((left, right) => evaluationCreatedAtMillis(right) - evaluationCreatedAtMillis(left))
@@ -856,6 +860,7 @@ async function refreshMemoryEvaluationHistory() {
     MEMORY_REDLINE: redlineLatest,
     MEMORY_PROVIDER_HARNESS: providerLatest
   };
+  runtimeMemoryEvaluationSummary.value = summary;
 }
 
 function toggleSessionSearch() {
@@ -1780,6 +1785,11 @@ function evaluationTypeLabel(type?: string) {
   return type || 'Evaluation';
 }
 
+function memoryEvaluationStatusClass(status?: string) {
+  const normalized = (status || 'UNKNOWN').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+  return `status-${normalized}`;
+}
+
 function toolProposalStatusClass(status?: string) {
   const normalized = (status || 'unknown').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
   return `status-${normalized}`;
@@ -2381,6 +2391,20 @@ onUnmounted(() => {
                     </div>
                   </div>
                   <div class="memory-evaluation-history-panel">
+                    <article
+                      class="memory-evaluation-status-card"
+                      :class="memoryEvaluationStatusClass(runtimeMemoryEvaluationSummary?.status)"
+                    >
+                      <div>
+                        <span>Memory Evaluation Health</span>
+                        <strong>{{ runtimeMemoryEvaluationSummary?.status || 'UNKNOWN' }}</strong>
+                        <small>{{ runtimeMemoryEvaluationSummary?.summary || '尚未生成 memory evaluation summary。' }}</small>
+                      </div>
+                      <em>
+                        redline {{ runtimeMemoryEvaluationSummary?.redlineLatest ? `${formatMetric(runtimeMemoryEvaluationSummary.redlineLatest.passed)}/${formatMetric(runtimeMemoryEvaluationSummary.redlineLatest.total)}` : '-' }}
+                        · provider {{ runtimeMemoryEvaluationSummary?.providerLatest ? `${formatMetric(runtimeMemoryEvaluationSummary.providerLatest.passed)}/${formatMetric(runtimeMemoryEvaluationSummary.providerLatest.total)}` : '-' }}
+                      </em>
+                    </article>
                     <header>
                       <div>
                         <span>Latest Evaluation</span>

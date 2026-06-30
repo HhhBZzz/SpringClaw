@@ -9,6 +9,7 @@ import com.springclaw.service.memory.evaluation.MemoryProviderEvaluationHarnessS
 import com.springclaw.service.memory.evaluation.MemoryProviderEvaluationReport;
 import com.springclaw.service.memory.evaluation.RuntimeEvaluationHistoryService;
 import com.springclaw.service.memory.evaluation.RuntimeEvaluationRun;
+import com.springclaw.service.memory.evaluation.RuntimeEvaluationStatusSummary;
 import com.springclaw.web.auth.RequireRole;
 import org.junit.jupiter.api.Test;
 
@@ -132,6 +133,44 @@ class RuntimeMemoryEvaluationControllerTest {
     }
 
     @Test
+    void shouldExposeEvaluationStatusSummaryThroughRuntimeConsole() {
+        MemoryEffectivenessRedlineReportService redlineService =
+                mock(MemoryEffectivenessRedlineReportService.class);
+        MemoryProviderEvaluationHarnessService providerEvaluationService =
+                mock(MemoryProviderEvaluationHarnessService.class);
+        RuntimeEvaluationHistoryService historyService =
+                mock(RuntimeEvaluationHistoryService.class);
+        RuntimeMemoryEvaluationController controller =
+                new RuntimeMemoryEvaluationController(redlineService, providerEvaluationService, historyService);
+        RuntimeEvaluationRun redline = new RuntimeEvaluationRun(
+                7L,
+                "MEMORY_REDLINE",
+                "springclaw.memory-effectiveness-redline.v1",
+                true,
+                5,
+                5,
+                0,
+                0,
+                "{\"schema\":\"springclaw.memory-effectiveness-redline.v1\"}",
+                Instant.parse("2026-06-30T00:02:00Z")
+        );
+        RuntimeEvaluationStatusSummary summary = new RuntimeEvaluationStatusSummary(
+                "OK",
+                "memory redline and provider harness passed",
+                redline,
+                null
+        );
+        when(historyService.summary()).thenReturn(summary);
+
+        ApiResponse<RuntimeEvaluationStatusSummary> response =
+                controller.evaluationSummary();
+
+        assertThat(response.getCode()).isZero();
+        assertThat(response.getData()).isEqualTo(summary);
+        verify(historyService).summary();
+    }
+
+    @Test
     void redlineReportEndpointShouldRequireAdminRole() throws Exception {
         Method method = RuntimeMemoryEvaluationController.class.getMethod("redlineReport");
         Method providerHarness = RuntimeMemoryEvaluationController.class.getMethod(
@@ -146,11 +185,15 @@ class RuntimeMemoryEvaluationControllerTest {
                 "latestEvaluation",
                 String.class
         );
+        Method summary = RuntimeMemoryEvaluationController.class.getMethod(
+                "evaluationSummary"
+        );
 
         RequireRole requireRole = method.getAnnotation(RequireRole.class);
         RequireRole providerHarnessRole = providerHarness.getAnnotation(RequireRole.class);
         RequireRole historyRole = history.getAnnotation(RequireRole.class);
         RequireRole latestRole = latest.getAnnotation(RequireRole.class);
+        RequireRole summaryRole = summary.getAnnotation(RequireRole.class);
 
         assertThat(requireRole).isNotNull();
         assertThat(requireRole.value()).containsExactly("ADMIN");
@@ -160,5 +203,7 @@ class RuntimeMemoryEvaluationControllerTest {
         assertThat(historyRole.value()).containsExactly("ADMIN");
         assertThat(latestRole).isNotNull();
         assertThat(latestRole.value()).containsExactly("ADMIN");
+        assertThat(summaryRole).isNotNull();
+        assertThat(summaryRole.value()).containsExactly("ADMIN");
     }
 }

@@ -56,6 +56,120 @@ class RuntimeEvaluationHistoryServiceTest {
         assertThat(store.lastLimit).isEqualTo(1);
     }
 
+    @Test
+    void summarizesEvaluationHealthFromLatestRedlineAndProviderRuns() {
+        InMemoryStore store = new InMemoryStore();
+        RuntimeEvaluationHistoryService service =
+                new RuntimeEvaluationHistoryService(store, new ObjectMapper());
+
+        assertThat(service.summary().status()).isEqualTo("UNKNOWN");
+
+        store.insert(run(
+                "MEMORY_REDLINE",
+                true,
+                5,
+                5,
+                0,
+                0,
+                Instant.parse("2026-06-30T00:02:00Z")
+        ));
+
+        RuntimeEvaluationStatusSummary degraded = service.summary();
+        assertThat(degraded.status()).isEqualTo("DEGRADED");
+        assertThat(degraded.summary()).contains("provider harness has not run");
+        assertThat(degraded.redlineLatest()).isNotNull();
+        assertThat(degraded.providerLatest()).isNull();
+
+        store.insert(run(
+                "MEMORY_PROVIDER_HARNESS",
+                true,
+                3,
+                3,
+                0,
+                0,
+                Instant.parse("2026-06-30T00:03:00Z")
+        ));
+
+        RuntimeEvaluationStatusSummary ok = service.summary();
+        assertThat(ok.status()).isEqualTo("OK");
+        assertThat(ok.summary()).contains("redline and provider harness passed");
+        assertThat(ok.providerLatest()).isNotNull();
+    }
+
+    @Test
+    void failsSummaryWhenLatestRedlineRunHasFailures() {
+        InMemoryStore store = new InMemoryStore();
+        RuntimeEvaluationHistoryService service =
+                new RuntimeEvaluationHistoryService(store, new ObjectMapper());
+
+        store.insert(run(
+                "MEMORY_REDLINE",
+                true,
+                5,
+                4,
+                1,
+                0,
+                Instant.parse("2026-06-30T00:04:00Z")
+        ));
+        store.insert(run(
+                "MEMORY_PROVIDER_HARNESS",
+                true,
+                3,
+                3,
+                0,
+                0,
+                Instant.parse("2026-06-30T00:05:00Z")
+        ));
+
+        RuntimeEvaluationStatusSummary summary = service.summary();
+
+        assertThat(summary.status()).isEqualTo("FAIL");
+        assertThat(summary.summary()).contains("redline has 1 failing case");
+    }
+
+    @Test
+    void degradesSummaryWhenProviderHarnessIsDisabledOrHasFailures() {
+        InMemoryStore store = new InMemoryStore();
+        RuntimeEvaluationHistoryService service =
+                new RuntimeEvaluationHistoryService(store, new ObjectMapper());
+        store.insert(run(
+                "MEMORY_REDLINE",
+                true,
+                5,
+                5,
+                0,
+                0,
+                Instant.parse("2026-06-30T00:06:00Z")
+        ));
+
+        store.insert(run(
+                "MEMORY_PROVIDER_HARNESS",
+                false,
+                3,
+                0,
+                0,
+                3,
+                Instant.parse("2026-06-30T00:07:00Z")
+        ));
+        assertThat(service.summary().status()).isEqualTo("DEGRADED");
+        assertThat(service.summary().summary()).contains("provider harness is disabled");
+
+        store.insert(run(
+                "MEMORY_PROVIDER_HARNESS",
+                true,
+                3,
+                2,
+                1,
+                0,
+                Instant.parse("2026-06-30T00:08:00Z")
+        ));
+
+        RuntimeEvaluationStatusSummary summary = service.summary();
+
+        assertThat(summary.status()).isEqualTo("DEGRADED");
+        assertThat(summary.summary()).contains("provider harness has 1 failing case");
+    }
+
     private static MemoryEffectivenessRedlineReport redlineReport() {
         return new MemoryEffectivenessRedlineReport(
                 "springclaw.memory-effectiveness-redline.v1",
@@ -89,6 +203,31 @@ class RuntimeEvaluationHistoryServiceTest {
                         List.of("springclaw.memory.evaluation.provider-harness-enabled=false")
                 )),
                 Instant.parse("2026-06-30T00:01:00Z")
+        );
+    }
+
+    private static RuntimeEvaluationRun run(
+            String type,
+            boolean enabled,
+            int total,
+            int passed,
+            int failed,
+            int skipped,
+            Instant createdAt
+    ) {
+        return new RuntimeEvaluationRun(
+                null,
+                type,
+                type.equals("MEMORY_REDLINE")
+                        ? "springclaw.memory-effectiveness-redline.v1"
+                        : "springclaw.memory-provider-evaluation.v1",
+                enabled,
+                total,
+                passed,
+                failed,
+                skipped,
+                "{\"schema\":\"test\"}",
+                createdAt
         );
     }
 

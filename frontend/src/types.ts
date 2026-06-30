@@ -427,6 +427,25 @@ export interface RuntimeMemoryEffectivenessRedlineReport {
   evaluatedAt?: string;
 }
 
+export interface RuntimeMemoryProviderEvaluationCase {
+  caseId: string;
+  title: string;
+  status: 'PASSED' | 'FAILED' | 'SKIPPED' | string;
+  summary: string;
+  evidence: string[];
+}
+
+export interface RuntimeMemoryProviderEvaluationReport {
+  schema: string;
+  enabled: boolean;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  cases: RuntimeMemoryProviderEvaluationCase[];
+  evaluatedAt?: string;
+}
+
 export type RuntimeKnowledgeSourceReviewStatus = 'active' | 'approved' | 'disabled' | 'rejected';
 
 export interface RuntimeKnowledgeSourceReviewItem {

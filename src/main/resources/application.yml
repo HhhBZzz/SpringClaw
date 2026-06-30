@@ -256,6 +256,8 @@ springclaw:
       schema-auto-init: ${SPRINGCLAW_MEMORY_SCHEMA_AUTO_INIT:true}
       short-term-max-messages: ${SPRINGCLAW_MEMORY_SHORT_TERM_MAX_MESSAGES:40}
       short-term-ttl-days: ${SPRINGCLAW_MEMORY_SHORT_TERM_TTL_DAYS:7}
+    evaluation:
+      provider-harness-enabled: ${SPRINGCLAW_MEMORY_EVALUATION_PROVIDER_HARNESS_ENABLED:false}
     semantic-extraction:
       enabled: ${SPRINGCLAW_MEMORY_SEMANTIC_EXTRACTION_ENABLED:false}
       extractor-provider-id: ${SPRINGCLAW_MEMORY_SEMANTIC_EXTRACTION_EXTRACTOR_PROVIDER_ID:coding-plan}

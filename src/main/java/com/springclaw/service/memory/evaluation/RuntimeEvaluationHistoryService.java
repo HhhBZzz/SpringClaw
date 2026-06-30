@@ -73,6 +73,70 @@ public class RuntimeEvaluationHistoryService {
         return store.latestByType(normalizeType(evaluationType));
     }
 
+    public RuntimeEvaluationStatusSummary summary() {
+        RuntimeEvaluationRun redline = store.latestByType(MEMORY_REDLINE)
+                .orElse(null);
+        RuntimeEvaluationRun provider = store.latestByType(MEMORY_PROVIDER_HARNESS)
+                .orElse(null);
+        if (redline == null) {
+            return new RuntimeEvaluationStatusSummary(
+                    "UNKNOWN",
+                    "memory redline has not run",
+                    null,
+                    provider
+            );
+        }
+        if (redline.failed() > 0) {
+            return new RuntimeEvaluationStatusSummary(
+                    "FAIL",
+                    "memory redline has " + failureLabel(redline.failed()),
+                    redline,
+                    provider
+            );
+        }
+        if (provider == null) {
+            return new RuntimeEvaluationStatusSummary(
+                    "DEGRADED",
+                    "memory redline passed but provider harness has not run",
+                    redline,
+                    null
+            );
+        }
+        if (!provider.enabled()) {
+            return new RuntimeEvaluationStatusSummary(
+                    "DEGRADED",
+                    "memory redline passed but provider harness is disabled",
+                    redline,
+                    provider
+            );
+        }
+        if (provider.failed() > 0) {
+            return new RuntimeEvaluationStatusSummary(
+                    "DEGRADED",
+                    "memory redline passed but provider harness has "
+                            + failureLabel(provider.failed()),
+                    redline,
+                    provider
+            );
+        }
+        if (provider.skipped() > 0) {
+            return new RuntimeEvaluationStatusSummary(
+                    "DEGRADED",
+                    "memory redline passed but provider harness skipped "
+                            + provider.skipped() + " case"
+                            + (provider.skipped() == 1 ? "" : "s"),
+                    redline,
+                    provider
+            );
+        }
+        return new RuntimeEvaluationStatusSummary(
+                "OK",
+                "memory redline and provider harness passed",
+                redline,
+                provider
+        );
+    }
+
     private String encode(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
@@ -83,6 +147,10 @@ public class RuntimeEvaluationHistoryService {
 
     private static int safeLimit(int limit) {
         return Math.max(1, Math.min(limit, 100));
+    }
+
+    private static String failureLabel(int failed) {
+        return failed + " failing case" + (failed == 1 ? "" : "s");
     }
 
     private static String normalizeType(String evaluationType) {

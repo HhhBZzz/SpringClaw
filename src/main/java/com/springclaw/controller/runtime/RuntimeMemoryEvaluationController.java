@@ -7,6 +7,7 @@ import com.springclaw.service.memory.evaluation.MemoryProviderEvaluationHarnessS
 import com.springclaw.service.memory.evaluation.MemoryProviderEvaluationReport;
 import com.springclaw.service.memory.evaluation.RuntimeEvaluationHistoryService;
 import com.springclaw.service.memory.evaluation.RuntimeEvaluationRun;
+import com.springclaw.service.memory.evaluation.RuntimeEvaluationStatusSummary;
 import com.springclaw.web.auth.RequireRole;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -80,5 +81,11 @@ public class RuntimeMemoryEvaluationController {
             @RequestParam String type
     ) {
         return ApiResponse.success(historyService.latest(type).orElse(null));
+    }
+
+    @GetMapping("/summary")
+    @RequireRole({"ADMIN"})
+    public ApiResponse<RuntimeEvaluationStatusSummary> evaluationSummary() {
+        return ApiResponse.success(historyService.summary());
     }
 }

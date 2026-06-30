@@ -6717,6 +6717,7 @@ button.runtime-nav-item {
 }
 
 .memory-evaluation-latest-grid article,
+.memory-evaluation-status-card,
 .memory-evaluation-history-item {
   display: grid;
   gap: 5px;
@@ -6728,11 +6729,64 @@ button.runtime-nav-item {
 }
 
 .memory-evaluation-latest-grid span,
+.memory-evaluation-status-card span,
 .memory-evaluation-history-head span {
   color: #f6c945;
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
+}
+
+.memory-evaluation-status-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-color: rgba(168, 176, 189, 0.22);
+}
+
+.memory-evaluation-status-card div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.memory-evaluation-status-card strong {
+  color: #f5f7fb;
+  font-size: 18px;
+}
+
+.memory-evaluation-status-card small {
+  color: #a8b0bd;
+}
+
+.memory-evaluation-status-card em {
+  color: #8bd5ff;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.memory-evaluation-status-card.status-ok {
+  border-color: rgba(56, 217, 121, 0.32);
+}
+
+.memory-evaluation-status-card.status-ok strong {
+  color: #38d979;
+}
+
+.memory-evaluation-status-card.status-degraded {
+  border-color: rgba(246, 201, 69, 0.32);
+}
+
+.memory-evaluation-status-card.status-degraded strong {
+  color: #f6c945;
+}
+
+.memory-evaluation-status-card.status-fail {
+  border-color: rgba(255, 111, 111, 0.36);
+}
+
+.memory-evaluation-status-card.status-fail strong {
+  color: #ff6f6f;
 }
 
 .memory-evaluation-history-head {

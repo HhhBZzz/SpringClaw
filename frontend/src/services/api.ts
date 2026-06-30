@@ -27,6 +27,7 @@ import type {
   RuntimeMemoryCandidateReviewStatus,
   RuntimeMemoryCandidateStatusUpdate,
   RuntimeMemoryConsolidationResult,
+  RuntimeEvaluationGateReport,
   RuntimeEvaluationRun,
   RuntimeEvaluationStatusSummary,
   RuntimeEvaluationType,
@@ -271,6 +272,12 @@ export function getRuntimeMemoryEvaluationLatest(type: RuntimeEvaluationType) {
 
 export function getRuntimeMemoryEvaluationSummary() {
   return request<RuntimeEvaluationStatusSummary>('/api/runtime-console/memory/evaluation/summary');
+}
+
+export function getRuntimeMemoryEvaluationGate(window = 5) {
+  return request<RuntimeEvaluationGateReport>(
+    `/api/runtime-console/memory/evaluation/gate?window=${encodeURIComponent(String(window))}`
+  );
 }
 
 export function getRuntimeUsage(recentLimit = 20) {

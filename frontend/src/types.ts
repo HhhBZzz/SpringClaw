@@ -468,6 +468,17 @@ export interface RuntimeEvaluationStatusSummary {
   providerLatest?: RuntimeEvaluationRun | null;
 }
 
+export interface RuntimeEvaluationGateReport {
+  gateStatus: 'PASS' | 'BLOCK' | string;
+  gatePassed: boolean;
+  gateReason: string;
+  trend: 'IMPROVING' | 'STABLE' | 'REGRESSING' | 'UNKNOWN' | string;
+  trendReason: string;
+  health: RuntimeEvaluationStatusSummary;
+  redlineRecent: RuntimeEvaluationRun[];
+  providerRecent: RuntimeEvaluationRun[];
+}
+
 export type RuntimeKnowledgeSourceReviewStatus = 'active' | 'approved' | 'disabled' | 'rejected';
 
 export interface RuntimeKnowledgeSourceReviewItem {

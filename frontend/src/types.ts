@@ -410,6 +410,23 @@ export interface RuntimeMemoryConsolidationResult {
   sourceVersionIds: string[];
 }
 
+export interface RuntimeMemoryEffectivenessRedlineCase {
+  caseId: string;
+  title: string;
+  passed: boolean;
+  summary: string;
+  evidence: string[];
+}
+
+export interface RuntimeMemoryEffectivenessRedlineReport {
+  schema: string;
+  total: number;
+  passed: number;
+  failed: number;
+  cases: RuntimeMemoryEffectivenessRedlineCase[];
+  evaluatedAt?: string;
+}
+
 export type RuntimeKnowledgeSourceReviewStatus = 'active' | 'approved' | 'disabled' | 'rejected';
 
 export interface RuntimeKnowledgeSourceReviewItem {

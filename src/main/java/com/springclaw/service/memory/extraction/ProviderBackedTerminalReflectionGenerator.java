@@ -29,9 +29,15 @@ class ProviderBackedTerminalReflectionGenerator implements TerminalReflectionGen
     public TerminalReflectionResult reflect(TerminalMemoryExtractionContext context) throws Exception {
         String first = call(context, renderPrompt(context));
         try {
-            return jsonParser.parseObject(first, TerminalReflectionResult.class);
+            TerminalReflectionResult result =
+                    jsonParser.parseObject(first, TerminalReflectionResult.class);
+            if (validReflection(context, result)) {
+                return result;
+            }
+            String repaired = call(context, renderSemanticRepairPrompt(context));
+            return jsonParser.parseObject(repaired, TerminalReflectionResult.class);
         } catch (Exception parseFailure) {
-            String repaired = call(context, "上一次输出不是合法 JSON。请只输出 terminal-reflection.v1 JSON。");
+            String repaired = call(context, renderJsonRepairPrompt(context));
             return jsonParser.parseObject(repaired, TerminalReflectionResult.class);
         }
     }
@@ -58,6 +64,33 @@ class ProviderBackedTerminalReflectionGenerator implements TerminalReflectionGen
                 """.formatted(context.runId(), renderEvidence(context));
     }
 
+    private String renderJsonRepairPrompt(TerminalMemoryExtractionContext context) {
+        return """
+                上一次输出不是合法 JSON。请只输出 springclaw.terminal-reflection.v1 JSON 对象。
+                lesson 不能为空；evidenceRefs 必须包含 run:%s，并至少包含一个下列 event 引用：
+                %s
+                不要 Markdown，不要解释。
+                """.formatted(context.runId(), renderAllowedEvidence(context));
+    }
+
+    private String renderSemanticRepairPrompt(TerminalMemoryExtractionContext context) {
+        return """
+                上一次输出 JSON 合法，但反思内容未通过校验。
+                请只输出 springclaw.terminal-reflection.v1 JSON 对象，并满足：
+                - lesson 不能为空，必须是可复用教训；
+                - evidenceRefs 必须包含 run:%s；
+                - evidenceRefs 至少包含一个下列 event 引用；
+                - 不允许使用未列出的证据引用；
+                - 没有可复用教训时，也要用一句保守 lesson 说明“本轮没有可推广教训”并引用证据。
+
+                可用证据引用：
+                %s
+
+                原始证据：
+                %s
+                """.formatted(context.runId(), renderAllowedEvidence(context), renderEvidence(context));
+    }
+
     private String renderEvidence(TerminalMemoryExtractionContext context) {
         StringBuilder sb = new StringBuilder();
         for (MemorySourceEvent event : context.events()) {
@@ -67,5 +100,39 @@ class ProviderBackedTerminalReflectionGenerator implements TerminalReflectionGen
                     .append('\n');
         }
         return sb.toString();
+    }
+
+    private String renderAllowedEvidence(TerminalMemoryExtractionContext context) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("- run:").append(context.runId()).append('\n');
+        for (MemorySourceEvent event : context.events()) {
+            sb.append("- event:").append(event.eventKey()).append('\n');
+        }
+        return sb.toString();
+    }
+
+    private boolean validReflection(
+            TerminalMemoryExtractionContext context,
+            TerminalReflectionResult reflection
+    ) {
+        if (reflection == null
+                || !TerminalMemoryExtractionService.TERMINAL_REFLECTION_SCHEMA.equals(reflection.schema())
+                || reflection.lesson() == null
+                || reflection.lesson().isBlank()
+                || !Double.isFinite(reflection.confidence())
+                || reflection.confidence() < 0.0
+                || reflection.confidence() > 1.0
+                || reflection.evidenceRefs() == null
+                || reflection.evidenceRefs().isEmpty()) {
+            return false;
+        }
+        java.util.Set<String> allowed = new java.util.LinkedHashSet<>();
+        allowed.add("run:" + context.runId());
+        for (MemorySourceEvent event : context.events()) {
+            allowed.add("event:" + event.eventKey());
+        }
+        return reflection.evidenceRefs().contains("run:" + context.runId())
+                && reflection.evidenceRefs().stream().anyMatch(ref -> ref != null && ref.startsWith("event:"))
+                && allowed.containsAll(reflection.evidenceRefs());
     }
 }

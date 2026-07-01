@@ -68,6 +68,38 @@ class ProviderBackedTerminalReflectionGeneratorTest {
         assertThat(modelClient.userPrompts).hasSize(2);
     }
 
+    @Test
+    void retriesWhenSemanticRepairStillReturnsInvalidReflection() throws Exception {
+        CapturingModelClient modelClient = new CapturingModelClient(
+                """
+                        {"schema":"springclaw.terminal-reflection.v1","outcome":"SUCCESS","lesson":"","applicability":"","failureMode":"","evidenceRefs":[],"confidence":0.8}
+                        """,
+                """
+                        {"schema":"springclaw.terminal-reflection.v1","outcome":"SUCCESS","lesson":"","applicability":"","failureMode":"","evidenceRefs":["run:run-1","event:chat:run-1:user"],"confidence":0.8}
+                        """,
+                """
+                        {"schema":"springclaw.terminal-reflection.v1","outcome":"SUCCESS","lesson":"用户要求进度汇报用简短中文时，后续进度答复应保持简短中文。","applicability":"后续进度汇报","failureMode":"","evidenceRefs":["run:run-1","event:chat:run-1:user"],"confidence":0.84}
+                        """
+        );
+        ProviderBackedTerminalReflectionGenerator generator =
+                new ProviderBackedTerminalReflectionGenerator(
+                        modelClient,
+                        new StrictJsonParser(new ObjectMapper()),
+                        "deepseek",
+                        "deepseek"
+                );
+
+        TerminalReflectionResult result = generator.reflect(context());
+
+        assertThat(result.lesson()).contains("简短中文");
+        assertThat(result.evidenceRefs())
+                .containsExactly("run:run-1", "event:chat:run-1:user");
+        assertThat(modelClient.userPrompts).hasSize(3);
+        assertThat(modelClient.userPrompts.get(2))
+                .contains("最后一次修复")
+                .contains("lesson 必须是非空中文句子");
+    }
+
     private static TerminalMemoryExtractionContext context() {
         return new TerminalMemoryExtractionContext(
                 "run-1",

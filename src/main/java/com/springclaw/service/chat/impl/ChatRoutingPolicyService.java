@@ -264,6 +264,10 @@ public class ChatRoutingPolicyService {
         }
         String normalized = question.trim().toLowerCase(Locale.ROOT);
 
+        if (looksLikePersonalMemoryQuestion(normalized)) {
+            return "general";
+        }
+
         // 优先使用 CapabilityRegistry 进行意图检测（数据驱动）
         if (capabilityRegistry != null) {
             List<CapabilityRegistry.CapabilityEntry> matches = capabilityRegistry.findByTriggerKeywords(question);
@@ -288,6 +292,20 @@ public class ChatRoutingPolicyService {
             return "tool-skill";
         }
         return "general";
+    }
+
+    private boolean looksLikePersonalMemoryQuestion(String normalized) {
+        if (!StringUtils.hasText(normalized)) {
+            return false;
+        }
+        boolean selfReference = TextUtils.containsAny(normalized,
+                "我", "我的", "我刚才", "我之前", "我以后", "帮我记住", "请记住", "记住");
+        boolean memoryCue = TextUtils.containsAny(normalized,
+                "喜欢", "偏好", "习惯", "技术栈", "长期记住", "刚才说", "之前说",
+                "记得", "记住", "优先用", "优先使用");
+        boolean explicitWorkspaceTask = TextUtils.containsAny(normalized,
+                "分析", "排查", "定位", "修复", "审查", "读取文件", "查看代码", "项目结构", "源码");
+        return selfReference && memoryCue && !explicitWorkspaceTask;
     }
 
     private String normalizeRole(String roleCode) {

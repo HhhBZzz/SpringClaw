@@ -5,6 +5,11 @@ spring:
       - optional:file:.env.local[.properties]
   application:
     name: springclaw-java
+  flyway:
+    enabled: ${SPRINGCLAW_FLYWAY_ENABLED:true}
+    baseline-on-migrate: true
+    baseline-version: 0
+    locations: classpath:db/migration
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
     url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DB:openclaw}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false
@@ -244,7 +249,6 @@ springclaw:
   runtime:
     lifecycle:
       store: ${SPRINGCLAW_RUNTIME_LIFECYCLE_STORE:memory}
-      schema-auto-init: ${SPRINGCLAW_RUNTIME_LIFECYCLE_SCHEMA_AUTO_INIT:true}
   context:
     snapshot:
       factory-enabled: ${SPRINGCLAW_CONTEXT_SNAPSHOT_FACTORY_ENABLED:true}
@@ -253,7 +257,6 @@ springclaw:
       enabled: ${SPRINGCLAW_MEMORY_CORE_ENABLED:false}
       short-term-shadow-enabled: ${SPRINGCLAW_MEMORY_SHORT_TERM_SHADOW_ENABLED:true}
       index-worker-enabled: ${SPRINGCLAW_MEMORY_INDEX_WORKER_ENABLED:false}
-      schema-auto-init: ${SPRINGCLAW_MEMORY_SCHEMA_AUTO_INIT:true}
       short-term-max-messages: ${SPRINGCLAW_MEMORY_SHORT_TERM_MAX_MESSAGES:40}
       short-term-ttl-days: ${SPRINGCLAW_MEMORY_SHORT_TERM_TTL_DAYS:7}
     evaluation:

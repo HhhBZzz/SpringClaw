@@ -9,14 +9,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class DatabaseSchemaPolicyTest {
 
+    private static final String V1 = "src/main/resources/db/migration/V1__initial_schema.sql";
+    private static final String V2 = "src/main/resources/db/migration/V2__tool_invocation_proposal.sql";
+    private static final String V3 = "src/main/resources/db/migration/V3__runtime_run_lifecycle.sql";
+
     @Test
-    void schemaShouldContainRuntimeIndexesForHotQueries() throws Exception {
-        String schema = Files.readString(Path.of("src/main/resources/sql/schema.sql"));
+    void v1ShouldContainCoreTablesHotQueryIndexesAndEvaluationRun() throws Exception {
+        String schema = Files.readString(Path.of(V1));
 
         assertThat(schema)
                 .contains("CREATE TABLE IF NOT EXISTS `agent_run`")
                 .contains("CREATE TABLE IF NOT EXISTS `agent_run_step`")
                 .contains("CREATE TABLE IF NOT EXISTS `tool_invocation`")
+                .contains("CREATE TABLE IF NOT EXISTS `runtime_evaluation_run`")
                 .contains("quality_score")
                 .contains("quality_level")
                 .contains("evaluation_json")
@@ -33,55 +38,28 @@ class DatabaseSchemaPolicyTest {
                 .contains("idx_llm_usage_cache_create")
                 .contains("idx_scheduled_task_due_dispatch")
                 .contains("idx_scheduled_task_execution_task_recent")
-                .contains("CREATE TABLE IF NOT EXISTS `runtime_evaluation_run`")
                 .contains("idx_runtime_eval_type_time");
     }
 
     @Test
-    void migrationShouldAddAgentQualityColumnsForExistingDatabases() throws Exception {
-        String migration = Files.readString(Path.of("src/main/resources/sql/migrations/2026-06-05-agent-quality-score.sql"));
+    void v2ShouldCreateToolInvocationProposalTable() throws Exception {
+        String migration = Files.readString(Path.of(V2));
 
         assertThat(migration)
-                .contains("agent_run")
-                .contains("quality_score")
-                .contains("quality_level")
-                .contains("evaluation_json")
-                .contains("information_schema.columns");
+                .contains("CREATE TABLE IF NOT EXISTS `tool_invocation_proposal`")
+                .contains("proposal_id")
+                .contains("status")
+                .contains("expires_at");
     }
 
     @Test
-    void migrationShouldAddAgentProductModeForExistingDatabases() throws Exception {
-        String migration = Files.readString(Path.of("src/main/resources/sql/migrations/2026-06-12-agent-product-mode.sql"));
+    void v3ShouldCreateRuntimeRunLifecycleTables() throws Exception {
+        String migration = Files.readString(Path.of(V3));
 
         assertThat(migration)
-                .contains("agent_run")
-                .contains("product_mode")
-                .contains("information_schema.columns");
-    }
-
-    @Test
-    void migrationShouldBeIdempotentAndCoverExistingDatabases() throws Exception {
-        String migration = Files.readString(Path.of("src/main/resources/sql/migrations/2026-06-03-optimize-runtime-indexes.sql"));
-
-        assertThat(migration)
-                .contains("information_schema.statistics")
-                .contains("springclaw_add_index_if_missing")
-                .contains("idx_message_event_session_filter_id")
-                .contains("idx_message_event_request_filter_id")
-                .contains("uk_tool_permission_role_tool")
-                .contains("uk_skill_policy_scope_skill")
-                .contains("idx_llm_usage_cache_create");
-    }
-
-    @Test
-    void runtimeConsoleMigrationShouldCreateEvaluationHistoryTable() throws Exception {
-        String migration = Files.readString(Path.of("src/main/resources/sql/migrations/2026-06-04-runtime-console-run-tables.sql"));
-
-        assertThat(migration)
-                .contains("CREATE TABLE IF NOT EXISTS `runtime_evaluation_run`")
-                .contains("evaluation_type")
-                .contains("schema_version")
-                .contains("result_json")
-                .contains("idx_runtime_eval_type_time");
+                .contains("CREATE TABLE IF NOT EXISTS `runtime_run_state`")
+                .contains("CREATE TABLE IF NOT EXISTS `runtime_run_event`")
+                .contains("run_id")
+                .contains("sequence_no");
     }
 }

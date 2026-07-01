@@ -141,6 +141,23 @@ class ChatRoutingPolicyServiceTest {
     }
 
     @Test
+    void shouldKeepPreferenceMemoryQuestionLightweightEvenWhenItMentionsProjectStack() {
+        ChatRoutingPolicyService.RoutingDecision decision = service.decide(
+                "我做后端项目时优先喜欢用什么技术栈？",
+                "USER",
+                "simplified",
+                true,
+                Set.of("workspace", "file", "script", "system"),
+                "agent"
+        );
+
+        Assertions.assertEquals("agent", decision.responseMode());
+        Assertions.assertEquals("simplified", decision.executionMode());
+        Assertions.assertEquals("general", decision.intent());
+        Assertions.assertFalse(decision.autoUpgraded());
+    }
+
+    @Test
     void shouldKeepAgentResponseModeWhenComplexWorkspaceTaskAutoUpgrades() {
         ChatRoutingPolicyService.RoutingDecision decision = service.decide(
                 "帮我分析当前项目结构",

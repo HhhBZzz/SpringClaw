@@ -1,11 +1,14 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.dto.chat.ChatRequest;
+import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.runtime.identity.DefaultRunIdentityFactory;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentActionProposalService;
+import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentRuntimeEngine;
 import com.springclaw.service.agent.EngineSelector;
+import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
 import com.springclaw.service.proposal.PendingToolApprovalException;
 import com.springclaw.service.proposal.ToolInvocationProposal;
@@ -16,11 +19,13 @@ import com.springclaw.tool.runtime.ToolOrchestrator;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.lang.reflect.Method;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -90,6 +95,24 @@ class ChatServiceImplPendingApprovalTest {
         verify(sseEventBridge).completeEmitter(emitter);
     }
 
+    @Test
+    void askClarificationDecisionDoesNotBecomeActionConfirmation() throws Exception {
+        ChatServiceImpl chatService = buildService();
+        AgentDecision ambiguousDecision = new AgentDecision(
+                "model_control",
+                "ask_clarification",
+                List.of("system"),
+                "side_effect",
+                true,
+                "模型分类结果不明确，需要澄清。"
+        );
+
+        Method method = ChatServiceImpl.class.getDeclaredMethod("shouldRequestActionConfirmation", ChatContext.class);
+        method.setAccessible(true);
+
+        assertThat((boolean) method.invoke(chatService, contextWith(ambiguousDecision))).isFalse();
+    }
+
     private ChatServiceImpl buildService() {
         return new ChatServiceImpl(
                 aiProviderService,
@@ -114,6 +137,39 @@ class ChatServiceImplPendingApprovalTest {
                 new DefaultRunIdentityFactory(),
                 false,
                 true
+        );
+    }
+
+    private static ChatContext contextWith(AgentDecision decision) {
+        AgentSession session = new AgentSession();
+        session.setSessionKey("session-A");
+        session.setChannel("api");
+        session.setUserId("user-1");
+        AssembledContext assembled = new AssembledContext(
+                "session-A",
+                "api",
+                "user-1",
+                "切换 DeepSeek 模型",
+                "",
+                "",
+                "# 当前问题\n切换 DeepSeek 模型"
+        );
+        return new ChatContext(
+                session,
+                "api",
+                "user-1",
+                "USER",
+                "切换 DeepSeek 模型",
+                "切换 DeepSeek 模型",
+                "req-1",
+                "system",
+                assembled,
+                new AiProviderService.ActiveChatClient("deepseek", "deepseek-v4-pro", "https://example.test", null, true, ""),
+                "opar",
+                "test",
+                "agent",
+                decision.intent(),
+                decision
         );
     }
 

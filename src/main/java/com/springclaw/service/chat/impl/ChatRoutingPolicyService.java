@@ -152,6 +152,20 @@ public class ChatRoutingPolicyService {
             );
         }
 
+        if ("agent".equals(normalizedResponseMode)
+                && "opar".equals(normalizedDefaultMode)
+                && "general".equals(intent)) {
+            return new RoutingDecision(
+                    normalizedQuestion,
+                    "simplified",
+                    false,
+                    false,
+                    "普通 Agent 问答保持轻量链路，避免全局深度模式劫持基础对话。",
+                    normalizedResponseMode,
+                    intent
+            );
+        }
+
         return new RoutingDecision(
                 normalizedQuestion,
                 normalizedDefaultMode,

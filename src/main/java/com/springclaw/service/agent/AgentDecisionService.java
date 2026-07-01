@@ -116,6 +116,9 @@ public class AgentDecisionService {
         if ("ask_clarification".equalsIgnoreCase(decision.executionPath())) {
             return true;
         }
+        if ("model_control".equalsIgnoreCase(decision.intent())) {
+            return false;
+        }
 
         String question = request.question().trim();
         String lowerQuestion = question.toLowerCase(Locale.ROOT);

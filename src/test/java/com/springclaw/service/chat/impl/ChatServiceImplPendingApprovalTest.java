@@ -1,11 +1,14 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.dto.chat.ChatRequest;
+import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.runtime.identity.DefaultRunIdentityFactory;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentActionProposalService;
+import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentRuntimeEngine;
 import com.springclaw.service.agent.EngineSelector;
+import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
 import com.springclaw.service.proposal.PendingToolApprovalException;
 import com.springclaw.service.proposal.ToolInvocationProposal;
@@ -16,6 +19,7 @@ import com.springclaw.tool.runtime.ToolOrchestrator;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.lang.reflect.Method;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -48,6 +52,7 @@ class ChatServiceImplPendingApprovalTest {
     private final LocalExecutionSupport localExecutionSupport = mock(LocalExecutionSupport.class);
     private final SseEventBridge sseEventBridge = mock(SseEventBridge.class);
     private final ToolInvocationProposalService proposalService = mock(ToolInvocationProposalService.class);
+    private final LocalFileWriteProposalService localFileWriteProposalService = mock(LocalFileWriteProposalService.class);
 
     @Test
     void handlePendingApproval_proposalExists_sendsActionRequired() {
@@ -86,6 +91,27 @@ class ChatServiceImplPendingApprovalTest {
         );
 
         verify(sseEventBridge, never()).sendToolActionRequired(eq(emitter), any(ToolInvocationProposal.class));
+        verify(chatGuardService).releaseSessionLock("session-A", "lock-token");
+        verify(sseEventBridge).completeEmitter(emitter);
+    }
+
+    @Test
+    void streamActionRequired_desktopWrite_usesToolProposalInsteadOfLegacyActionProposal() throws Exception {
+        ChatServiceImpl chatService = buildService();
+        chatService.setLocalFileWriteProposalService(localFileWriteProposalService);
+        SseEmitter emitter = new SseEmitter();
+        ChatContext context = desktopWriteContext();
+        ToolInvocationProposal proposal = proposal("tip-desktop");
+        when(localFileWriteProposalService.createProposalIfSupported(context)).thenReturn(Optional.of(proposal));
+
+        Method method = ChatServiceImpl.class.getDeclaredMethod(
+                "streamActionRequired", ChatContext.class, String.class, AtomicBoolean.class, SseEmitter.class);
+        method.setAccessible(true);
+        method.invoke(chatService, context, "lock-token", new AtomicBoolean(false), emitter);
+
+        verify(sseEventBridge).sendToolActionRequired(emitter, proposal);
+        verify(actionProposalService, never()).createProposal(
+                any(), any(), any(), any(), any(), any(), any());
         verify(chatGuardService).releaseSessionLock("session-A", "lock-token");
         verify(sseEventBridge).completeEmitter(emitter);
     }
@@ -150,6 +176,31 @@ class ChatServiceImplPendingApprovalTest {
                 now,
                 now,
                 now.plusMinutes(15)
+        );
+    }
+
+    private static ChatContext desktopWriteContext() {
+        String message = "你在桌面创建一个 hello.txt 文件，内容是 hello springclaw";
+        AgentSession session = new AgentSession();
+        session.setSessionKey("session-A");
+        session.setChannel("api");
+        session.setUserId("admin");
+        return new ChatContext(
+                session,
+                "api",
+                "admin",
+                "ADMIN",
+                message,
+                message,
+                "req-1",
+                "system",
+                new AssembledContext("session-A", "api", "admin", message, "", "", ""),
+                null,
+                "simplified",
+                "route",
+                "agent",
+                "local_files",
+                new AgentDecision("local_files", "agent_tools", List.of("file"), "write", true, "desktop write")
         );
     }
 }

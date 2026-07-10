@@ -1,7 +1,6 @@
 package com.springclaw.service.agent;
 
 import com.springclaw.common.util.TextUtils;
-import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import com.springclaw.tool.runtime.CapabilityRegistry;
@@ -47,6 +46,10 @@ public class AgentDecisionRouter {
         }
         if (looksAmbiguousAction(lower)) {
             return AgentDecision.clarify("用户目标偏动作化但缺少对象，进入澄清或轻量模型分类。");
+        }
+        if (looksLikeLocalFileWrite(lower)) {
+            return new AgentDecision("local_files", "agent_tools", List.of("local-files", "file"),
+                    "write", true, "检测到本地文件写入请求，必须走工具确认链路。");
         }
         Set<String> allowedToolPacks = request == null ? Set.of() : request.allowedToolPacks();
 
@@ -147,6 +150,11 @@ public class AgentDecisionRouter {
                 && !TextUtils.containsAny(lower, "是什么", "解释", "为什么", "区别");
     }
 
+    private boolean looksLikeLocalFileWrite(String lower) {
+        return TextUtils.containsAny(lower, "创建", "新建", "写入", "写", "保存", "生成", "覆盖", "create", "write", "save")
+                && TextUtils.containsAny(lower,
+                "桌面", "desktop", "本地", "文件", "文档", ".txt", ".md", ".json", ".csv", ".log", "path", "file");
+    }
 
     private boolean isLocalFilesSkill(String skillId) {
         return "local-files".equalsIgnoreCase(TextUtils.safe(skillId))

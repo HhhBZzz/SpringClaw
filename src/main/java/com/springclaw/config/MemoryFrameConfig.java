@@ -3,6 +3,7 @@ package com.springclaw.config;
 import com.springclaw.runtime.memory.port.MemoryRecordStore;
 import com.springclaw.runtime.memory.port.ProjectMemorySource;
 import com.springclaw.runtime.memory.port.ShortTermMemoryStore;
+import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.memory.frame.MemoryCoordinator;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -33,6 +34,7 @@ public class MemoryFrameConfig {
             MemoryRecordStore recordStore,
             ObjectProvider<ShortTermMemoryStore> shortTermStoreProvider,
             ProjectMemorySource projectMemorySource,
+            ObjectProvider<MessageEventService> messageEventServiceProvider,
             ObjectProvider<Clock> clockProvider,
             @Value("${springclaw.memory.frame.max-chars:6000}") int maxChars,
             @Value("${springclaw.memory.frame.trace-max-warnings:20}") int traceMaxWarnings
@@ -41,6 +43,7 @@ public class MemoryFrameConfig {
                 recordStore,
                 shortTermStoreProvider,
                 projectMemorySource,
+                messageEventServiceProvider.getIfAvailable(),
                 clockProvider.getIfAvailable(Clock::systemUTC),
                 maxChars,
                 traceMaxWarnings

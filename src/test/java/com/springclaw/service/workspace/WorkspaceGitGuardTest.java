@@ -229,6 +229,28 @@ class WorkspaceGitGuardTest {
     }
 
     @Test
+    void dirtyNonTargetDirectory_doesNotBlockToolExecution() throws Exception {
+        Files.createDirectories(tmpRoot.resolve("docs/interview-prep"));
+
+        GitOperations git = Mockito.mock(GitOperations.class);
+        Mockito.when(git.workspaceRoot()).thenReturn(tmpRoot);
+        Mockito.when(git.headSha()).thenReturn("abc1234");
+        Mockito.when(git.statusNameOnly())
+                .thenReturn(List.of("docs/interview-prep"))
+                .thenReturn(List.of("docs/interview-prep"));
+        Mockito.when(repository.recordBaseline(Mockito.anyString(), Mockito.anyString())).thenReturn(true);
+        Mockito.when(repository.recordCommit(Mockito.anyString(), Mockito.any(),
+                Mockito.anyList(), Mockito.anyString())).thenReturn(true);
+
+        WorkspaceGitGuard guard = new WorkspaceGitGuard(git, pathNormalizer, repository);
+        ToolInvocationProposal p = proposal("abc1234", List.of("Desktop/hello.txt"));
+
+        assertThatNoException().isThrownBy(() -> guard.execute(p, () -> "ok"));
+
+        Mockito.verify(repository).recordCommit("tip-test-1", null, List.of(), "no-op write; nothing committed");
+    }
+
+    @Test
     void toolException_rollbackTargetsAndPropagate() throws Exception {
         GitOperations git = Mockito.mock(GitOperations.class);
         Mockito.when(git.workspaceRoot()).thenReturn(tmpRoot);

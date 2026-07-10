@@ -20,6 +20,7 @@ import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
 import com.springclaw.service.proposal.PendingToolApprovalException;
+import com.springclaw.service.proposal.ToolInvocationProposal;
 import com.springclaw.service.proposal.ToolInvocationProposalService;
 import com.springclaw.service.usage.LlmUsageRecordService;
 import com.springclaw.tool.runtime.ToolOrchestrator;
@@ -69,6 +70,7 @@ public class ChatServiceImpl implements ChatService {
     private final RunIdentityFactory runIdentityFactory;
     private final boolean modelLedStreamingEnabled;
     private final boolean basicStreamingEnabled;
+    private LocalFileWriteProposalService localFileWriteProposalService;
 
     @Autowired
     public ChatServiceImpl(AiProviderService aiProviderService,
@@ -115,6 +117,11 @@ public class ChatServiceImpl implements ChatService {
         this.runIdentityFactory = runIdentityFactory;
         this.modelLedStreamingEnabled = modelLedStreamingEnabled;
         this.basicStreamingEnabled = basicStreamingEnabled;
+    }
+
+    @Autowired(required = false)
+    void setLocalFileWriteProposalService(LocalFileWriteProposalService localFileWriteProposalService) {
+        this.localFileWriteProposalService = localFileWriteProposalService;
     }
 
     /**
@@ -357,6 +364,15 @@ public class ChatServiceImpl implements ChatService {
         try {
             sseEventBridge.sendTrace(emitter, context, "等待确认", "agent", "started",
                     "该动作风险等级=" + context.decision().riskLevel() + "，需要用户确认。", 0L);
+            ToolInvocationProposal toolProposal = localFileWriteProposalService == null
+                    ? null
+                    : localFileWriteProposalService.createProposalIfSupported(context).orElse(null);
+            if (toolProposal != null) {
+                sseEventBridge.sendToolActionRequired(emitter, toolProposal);
+                sseEventBridge.sendAnswerChunks(emitter,
+                        "这个本地文件写入操作需要确认。请在确认卡片里确认或拒绝；确认前不会写入文件。");
+                return;
+            }
             AgentActionProposal proposal = actionProposalService == null
                     ? null
                     : actionProposalService.createProposal(

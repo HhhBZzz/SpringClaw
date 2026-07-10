@@ -39,7 +39,7 @@ public class GitOperations {
      */
     public List<String> statusNameOnly() {
         // -z 用 NUL 分隔，每条记录是 "XY pathname"。
-        String out = run("git", "status", "--porcelain=v1", "-z");
+        String out = run("git", "status", "--porcelain=v1", "-z", "--untracked-files=all");
         if (out.isEmpty()) return List.of();
         return Arrays.stream(out.split("\0"))
                 .filter(s -> s.length() > 3)

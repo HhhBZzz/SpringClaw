@@ -37,7 +37,7 @@ public class FileToolPack {
 
     @Autowired
     public FileToolPack(LocalFilesystemService localFilesystemService,
-                        @Value("${springclaw.tools.file.root:${user.dir}}") String root) {
+                        @Value("${springclaw.tools.local-write.root:${springclaw.tools.file.root:${user.dir}}}") String root) {
         this.localFilesystemService = localFilesystemService;
         this.rootPath = Path.of(root).toAbsolutePath().normalize();
     }

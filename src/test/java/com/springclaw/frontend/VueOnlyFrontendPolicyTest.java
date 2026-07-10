@@ -435,6 +435,33 @@ class VueOnlyFrontendPolicyTest {
     }
 
     @Test
+    void toolConfirmationCardsShouldRenderOutsideComposerOverflow() throws IOException {
+        String agentView = Files.readString(projectRoot.resolve("frontend/src/views/AgentView.vue"));
+        String styles = Files.readString(projectRoot.resolve("frontend/src/assets/styles.css"));
+
+        assertThat(agentView)
+                .contains("ref=\"confirmationTray\"")
+                .contains("class=\"confirmation-tray\"")
+                .contains("pendingToolAction")
+                .contains("confirmPendingToolAction");
+
+        int trayIndex = agentView.indexOf("class=\"confirmation-tray\"");
+        int composerIndex = agentView.indexOf("<footer id=\"composer\"");
+        assertThat(trayIndex).isGreaterThan(0).isLessThan(composerIndex);
+
+        String composerBlock = agentView.substring(composerIndex, agentView.indexOf("</footer>", composerIndex));
+        assertThat(composerBlock)
+                .doesNotContain("pendingAction")
+                .doesNotContain("pendingToolAction")
+                .doesNotContain("action-required-card");
+
+        assertThat(styles)
+                .contains(".confirmation-tray")
+                .contains("scroll-margin-bottom")
+                .contains("overflow: visible");
+    }
+
+    @Test
     void adminRouteShouldRemainReachableForUnauthenticatedLogin() throws IOException {
         String router = Files.readString(projectRoot.resolve("frontend/src/router/index.ts"));
         String adminView = Files.readString(projectRoot.resolve("frontend/src/views/AdminView.vue"));
@@ -507,5 +534,108 @@ class VueOnlyFrontendPolicyTest {
                 .contains("Semantic Memory")
                 .contains("Observe Prompt")
                 .contains("context-summary-grid");
+    }
+
+    @Test
+    void matureAgentWorkspaceShouldGateComposerAndKeepDebugOptional() throws IOException {
+        String agentView = Files.readString(projectRoot.resolve("frontend/src/views/AgentView.vue"));
+        String styles = Files.readString(projectRoot.resolve("frontend/src/assets/styles.css"));
+
+        assertThat(agentView)
+                .contains("const composerLocked = computed(() => !auth.profile)")
+                .contains("const inspectorDrawerOpen = ref(false)")
+                .contains("const showRuntimeInspector = computed")
+                .contains("const canSend = computed")
+                .contains("v-if=\"composerLocked\"")
+                .contains("登录后继续")
+                .contains(":disabled=\"!canSend\"")
+                .contains("class=\"runtime-debug-toggle\"")
+                .contains(":aria-expanded=\"inspectorDrawerOpen\"")
+                .contains("runCurrentStepLabel")
+                .doesNotContain("addMessage('system', '请先登录，再开始和 Agent 对话。')");
+
+        assertThat(styles)
+                .contains(".runtime-workspace.debug-collapsed")
+                .contains(".composer-auth-gate")
+                .contains(".runtime-debug-toggle")
+                .contains(".runtime-console.mobile-debug-open")
+                .contains("minmax(260px, 1fr)");
+    }
+
+    @Test
+    void homePageShouldUseMatureProductHeroAndGsapMotion() throws IOException {
+        String homeView = Files.readString(projectRoot.resolve("frontend/src/views/HomeView.vue"));
+        String styles = Files.readString(projectRoot.resolve("frontend/src/assets/styles.css"));
+
+        assertThat(homeView)
+                .contains("import { gsap } from 'gsap';")
+                .contains("const homeRoot = ref<HTMLElement | null>(null)")
+                .contains("useHomePageMotion")
+                .contains("ref=\"homeRoot\"")
+                .contains("class=\"home-hero-shell\"")
+                .contains("class=\"home-product-preview home-hero-stage home-motion\"")
+                .contains("SpringClaw Workspace")
+                .contains("把复杂项目交给一个可靠 Agent")
+                .contains("class=\"home-motion\"")
+                .doesNotContain("<p class=\"eyebrow\">SpringClaw Agent Platform</p>");
+
+        assertThat(styles)
+                .contains(".home-hero-shell")
+                .contains(".home-product-preview")
+                .contains(".home-proof-strip")
+                .contains(".home-motion")
+                .contains(".home-workflow-band");
+    }
+
+    @Test
+    void homePageShouldKeepTastefulCinematicLandingDesign() throws IOException {
+        String homeView = Files.readString(projectRoot.resolve("frontend/src/views/HomeView.vue"));
+        String styles = Files.readString(projectRoot.resolve("frontend/src/assets/styles.css"));
+
+        assertThat(homeView)
+                .contains("taste-home")
+                .contains("AI Agent workspace for engineers")
+                .contains("home-launch-ribbon")
+                .contains("home-hero-backdrop")
+                .contains("home-brand-glyph")
+                .contains("home-workbench-shell")
+                .contains("home-execution-rail")
+                .contains("preview-confirmation-panel")
+                .contains("preview-observe-card")
+                .contains("observabilityStats")
+                .contains("home-process-strip")
+                .contains("home-bento-grid")
+                .contains("home-system-map")
+                .contains("capability.size")
+                .contains("credibilitySignals");
+
+        assertThat(styles)
+                .contains(".home-hero-backdrop")
+                .contains(".home-launch-ribbon")
+                .contains(".home-workbench-shell")
+                .contains(".home-execution-rail")
+                .contains(".preview-confirmation-panel")
+                .contains(".home-process-strip")
+                .contains(".home-bento-card.featured")
+                .contains(".home-system-map")
+                .contains("Tasteful cinematic landing redesign")
+                .contains("springclaw-hero-evidence.png")
+                .contains("preview-observe-card")
+                .contains("#0b1020")
+                .contains("#27d7c2")
+                .contains("#f4b345");
+    }
+
+    @Test
+    void agentGsapMotionShouldUseMatchMediaAndReducedMotionCleanup() throws IOException {
+        String motion = Files.readString(projectRoot.resolve("frontend/src/composables/useAgentGsapMotion.ts"));
+
+        assertThat(motion)
+                .contains("gsap.matchMedia()")
+                .contains("(prefers-reduced-motion: reduce)")
+                .contains("(max-width: 899px)")
+                .contains("mm?.revert()")
+                .contains("gsap.killTweensOf")
+                .contains("willChange: 'transform, opacity'");
     }
 }

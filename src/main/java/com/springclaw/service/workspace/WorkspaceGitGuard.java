@@ -180,6 +180,10 @@ public class WorkspaceGitGuard {
         Map<String, DirtyFileSnapshot> snapshots = new LinkedHashMap<>();
         for (String path : beforeDirty) {
             if (!targetPaths.contains(path)) {
+                Path absolutePath = git.workspaceRoot().resolve(path);
+                if (Files.isDirectory(absolutePath)) {
+                    continue;
+                }
                 snapshots.put(path, snapshotPath(path));
             }
         }

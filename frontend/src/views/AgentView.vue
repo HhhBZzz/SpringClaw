@@ -103,6 +103,8 @@ const lastUserPrompt = ref('');
 const stoppingStream = ref(false);
 const runtimeActionStatus = ref('');
 const activeResourceView = ref<RuntimeResourceView>('console');
+const inspectorDrawerOpen = ref(false);
+const composerAuthNotice = ref('');
 const runtimeResourceLoading = ref(false);
 const runtimeResourceError = ref('');
 const runtimeOverview = ref<RuntimeOverview | null>(null);
@@ -142,6 +144,7 @@ const sessionSearchQuery = ref('');
 const taskMetaExpanded = ref(false);
 const studioRoot = ref<HTMLElement | null>(null);
 const chatLog = ref<HTMLElement | null>(null);
+const confirmationTray = ref<HTMLElement | null>(null);
 const motion = useAgentGsapMotion({ root: studioRoot, chatLog });
 let persistTimer: number | undefined;
 let scrollQueued = false;
@@ -176,17 +179,17 @@ const prompts = [
 ] as const;
 
 const engineerNavItems: Array<{ key: RuntimeResourceView; label: string; className: string }> = [
-  { key: 'console', label: 'Agent Console', className: 'nav-console' },
-  { key: 'sessions', label: 'Sessions', className: 'nav-sessions' },
-  { key: 'agents', label: 'Agents', className: 'nav-agents' },
+  { key: 'console', label: '对话工作台', className: 'nav-console' },
+  { key: 'sessions', label: '会话历史', className: 'nav-sessions' },
+  { key: 'agents', label: '运行记录', className: 'nav-agents' },
   { key: 'skills', label: 'Skills', className: 'nav-skills' },
-  { key: 'tools', label: 'Tools', className: 'nav-tools' },
-  { key: 'proposals', label: 'Proposals', className: 'nav-proposals' },
-  { key: 'tasks', label: 'Tasks', className: 'nav-tasks' },
-  { key: 'learning', label: 'Learning', className: 'nav-learning' },
-  { key: 'memory-candidates', label: 'Memory Candidates', className: 'nav-memory-candidates' },
-  { key: 'knowledge', label: 'Knowledge', className: 'nav-knowledge' },
-  { key: 'usage', label: 'Usage', className: 'nav-usage' }
+  { key: 'tools', label: '工具权限', className: 'nav-tools' },
+  { key: 'proposals', label: '确认单', className: 'nav-proposals' },
+  { key: 'tasks', label: '自动化任务', className: 'nav-tasks' },
+  { key: 'learning', label: '学习规则', className: 'nav-learning' },
+  { key: 'memory-candidates', label: '候选记忆', className: 'nav-memory-candidates' },
+  { key: 'knowledge', label: '知识源', className: 'nav-knowledge' },
+  { key: 'usage', label: '用量', className: 'nav-usage' }
 ];
 
 type RuntimeNavKey = RuntimeResourceView;
@@ -195,17 +198,17 @@ type InspectorTab = 'trace' | 'tools' | 'memory' | 'logs';
 type RunStepStatus = 'completed' | 'running' | 'pending' | 'failed';
 
 const responseModes: Array<{ value: ChatResponseMode; label: string; description: string }> = [
-  { value: 'agent', label: 'Auto', description: '自动选择聊天、工具或深度链路' },
-  { value: 'fast', label: 'Fast', description: '轻量回答，减少规划和工具开销' },
-  { value: 'deep', label: 'Deep', description: '强制深度 OPAR 链路' }
+  { value: 'agent', label: '自动', description: '自动选择聊天、工具或深度链路' },
+  { value: 'fast', label: '快速', description: '轻量回答，减少规划和工具开销' },
+  { value: 'deep', label: '深度', description: '强制深度 OPAR 链路' }
 ];
 const activeInspectorTab = ref<InspectorTab>('trace');
 
 const inspectorTabs: Array<{ value: InspectorTab; label: string }> = [
-  { value: 'trace', label: 'Run Trace' },
-  { value: 'tools', label: 'Tool Calls' },
-  { value: 'memory', label: 'Memory' },
-  { value: 'logs', label: 'Logs' }
+  { value: 'trace', label: '链路' },
+  { value: 'tools', label: '工具' },
+  { value: 'memory', label: '记忆' },
+  { value: 'logs', label: '日志' }
 ];
 
 const workspaceShortcuts = [
@@ -265,6 +268,8 @@ const sessionState = computed(() => {
   if (busy.value) return '执行中';
   return messages.value.length ? '会话进行中' : '等待输入';
 });
+
+const composerLocked = computed(() => !auth.profile);
 
 const currentSessionSummary = computed(() => {
   return historySessions.value.find((item) => item.sessionKey === sessionKey.value);
@@ -420,6 +425,17 @@ const currentStep = computed(() => {
     || visibleRunSteps.value[0];
 });
 
+const runCurrentStepLabel = computed(() => {
+  if (runStatus.value === 'Completed') return '完成';
+  if (runStatus.value === 'Failed') return '失败';
+  return currentStep.value?.label || '等待任务';
+});
+
+const runCurrentStepDurationLabel = computed(() => {
+  if (runStatus.value === 'Completed' || runStatus.value === 'Failed') return runDurationLabel.value;
+  return currentStep.value?.duration || runDurationLabel.value;
+});
+
 const selectedCapabilitiesList = computed(() => {
   const raw = agentDecision.value?.selectedCapabilities;
   if (!raw) return [];
@@ -459,11 +475,16 @@ const visibleLogs = computed(() => {
 
 const executionPayload = computed(() => {
   const step = currentStep.value;
+  const normalizedRunStatus = runStatus.value === 'Completed'
+    ? 'completed'
+    : runStatus.value === 'Failed'
+      ? 'failed'
+      : step?.status || 'pending';
   return JSON.stringify({
-    action: normalizeActionName(step?.label || 'idle'),
-    status: step?.status || 'pending',
-    progress: step?.status === 'completed' ? 100 : step?.status === 'running' ? 68 : 0,
-    verification: verificationEvent.value?.status || 'pending',
+    action: normalizeActionName(runCurrentStepLabel.value || step?.label || 'idle'),
+    status: normalizedRunStatus,
+    progress: normalizedRunStatus === 'completed' ? 100 : normalizedRunStatus === 'running' ? 68 : 0,
+    verification: verificationEvent.value?.status || (normalizedRunStatus === 'completed' ? 'done' : 'pending'),
     quality: agentQuality.value?.overallScore ?? null,
     model: modelStatus.value?.activeModel || modelStatusLabel.value,
     requestId: currentRequestId.value
@@ -484,6 +505,15 @@ const currentProductModeLabel = computed(() => productModeLabel(currentProductMo
 const activeResponseMode = computed(() => {
   return responseModes.find((mode) => mode.value === responseMode.value) || responseModes[0];
 });
+
+const hasRunDetails = computed(() => {
+  return traceEvents.value.length > 0
+    || Boolean(agentDecision.value || verificationEvent.value || pendingAction.value || pendingToolAction.value || currentMemoryUsage.value);
+});
+
+const showRuntimeInspector = computed(() => activeResourceView.value === 'console' && hasRunDetails.value && inspectorDrawerOpen.value);
+
+const canSend = computed(() => Boolean(auth.profile && input.value.trim() && !busy.value));
 
 const sidebarOpen = computed(() => sidebarPinned.value || sidebarHovered.value);
 
@@ -526,11 +556,11 @@ const canRetryLastPrompt = computed(() => {
 });
 
 const runtimeHealthLabel = computed(() => {
-  if (!auth.profile) return 'Login required';
-  if (modelStatusLoading.value) return 'Checking';
-  if (modelStatusError.value) return 'Degraded';
-  if (!modelStatus.value) return 'Unknown';
-  return modelStatus.value.available ? 'Healthy' : 'Degraded';
+  if (!auth.profile) return '需登录';
+  if (modelStatusLoading.value) return '检测中';
+  if (modelStatusError.value) return '降级';
+  if (!modelStatus.value) return '未知';
+  return modelStatus.value.available ? '正常' : '降级';
 });
 
 const runtimeModelDisplay = computed(() => {
@@ -540,9 +570,15 @@ const runtimeModelDisplay = computed(() => {
   return `${provider} / ${model}`;
 });
 
-const runtimeModelProvider = computed(() => modelStatus.value?.activeProvider || 'coding-plan');
+const runtimeModelProvider = computed(() => {
+  if (!auth.profile) return '未登录';
+  return modelStatus.value?.activeProvider || 'coding-plan';
+});
 
-const runtimeModelName = computed(() => modelStatus.value?.activeModel || 'o3');
+const runtimeModelName = computed(() => {
+  if (!auth.profile) return '登录后检测';
+  return modelStatus.value?.activeModel || 'o3';
+});
 
 const runtimeUserInitial = computed(() => {
   const username = auth.username || 'Guest';
@@ -550,7 +586,7 @@ const runtimeUserInitial = computed(() => {
 });
 
 const runtimeRoleLabel = computed(() => {
-  if (!auth.profile) return 'LOGIN';
+  if (!auth.profile) return '登录';
   return auth.roleCode === 'ADMIN' ? 'ADMIN' : auth.roleCode;
 });
 
@@ -731,18 +767,24 @@ watch(agentDecision, (value) => {
 watch(pendingAction, (value) => {
   if (value) {
     void motion.revealActionCard();
+    void scrollConfirmationTrayIntoView();
   }
 });
 
 watch(pendingToolAction, (value) => {
   if (value) {
     void motion.revealActionCard();
+    void scrollConfirmationTrayIntoView();
   }
 });
 
 watch(activeInspectorTab, () => {
   void motion.revealInspectorPanel();
 }, { flush: 'post' });
+
+watch(hasRunDetails, (value) => {
+  if (!value) inspectorDrawerOpen.value = false;
+});
 
 watch(sidebarOpen, (open) => {
   motion.animateSidebar(open, sidebarPinned.value);
@@ -878,9 +920,19 @@ function toggleRuntimeSidebar() {
   setRuntimeStatus(sidebarCollapsed.value ? '侧栏已折叠。' : '侧栏已展开。');
 }
 
+function toggleRuntimeInspector() {
+  if (!hasRunDetails.value) return;
+  inspectorDrawerOpen.value = !inspectorDrawerOpen.value;
+  setRuntimeStatus(inspectorDrawerOpen.value ? '已展开调试详情。' : '已收起调试详情。');
+  if (inspectorDrawerOpen.value) {
+    void motion.revealInspectorPanel();
+  }
+}
+
 async function activateRuntimeNav(key: RuntimeNavKey) {
   if (busy.value) return;
   activeResourceView.value = key;
+  if (key !== 'console') inspectorDrawerOpen.value = false;
   if (key === 'console') {
     sessionSearchOpen.value = false;
     runtimeResourceError.value = '';
@@ -1285,6 +1337,11 @@ async function scrollBottom() {
   }
 }
 
+async function scrollConfirmationTrayIntoView() {
+  await nextTick();
+  confirmationTray.value?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
 function scheduleScrollBottom() {
   if (scrollQueued) return;
   scrollQueued = true;
@@ -1298,10 +1355,11 @@ async function send() {
   const text = input.value.trim();
   if (!text || busy.value) return;
   if (!auth.profile) {
-    addMessage('system', '请先登录，再开始和 Agent 对话。');
-    await scrollBottom();
+    composerAuthNotice.value = '请先登录，当前输入会保留，登录后可继续发送。';
+    void motion.nudgeComposer();
     return;
   }
+  composerAuthNotice.value = '';
   input.value = '';
   busy.value = true;
   streamStatus.value = '正在连接 Agent 流式通道';
@@ -1313,6 +1371,8 @@ async function send() {
   agentDecision.value = null;
   pendingAction.value = null;
   pendingToolAction.value = null;
+  inspectorDrawerOpen.value = false;
+  composerAuthNotice.value = '';
   actionStatus.value = '';
   toolActionStatus.value = '';
   historyStatus.value = '';
@@ -1900,7 +1960,7 @@ onMounted(async () => {
   try {
     await auth.loadMe();
   } finally {
-    await Promise.all([loadServerHistory(), loadModelStatus(), loadRuntimeResource('console')]);
+    await Promise.all([loadServerHistory(), loadModelStatus()]);
   }
 });
 
@@ -1914,7 +1974,16 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div ref="studioRoot" class="agent-studio runtime-console" :class="{ 'sidebar-pinned': sidebarPinned, 'sidebar-preview': !sidebarPinned, 'sidebar-collapsed': sidebarCollapsed }">
+  <div
+    ref="studioRoot"
+    class="agent-studio runtime-console"
+    :class="{
+      'sidebar-pinned': sidebarPinned,
+      'sidebar-preview': !sidebarPinned,
+      'sidebar-collapsed': sidebarCollapsed,
+      'mobile-debug-open': showRuntimeInspector
+    }"
+  >
     <main class="runtime-shell">
       <aside class="runtime-app-sidebar" :class="'runtime-left-sidebar'" aria-label="SpringClaw Runtime navigation">
         <RouterLink class="runtime-sidebar-brand" to="/" aria-label="SpringClaw home">
@@ -1925,9 +1994,9 @@ onUnmounted(() => {
           </span>
         </RouterLink>
 
-        <button class="runtime-new-session" type="button" :disabled="busy" @click="newSession">
+        <button class="runtime-new-session" type="button" title="New Session" :disabled="busy" @click="newSession">
           <span aria-hidden="true">+</span>
-          <strong>New Session</strong>
+          <strong>新建会话</strong>
           <kbd>K</kbd>
         </button>
 
@@ -1949,15 +2018,15 @@ onUnmounted(() => {
 
         <section class="runtime-recent-panel" aria-label="Recent sessions">
           <div class="runtime-section-title">
-            <span>Recent Sessions</span>
-            <button type="button" title="Search sessions" :aria-pressed="sessionSearchOpen" @click="toggleSessionSearch">Search</button>
+            <span>最近会话</span>
+            <button type="button" title="Search sessions" :aria-pressed="sessionSearchOpen" @click="toggleSessionSearch">搜索</button>
           </div>
           <input
             v-if="sessionSearchOpen"
             v-model="sessionSearchQuery"
             class="runtime-session-search"
             type="search"
-            placeholder="Filter sessions..."
+            placeholder="筛选会话..."
           />
           <div v-if="historySessions.length" class="runtime-history-list">
             <button
@@ -2023,8 +2092,8 @@ onUnmounted(() => {
             </button>
             <div v-if="modelSwitcherOpen" class="runtime-model-menu" role="menu" aria-label="Model providers">
               <div class="runtime-model-menu-head">
-                <strong>Model Router</strong>
-                <span>{{ runtimeModelProviders?.canSwitch ? 'ADMIN write access' : 'Read only' }}</span>
+                <strong>模型路由</strong>
+                <span>{{ runtimeModelProviders?.canSwitch ? '管理员可切换' : '只读' }}</span>
               </div>
               <button
                 v-for="provider in runtimeProviderItems"
@@ -2039,15 +2108,15 @@ onUnmounted(() => {
                   <strong>{{ provider.providerId }}</strong>
                   <small>{{ provider.model || provider.defaultModel || '-' }}</small>
                 </span>
-                <em>{{ provider.available ? (provider.active ? 'Active' : 'Available') : 'Unavailable' }}</em>
+                <em>{{ provider.available ? (provider.active ? '当前' : '可用') : '不可用' }}</em>
               </button>
               <p v-if="modelStatusError" class="runtime-model-error">{{ modelStatusError }}</p>
             </div>
           </div>
 
           <nav class="runtime-worktop-actions" aria-label="Runtime quick links">
-            <button class="runtime-quick-link" type="button" @click="activateRuntimeNav('tasks')">Tasks</button>
-            <button class="runtime-quick-link" type="button" @click="activateRuntimeNav('usage')">Usage<span class="live-dot" aria-hidden="true"></span></button>
+            <button class="runtime-quick-link" type="button" @click="activateRuntimeNav('tasks')">任务</button>
+            <button class="runtime-quick-link" type="button" @click="activateRuntimeNav('usage')">用量<span class="live-dot" aria-hidden="true"></span></button>
             <button class="runtime-notification-button" type="button" title="Notifications" aria-label="Notifications" @click="openNotifications">
               <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
                 <path d="M18 10.8c0-3.4-2.2-6.1-6-6.1s-6 2.7-6 6.1v2.6l-1.5 2.5h15L18 13.4v-2.6Z" />
@@ -2062,7 +2131,15 @@ onUnmounted(() => {
           </nav>
         </header>
 
-        <div class="runtime-workspace">
+        <div
+          class="runtime-workspace"
+          :class="{
+            'no-run-details': activeResourceView === 'console' && !hasRunDetails,
+            'debug-collapsed': activeResourceView === 'console' && hasRunDetails && !inspectorDrawerOpen,
+            'debug-open': showRuntimeInspector,
+            'resource-focus': activeResourceView !== 'console'
+          }"
+        >
           <section class="runtime-main-panel" aria-label="Agent conversation">
             <div class="studio-canvas runtime-chat-canvas">
               <div class="studio-heading runtime-main-heading task-header">
@@ -2609,28 +2686,19 @@ onUnmounted(() => {
                   <article class="runtime-empty-brief">
                     <div>
                       <span class="empty-state-kicker">Ready</span>
-                      <h3>把目标交给 SpringClaw</h3>
-                      <p>输入任务后，Agent 会自动选择模型、工具、Skill 和确认路径；需要写入或执行时会先请求确认。</p>
+                      <h3>今天要处理什么？</h3>
                     </div>
-                    <div class="command-step-list" aria-label="Task execution preview">
-                      <template v-if="visibleRunSteps.length">
-                        <div
-                          v-for="(step, index) in visibleRunSteps.slice(0, 4)"
-                          :key="step.label"
-                          class="command-step-row"
-                          :class="`is-${step.status}`"
-                        >
-                          <span class="step-index">{{ step.status === 'completed' ? '✓' : index + 1 }}</span>
-                          <div>
-                            <strong>{{ step.label }}</strong>
-                            <small>{{ step.detail }}</small>
-                          </div>
-                          <em>{{ step.duration }}</em>
-                        </div>
-                      </template>
-                      <div v-else class="empty-history">
-                        真实 trace 会在发送任务后出现。当前没有 mock 步骤。
-                      </div>
+                    <div class="empty-prompt-grid" aria-label="Starter prompts">
+                      <button
+                        v-for="prompt in prompts"
+                        :key="prompt"
+                        class="empty-prompt-button"
+                        type="button"
+                        :disabled="busy"
+                        @click="usePrompt(prompt)"
+                      >
+                        {{ prompt }}
+                      </button>
                     </div>
                   </article>
                 </div>
@@ -2646,56 +2714,12 @@ onUnmounted(() => {
                 </article>
               </section>
 
-              <footer id="composer" class="stitch-composer runtime-composer">
-                <div class="quick-prompt-strip" aria-label="Quick prompts">
-                  <button
-                    v-for="mode in modeActions"
-                    :key="mode.label"
-                    class="mode-chip-button"
-                    type="button"
-                    :disabled="busy"
-                    @click="usePrompt(mode.prompt)"
-                  >
-                    {{ mode.label }}
-                  </button>
-                </div>
-                <div class="composer-headline">
-                  <label for="agent-input">Ask SpringClaw</label>
-                  <span v-if="busy">{{ responseTiming || streamStatus || '生成中' }}</span>
-                  <span v-else>{{ modelStatusDetail }}</span>
-                </div>
-                <textarea
-                  id="agent-input"
-                  v-model="input"
-                  placeholder="Type your message..."
-                  @keydown.enter.exact.prevent="send"
-                />
-                <div class="composer-tools">
-                  <div class="composer-left-actions" aria-label="Input helpers">
-                    <button class="composer-icon-button" type="button" title="Use authorized local files" @click="startAttachFlow">Files</button>
-                    <button class="composer-icon-button" type="button" title="Code context" @click="activateRuntimeNav('skills')">Code</button>
-                    <button class="composer-icon-button" type="button" title="Tool routing" @click="activateRuntimeNav('tools')">Tools</button>
-                  </div>
-                  <div class="composer-actions">
-                    <button class="btn-subtle light retry-button" type="button" :disabled="!canRetryLastPrompt" @click="retryLastPrompt">
-                      重试
-                    </button>
-                    <button v-if="busy" class="btn-subtle stop-button" type="button" :disabled="stoppingStream" @click="stopStreaming">
-                      <span v-if="stoppingStream" class="button-spinner" aria-hidden="true"></span>
-                      {{ stoppingStream ? '停止中' : '停止' }}
-                    </button>
-                    <button v-else class="btn-primary send-button" type="button" :disabled="!input.trim()" @click="send">
-                      <span aria-hidden="true"></span>
-                      发送
-                    </button>
-                  </div>
-                </div>
-
-                <div v-if="agentDecision" class="agent-decision-pill">
-                  <span>Auto Decision</span>
-                  <strong>{{ decisionLabel }}</strong>
-                  <small>{{ agentDecision.reason }}</small>
-                </div>
+              <div
+                v-if="pendingAction || pendingToolAction || actionStatus || toolActionStatus"
+                ref="confirmationTray"
+                class="confirmation-tray"
+                aria-live="assertive"
+              >
                 <div v-if="pendingAction" class="action-required-card">
                   <div>
                     <span class="risk-badge">{{ pendingAction.riskLevel }}</span>
@@ -2726,6 +2750,65 @@ onUnmounted(() => {
                 </div>
                 <p v-if="actionStatus" class="stream-status">{{ actionStatus }}</p>
                 <p v-if="toolActionStatus" class="stream-status">{{ toolActionStatus }}</p>
+              </div>
+
+              <footer id="composer" class="stitch-composer runtime-composer">
+                <div class="quick-prompt-strip" aria-label="Quick prompts">
+                  <button
+                    v-for="mode in modeActions"
+                    :key="mode.label"
+                    class="mode-chip-button"
+                    type="button"
+                    :disabled="busy"
+                    @click="usePrompt(mode.prompt)"
+                  >
+                    {{ mode.label }}
+                  </button>
+                </div>
+                <div class="composer-headline">
+                  <label for="agent-input">SpringClaw</label>
+                  <span v-if="busy">{{ responseTiming || streamStatus || '生成中' }}</span>
+                  <span v-else>{{ modelStatusDetail }}</span>
+                </div>
+                <textarea
+                  id="agent-input"
+                  v-model="input"
+                  placeholder="问一个问题或给一个任务"
+                  @keydown.enter.exact.prevent="send"
+                />
+                <div v-if="composerLocked" class="composer-auth-gate" aria-live="polite">
+                  <div>
+                    <strong>登录后继续</strong>
+                    <span>{{ composerAuthNotice || '你的输入会保留，登录后可继续发送并同步历史。' }}</span>
+                  </div>
+                  <RouterLink class="btn-subtle light small-button" to="/admin">登录 / 注册</RouterLink>
+                </div>
+                <div class="composer-tools">
+                  <div class="composer-left-actions" aria-label="Input helpers">
+                    <button class="composer-icon-button" type="button" title="Use authorized local files" @click="startAttachFlow">文件</button>
+                    <button class="composer-icon-button" type="button" title="Code context" @click="activateRuntimeNav('skills')">代码</button>
+                    <button class="composer-icon-button" type="button" title="Tool routing" @click="activateRuntimeNav('tools')">工具</button>
+                  </div>
+                  <div class="composer-actions">
+                    <button class="btn-subtle light retry-button" type="button" :disabled="!canRetryLastPrompt" @click="retryLastPrompt">
+                      重试
+                    </button>
+                    <button v-if="busy" class="btn-subtle stop-button" type="button" :disabled="stoppingStream" @click="stopStreaming">
+                      <span v-if="stoppingStream" class="button-spinner" aria-hidden="true"></span>
+                      {{ stoppingStream ? '停止中' : '停止' }}
+                    </button>
+                    <button v-else class="btn-primary send-button" type="button" :disabled="!canSend" @click="send">
+                      <span aria-hidden="true"></span>
+                      发送
+                    </button>
+                  </div>
+                </div>
+
+                <div v-if="agentDecision" class="agent-decision-pill">
+                  <span>Auto Decision</span>
+                  <strong>{{ decisionLabel }}</strong>
+                  <small>{{ agentDecision.reason }}</small>
+                </div>
                 <p v-if="streamMeta" class="stream-status">
                   {{ currentProductModeLabel }} · {{ responseModeLabel(streamMeta.responseMode || responseMode) }} · {{ streamMeta.intent || 'general' }}
                 </p>
@@ -2734,11 +2817,26 @@ onUnmounted(() => {
                   <strong>{{ latestTrace?.stepName }}</strong>
                   <small>{{ latestTrace?.detail || traceStatusLabel(latestTrace?.status) }}</small>
                 </div>
+                <div v-if="hasRunDetails" class="runtime-debug-summary" aria-label="运行摘要">
+                  <div>
+                    <span>{{ runStatus }}</span>
+                    <strong>{{ runCurrentStepLabel }}</strong>
+                    <small>{{ runDurationLabel }}</small>
+                  </div>
+                  <button
+                    class="runtime-debug-toggle"
+                    type="button"
+                    :aria-expanded="inspectorDrawerOpen"
+                    @click="toggleRuntimeInspector"
+                  >
+                    {{ inspectorDrawerOpen ? '收起调试' : '调试详情' }}
+                  </button>
+                </div>
               </footer>
             </div>
           </section>
 
-          <aside class="studio-sidebar runtime-inspector" aria-label="Run Inspector">
+          <aside v-if="showRuntimeInspector" class="studio-sidebar runtime-inspector" aria-label="Run Inspector">
             <div class="sidebar-drawer runtime-inspector-drawer">
               <div class="inspector-tabs" role="tablist" aria-label="Inspector tabs">
                 <button
@@ -2822,9 +2920,9 @@ onUnmounted(() => {
                 <div class="current-step-card">
                   <div class="panel-title-row">
                     <strong>Current Step</strong>
-                    <span>{{ currentStep?.duration || runDurationLabel }}</span>
+                    <span>{{ runCurrentStepDurationLabel }}</span>
                   </div>
-                  <p>{{ currentStep?.label || '等待任务' }}</p>
+                  <p>{{ runCurrentStepLabel }}</p>
                   <pre><code>{{ executionPayload }}</code></pre>
                 </div>
               </section>

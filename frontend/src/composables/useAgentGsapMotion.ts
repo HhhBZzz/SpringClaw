@@ -7,7 +7,7 @@ type AgentMotionOptions = {
 };
 
 export function useAgentGsapMotion(options: AgentMotionOptions) {
-  let ctx: gsap.Context | undefined;
+  let mm: gsap.MatchMedia | undefined;
   let sidebarTween: gsap.core.Tween | undefined;
   let railTween: gsap.core.Tween | undefined;
   let reduceMotionQuery: MediaQueryList | undefined;
@@ -28,30 +28,54 @@ export function useAgentGsapMotion(options: AgentMotionOptions) {
   onMounted(() => {
     const root = options.root.value;
     if (!root) return;
-    ctx = gsap.context(() => {
-      if (prefersReducedMotion()) {
-        gsap.set(['.studio-nav', '.studio-heading', '.stitch-chat', '.stitch-composer'], { clearProps: 'all' });
+    mm = gsap.matchMedia();
+    mm.add({
+      isDesktop: '(min-width: 900px)',
+      isMobile: '(max-width: 899px)',
+      reduceMotion: '(prefers-reduced-motion: reduce)'
+    }, (context) => {
+      const { isDesktop, isMobile, reduceMotion } = context.conditions || {};
+      const introTargets = [
+        '.studio-nav',
+        '.runtime-left-sidebar',
+        '.studio-heading',
+        '.stitch-chat',
+        '.stitch-composer',
+        '.runtime-inspector'
+      ];
+      if (reduceMotion) {
+        gsap.set(introTargets, { clearProps: 'all' });
         return;
       }
       gsap.defaults({ ease: 'power3.out' });
-      gsap.set(['.runtime-left-sidebar', '.studio-heading', '.stitch-chat', '.stitch-composer', '.runtime-inspector'], {
+      gsap.set(introTargets, {
         willChange: 'transform, opacity'
       });
-      gsap.timeline({ defaults: { duration: 0.42 } })
-        .from('.studio-nav', { autoAlpha: 0, y: -14 })
-        .from('.runtime-left-sidebar', { autoAlpha: 0, x: -14 }, '<0.05')
-        .from('.studio-heading', { autoAlpha: 0, y: 14, scale: 0.992 }, '<0.04')
+      const timeline = gsap.timeline({ defaults: { duration: isMobile ? 0.28 : 0.42 } })
+        .from('.studio-nav', { autoAlpha: 0, y: isMobile ? -8 : -14 })
+        .from('.studio-heading', { autoAlpha: 0, y: isMobile ? 8 : 14, scale: 0.992 }, '<0.04')
         .from(['.runtime-mode-switch', '.runtime-model-pill', '.runtime-worktop-actions > *'], { autoAlpha: 0, y: 10, stagger: 0.04 }, '<0.04')
-        .from('.stitch-chat', { autoAlpha: 0, y: 14 }, '<0.04')
-        .from('.stitch-composer', { autoAlpha: 0, y: 14, scale: 0.995 }, '<0.02')
-        .from('.runtime-inspector', { autoAlpha: 0, x: 14 }, '<0.02');
+        .from('.stitch-chat', { autoAlpha: 0, y: isMobile ? 8 : 14 }, '<0.04')
+        .from('.stitch-composer', { autoAlpha: 0, y: isMobile ? 8 : 14, scale: 0.995 }, '<0.02');
+
+      if (isDesktop) {
+        timeline
+          .from('.runtime-left-sidebar', { autoAlpha: 0, x: -14 }, '<0.05')
+          .from('.runtime-inspector', { autoAlpha: 0, x: 14 }, '<0.02');
+      }
+
+      return () => {
+        gsap.killTweensOf(scopedElements('*'));
+        gsap.set(introTargets, { clearProps: 'willChange' });
+      };
     }, root);
   });
 
   onUnmounted(() => {
     sidebarTween?.kill();
     railTween?.kill();
-    ctx?.revert();
+    gsap.killTweensOf(scopedElements('*'));
+    mm?.revert();
   });
 
   async function revealLastMessage() {

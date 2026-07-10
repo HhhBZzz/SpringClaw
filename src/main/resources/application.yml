@@ -295,6 +295,8 @@ springclaw:
     file:
       root: ${SPRINGCLAW_TOOL_FILE_ROOT:${user.dir}}
       max-read-chars: 12000
+    local-write:
+      root: ${SPRINGCLAW_TOOLS_LOCAL_WRITE_ROOT:${springclaw.tools.file.root:${user.dir}}}
     workspace:
       max-depth: 8
       max-candidates: 4000

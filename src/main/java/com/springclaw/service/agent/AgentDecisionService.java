@@ -150,13 +150,6 @@ public class AgentDecisionService {
             }
         }
 
-        // Case 4: No keyword match, but query is substantive enough to be a capability request.
-        // Short queries (< 10 chars) are likely simple knowledge questions → skip model.
-        if ("general".equals(decision.intent()) && question.length() >= 10) {
-            log.debug("无关键词匹配但查询较长(len={})，触发模型路由: question={}", question.length(), question);
-            return true;
-        }
-
         return false;
     }
 

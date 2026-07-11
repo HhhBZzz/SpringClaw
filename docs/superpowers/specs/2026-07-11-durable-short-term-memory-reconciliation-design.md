@@ -176,7 +176,7 @@ If either receipt is null or non-durable, the writer skips that entry and logs a
 
 ## 7. Persistence and migration
 
-Add Flyway migration `V5__message_event_short_term_scope_index.sql`:
+Add Flyway migration `V4__message_event_short_term_scope_index.sql`:
 
 ```sql
 CREATE INDEX idx_message_event_short_term_scope_id

@@ -1,6 +1,7 @@
 package com.springclaw.service.memory;
 
 import com.springclaw.runtime.contract.SessionAccessClaim;
+import com.springclaw.runtime.contract.ContextSnapshot;
 import com.springclaw.runtime.memory.contract.MemoryScope;
 import com.springclaw.runtime.memory.contract.ShortTermMemoryEntry;
 import com.springclaw.runtime.memory.port.ShortTermMemoryStore;
@@ -31,7 +32,10 @@ public class ShortTermMemoryWriter {
                                String userContent,
                                MessageEventReceipt assistantReceipt,
                                String assistantContent) {
-        MemoryScope scope = personalScope(context);
+        if (!isDurable(userReceipt) || !isDurable(assistantReceipt)) {
+            return;
+        }
+        MemoryScope scope = writeScope(context);
         ShortTermMemoryStore store = storeProvider.getIfAvailable();
         if (store == null) {
             return;
@@ -44,7 +48,10 @@ public class ShortTermMemoryWriter {
     public void appendSuspension(ChatContext context,
                                  MessageEventReceipt userReceipt,
                                  String userContent) {
-        MemoryScope scope = personalScope(context);
+        if (!isDurable(userReceipt)) {
+            return;
+        }
+        MemoryScope scope = writeScope(context);
         ShortTermMemoryStore store = storeProvider.getIfAvailable();
         if (store == null) {
             return;
@@ -52,13 +59,25 @@ public class ShortTermMemoryWriter {
         store.append(scope, entry(userReceipt, context, "USER", userContent));
     }
 
-    private static MemoryScope personalScope(ChatContext context) {
+    private static MemoryScope writeScope(ChatContext context) {
+        ContextSnapshot snapshot = context.contextSnapshot();
+        if (snapshot != null && snapshot.memoryFrame() != null) {
+            return snapshot.memoryFrame().scope();
+        }
         return MemoryScope.from(SessionAccessClaim.personal(
                 SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
                 context.channel(),
                 context.session().getSessionKey(),
                 context.userId()
         ));
+    }
+
+    private static boolean isDurable(MessageEventReceipt receipt) {
+        return receipt != null
+                && receipt.isDurable()
+                && receipt.eventKey() != null
+                && !receipt.eventKey().isBlank()
+                && receipt.occurredAt() != null;
     }
 
     private static ShortTermMemoryEntry entry(MessageEventReceipt receipt,

@@ -8,6 +8,9 @@ import com.springclaw.mapper.MessageEventMapper;
 import com.springclaw.service.event.MessageEventReceipt;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.event.MessageEventWrite;
+import com.springclaw.service.event.ShortTermChatEventRead;
+import com.springclaw.runtime.memory.contract.MemoryScope;
+import com.springclaw.runtime.memory.contract.MemoryScopeType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
@@ -100,6 +103,56 @@ public class MessageEventServiceImpl extends ServiceImpl<MessageEventMapper, Mes
             localEventByKey.put(write.eventKey(), event);
             return toReceipt(event);
         }
+    }
+
+    @Override
+    public ShortTermChatEventRead readShortTermChatEvents(
+            MemoryScope scope,
+            int limit
+    ) {
+        java.util.Objects.requireNonNull(scope, "scope");
+        int safeLimit = Math.max(1, Math.min(limit, 5_000));
+        if (dbEnabled) {
+            try {
+                var query = lambdaQuery()
+                        .eq(MessageEvent::getChannel, scope.channel())
+                        .eq(MessageEvent::getSessionKey, scope.sessionKey())
+                        .eq(MessageEvent::getEventType, "CHAT")
+                        .in(MessageEvent::getRole, List.of("USER", "ASSISTANT"))
+                        .orderByDesc(MessageEvent::getId);
+                if (scope.scopeType() == MemoryScopeType.PERSONAL_SESSION) {
+                    query.eq(MessageEvent::getUserId, scope.authorizationPrincipal());
+                }
+                List<MessageEvent> rows = query
+                        .page(new Page<MessageEvent>(1, safeLimit, false))
+                        .getRecords()
+                        .stream()
+                        .filter(this::isEligibleShortTermEvent)
+                        .sorted(Comparator.comparing(MessageEvent::getId))
+                        .toList();
+                return new ShortTermChatEventRead(
+                        rows,
+                        ShortTermChatEventRead.Source.DURABLE
+                );
+            } catch (Exception ex) {
+                log.warn("短期记忆持久化查询失败，降级本地缓存。scope={}, reason={}",
+                        scope.scopeId(), ex.getMessage());
+            }
+        }
+        return new ShortTermChatEventRead(
+                localAllEventsSnapshot().stream()
+                        .filter(event -> scope.channel().equals(event.getChannel()))
+                        .filter(event -> scope.sessionKey().equals(event.getSessionKey()))
+                        .filter(event -> "CHAT".equalsIgnoreCase(event.getEventType()))
+                        .filter(event -> "USER".equalsIgnoreCase(event.getRole())
+                                || "ASSISTANT".equalsIgnoreCase(event.getRole()))
+                        .filter(event -> scope.scopeType() != MemoryScopeType.PERSONAL_SESSION
+                                || scope.authorizationPrincipal().equals(event.getUserId()))
+                        .filter(this::hasShortTermIdentity)
+                        .limit(safeLimit)
+                        .toList(),
+                ShortTermChatEventRead.Source.LOCAL_FALLBACK
+        );
     }
 
     protected MessageEvent findByEventKey(String eventKey) {
@@ -412,6 +465,20 @@ public class MessageEventServiceImpl extends ServiceImpl<MessageEventMapper, Mes
                 localEventByKey.remove(evicted.getEventKey(), evicted);
             }
         }
+    }
+
+    private boolean isEligibleShortTermEvent(MessageEvent event) {
+        return event != null
+                && event.getId() != null
+                && event.getId() > 0
+                && hasShortTermIdentity(event);
+    }
+
+    private boolean hasShortTermIdentity(MessageEvent event) {
+        return StringUtils.hasText(event.getEventKey())
+                && StringUtils.hasText(event.getRequestId())
+                && StringUtils.hasText(event.getUserId())
+                && StringUtils.hasText(event.getContent());
     }
 
     private List<MessageEvent> localAllEventsSnapshot() {

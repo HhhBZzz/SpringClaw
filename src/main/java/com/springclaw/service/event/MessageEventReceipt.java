@@ -10,4 +10,8 @@ public record MessageEventReceipt(
         String eventKey,
         Instant occurredAt
 ) {
+
+    public boolean isDurable() {
+        return eventId > 0;
+    }
 }

@@ -1,7 +1,7 @@
 # Durable Short-Term Memory Reconciliation Design
 
 **Date:** 2026-07-11
-**Status:** Approved by the user's continuous-delivery authorization; implementation planning in progress
+**Status:** Implemented and verified
 **Branch:** `codex/memory-durable-reconciliation`
 **Base:** `392917b` (`codex/flyway-schema-migration`)
 
@@ -75,7 +75,7 @@ ContextSnapshotFactory
     -> MemoryCoordinator.retrieve(accepted MemoryScope)
     -> Redis v2 recent window
     -> MessageEventService.readShortTermChatEvents(scope)
-    -> deterministic union, durable row wins by eventKey
+    -> durable rows are the authoritative frame window; Redis is repaired best-effort
     -> Redis mergeRecovery(best effort)
     -> MemoryFrame / ContextSnapshot
 ```
@@ -150,10 +150,10 @@ Redis stores only `ShortTermMemoryEntry` values with positive event IDs. A store
 
 For every short-term read:
 
-1. Read Redis v2 recent entries.
+1. Read Redis v2 recent entries as the local fallback window.
 2. Call `readShortTermChatEvents(scope, limit)`.
-3. If source is `DURABLE`, convert the durable events, merge by `eventKey`, prefer durable data for equal keys, sort by positive event ID, keep the newest configured limit, and call `ShortTermMemoryStore.mergeRecovery` best-effort.
-4. If source is `LOCAL_FALLBACK`, use Redis entries only for distributed short-term context. Add a bounded trace warning explaining that durable reconciliation was unavailable; do not map negative local IDs into `ShortTermMemoryEntry`.
+3. If source is `DURABLE`, convert and order the durable events, return that durable window for the current frame, and call `ShortTermMemoryStore.mergeRecovery` best-effort to repair Redis. Durable data therefore replaces a stale Redis payload for the same `eventKey` and cannot be omitted by a partial cache window.
+4. If source is `LOCAL_FALLBACK`, use the existing Redis entries only, add a bounded trace warning explaining that durable reconciliation was unavailable, and do not map negative local IDs into `ShortTermMemoryEntry`.
 5. If Redis is empty and durable rows exist, the returned frame still contains the durable rows in that same request.
 
 This makes the snapshot correct even before Redis repair finishes.
@@ -249,3 +249,11 @@ This phase deliberately leaves two future pieces separate:
 
 1. a durable cross-instance journal/outbox for accepting chat turns while MySQL is down;
 2. semantic extraction, long-term ranking, project-memory budgets, and confirmation-decision replay.
+
+## 13. Verification evidence
+
+- Focused regression suite passed:
+  `mvn -q -Dtest=MessageEventServiceImplTest,RedisShortTermMemoryStoreTest,ShortTermMemoryRecoveryServiceTest,MemoryCoordinatorTest,ShortTermMemoryWriterTest,ChatResultPersisterTest,ChatControllerSpringBootCanonicalSmokeIT test`.
+- Full regression suite passed: `mvn -q test`.
+- Surefire reports: 197 XML reports; 900 tests, 0 failures, 0 errors, 0 skipped.
+- Flyway validated five migrations and confirmed schema version 4 during the Spring Boot smoke test.

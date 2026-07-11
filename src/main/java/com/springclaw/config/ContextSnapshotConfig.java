@@ -1,6 +1,8 @@
 package com.springclaw.config;
 
 import com.springclaw.runtime.bridge.CanonicalContextReadyProjector;
+import com.springclaw.runtime.bridge.CanonicalContextSnapshotResolver;
+import com.springclaw.runtime.bridge.AcceptedRunContextResolver;
 import com.springclaw.runtime.bridge.LegacyContextViewAdapter;
 import com.springclaw.runtime.bridge.RunStateContextSnapshotRequestFactory;
 import com.springclaw.runtime.contract.ContextSnapshotFactory;
@@ -53,5 +55,20 @@ public class ContextSnapshotConfig {
                 runCoordinator,
                 runStateRepository
         );
+    }
+
+    @Bean
+    public AcceptedRunContextResolver acceptedRunContextResolver(
+            RunStateRepository runStateRepository
+    ) {
+        return new AcceptedRunContextResolver(runStateRepository);
+    }
+
+    @Bean
+    public CanonicalContextSnapshotResolver canonicalContextSnapshotResolver(
+            CanonicalContextReadyProjector projector,
+            RunStateRepository runStateRepository
+    ) {
+        return new CanonicalContextSnapshotResolver(projector, runStateRepository);
     }
 }

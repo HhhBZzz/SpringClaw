@@ -17,6 +17,7 @@ import com.springclaw.runtime.memory.port.ProjectMemorySource;
 import com.springclaw.runtime.memory.port.ShortTermMemoryStore;
 import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.service.event.MessageEventService;
+import com.springclaw.service.event.ShortTermChatEventRead;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.util.StringUtils;
 
@@ -27,6 +28,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -252,66 +254,66 @@ public class MemoryCoordinator {
             warnings.add("short-term store unavailable");
             return List.of();
         }
-        List<ShortTermMemoryEntry> entries = store.readRecent(
+        List<ShortTermMemoryEntry> cachedEntries = store.readRecent(
                 scope,
                 SHORT_TERM_ENTRY_LIMIT
         );
-        sourceCounts.add("shortTerm", entries.size());
-        if (entries.isEmpty()) {
-            List<ShortTermMemoryEntry> persistedEntries = persistedShortTermEntries(
-                    scope,
-                    SHORT_TERM_ENTRY_LIMIT,
-                    warnings
-            );
-            if (!persistedEntries.isEmpty()) {
-                sourceCounts.add("persistedShortTerm", persistedEntries.size());
-                return persistedEntries.stream()
-                        .filter(entry -> isAllowedShortTermRole(entry.role()))
-                        .map(entry -> fromShortTerm(scope, entry))
-                        .toList();
-            }
-        }
-        return entries.stream()
-                .filter(entry -> isAllowedShortTermRole(entry.role()))
-                .map(entry -> fromShortTerm(scope, entry))
-                .toList();
-    }
-
-    private List<ShortTermMemoryEntry> persistedShortTermEntries(
-            MemoryScope scope,
-            int limit,
-            List<String> warnings
-    ) {
         if (messageEventService == null) {
-            return List.of();
+            sourceCounts.add("shortTerm", cachedEntries.size());
+            return toShortTermItems(scope, cachedEntries);
         }
-        String userFilter = scope.scopeType() == MemoryScopeType.PERSONAL_SESSION
-                ? scope.authorizationPrincipal()
-                : null;
         try {
-            List<MessageEvent> events = messageEventService.listSessionEvents(
-                    scope.sessionKey(),
-                    userFilter,
-                    null,
-                    "CHAT",
-                    limit,
-                    true
+            ShortTermChatEventRead durableRead = messageEventService.readShortTermChatEvents(
+                    scope,
+                    SHORT_TERM_ENTRY_LIMIT
             );
-            if (events == null || events.isEmpty()) {
-                return List.of();
+            if (durableRead.source() != ShortTermChatEventRead.Source.DURABLE) {
+                warnings.add("durable short-term reconciliation unavailable");
+                sourceCounts.add("shortTerm", cachedEntries.size());
+                return toShortTermItems(scope, cachedEntries);
             }
+
             List<ShortTermMemoryEntry> entries = new ArrayList<>();
-            for (MessageEvent event : events) {
+            for (MessageEvent event : durableRead.events()) {
                 ShortTermMemoryEntry entry = toShortTermEntry(scope, event);
                 if (entry != null) {
                     entries.add(entry);
                 }
             }
-            return List.copyOf(entries);
+            entries.sort(Comparator.comparingLong(ShortTermMemoryEntry::eventId));
+            if (entries.size() > SHORT_TERM_ENTRY_LIMIT) {
+                entries = new ArrayList<>(entries.subList(
+                        entries.size() - SHORT_TERM_ENTRY_LIMIT,
+                        entries.size()
+                ));
+            }
+            long watermark = entries.stream()
+                    .mapToLong(ShortTermMemoryEntry::eventId)
+                    .max()
+                    .orElse(Long.MAX_VALUE);
+            try {
+                store.mergeRecovery(scope, watermark, entries);
+            } catch (RuntimeException ex) {
+                warnings.add("durable short-term cache repair unavailable: " + ex.getMessage());
+            }
+            sourceCounts.add("shortTerm", entries.size());
+            sourceCounts.add("persistedShortTerm", entries.size());
+            return toShortTermItems(scope, entries);
         } catch (RuntimeException ex) {
-            warnings.add("persisted short-term fallback unavailable: " + ex.getMessage());
-            return List.of();
+            warnings.add("durable short-term reconciliation unavailable: " + ex.getMessage());
+            sourceCounts.add("shortTerm", cachedEntries.size());
+            return toShortTermItems(scope, cachedEntries);
         }
+    }
+
+    private static List<MemoryFrameItem> toShortTermItems(
+            MemoryScope scope,
+            List<ShortTermMemoryEntry> entries
+    ) {
+        return entries.stream()
+                .filter(entry -> isAllowedShortTermRole(entry.role()))
+                .map(entry -> fromShortTerm(scope, entry))
+                .toList();
     }
 
     private static ShortTermMemoryEntry toShortTermEntry(
@@ -326,7 +328,9 @@ public class MemoryCoordinator {
                 || !StringUtils.hasText(event.getEventKey())
                 || !StringUtils.hasText(event.getRequestId())
                 || !StringUtils.hasText(event.getUserId())
-                || !StringUtils.hasText(event.getContent())) {
+                || !StringUtils.hasText(event.getContent())
+                || !scope.channel().equals(event.getChannel())
+                || !scope.sessionKey().equals(event.getSessionKey())) {
             return null;
         }
         if (scope.scopeType() == MemoryScopeType.PERSONAL_SESSION

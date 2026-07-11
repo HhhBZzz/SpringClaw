@@ -52,6 +52,37 @@ public class RedisShortTermMemoryStore implements ShortTermMemoryStore {
             return 1
             """;
 
+    private static final String MERGE_RECOVERY_SCRIPT = """
+            local orderKey = KEYS[1]
+            local entryKey = KEYS[2]
+            local watermark = tonumber(ARGV[1])
+            local maxEntries = tonumber(ARGV[2])
+            local ttlSeconds = tonumber(ARGV[3])
+            local entryCount = tonumber(ARGV[4])
+            local stale = redis.call('ZRANGEBYSCORE', orderKey, '-inf', watermark)
+            if #stale > 0 then
+                redis.call('ZREM', orderKey, unpack(stale))
+                redis.call('HDEL', entryKey, unpack(stale))
+            end
+            local offset = 5
+            for i = 1, entryCount do
+                local score = tonumber(ARGV[offset])
+                local eventKey = ARGV[offset + 1]
+                local payload = ARGV[offset + 2]
+                redis.call('ZADD', orderKey, score, eventKey)
+                redis.call('HSET', entryKey, eventKey, payload)
+                offset = offset + 3
+            end
+            local removed = redis.call('ZRANGE', orderKey, 0, -(maxEntries + 1))
+            if #removed > 0 then
+                redis.call('ZREM', orderKey, unpack(removed))
+                redis.call('HDEL', entryKey, unpack(removed))
+            end
+            redis.call('EXPIRE', orderKey, ttlSeconds)
+            redis.call('EXPIRE', entryKey, ttlSeconds)
+            return 1
+            """;
+
     private final RedissonClient redissonClient;
     private final int maxEntries;
     private final long ttlSeconds;
@@ -138,12 +169,34 @@ public class RedisShortTermMemoryStore implements ShortTermMemoryStore {
     ) {
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(persistedEntries, "persistedEntries");
+        List<ShortTermMemoryEntry> eligible = new ArrayList<>(persistedEntries.size());
         for (ShortTermMemoryEntry entry : persistedEntries) {
             Objects.requireNonNull(entry, "persisted entry");
-            if (entry.eventId() > watermark) {
-                continue;
+            if (entry.eventId() <= watermark) {
+                eligible.add(entry);
             }
-            append(scope, entry);
+        }
+        List<Object> arguments = new ArrayList<>(4 + eligible.size() * 3);
+        arguments.add(String.valueOf(watermark));
+        arguments.add(String.valueOf(maxEntries));
+        arguments.add(String.valueOf(ttlSeconds));
+        arguments.add(String.valueOf(eligible.size()));
+        for (ShortTermMemoryEntry entry : eligible) {
+            arguments.add(String.valueOf(entry.eventId()));
+            arguments.add(entry.eventKey());
+            arguments.add(encode(entry));
+        }
+        try {
+            redissonClient.getScript(StringCodec.INSTANCE).eval(
+                    RScript.Mode.READ_WRITE,
+                    MERGE_RECOVERY_SCRIPT,
+                    RScript.ReturnType.INTEGER,
+                    List.of(orderKey(scope), entryKey(scope)),
+                    arguments.toArray()
+            );
+        } catch (Exception ex) {
+            log.warn("Redis 短期记忆恢复合并失败，降级 MySQL 恢复源。scope={}, reason={}",
+                    scope.scopeId(), ex.getMessage());
         }
     }
 

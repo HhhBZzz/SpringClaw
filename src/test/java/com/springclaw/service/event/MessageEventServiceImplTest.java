@@ -1,6 +1,8 @@
 package com.springclaw.service.event;
 
 import com.springclaw.domain.entity.MessageEvent;
+import com.springclaw.runtime.contract.SessionAccessClaim;
+import com.springclaw.runtime.memory.contract.MemoryScope;
 import com.springclaw.service.event.impl.MessageEventServiceImpl;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -139,5 +141,55 @@ class MessageEventServiceImplTest {
         assertThat(reinserted.eventId()).isLessThan(-100L);
         assertThat(service.listSessionEvents("s1", "u1", null, "CHAT", 500, true))
                 .hasSize(100);
+    }
+
+    @Test
+    void shortTermReaderKeepsPersonalScopeInsideChannelSessionAndUser() {
+        MessageEventServiceImpl service = new MessageEventServiceImpl(false);
+        service.append(new MessageEventWrite(
+                "chat:req-api-alice:user", "shared-session", "api", "alice",
+                "USER", "CHAT", "api alice", "req-api-alice"));
+        service.append(new MessageEventWrite(
+                "chat:req-api-bob:user", "shared-session", "api", "bob",
+                "USER", "CHAT", "api bob", "req-api-bob"));
+        service.append(new MessageEventWrite(
+                "chat:req-feishu-alice:user", "shared-session", "feishu", "alice",
+                "USER", "CHAT", "feishu alice", "req-feishu-alice"));
+
+        ShortTermChatEventRead read = service.readShortTermChatEvents(
+                MemoryScope.from(SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        "api", "shared-session", "alice"
+                )),
+                40
+        );
+
+        assertThat(read.source()).isEqualTo(ShortTermChatEventRead.Source.LOCAL_FALLBACK);
+        assertThat(read.events()).extracting(MessageEvent::getContent)
+                .containsExactly("api alice");
+    }
+
+    @Test
+    void shortTermReaderKeepsVerifiedSharedScopeInsideChannelAndSession() {
+        MessageEventServiceImpl service = new MessageEventServiceImpl(false);
+        service.append(new MessageEventWrite(
+                "chat:req-api-alice:user", "group-1", "api", "alice",
+                "USER", "CHAT", "api alice", "req-api-alice"));
+        service.append(new MessageEventWrite(
+                "chat:req-api-bob:assistant", "group-1", "api", "bob",
+                "ASSISTANT", "CHAT", "api bob", "req-api-bob"));
+        service.append(new MessageEventWrite(
+                "chat:req-feishu-alice:user", "group-1", "feishu", "alice",
+                "USER", "CHAT", "feishu alice", "req-feishu-alice"));
+
+        ShortTermChatEventRead read = service.readShortTermChatEvents(
+                MemoryScope.from(SessionAccessClaim.sharedVerified(
+                        "api", "group-1", "alice"
+                )),
+                40
+        );
+
+        assertThat(read.events()).extracting(MessageEvent::getContent)
+                .containsExactly("api alice", "api bob");
     }
 }

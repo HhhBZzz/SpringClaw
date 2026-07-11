@@ -7,6 +7,7 @@ import com.springclaw.service.proposal.ToolInvocationProposalService;
 import com.springclaw.service.proposal.ToolInvocationProposalStatus;
 import com.springclaw.service.proposal.ToolInvocationSnapshot;
 import com.springclaw.service.proposal.ToolInvocationSnapshotService;
+import com.springclaw.service.proposal.ToolGateway;
 import com.springclaw.service.workspace.WorkspaceGitGuard;
 import com.springclaw.tool.pack.WorkspaceEditToolPack;
 import com.springclaw.tool.runtime.CapabilityRegistry;
@@ -57,7 +58,7 @@ class ToolSafetyPathCharacterizationTest {
         when(fixture.snapshotService.capture(
                 eq(TOOL_NAME), eq("workspace"), any(), eq(riskLevel)))
                 .thenReturn(snapshot);
-        when(fixture.proposalService.createPending(eq(snapshot), any()))
+        when(fixture.toolGateway.requestApproval(eq(snapshot), any()))
                 .thenReturn(pending);
 
         assertThatThrownBy(() -> fixture.aspect.aroundTool(fixture.joinPoint))
@@ -68,7 +69,7 @@ class ToolSafetyPathCharacterizationTest {
         verify(fixture.joinPoint, never()).proceed();
         verify(fixture.snapshotService).capture(
                 eq(TOOL_NAME), eq("workspace"), any(), eq(riskLevel));
-        verify(fixture.proposalService).createPending(eq(snapshot), any());
+        verify(fixture.toolGateway).requestApproval(eq(snapshot), any());
         verify(fixture.auditService).recordInvoke(
                 eq(TOOL_NAME), eq("PENDING_APPROVAL"),
                 eq("proposalId=tip-characterization"), any());
@@ -85,7 +86,8 @@ class ToolSafetyPathCharacterizationTest {
 
         assertThat(result).isEqualTo("read-result");
         verify(fixture.joinPoint).proceed();
-        verifyNoInteractions(fixture.snapshotService, fixture.proposalService, fixture.workspaceGitGuard);
+        verifyNoInteractions(fixture.snapshotService, fixture.proposalService,
+                fixture.toolGateway, fixture.workspaceGitGuard);
     }
 
     @ParameterizedTest(name = "unclassified risk [{0}] remains on the direct path")
@@ -99,7 +101,8 @@ class ToolSafetyPathCharacterizationTest {
 
         assertThat(result).isEqualTo("unclassified-result");
         verify(fixture.joinPoint).proceed();
-        verifyNoInteractions(fixture.snapshotService, fixture.proposalService, fixture.workspaceGitGuard);
+        verifyNoInteractions(fixture.snapshotService, fixture.proposalService,
+                fixture.toolGateway, fixture.workspaceGitGuard);
     }
 
     private static ToolInvocationSnapshot snapshot(String riskLevel) {
@@ -160,6 +163,7 @@ class ToolSafetyPathCharacterizationTest {
                 mock(ToolInvocationSnapshotService.class);
         private final ToolInvocationProposalService proposalService =
                 mock(ToolInvocationProposalService.class);
+        private final ToolGateway toolGateway = mock(ToolGateway.class);
         private final WorkspaceGitGuard workspaceGitGuard = mock(WorkspaceGitGuard.class);
         private final CapabilityRegistry capabilityRegistry = mock(CapabilityRegistry.class);
         private final ProceedingJoinPoint joinPoint = mock(ProceedingJoinPoint.class);
@@ -184,7 +188,8 @@ class ToolSafetyPathCharacterizationTest {
                     capabilityRegistry,
                     snapshotService,
                     proposalService,
-                    workspaceGitGuard
+                    workspaceGitGuard,
+                    toolGateway
             );
         }
     }

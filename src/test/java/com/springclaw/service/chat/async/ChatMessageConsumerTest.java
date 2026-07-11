@@ -8,6 +8,7 @@ import com.springclaw.runtime.lifecycle.RunStateRepository;
 import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import java.time.Duration;
@@ -15,6 +16,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -59,8 +61,9 @@ class ChatMessageConsumerTest {
         SimpMessagingTemplate messaging = mock(SimpMessagingTemplate.class);
         RunStateRepository repository = mock(RunStateRepository.class);
         AsyncChatRequestMessage message = message();
+        RunState canonical = createdRun(message);
         when(repository.requireByRunId(message.requestId()))
-                .thenReturn(createdRun(message));
+                .thenReturn(canonical);
         when(chatService.chat(any(AcceptedChatCommand.class)))
                 .thenReturn(new ChatResponse(
                         message.requestId(),
@@ -86,7 +89,15 @@ class ChatMessageConsumerTest {
 
         consumer.consume(message);
 
-        verify(chatService).chat(any(AcceptedChatCommand.class));
+        ArgumentCaptor<AcceptedChatCommand> command =
+                ArgumentCaptor.forClass(AcceptedChatCommand.class);
+        verify(chatService).chat(command.capture());
+        assertThat(command.getValue().runId()).isEqualTo(canonical.runId());
+        assertThat(command.getValue().request().sessionKey()).isEqualTo(canonical.sessionKey());
+        assertThat(command.getValue().request().channel()).isEqualTo(canonical.channel());
+        assertThat(command.getValue().request().userId()).isEqualTo(canonical.userId());
+        assertThat(command.getValue().request().message()).isEqualTo(canonical.originalMessage());
+        assertThat(command.getValue().request().responseMode()).isEqualTo(canonical.responseMode());
         verify(producer).sendResponse(payload);
         verify(messaging).convertAndSend("/topic/chat/" + message.requestId(), payload);
     }

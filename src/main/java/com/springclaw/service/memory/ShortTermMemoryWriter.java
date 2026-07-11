@@ -74,7 +74,7 @@ public class ShortTermMemoryWriter {
 
     private static boolean isDurable(MessageEventReceipt receipt) {
         return receipt != null
-                && receipt.eventId() > 0
+                && receipt.isDurable()
                 && receipt.eventKey() != null
                 && !receipt.eventKey().isBlank()
                 && receipt.occurredAt() != null;

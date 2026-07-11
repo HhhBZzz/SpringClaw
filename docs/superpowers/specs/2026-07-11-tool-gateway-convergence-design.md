@@ -1,7 +1,7 @@
 # Tool Gateway Convergence Design
 
 **Date:** 2026-07-11  
-**Status:** Approved by the user's continuous-delivery authorization; implementation planning in progress  
+**Status:** Implemented and verified
 **Branch:** `codex/tool-gateway-convergence`  
 **Base:** `3a8dba9` (`codex/flyway-schema-migration`)
 
@@ -68,3 +68,9 @@ Characterize current pending/confirm/failed behavior first. Add gateway tests fo
 - Completion verification and final answer ownership.
 - Replacing the scheduled-task confirmation domain.
 - New workspace lease/fencing storage beyond the existing `WorkspaceGitGuard` protections; that follows after gateway ownership is proven.
+
+## Verification evidence
+
+- Focused gateway, aspect, proposal, controller, and safety-characterization suite passed.
+- Full `mvn -q test` passed: 948 tests, 0 failures, 0 errors, 0 skipped.
+- Spring integration tests validated five Flyway migrations and schema version 4.

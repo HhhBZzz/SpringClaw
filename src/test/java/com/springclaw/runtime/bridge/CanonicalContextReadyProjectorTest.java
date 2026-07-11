@@ -68,6 +68,43 @@ class CanonicalContextReadyProjectorTest {
     }
 
     @Test
+    void returnsStoredSnapshotInsteadOfNewCandidateForExistingContextReadyRun() {
+        InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+        RunCoordinator coordinator = new RunCoordinator(store);
+        accept(coordinator);
+        ContextSnapshot stored = snapshot();
+        coordinator.contextReady(RUN_ID, stored, T0.plusSeconds(1));
+        CanonicalContextReadyProjector projector =
+                new CanonicalContextReadyProjector(coordinator, store);
+        ContextSnapshot candidate = new ContextSnapshot(
+                RUN_ID,
+                "session-1",
+                "user-1",
+                "api",
+                "user-1",
+                "USER",
+                "hello",
+                "hello",
+                "replacement system",
+                "project",
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of("web"),
+                Map.of("providerId", "provider"),
+                Map.of("schema", "test"),
+                frame(),
+                T0.plusSeconds(2),
+                "candidate-hash"
+        );
+
+        RunState state = projector.project(RUN_ID, candidate, T0.plusSeconds(2));
+
+        assertThat(state.contextSnapshot()).isSameAs(stored);
+        assertThat(state.contextSnapshot().snapshotHash()).isEqualTo("snapshot-hash");
+    }
+
+    @Test
     void rejectsProjectionAfterDecisionBoundary() {
         InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
         RunCoordinator coordinator = new RunCoordinator(store);

@@ -2,14 +2,15 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.dto.chat.ChatRequest;
-import com.springclaw.runtime.bridge.CanonicalContextReadyProjector;
+import com.springclaw.runtime.bridge.AcceptedRunContext;
+import com.springclaw.runtime.bridge.AcceptedRunContextResolver;
+import com.springclaw.runtime.bridge.CanonicalContextSnapshotResolver;
+import com.springclaw.runtime.bridge.CanonicalRunContextException;
 import com.springclaw.runtime.bridge.LegacyContextView;
 import com.springclaw.runtime.bridge.LegacyContextViewAdapter;
 import com.springclaw.runtime.bridge.RunStateContextSnapshotRequestFactory;
 import com.springclaw.runtime.contract.ContextSnapshot;
 import com.springclaw.runtime.contract.ContextSnapshotFactory;
-import com.springclaw.runtime.contract.RunState;
-import com.springclaw.runtime.lifecycle.RunStateRepository;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentDecisionRequest;
@@ -23,14 +24,15 @@ import com.springclaw.service.session.AgentSessionService;
 import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.SkillService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 /**
@@ -51,9 +53,11 @@ public class ChatContextFactory {
     private final AgentDecisionService agentDecisionService;
     private final ObjectProvider<ContextSnapshotFactory> contextSnapshotFactoryProvider;
     private final ObjectProvider<LegacyContextViewAdapter> legacyContextViewAdapterProvider;
-    private final ObjectProvider<RunStateRepository> runStateRepositoryProvider;
-    private final ObjectProvider<RunStateContextSnapshotRequestFactory> runStateContextSnapshotRequestFactoryProvider;
-    private final ObjectProvider<CanonicalContextReadyProjector> canonicalContextReadyProjectorProvider;
+    private final ObjectProvider<AcceptedRunContextResolver> acceptedRunContextResolverProvider;
+    private final ObjectProvider<RunStateContextSnapshotRequestFactory>
+            runStateContextSnapshotRequestFactoryProvider;
+    private final ObjectProvider<CanonicalContextSnapshotResolver>
+            canonicalContextSnapshotResolverProvider;
     private final boolean contextSnapshotFactoryEnabled;
     private final String configuredAgentMode;
     private final boolean routingAutoUpgradeEnabled;
@@ -71,9 +75,9 @@ public class ChatContextFactory {
                               AgentDecisionService agentDecisionService,
                               ObjectProvider<ContextSnapshotFactory> contextSnapshotFactoryProvider,
                               ObjectProvider<LegacyContextViewAdapter> legacyContextViewAdapterProvider,
-                              ObjectProvider<RunStateRepository> runStateRepositoryProvider,
+                              ObjectProvider<AcceptedRunContextResolver> acceptedRunContextResolverProvider,
                               ObjectProvider<RunStateContextSnapshotRequestFactory> runStateContextSnapshotRequestFactoryProvider,
-                              ObjectProvider<CanonicalContextReadyProjector> canonicalContextReadyProjectorProvider,
+                              ObjectProvider<CanonicalContextSnapshotResolver> canonicalContextSnapshotResolverProvider,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.context.snapshot.factory-enabled:true}") boolean contextSnapshotFactoryEnabled,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.agent-mode:simplified}") String configuredAgentMode,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.routing.auto-upgrade-enabled:true}") boolean routingAutoUpgradeEnabled) {
@@ -89,9 +93,10 @@ public class ChatContextFactory {
         this.agentDecisionService = agentDecisionService;
         this.contextSnapshotFactoryProvider = contextSnapshotFactoryProvider;
         this.legacyContextViewAdapterProvider = legacyContextViewAdapterProvider;
-        this.runStateRepositoryProvider = runStateRepositoryProvider;
-        this.runStateContextSnapshotRequestFactoryProvider = runStateContextSnapshotRequestFactoryProvider;
-        this.canonicalContextReadyProjectorProvider = canonicalContextReadyProjectorProvider;
+        this.acceptedRunContextResolverProvider = acceptedRunContextResolverProvider;
+        this.runStateContextSnapshotRequestFactoryProvider =
+                runStateContextSnapshotRequestFactoryProvider;
+        this.canonicalContextSnapshotResolverProvider = canonicalContextSnapshotResolverProvider;
         this.contextSnapshotFactoryEnabled = contextSnapshotFactoryEnabled;
         this.configuredAgentMode = configuredAgentMode;
         this.routingAutoUpgradeEnabled = routingAutoUpgradeEnabled;
@@ -137,22 +142,217 @@ public class ChatContextFactory {
         if (!StringUtils.hasText(acceptedRunId)) {
             throw new IllegalArgumentException("acceptedRunId must not be blank");
         }
+        return contextSnapshotFactoryEnabled
+                ? buildCanonical(request, persistSession, acceptedRunId)
+                : buildLegacy(request, persistSession, acceptedRunId);
+    }
+
+    private ChatContext buildCanonical(
+            ChatRequest request,
+            boolean persistSession,
+            String acceptedRunId
+    ) {
+        AcceptedRunContext accepted = requireBean(
+                acceptedRunContextResolverProvider,
+                "AcceptedRunContextResolver"
+        ).resolve(acceptedRunId, request);
+        AgentSession session = persistSession
+                ? agentSessionService.getOrCreate(
+                        accepted.sessionKey(),
+                        accepted.channel(),
+                        accepted.userId()
+                )
+                : buildEphemeralSession(
+                        accepted.sessionKey(),
+                        accepted.channel(),
+                        accepted.userId()
+                );
+        ContextSnapshotFactory snapshotFactory = requireBean(
+                contextSnapshotFactoryProvider,
+                "ContextSnapshotFactory"
+        );
+        RunStateContextSnapshotRequestFactory requestFactory = requireBean(
+                runStateContextSnapshotRequestFactoryProvider,
+                "RunStateContextSnapshotRequestFactory"
+        );
+        CanonicalContextSnapshotResolver snapshotResolver = requireBean(
+                canonicalContextSnapshotResolverProvider,
+                "CanonicalContextSnapshotResolver"
+        );
+        LegacyContextViewAdapter viewAdapter = requireBean(
+                legacyContextViewAdapterProvider,
+                "LegacyContextViewAdapter"
+        );
+        AiProviderService.ActiveChatClient activeClient = aiProviderService.activeClient();
+        AtomicReference<CanonicalPlanning> candidatePlanning = new AtomicReference<>();
+
+        ContextSnapshot snapshot = snapshotResolver.resolve(accepted, () -> {
+            CanonicalPlanning planning = createCanonicalPlanning(
+                    accepted,
+                    accepted.originalMessage(),
+                    true
+            );
+            candidatePlanning.set(planning);
+            return snapshotFactory.create(requestFactory.create(
+                    accepted.runState(),
+                    planning.routingDecision().effectiveQuestion(),
+                    planning.systemPrompt(),
+                    planning.decision().selectedCapabilities(),
+                    providerSnapshot(activeClient)
+            ));
+        });
+        requireMatchingProvider(snapshot, activeClient);
+        CanonicalPlanning planning = candidatePlanning.get();
+        if (planning == null) {
+            planning = createCanonicalPlanning(
+                    accepted,
+                    snapshot.effectiveMessage(),
+                    false
+            );
+        }
+        LegacyContextView view = viewAdapter.adapt(snapshot);
+        return new ChatContext(
+                session,
+                accepted.channel(),
+                accepted.userId(),
+                accepted.roleCode(),
+                accepted.originalMessage(),
+                snapshot.effectiveMessage(),
+                accepted.runId(),
+                snapshot.systemPrompt(),
+                view.assembled(),
+                activeClient,
+                planning.routingDecision().executionMode(),
+                planning.routingDecision().reason(),
+                planning.routingDecision().responseMode(),
+                planning.decision().intent(),
+                planning.decision(),
+                view.injection(),
+                snapshot
+        );
+    }
+
+    private ChatContext buildLegacy(
+            ChatRequest request,
+            boolean persistSession,
+            String acceptedRunId
+    ) {
         String channel = StringUtils.hasText(request.channel()) ? request.channel() : "api";
         AgentSession session = persistSession
                 ? agentSessionService.getOrCreate(request.sessionKey(), channel, request.userId())
                 : buildEphemeralSession(request.sessionKey(), channel, request.userId());
-        String requestId = acceptedRunId;
         String roleCode = authService.resolveRoleByUserId(request.userId());
-        var allowedToolPacks = skillService.resolveAllowedToolPacks(channel, request.userId());
-        String routingQuestion = resolveRoutingQuestion(session.getSessionKey(), channel, request.userId(), requestId, request.message(), request.responseMode());
-        AgentDecision decision = agentDecisionService.decide(new AgentDecisionRequest(
+        CanonicalPlanning planning = createLegacyPlanning(
                 session.getSessionKey(),
                 channel,
                 request.userId(),
                 roleCode,
+                acceptedRunId,
+                request.message(),
+                request.responseMode()
+        );
+        AssembledContext assembled = contextAssembler.assemble(
+                session.getSessionKey(),
+                channel,
+                request.userId(),
+                planning.routingDecision().effectiveQuestion()
+        );
+        ContextInjection injection = new ContextInjection(
+                assembled == null ? "" : assembled.observePrompt(),
+                "",
+                "",
+                Map.of(
+                        "contextSummary",
+                        assembled == null
+                                ? AssembledContext.ContextSourceSummary.empty()
+                                : assembled.sourceSummary()
+                )
+        );
+        return new ChatContext(
+                session,
+                channel,
+                request.userId(),
+                roleCode,
+                request.message(),
+                planning.routingDecision().effectiveQuestion(),
+                acceptedRunId,
+                planning.systemPrompt(),
+                assembled,
+                aiProviderService.activeClient(),
+                planning.routingDecision().executionMode(),
+                planning.routingDecision().reason(),
+                planning.routingDecision().responseMode(),
+                planning.decision().intent(),
+                planning.decision(),
+                injection,
+                null
+        );
+    }
+
+    private CanonicalPlanning createCanonicalPlanning(
+            AcceptedRunContext accepted,
+            String routingQuestion,
+            boolean buildPrompt
+    ) {
+        return createPlanning(
+                accepted.sessionKey(),
+                accepted.channel(),
+                accepted.userId(),
+                accepted.roleCode(),
+                accepted.runId(),
+                routingQuestion,
+                accepted.responseMode(),
+                buildPrompt
+        );
+    }
+
+    private CanonicalPlanning createLegacyPlanning(
+            String sessionKey,
+            String channel,
+            String userId,
+            String roleCode,
+            String requestId,
+            String message,
+            String responseMode
+    ) {
+        return createPlanning(
+                sessionKey,
+                channel,
+                userId,
+                roleCode,
+                requestId,
+                resolveRoutingQuestion(
+                        sessionKey,
+                        channel,
+                        userId,
+                        requestId,
+                        message,
+                        responseMode
+                ),
+                responseMode,
+                true
+        );
+    }
+
+    private CanonicalPlanning createPlanning(
+            String sessionKey,
+            String channel,
+            String userId,
+            String roleCode,
+            String requestId,
+            String routingQuestion,
+            String responseMode,
+            boolean buildPrompt
+    ) {
+        var allowedToolPacks = skillService.resolveAllowedToolPacks(channel, userId);
+        AgentDecision decision = agentDecisionService.decide(new AgentDecisionRequest(
+                sessionKey,
+                channel,
+                userId,
+                roleCode,
                 requestId,
                 routingQuestion,
-                request.responseMode(),
+                responseMode,
                 allowedToolPacks
         ));
         String effectiveDefaultMode = chatRoutingStateService.resolveDefaultMode(configuredAgentMode);
@@ -163,102 +363,27 @@ public class ChatContextFactory {
                 effectiveDefaultMode,
                 effectiveAutoUpgrade,
                 allowedToolPacks,
-                request.responseMode()
+                responseMode
         );
         if (routingDecision == null) {
             routingDecision = new ChatRoutingPolicyService.RoutingDecision(
-                    request.message(),
+                    routingQuestion,
                     effectiveDefaultMode,
                     false,
                     false,
                     "路由策略未返回结果，回退到当前默认链路。"
             );
         }
-        List<SkillDefinition> matchedSkills = skillRegistryService.matchAgentVisibleDefinitions(
-                routingDecision.effectiveQuestion(),
-                allowedToolPacks,
-                2
-        );
-        String systemPrompt = soulPromptService.buildSystemPrompt(channel, request.userId(), matchedSkills);
-        AiProviderService.ActiveChatClient activeClient = aiProviderService.activeClient();
-        AssembledContext assembled;
-        ContextInjection injection;
-        ContextSnapshot contextSnapshot = null;
-        if (contextSnapshotFactoryEnabled) {
-            ContextSnapshotFactory snapshotFactory =
-                    contextSnapshotFactoryProvider.getIfAvailable();
-            LegacyContextViewAdapter viewAdapter =
-                    legacyContextViewAdapterProvider.getIfAvailable();
-            RunStateRepository runStateRepository =
-                    runStateRepositoryProvider.getIfAvailable();
-            RunStateContextSnapshotRequestFactory requestFactory =
-                    runStateContextSnapshotRequestFactoryProvider.getIfAvailable();
-            CanonicalContextReadyProjector contextReadyProjector =
-                    canonicalContextReadyProjectorProvider.getIfAvailable();
-            if (snapshotFactory == null
-                    || viewAdapter == null
-                    || runStateRepository == null
-                    || requestFactory == null
-                    || contextReadyProjector == null) {
-                throw new IllegalStateException(
-                        "canonical ContextSnapshotFactory path is enabled but required beans are missing"
-                );
-            }
-            RunState runState = runStateRepository.requireByRunId(requestId);
-            ContextSnapshot snapshot = snapshotFactory.create(requestFactory.create(
-                    runState,
+        String systemPrompt = "";
+        if (buildPrompt) {
+            List<SkillDefinition> matchedSkills = skillRegistryService.matchAgentVisibleDefinitions(
                     routingDecision.effectiveQuestion(),
-                    systemPrompt,
-                    decision.selectedCapabilities(),
-                    providerSnapshot(activeClient)
-            ));
-            contextSnapshot = snapshot;
-            contextReadyProjector.project(
-                    requestId,
-                    snapshot,
-                    snapshot.capturedAt()
+                    allowedToolPacks,
+                    2
             );
-            LegacyContextView view = viewAdapter.adapt(snapshot);
-            assembled = view.assembled();
-            injection = view.injection();
-        } else {
-            assembled = contextAssembler.assemble(
-                    session.getSessionKey(),
-                    channel,
-                    request.userId(),
-                    routingDecision.effectiveQuestion()
-            );
-            injection = new ContextInjection(
-                    assembled == null ? "" : assembled.observePrompt(),
-                    "",
-                    "",
-                    Map.of(
-                            "contextSummary",
-                            assembled == null
-                                    ? AssembledContext.ContextSourceSummary.empty()
-                                    : assembled.sourceSummary()
-                    )
-            );
+            systemPrompt = soulPromptService.buildSystemPrompt(channel, userId, matchedSkills);
         }
-        return new ChatContext(
-                session,
-                channel,
-                request.userId(),
-                roleCode,
-                request.message(),
-                routingDecision.effectiveQuestion(),
-                requestId,
-                systemPrompt,
-                assembled,
-                activeClient,
-                routingDecision.executionMode(),
-                routingDecision.reason(),
-                routingDecision.responseMode(),
-                decision.intent(),
-                decision,
-                injection,
-                contextSnapshot
-        );
+        return new CanonicalPlanning(decision, routingDecision, systemPrompt);
     }
 
     private AgentSession buildEphemeralSession(String sessionKey, String channel, String userId) {
@@ -280,6 +405,39 @@ public class ChatContextFactory {
         return message == null ? "" : message.trim();
     }
 
+    private static void requireMatchingProvider(
+            ContextSnapshot snapshot,
+            AiProviderService.ActiveChatClient activeClient
+    ) {
+        Map<String, String> frozen = snapshot.providerSnapshot();
+        requireProviderField(
+                "providerId",
+                frozen.get("providerId"),
+                activeClient == null ? null : activeClient.providerId()
+        );
+        requireProviderField(
+                "model",
+                frozen.get("model"),
+                activeClient == null ? null : activeClient.model()
+        );
+    }
+
+    private static void requireProviderField(
+            String field,
+            String frozenValue,
+            String activeValue
+    ) {
+        if (StringUtils.hasText(frozenValue)
+                && !frozenValue.trim().equals(
+                activeValue == null ? "" : activeValue.trim()
+        )) {
+            throw new CanonicalRunContextException(
+                    CanonicalRunContextException.Code.CANONICAL_PROVIDER_MISMATCH,
+                    "canonical provider mismatch: " + field
+            );
+        }
+    }
+
     private static Map<String, String> providerSnapshot(
             AiProviderService.ActiveChatClient activeClient
     ) {
@@ -296,6 +454,17 @@ public class ChatContextFactory {
 
     private static String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private static <T> T requireBean(ObjectProvider<T> provider, String beanName) {
+        T bean = provider.getIfAvailable();
+        if (bean == null) {
+            throw new IllegalStateException(
+                    "canonical ContextSnapshotFactory path is enabled but required bean is missing: "
+                            + beanName
+            );
+        }
+        return bean;
     }
 
     private static <T> ObjectProvider<T> emptyProvider() {
@@ -330,5 +499,12 @@ public class ChatContextFactory {
                 return Stream.empty();
             }
         };
+    }
+
+    private record CanonicalPlanning(
+            AgentDecision decision,
+            ChatRoutingPolicyService.RoutingDecision routingDecision,
+            String systemPrompt
+    ) {
     }
 }

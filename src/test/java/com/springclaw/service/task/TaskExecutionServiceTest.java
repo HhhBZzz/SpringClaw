@@ -362,6 +362,12 @@ class TaskExecutionServiceTest {
                 .isEqualTo(SessionAccessClaim.AcceptanceOrigin.SCHEDULED_TASK);
         assertThat(chatRequest.getValue().message())
                 .isEqualTo(acceptance.getValue().originalMessage());
+        assertThat(chatRequest.getValue().sessionKey())
+                .isEqualTo(acceptance.getValue().sessionKey());
+        assertThat(chatRequest.getValue().channel())
+                .isEqualTo(acceptance.getValue().channel());
+        assertThat(chatRequest.getValue().userId())
+                .isEqualTo(acceptance.getValue().userId());
         assertThat(chatRequest.getValue().responseMode()).isEqualTo("agent");
         assertThat(outcome.resultPayload()).contains("今日进展");
         assertThat(outcome.requestId()).isEqualTo(startedRunId.getValue());

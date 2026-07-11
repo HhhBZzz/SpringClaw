@@ -199,23 +199,38 @@ class CanonicalRetrievalBoundaryTest {
             when(requestFactory.create(any(), any(), any(), any(), any()))
                     .thenReturn(snapshotRequest());
             when(contextSnapshotFactory.create(any())).thenReturn(snapshot);
+            when(projector.project(eq(RUN_ID), eq(snapshot), any()))
+                    .thenReturn(contextReadyRun(snapshot));
             when(legacyContextViewAdapter.adapt(snapshot)).thenReturn(view);
 
             ObjectProvider<ContextSnapshotFactory> snapshotProvider =
                     (ObjectProvider<ContextSnapshotFactory>) mock(ObjectProvider.class);
             ObjectProvider<LegacyContextViewAdapter> adapterProvider =
                     (ObjectProvider<LegacyContextViewAdapter>) mock(ObjectProvider.class);
-            ObjectProvider<RunStateRepository> runStateProvider =
-                    (ObjectProvider<RunStateRepository>) mock(ObjectProvider.class);
+            ObjectProvider<com.springclaw.runtime.bridge.AcceptedRunContextResolver>
+                    acceptedRunContextResolverProvider =
+                    (ObjectProvider<com.springclaw.runtime.bridge.AcceptedRunContextResolver>)
+                            mock(ObjectProvider.class);
             ObjectProvider<RunStateContextSnapshotRequestFactory> requestFactoryProvider =
                     (ObjectProvider<RunStateContextSnapshotRequestFactory>) mock(ObjectProvider.class);
-            ObjectProvider<CanonicalContextReadyProjector> projectorProvider =
-                    (ObjectProvider<CanonicalContextReadyProjector>) mock(ObjectProvider.class);
+            ObjectProvider<com.springclaw.runtime.bridge.CanonicalContextSnapshotResolver>
+                    canonicalContextSnapshotResolverProvider =
+                    (ObjectProvider<com.springclaw.runtime.bridge.CanonicalContextSnapshotResolver>)
+                            mock(ObjectProvider.class);
             when(snapshotProvider.getIfAvailable()).thenReturn(contextSnapshotFactory);
             when(adapterProvider.getIfAvailable()).thenReturn(legacyContextViewAdapter);
-            when(runStateProvider.getIfAvailable()).thenReturn(runStateRepository);
+            when(acceptedRunContextResolverProvider.getIfAvailable()).thenReturn(
+                    new com.springclaw.runtime.bridge.AcceptedRunContextResolver(
+                            runStateRepository
+                    )
+            );
             when(requestFactoryProvider.getIfAvailable()).thenReturn(requestFactory);
-            when(projectorProvider.getIfAvailable()).thenReturn(projector);
+            when(canonicalContextSnapshotResolverProvider.getIfAvailable()).thenReturn(
+                    new com.springclaw.runtime.bridge.CanonicalContextSnapshotResolver(
+                            projector,
+                            runStateRepository
+                    )
+            );
 
             this.factory = new ChatContextFactory(
                     aiProviderService,
@@ -230,9 +245,9 @@ class CanonicalRetrievalBoundaryTest {
                     agentDecisionService,
                     snapshotProvider,
                     adapterProvider,
-                    runStateProvider,
+                    acceptedRunContextResolverProvider,
                     requestFactoryProvider,
-                    projectorProvider,
+                    canonicalContextSnapshotResolverProvider,
                     canonicalMode,
                     "simplified",
                     true
@@ -259,6 +274,37 @@ class CanonicalRetrievalBoundaryTest {
                 null,
                 T0.plusSeconds(300),
                 null,
+                null,
+                "",
+                1,
+                "",
+                List.of(),
+                null,
+                null,
+                Map.of(),
+                null
+        );
+    }
+
+    private static RunState contextReadyRun(ContextSnapshot snapshot) {
+        return new RunState(
+                RUN_ID,
+                RUN_ID,
+                1,
+                RunStatus.CONTEXT_READY,
+                "session-1",
+                "api",
+                "user-1",
+                claim(),
+                "USER",
+                "hello",
+                "agent",
+                T0,
+                null,
+                T0.plusSeconds(1),
+                null,
+                T0.plusSeconds(300),
+                snapshot,
                 null,
                 "",
                 1,

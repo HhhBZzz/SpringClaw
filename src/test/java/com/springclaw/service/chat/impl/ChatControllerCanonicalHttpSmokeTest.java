@@ -297,22 +297,32 @@ class ChatControllerCanonicalHttpSmokeTest {
                     (ObjectProvider<ContextSnapshotFactory>) mock(ObjectProvider.class);
             ObjectProvider<LegacyContextViewAdapter> adapterProvider =
                     (ObjectProvider<LegacyContextViewAdapter>) mock(ObjectProvider.class);
-            ObjectProvider<com.springclaw.runtime.lifecycle.RunStateRepository> runStateProvider =
-                    (ObjectProvider<com.springclaw.runtime.lifecycle.RunStateRepository>) mock(ObjectProvider.class);
+            ObjectProvider<com.springclaw.runtime.bridge.AcceptedRunContextResolver>
+                    acceptedRunContextResolverProvider =
+                    (ObjectProvider<com.springclaw.runtime.bridge.AcceptedRunContextResolver>)
+                            mock(ObjectProvider.class);
             ObjectProvider<RunStateContextSnapshotRequestFactory> requestFactoryProvider =
                     (ObjectProvider<RunStateContextSnapshotRequestFactory>) mock(ObjectProvider.class);
-            ObjectProvider<CanonicalContextReadyProjector> projectorProvider =
-                    (ObjectProvider<CanonicalContextReadyProjector>) mock(ObjectProvider.class);
+            ObjectProvider<com.springclaw.runtime.bridge.CanonicalContextSnapshotResolver>
+                    canonicalContextSnapshotResolverProvider =
+                    (ObjectProvider<com.springclaw.runtime.bridge.CanonicalContextSnapshotResolver>)
+                            mock(ObjectProvider.class);
             when(snapshotProvider.getIfAvailable()).thenReturn(new ContextSnapshotFactory(
                     memoryCoordinator,
                     Clock.systemUTC()
             ));
             when(adapterProvider.getIfAvailable()).thenReturn(new LegacyContextViewAdapter());
-            when(runStateProvider.getIfAvailable()).thenReturn(store);
+            when(acceptedRunContextResolverProvider.getIfAvailable()).thenReturn(
+                    new com.springclaw.runtime.bridge.AcceptedRunContextResolver(store)
+            );
             when(requestFactoryProvider.getIfAvailable())
                     .thenReturn(new RunStateContextSnapshotRequestFactory());
-            when(projectorProvider.getIfAvailable())
-                    .thenReturn(new CanonicalContextReadyProjector(coordinator, store));
+            when(canonicalContextSnapshotResolverProvider.getIfAvailable()).thenReturn(
+                    new com.springclaw.runtime.bridge.CanonicalContextSnapshotResolver(
+                            new CanonicalContextReadyProjector(coordinator, store),
+                            store
+                    )
+            );
 
             return new ChatContextFactory(
                     aiProviderService,
@@ -327,9 +337,9 @@ class ChatControllerCanonicalHttpSmokeTest {
                     decisionService,
                     snapshotProvider,
                     adapterProvider,
-                    runStateProvider,
+                    acceptedRunContextResolverProvider,
                     requestFactoryProvider,
-                    projectorProvider,
+                    canonicalContextSnapshotResolverProvider,
                     true,
                     "simplified",
                     true

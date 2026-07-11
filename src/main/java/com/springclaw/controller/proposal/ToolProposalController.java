@@ -5,6 +5,7 @@ import com.springclaw.common.response.ApiResponse;
 import com.springclaw.service.proposal.ToolInvocationProposal;
 import com.springclaw.service.proposal.ToolInvocationProposalRepository;
 import com.springclaw.service.proposal.ToolInvocationProposalService;
+import com.springclaw.service.proposal.ToolGateway;
 import com.springclaw.web.auth.RequestUserContext;
 import com.springclaw.web.auth.RequestUserContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,11 +31,14 @@ import java.util.Objects;
 public class ToolProposalController {
 
     private final ToolInvocationProposalService proposalService;
+    private final ToolGateway toolGateway;
     private final ToolInvocationProposalRepository repository;
 
     public ToolProposalController(ToolInvocationProposalService proposalService,
+                                  ToolGateway toolGateway,
                                   ToolInvocationProposalRepository repository) {
         this.proposalService = proposalService;
+        this.toolGateway = toolGateway;
         this.repository = repository;
     }
 
@@ -46,7 +50,7 @@ public class ToolProposalController {
                 .orElseThrow(() -> new BusinessException(40404, "proposal 不存在"));
         requireAccessible(existing, context);
         String reason = body == null ? null : body.get("reason");
-        return ApiResponse.success(proposalService.confirm(proposalId, reason));
+        return ApiResponse.success(toolGateway.confirm(proposalId, reason));
     }
 
     @PostMapping("/{proposalId}/reject")

@@ -3,6 +3,7 @@ package com.springclaw.service.chat.impl;
 import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.runtime.bridge.CanonicalContextReadyProjector;
+import com.springclaw.runtime.bridge.CanonicalRunContextException;
 import com.springclaw.runtime.bridge.LegacyContextView;
 import com.springclaw.runtime.bridge.LegacyContextViewAdapter;
 import com.springclaw.runtime.bridge.RunStateContextSnapshotRequestFactory;
@@ -37,11 +38,13 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 class ChatContextFactoryCanonicalSnapshotTest {
@@ -81,6 +84,71 @@ class ChatContextFactoryCanonicalSnapshotTest {
         assertThat(context.contextInjection().observePrompt()).isEqualTo("canonical observe");
     }
 
+    @Test
+    void canonicalModeReusesStoredSnapshotWithoutRebuildingPromptOrSnapshot() {
+        ContextSnapshot stored = snapshot();
+        Fixture fixture = new Fixture(true, stored, contextReadyRun(stored));
+
+        ChatContext context = fixture.factory.build(
+                new ChatRequest("s1", "u1", "hello", "api", "agent"),
+                true,
+                "0123456789abcdef0123456789abcdef"
+        );
+
+        assertThat(context.contextSnapshot()).isSameAs(stored);
+        assertThat(context.effectiveUserMessage()).isEqualTo("hello");
+        assertThat(context.systemPrompt()).isEqualTo("system");
+        verifyNoInteractions(fixture.contextSnapshotFactory, fixture.requestFactory);
+        verify(fixture.soulPromptService, never()).buildSystemPrompt(any(), any(), any());
+        verify(fixture.authService, never()).resolveRoleByUserId(any());
+    }
+
+    @Test
+    void canonicalModeRejectsProviderDriftWhenReusingStoredSnapshot() {
+        ContextSnapshot stored = snapshot("other-provider", "model");
+        Fixture fixture = new Fixture(true, stored, contextReadyRun(stored));
+
+        assertThatThrownBy(() -> fixture.factory.build(
+                new ChatRequest("s1", "u1", "hello", "api", "agent"),
+                true,
+                "0123456789abcdef0123456789abcdef"
+        ))
+                .isInstanceOf(CanonicalRunContextException.class)
+                .extracting(error -> ((CanonicalRunContextException) error).code())
+                .isEqualTo(CanonicalRunContextException.Code.CANONICAL_PROVIDER_MISMATCH);
+        verifyNoInteractions(fixture.contextSnapshotFactory, fixture.requestFactory);
+    }
+
+    @Test
+    void canonicalModeRejectsModelDriftWhenReusingStoredSnapshot() {
+        ContextSnapshot stored = snapshot("provider", "other-model");
+        Fixture fixture = new Fixture(true, stored, contextReadyRun(stored));
+
+        assertThatThrownBy(() -> fixture.factory.build(
+                new ChatRequest("s1", "u1", "hello", "api", "agent"),
+                true,
+                "0123456789abcdef0123456789abcdef"
+        ))
+                .isInstanceOf(CanonicalRunContextException.class)
+                .extracting(error -> ((CanonicalRunContextException) error).code())
+                .isEqualTo(CanonicalRunContextException.Code.CANONICAL_PROVIDER_MISMATCH);
+    }
+
+    @Test
+    void canonicalModeAllowsReuseWhenFrozenProviderFieldsAreBlank() {
+        ContextSnapshot stored = snapshot("", "");
+        Fixture fixture = new Fixture(true, stored, contextReadyRun(stored));
+
+        ChatContext context = fixture.factory.build(
+                new ChatRequest("s1", "u1", "hello", "api", "agent"),
+                true,
+                "0123456789abcdef0123456789abcdef"
+        );
+
+        assertThat(context.contextSnapshot()).isSameAs(stored);
+        verifyNoInteractions(fixture.contextSnapshotFactory, fixture.requestFactory);
+    }
+
     private static final class Fixture {
         private final AiProviderService aiProviderService = mock(AiProviderService.class);
         private final SoulPromptService soulPromptService = mock(SoulPromptService.class);
@@ -100,13 +168,28 @@ class ChatContextFactoryCanonicalSnapshotTest {
                 mock(RunStateRepository.class);
         private final RunStateContextSnapshotRequestFactory requestFactory =
                 mock(RunStateContextSnapshotRequestFactory.class);
-        private final ContextSnapshot snapshot = snapshot();
-        private final RunState runState = runState();
+        private final CanonicalContextReadyProjector projector =
+                mock(CanonicalContextReadyProjector.class);
+        private final ContextSnapshot snapshot;
+        private final RunState runState;
         private final ContextSnapshotRequest snapshotRequest = snapshotRequest();
         private final ChatContextFactory factory;
 
         @SuppressWarnings("unchecked")
         private Fixture(boolean canonicalMode) {
+            this(canonicalMode, snapshot(), null);
+        }
+
+        @SuppressWarnings("unchecked")
+        private Fixture(
+                boolean canonicalMode,
+                ContextSnapshot snapshot,
+                RunState runState
+        ) {
+            this.snapshot = snapshot;
+            this.runState = runState == null
+                    ? ChatContextFactoryCanonicalSnapshotTest.runState()
+                    : runState;
             AgentSession session = new AgentSession();
             session.setId(1L);
             session.setSessionKey("s1");
@@ -182,31 +265,48 @@ class ChatContextFactoryCanonicalSnapshotTest {
                     .thenReturn(snapshot);
             when(legacyContextViewAdapter.adapt(snapshot)).thenReturn(canonicalView);
             when(runStateRepository.requireByRunId("0123456789abcdef0123456789abcdef"))
-                    .thenReturn(runState);
+                    .thenReturn(this.runState);
             when(requestFactory.create(
-                    eq(runState),
+                    eq(this.runState),
                     eq("hello"),
                     eq("system"),
                     eq(List.of("web")),
                     any()
             )).thenReturn(snapshotRequest);
+            when(projector.project(
+                    eq("0123456789abcdef0123456789abcdef"),
+                    eq(snapshot),
+                    any()
+            )).thenReturn(contextReadyRun(snapshot));
 
             ObjectProvider<ContextSnapshotFactory> snapshotProvider =
                     (ObjectProvider<ContextSnapshotFactory>) mock(ObjectProvider.class);
             ObjectProvider<LegacyContextViewAdapter> adapterProvider =
                     (ObjectProvider<LegacyContextViewAdapter>) mock(ObjectProvider.class);
-            ObjectProvider<RunStateRepository> runStateRepositoryProvider =
-                    (ObjectProvider<RunStateRepository>) mock(ObjectProvider.class);
+            ObjectProvider<com.springclaw.runtime.bridge.AcceptedRunContextResolver>
+                    acceptedRunContextResolverProvider =
+                    (ObjectProvider<com.springclaw.runtime.bridge.AcceptedRunContextResolver>)
+                            mock(ObjectProvider.class);
             ObjectProvider<RunStateContextSnapshotRequestFactory> requestFactoryProvider =
                     (ObjectProvider<RunStateContextSnapshotRequestFactory>) mock(ObjectProvider.class);
-            ObjectProvider<CanonicalContextReadyProjector> projectorProvider =
-                    (ObjectProvider<CanonicalContextReadyProjector>) mock(ObjectProvider.class);
+            ObjectProvider<com.springclaw.runtime.bridge.CanonicalContextSnapshotResolver>
+                    canonicalContextSnapshotResolverProvider =
+                    (ObjectProvider<com.springclaw.runtime.bridge.CanonicalContextSnapshotResolver>)
+                            mock(ObjectProvider.class);
             when(snapshotProvider.getIfAvailable()).thenReturn(contextSnapshotFactory);
             when(adapterProvider.getIfAvailable()).thenReturn(legacyContextViewAdapter);
-            when(runStateRepositoryProvider.getIfAvailable()).thenReturn(runStateRepository);
+            when(acceptedRunContextResolverProvider.getIfAvailable()).thenReturn(
+                    new com.springclaw.runtime.bridge.AcceptedRunContextResolver(
+                            runStateRepository
+                    )
+            );
             when(requestFactoryProvider.getIfAvailable()).thenReturn(requestFactory);
-            when(projectorProvider.getIfAvailable())
-                    .thenReturn(mock(CanonicalContextReadyProjector.class));
+            when(canonicalContextSnapshotResolverProvider.getIfAvailable()).thenReturn(
+                    new com.springclaw.runtime.bridge.CanonicalContextSnapshotResolver(
+                            projector,
+                            runStateRepository
+                    )
+            );
 
             this.factory = new ChatContextFactory(
                     aiProviderService,
@@ -221,9 +321,9 @@ class ChatContextFactoryCanonicalSnapshotTest {
                     agentDecisionService,
                     snapshotProvider,
                     adapterProvider,
-                    runStateRepositoryProvider,
+                    acceptedRunContextResolverProvider,
                     requestFactoryProvider,
-                    projectorProvider,
+                    canonicalContextSnapshotResolverProvider,
                     canonicalMode,
                     "simplified",
                     true
@@ -232,6 +332,13 @@ class ChatContextFactoryCanonicalSnapshotTest {
     }
 
     private static ContextSnapshot snapshot() {
+        return snapshot("provider", null);
+    }
+
+    private static ContextSnapshot snapshot(String providerId, String model) {
+        Map<String, String> providerSnapshot = model == null
+                ? Map.of("providerId", providerId)
+                : Map.of("providerId", providerId, "model", model);
         return new ContextSnapshot(
                 "0123456789abcdef0123456789abcdef",
                 "s1",
@@ -247,7 +354,7 @@ class ChatContextFactoryCanonicalSnapshotTest {
                 List.of("semantic"),
                 List.of("rule"),
                 List.of("web"),
-                Map.of("providerId", "provider"),
+                providerSnapshot,
                 Map.of("schema", "test"),
                 frame(),
                 Instant.parse("2026-06-24T00:00:00Z"),
@@ -302,6 +409,43 @@ class ChatContextFactoryCanonicalSnapshotTest {
                 null,
                 now.plusSeconds(300),
                 null,
+                null,
+                "",
+                1,
+                "",
+                List.of(),
+                null,
+                null,
+                Map.of(),
+                null
+        );
+    }
+
+    private static RunState contextReadyRun(ContextSnapshot snapshot) {
+        Instant now = Instant.parse("2026-06-24T00:00:00Z");
+        return new RunState(
+                "0123456789abcdef0123456789abcdef",
+                "0123456789abcdef0123456789abcdef",
+                1,
+                RunStatus.CONTEXT_READY,
+                "s1",
+                "api",
+                "u1",
+                SessionAccessClaim.personal(
+                        SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API,
+                        "api",
+                        "s1",
+                        "u1"
+                ),
+                "USER",
+                "hello",
+                "agent",
+                now,
+                null,
+                now.plusSeconds(1),
+                null,
+                now.plusSeconds(300),
+                snapshot,
                 null,
                 "",
                 1,

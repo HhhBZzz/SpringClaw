@@ -85,6 +85,24 @@ class RedisShortTermMemoryStoreTest {
     }
 
     @Test
+    void appendRemainsIdempotentWhenReplayTimestampChanges() {
+        store.append(scope, entry(10, "event-10"));
+        store.append(scope, new ShortTermMemoryEntry(
+                10L,
+                "event-10",
+                "req-1",
+                "USER",
+                "alice",
+                "content-replayed",
+                Instant.parse("2026-06-24T00:00:00Z")
+        ));
+
+        assertThat(store.readRecent(scope, 10))
+                .extracting(ShortTermMemoryEntry::eventKey)
+                .containsExactly("event-10");
+    }
+
+    @Test
     void readRecentReturnsAtMostLimitNewest() {
         store.append(scope, entry(1, "event-1"));
         store.append(scope, entry(2, "event-2"));

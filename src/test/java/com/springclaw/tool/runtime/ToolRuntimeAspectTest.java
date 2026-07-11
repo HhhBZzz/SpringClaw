@@ -3,6 +3,7 @@ package com.springclaw.tool.runtime;
 import com.springclaw.service.auth.ToolPermissionService;
 import com.springclaw.service.proposal.ToolInvocationProposalService;
 import com.springclaw.service.proposal.ToolInvocationSnapshotService;
+import com.springclaw.service.proposal.ToolGateway;
 import com.springclaw.service.workspace.WorkspaceGitGuard;
 import com.springclaw.service.workspace.WorkspaceGuard;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -27,7 +28,8 @@ class ToolRuntimeAspectTest {
                 mock(CapabilityRegistry.class),
                 mock(ToolInvocationSnapshotService.class),
                 mock(ToolInvocationProposalService.class),
-                mock(WorkspaceGitGuard.class)
+                mock(WorkspaceGitGuard.class),
+                mock(ToolGateway.class)
         );
     }
 

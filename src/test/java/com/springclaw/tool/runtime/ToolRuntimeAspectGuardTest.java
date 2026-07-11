@@ -8,6 +8,7 @@ import com.springclaw.service.proposal.ToolInvocationProposalService;
 import com.springclaw.service.proposal.ToolInvocationProposalStatus;
 import com.springclaw.service.proposal.ToolInvocationSnapshot;
 import com.springclaw.service.proposal.ToolInvocationSnapshotService;
+import com.springclaw.service.proposal.ToolGateway;
 import com.springclaw.service.workspace.WorkspaceGitGuard;
 import com.springclaw.tool.pack.FileToolPack;
 import com.springclaw.tool.pack.WorkspaceEditToolPack;
@@ -43,6 +44,7 @@ class ToolRuntimeAspectGuardTest {
     private CapabilityRegistry capabilityRegistry;
     private ToolInvocationSnapshotService snapshotService;
     private ToolInvocationProposalService proposalService;
+    private ToolGateway toolGateway;
     private WorkspaceGitGuard workspaceGitGuard;
     private ToolRuntimeAspect aspect;
 
@@ -54,10 +56,11 @@ class ToolRuntimeAspectGuardTest {
         capabilityRegistry = Mockito.mock(CapabilityRegistry.class);
         snapshotService = Mockito.mock(ToolInvocationSnapshotService.class);
         proposalService = Mockito.mock(ToolInvocationProposalService.class);
+        toolGateway = Mockito.mock(ToolGateway.class);
         workspaceGitGuard = Mockito.mock(WorkspaceGitGuard.class);
         aspect = new ToolRuntimeAspect(
                 toolGuardService, toolAuditService, toolPermissionService,
-                capabilityRegistry, snapshotService, proposalService, workspaceGitGuard
+                capabilityRegistry, snapshotService, proposalService, workspaceGitGuard, toolGateway
         );
         ToolExecutionContextHolder.clearApprovedProposal();
     }
@@ -184,7 +187,7 @@ class ToolRuntimeAspectGuardTest {
         ToolInvocationProposal pending = proposal(ToolInvocationProposalStatus.PENDING,
                 "WorkspaceEditToolPack.workspaceWriteFile",
                 "req-x", "run-x", "user-x", "abcd1234");
-        Mockito.when(proposalService.createPending(Mockito.eq(snap), ArgumentMatchers.any()))
+        Mockito.when(toolGateway.requestApproval(Mockito.eq(snap), ArgumentMatchers.any()))
                 .thenReturn(pending);
 
         ProceedingJoinPoint pjp = pjpForWriteTool(new Object[]{"docs/a.md", "content"});
@@ -202,6 +205,7 @@ class ToolRuntimeAspectGuardTest {
                 ArgumentMatchers.any(),
                 Mockito.eq("execution")
         );
+        Mockito.verify(toolGateway).requestApproval(Mockito.eq(snap), ArgumentMatchers.any());
     }
 
     @Test
@@ -221,7 +225,7 @@ class ToolRuntimeAspectGuardTest {
         ToolInvocationProposal pending = proposal(ToolInvocationProposalStatus.PENDING,
                 "WorkspaceEditToolPack.workspaceWriteFile",
                 "req-x", "run-x", "user-x", "abcd1234");
-        Mockito.when(proposalService.createPending(Mockito.eq(snap), ArgumentMatchers.any()))
+        Mockito.when(toolGateway.requestApproval(Mockito.eq(snap), ArgumentMatchers.any()))
                 .thenReturn(pending);
 
         ProceedingJoinPoint pjp = pjpForWriteTool(new Object[]{"docs/a.md", "content"});
@@ -239,6 +243,7 @@ class ToolRuntimeAspectGuardTest {
                 ArgumentMatchers.any(),
                 Mockito.eq("write")
         );
+        Mockito.verify(toolGateway).requestApproval(Mockito.eq(snap), ArgumentMatchers.any());
         // 审计：写到 PENDING_APPROVAL（不是 FAILED）
         Mockito.verify(toolAuditService).recordInvoke(
                 Mockito.eq("WorkspaceEditToolPack.workspaceWriteFile"),

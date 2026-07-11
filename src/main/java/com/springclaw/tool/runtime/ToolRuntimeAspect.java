@@ -11,6 +11,7 @@ import com.springclaw.service.proposal.ToolInvocationProposalService;
 import com.springclaw.service.proposal.ToolInvocationProposalStatus;
 import com.springclaw.service.proposal.ToolInvocationSnapshot;
 import com.springclaw.service.proposal.ToolInvocationSnapshotService;
+import com.springclaw.service.proposal.ToolGateway;
 import com.springclaw.service.workspace.WorkspaceGitGuard;
 import com.springclaw.service.workspace.WorkspaceGuard;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -46,6 +47,7 @@ public class ToolRuntimeAspect {
     private final ToolInvocationSnapshotService snapshotService;
     private final ToolInvocationProposalService proposalService;
     private final WorkspaceGitGuard workspaceGitGuard;
+    private final ToolGateway toolGateway;
 
     public ToolRuntimeAspect(ToolGuardService toolGuardService,
                              ToolAuditService toolAuditService,
@@ -53,7 +55,8 @@ public class ToolRuntimeAspect {
                              CapabilityRegistry capabilityRegistry,
                              ToolInvocationSnapshotService snapshotService,
                              ToolInvocationProposalService proposalService,
-                             WorkspaceGitGuard workspaceGitGuard) {
+                             WorkspaceGitGuard workspaceGitGuard,
+                             ToolGateway toolGateway) {
         this.toolGuardService = toolGuardService;
         this.toolAuditService = toolAuditService;
         this.toolPermissionService = toolPermissionService;
@@ -61,6 +64,7 @@ public class ToolRuntimeAspect {
         this.snapshotService = snapshotService;
         this.proposalService = proposalService;
         this.workspaceGitGuard = workspaceGitGuard;
+        this.toolGateway = toolGateway;
     }
 
     @Around("@annotation(org.springframework.ai.tool.annotation.Tool)")
@@ -108,7 +112,7 @@ public class ToolRuntimeAspect {
                     }
                     ToolInvocationSnapshot snapshot = snapshotService.capture(
                             genericToolName, toolsetId, args, riskLevel);
-                    ToolInvocationProposal proposal = proposalService.createPending(snapshot, context);
+                    ToolInvocationProposal proposal = toolGateway.requestApproval(snapshot, context);
                     throw new PendingToolApprovalException(proposal.proposalId());
                 }
                 // 已授权：DB 二次校验 + GitGuard 包住执行

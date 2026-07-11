@@ -88,15 +88,16 @@ public class ChatResultPersister {
                 soulPromptService.soulVersion()
         );
         String assistantForMemory = normalizeAssistantForMemory(assistantMessage);
+        String assistantEventContent = "[REFLECT] " + TextUtils.truncate(assistantForMemory, 1600);
         MessageEventReceipt userReceipt = messageEventService.append(new MessageEventWrite(
                 "chat:" + requestId + ":user", sessionKey, channel, userId,
                 "USER", "CHAT", context.effectiveUserMessage(), requestId));
         MessageEventReceipt assistantReceipt = messageEventService.append(new MessageEventWrite(
                 "chat:" + requestId + ":assistant:terminal", sessionKey, channel, userId,
                 "ASSISTANT", "CHAT",
-                "[REFLECT] " + TextUtils.truncate(assistantForMemory, 1600),
+                assistantEventContent,
                 requestId));
-        shadowTerminal(context, userReceipt, context.effectiveUserMessage(), assistantReceipt, assistantForMemory);
+        shadowTerminal(context, userReceipt, context.effectiveUserMessage(), assistantReceipt, assistantEventContent);
         messageEventService.recordSingle(
                 sessionKey, channel, userId, "SYSTEM", "OPAR",
                 "ROUTING=mode=%s, role=%s, reason=%s".formatted(

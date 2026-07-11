@@ -3,6 +3,7 @@ package com.springclaw.service.chat.impl;
 import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.runtime.bridge.CanonicalContextReadyProjector;
+import com.springclaw.runtime.bridge.CanonicalRunContextException;
 import com.springclaw.runtime.bridge.LegacyContextView;
 import com.springclaw.runtime.bridge.LegacyContextViewAdapter;
 import com.springclaw.runtime.bridge.RunStateContextSnapshotRequestFactory;
@@ -42,6 +43,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -52,29 +54,56 @@ class ChatContextFactoryCanonicalOwnershipTest {
     private static final Instant NOW = Instant.parse("2026-06-24T00:00:00Z");
 
     @Test
-    void canonicalDefaultUsesAcceptedRunStateClaimAndSkipsContextAssembler() {
+    void canonicalDefaultRejectsForgedRequestBeforeAnyDownstreamWork() {
         Fixture fixture = new Fixture(true);
         when(fixture.runStateRepository.requireByRunId(RUN_ID))
                 .thenReturn(sharedRunState());
 
-        ChatContext context = fixture.factory.build(
+        assertThatThrownBy(() -> fixture.factory.build(
                 new ChatRequest("forged-session", "mallory", "hello", "api", "agent"),
+                true,
+                RUN_ID
+        ))
+                .isInstanceOf(CanonicalRunContextException.class)
+                .extracting(error -> ((CanonicalRunContextException) error).code())
+                .isEqualTo(CanonicalRunContextException.Code.ACCEPTED_REQUEST_MISMATCH);
+
+        verify(fixture.runStateRepository).requireByRunId(RUN_ID);
+        verify(fixture.agentSessionService, never()).getOrCreate(any(), any(), any());
+        verifyNoInteractions(
+                fixture.authService,
+                fixture.skillService,
+                fixture.chatRoutingPolicyService,
+                fixture.soulPromptService,
+                fixture.aiProviderService,
+                fixture.contextSnapshotFactory,
+                fixture.contextAssembler
+        );
+    }
+
+    @Test
+    void canonicalDefaultBuildsContextFromAcceptedSharedIdentityAndFrozenRole() {
+        Fixture fixture = new Fixture(true);
+        RunState accepted = sharedRunState();
+        when(fixture.runStateRepository.requireByRunId(RUN_ID)).thenReturn(accepted);
+        when(fixture.projector.project(eq(RUN_ID), eq(fixture.snapshot), any()))
+                .thenReturn(sharedContextReady(fixture.snapshot));
+
+        ChatContext context = fixture.factory.build(
+                new ChatRequest("group-1", "ou-1", "hello", "feishu", "agent"),
                 true,
                 RUN_ID
         );
 
-        ArgumentCaptor<ContextSnapshotRequest> requestCaptor =
-                ArgumentCaptor.forClass(ContextSnapshotRequest.class);
-        verify(fixture.runStateRepository).requireByRunId(RUN_ID);
-        verify(fixture.contextSnapshotFactory).create(requestCaptor.capture());
+        verify(fixture.agentSessionService).getOrCreate("group-1", "feishu", "ou-1");
+        verifyNoInteractions(fixture.authService);
         verifyNoInteractions(fixture.contextAssembler);
-        assertThat(requestCaptor.getValue().sessionAccessClaim().claimType())
-                .isEqualTo(SessionAccessClaim.ClaimType.SHARED);
-        assertThat(requestCaptor.getValue().sessionAccessClaim().ownerOrSharedPrincipal())
-                .isEqualTo("shared:feishu:group-1");
-        assertThat(requestCaptor.getValue().sessionKey()).isEqualTo("group-1");
-        assertThat(requestCaptor.getValue().userId()).isEqualTo("ou-1");
-        assertThat(context.assembled().observePrompt()).isEqualTo("canonical observe");
+        assertThat(context.channel()).isEqualTo("feishu");
+        assertThat(context.userId()).isEqualTo("ou-1");
+        assertThat(context.roleCode()).isEqualTo("MEMBER");
+        assertThat(context.userMessage()).isEqualTo("hello");
+        assertThat(context.requestId()).isEqualTo(RUN_ID);
+        assertThat(context.contextSnapshot()).isSameAs(fixture.snapshot);
     }
 
     @Test
@@ -125,6 +154,9 @@ class ChatContextFactoryCanonicalOwnershipTest {
                 mock(LegacyContextViewAdapter.class);
         private final RunStateRepository runStateRepository =
                 mock(RunStateRepository.class);
+        private final CanonicalContextReadyProjector projector =
+                mock(CanonicalContextReadyProjector.class);
+        private final ContextSnapshot snapshot = snapshot();
         private final ChatContextFactory factory;
 
         @SuppressWarnings("unchecked")
@@ -147,7 +179,6 @@ class ChatContextFactoryCanonicalOwnershipTest {
                     "legacy memory",
                     "legacy observe"
             );
-            ContextSnapshot snapshot = snapshot();
             LegacyContextView canonicalView = new LegacyContextView(
                     new AssembledContext(
                             "group-1",
@@ -216,19 +247,31 @@ class ChatContextFactoryCanonicalOwnershipTest {
                     (ObjectProvider<ContextSnapshotFactory>) mock(ObjectProvider.class);
             ObjectProvider<LegacyContextViewAdapter> adapterProvider =
                     (ObjectProvider<LegacyContextViewAdapter>) mock(ObjectProvider.class);
-            ObjectProvider<RunStateRepository> runStateRepositoryProvider =
-                    (ObjectProvider<RunStateRepository>) mock(ObjectProvider.class);
+            ObjectProvider<com.springclaw.runtime.bridge.AcceptedRunContextResolver>
+                    acceptedRunContextResolverProvider =
+                    (ObjectProvider<com.springclaw.runtime.bridge.AcceptedRunContextResolver>)
+                            mock(ObjectProvider.class);
             ObjectProvider<RunStateContextSnapshotRequestFactory> requestFactoryProvider =
                     (ObjectProvider<RunStateContextSnapshotRequestFactory>) mock(ObjectProvider.class);
-            ObjectProvider<CanonicalContextReadyProjector> projectorProvider =
-                    (ObjectProvider<CanonicalContextReadyProjector>) mock(ObjectProvider.class);
+            ObjectProvider<com.springclaw.runtime.bridge.CanonicalContextSnapshotResolver>
+                    canonicalContextSnapshotResolverProvider =
+                    (ObjectProvider<com.springclaw.runtime.bridge.CanonicalContextSnapshotResolver>)
+                            mock(ObjectProvider.class);
             when(snapshotProvider.getIfAvailable()).thenReturn(contextSnapshotFactory);
             when(adapterProvider.getIfAvailable()).thenReturn(legacyContextViewAdapter);
-            when(runStateRepositoryProvider.getIfAvailable()).thenReturn(runStateRepository);
+            when(acceptedRunContextResolverProvider.getIfAvailable()).thenReturn(
+                    new com.springclaw.runtime.bridge.AcceptedRunContextResolver(
+                            runStateRepository
+                    )
+            );
             when(requestFactoryProvider.getIfAvailable())
                     .thenReturn(new RunStateContextSnapshotRequestFactory());
-            when(projectorProvider.getIfAvailable())
-                    .thenReturn(mock(CanonicalContextReadyProjector.class));
+            when(canonicalContextSnapshotResolverProvider.getIfAvailable()).thenReturn(
+                    new com.springclaw.runtime.bridge.CanonicalContextSnapshotResolver(
+                            projector,
+                            runStateRepository
+                    )
+            );
 
             this.factory = new ChatContextFactory(
                     aiProviderService,
@@ -243,9 +286,9 @@ class ChatContextFactoryCanonicalOwnershipTest {
                     agentDecisionService,
                     snapshotProvider,
                     adapterProvider,
-                    runStateRepositoryProvider,
+                    acceptedRunContextResolverProvider,
                     requestFactoryProvider,
-                    projectorProvider,
+                    canonicalContextSnapshotResolverProvider,
                     canonicalMode,
                     "simplified",
                     true
@@ -310,6 +353,42 @@ class ChatContextFactoryCanonicalOwnershipTest {
                 frame(),
                 NOW,
                 "snapshot-hash"
+        );
+    }
+
+    private static RunState sharedContextReady(ContextSnapshot snapshot) {
+        SessionAccessClaim claim = SessionAccessClaim.sharedVerified(
+                "feishu",
+                "group-1",
+                "ou-1"
+        );
+        return new RunState(
+                RUN_ID,
+                RUN_ID,
+                1,
+                RunStatus.CONTEXT_READY,
+                claim.sessionKey(),
+                claim.channel(),
+                claim.acceptedUserId(),
+                claim,
+                "MEMBER",
+                "hello",
+                "agent",
+                NOW,
+                null,
+                NOW.plusSeconds(1),
+                null,
+                NOW.plusSeconds(300),
+                snapshot,
+                null,
+                "",
+                1,
+                "",
+                List.of(),
+                null,
+                null,
+                Map.of(),
+                null
         );
     }
 

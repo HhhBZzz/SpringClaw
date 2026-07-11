@@ -5,6 +5,7 @@ import com.springclaw.runtime.memory.contract.MemoryScope;
 import com.springclaw.runtime.memory.contract.ShortTermMemoryEntry;
 import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.service.event.MessageEventService;
+import com.springclaw.service.event.ShortTermChatEventRead;
 import com.springclaw.service.memory.store.RedisShortTermMemoryStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -60,7 +61,7 @@ class ShortTermMemoryRecoveryServiceTest {
     @AfterEach
     void tearDown() {
         if (redisson != null && scope != null) {
-            redisson.getKeys().delete(shortTermKey(scope));
+            redisson.getKeys().delete(shortTermOrderKey(scope), shortTermEntryKey(scope));
         }
         if (recovery != null && scope != null) {
             recovery.releaseLease(scope);
@@ -105,14 +106,14 @@ class ShortTermMemoryRecoveryServiceTest {
 
     @Test
     void recoverLoadsOnlyAuthorizedChatUserAndAssistantEvents() {
-        when(messageEventService.listSessionEvents(
-                scope.sessionKey(), scope.authorizationPrincipal(), null, "CHAT", 100, true
-        )).thenReturn(List.of(
-                event(10, "chat:req-1:user", "USER", "alice", "hello"),
-                event(11, "chat:req-1:system", "SYSTEM", "alice", "audit"),
-                event(12, "chat:req-1:assistant:terminal", "ASSISTANT", "alice", "answer"),
-                event(13, "chat:req-2:user", "USER", "bob", "wrong owner")
-        ));
+        when(messageEventService.readShortTermChatEvents(scope, 100)).thenReturn(
+                new ShortTermChatEventRead(List.of(
+                        event(10, "chat:req-1:user", "USER", "alice", "hello"),
+                        event(11, "chat:req-1:system", "SYSTEM", "alice", "audit"),
+                        event(12, "chat:req-1:assistant:terminal", "ASSISTANT", "alice", "answer"),
+                        event(13, "chat:req-2:user", "USER", "bob", "wrong owner")
+                ), ShortTermChatEventRead.Source.DURABLE)
+        );
 
         long watermark = recovery.recover(scope, 100);
 
@@ -120,8 +121,7 @@ class ShortTermMemoryRecoveryServiceTest {
         assertThat(store.readRecent(scope, 10))
                 .extracting(ShortTermMemoryEntry::eventId)
                 .containsExactly(10L, 12L);
-        verify(messageEventService).listSessionEvents(
-                scope.sessionKey(), scope.authorizationPrincipal(), null, "CHAT", 100, true);
+        verify(messageEventService).readShortTermChatEvents(scope, 100);
     }
 
     private static ShortTermMemoryEntry entry(long id, String eventKey) {
@@ -151,7 +151,13 @@ class ShortTermMemoryRecoveryServiceTest {
         return event;
     }
 
-    private static String shortTermKey(MemoryScope scope) {
-        return "springclaw:memory:short-term:" + scope.scopeType().name() + ":" + scope.scopeId();
+    private static String shortTermOrderKey(MemoryScope scope) {
+        return "springclaw:memory:short-term:v2:" + scope.scopeType().name()
+                + ":" + scope.scopeId() + ":order";
+    }
+
+    private static String shortTermEntryKey(MemoryScope scope) {
+        return "springclaw:memory:short-term:v2:" + scope.scopeType().name()
+                + ":" + scope.scopeId() + ":entry";
     }
 }

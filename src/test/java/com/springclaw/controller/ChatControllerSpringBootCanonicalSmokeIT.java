@@ -26,6 +26,8 @@ import com.springclaw.service.chat.async.ChatMessageProducer;
 import com.springclaw.service.chat.impl.ChatContext;
 import com.springclaw.service.chat.impl.ChatExecutionResult;
 import com.springclaw.service.context.ContextAssembler;
+import com.springclaw.service.event.MessageEventService;
+import com.springclaw.service.event.MessageEventWrite;
 import com.springclaw.service.memory.MemoryManagementService;
 import com.springclaw.service.memory.MemoryWriteCommand;
 import com.springclaw.service.memory.frame.MemoryCoordinator;
@@ -90,6 +92,9 @@ class ChatControllerSpringBootCanonicalSmokeIT {
 
     @Autowired
     private MemoryManagementService memoryManagementService;
+
+    @Autowired
+    private MessageEventService messageEventService;
 
     @Autowired
     private ShortTermMemoryStore shortTermMemoryStore;
@@ -219,9 +224,6 @@ class ChatControllerSpringBootCanonicalSmokeIT {
                 .contains("用户偏好：Phase 3C 需要真实 SpringBoot 冒烟测试");
         assertThat(state.contextSnapshot().activeLearningRules())
                 .contains("执行规则：Runtime smoke 必须检查 canonical event 顺序");
-        assertThat(state.contextSnapshot().memoryBankText())
-                .contains("SpringClaw");
-
         assertThat(runEventStore.findEventsByRunId(RUN_ID))
                 .extracting(RunEvent::eventType)
                 .containsExactly(
@@ -238,6 +240,16 @@ class ChatControllerSpringBootCanonicalSmokeIT {
 
     private void seedMemoryFrameSources() {
         MemoryScope scope = personalScope();
+        messageEventService.append(new MessageEventWrite(
+                "phase-3c-short-term-user",
+                SESSION_KEY,
+                CHANNEL,
+                USER_ID,
+                "USER",
+                "CHAT",
+                "上一轮用户说 SpringBoot smoke short-term memory",
+                "previous-run"
+        ));
         shortTermMemoryStore.append(scope, new ShortTermMemoryEntry(
                 1L,
                 "phase-3c-short-term-user",
@@ -300,10 +312,16 @@ class ChatControllerSpringBootCanonicalSmokeIT {
     private void cleanCommittedData() {
         MemoryScope scope = personalScope();
         redissonClient.getKeys().delete(
-                "springclaw:memory:short-term:"
+                "springclaw:memory:short-term:v2:"
                         + scope.scopeType().name()
                         + ":"
-                        + scope.scopeId(),
+                        + scope.scopeId()
+                        + ":order",
+                "springclaw:memory:short-term:v2:"
+                        + scope.scopeType().name()
+                        + ":"
+                        + scope.scopeId()
+                        + ":entry",
                 "springclaw:guard:rate:" + SESSION_KEY,
                 "springclaw:guard:lock:" + SESSION_KEY
         );

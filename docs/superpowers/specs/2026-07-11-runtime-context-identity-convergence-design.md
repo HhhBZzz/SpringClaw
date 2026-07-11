@@ -1,7 +1,7 @@
 # Runtime Context Identity Convergence Design
 
 **Date:** 2026-07-11
-**Status:** Approved by user; implementation planning in progress
+**Status:** Implemented and verified
 **Branch:** `codex/runtime-context-identity-convergence`
 **Base:** `7a77ce5` (`codex/flyway-schema-migration`)
 
@@ -359,3 +359,18 @@ After this phase is merged, separate specifications should address:
 3. Long-term relevance, expiry, conflict handling, and vector retrieval.
 4. Canonical `ExecutionDecision` replay including explicit confirmation semantics.
 5. Unified execution strategies and legacy-engine retirement.
+
+## 14. Implementation evidence
+
+- `AcceptedRunContextResolver` validates the accepted run ID, immutable command fields,
+  normalized defaults, terminal status, and access-claim identity before canonical context
+  construction.
+- `CanonicalContextSnapshotResolver` creates only from `CREATED`, reuses stored snapshots
+  for later non-terminal states, and reloads the committed winner after a projection race.
+- `ChatContextFactory` now branches explicitly between legacy rollback and canonical
+  construction; canonical construction derives identity and role from `RunState`, reuses
+  frozen prompt/message data, and rejects provider or model drift.
+- Focused verification completed successfully:
+  `mvn -q -Dtest=AcceptedRunContextResolverTest,CanonicalContextSnapshotResolverTest,CanonicalContextReadyProjectorTest,RunStateContextSnapshotRequestFactoryTest,ChatContextFactoryTest,ChatContextFactoryCanonicalOwnershipTest,ChatContextFactoryCanonicalSnapshotTest,ChatContextFactoryCanonicalLifecycleProjectionTest,ChatMessageConsumerTest,WebhookRouterServiceTest,TaskExecutionServiceTest test`.
+- Full verification completed successfully: `mvn -q test` reported 893 tests, 0 failures,
+  0 errors, and 0 skipped tests from Surefire XML reports.

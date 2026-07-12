@@ -22,21 +22,24 @@ class WorkspaceMutationLeaseCoordinatorTest {
 
     private WorkspaceIdentity identity;
     private WorkspaceMutationLeaseRepository repository;
+    private WorkspaceFencingTokenAllocator tokenAllocator;
     private WorkspaceMutationLeaseCoordinator coordinator;
 
     @BeforeEach
     void setUp() {
         identity = mock(WorkspaceIdentity.class);
         repository = mock(WorkspaceMutationLeaseRepository.class);
-        coordinator = new WorkspaceMutationLeaseCoordinator(identity, repository, 300);
+        tokenAllocator = mock(WorkspaceFencingTokenAllocator.class);
+        coordinator = new WorkspaceMutationLeaseCoordinator(identity, repository, tokenAllocator, 300);
         when(identity.id(workspaceRoot)).thenReturn("workspace-id");
+        when(tokenAllocator.nextToken("workspace-id", "proposal-1")).thenReturn(7L);
         when(repository.release("workspace-id", "proposal-1", 7L)).thenReturn(true);
     }
 
     @Test
     void executeExclusiveUsesWorkspaceIdentityConfiguredTtlAndExactReleaseToken() throws Exception {
         WorkspaceMutationLease lease = lease();
-        when(repository.acquire("workspace-id", "proposal-1", Duration.ofSeconds(300)))
+        when(repository.acquire("workspace-id", "proposal-1", 7L, Duration.ofSeconds(300)))
                 .thenReturn(Optional.of(lease));
 
         String result = coordinator.executeExclusive(
@@ -51,7 +54,8 @@ class WorkspaceMutationLeaseCoordinatorTest {
 
     @Test
     void acquireRejectsAnActiveWorkspaceLease() {
-        when(repository.acquire("workspace-id", "proposal-2", Duration.ofSeconds(300)))
+        when(tokenAllocator.nextToken("workspace-id", "proposal-2")).thenReturn(8L);
+        when(repository.acquire("workspace-id", "proposal-2", 8L, Duration.ofSeconds(300)))
                 .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> coordinator.executeExclusive(

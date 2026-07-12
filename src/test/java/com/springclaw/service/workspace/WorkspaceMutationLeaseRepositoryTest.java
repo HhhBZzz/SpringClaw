@@ -41,11 +41,12 @@ class WorkspaceMutationLeaseRepositoryTest {
     @Test
     void acquireReturnsFirstTokenAndRejectsActiveCompetitor() {
         String workspaceId = workspaceId();
+        repository.ensureWorkspace(workspaceId);
 
         WorkspaceMutationLease first = repository.acquire(
-                workspaceId, "proposal-1", Duration.ofMinutes(5)).orElseThrow();
+                workspaceId, "proposal-1", 1L, Duration.ofMinutes(5)).orElseThrow();
         Optional<WorkspaceMutationLease> competitor = repository.acquire(
-                workspaceId, "proposal-2", Duration.ofMinutes(5));
+                workspaceId, "proposal-2", 2L, Duration.ofMinutes(5));
 
         assertThat(first.workspaceId()).isEqualTo(workspaceId);
         assertThat(first.proposalId()).isEqualTo("proposal-1");
@@ -57,8 +58,9 @@ class WorkspaceMutationLeaseRepositoryTest {
     @Test
     void expiredLeaseGetsHigherTokenAndOldTokenCannotValidateOrReleaseIt() {
         String workspaceId = workspaceId();
+        repository.ensureWorkspace(workspaceId);
         WorkspaceMutationLease first = repository.acquire(
-                workspaceId, "proposal-old", Duration.ofMinutes(5)).orElseThrow();
+                workspaceId, "proposal-old", 1L, Duration.ofMinutes(5)).orElseThrow();
         jdbcTemplate.update(
                 "UPDATE workspace_mutation_lease " +
                         "SET lease_until = DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 1 SECOND) " +
@@ -66,7 +68,7 @@ class WorkspaceMutationLeaseRepositoryTest {
                 workspaceId);
 
         WorkspaceMutationLease replacement = repository.acquire(
-                workspaceId, "proposal-new", Duration.ofMinutes(5)).orElseThrow();
+                workspaceId, "proposal-new", 2L, Duration.ofMinutes(5)).orElseThrow();
 
         assertThat(replacement.fencingToken()).isGreaterThan(first.fencingToken());
         assertThat(repository.isCurrent(

@@ -27,6 +27,18 @@ class WorkspaceMutationLeaseRepositoryTest {
     JdbcTemplate jdbcTemplate;
 
     @Test
+    void executionResultColumnCanHoldStructuredEnvelopeBeyondTextLimit() {
+        String dataType = jdbcTemplate.queryForObject(
+                "SELECT DATA_TYPE FROM information_schema.COLUMNS " +
+                        "WHERE TABLE_SCHEMA = DATABASE() " +
+                        "AND TABLE_NAME = 'tool_invocation_proposal' " +
+                        "AND COLUMN_NAME = 'execution_result'",
+                String.class);
+
+        assertThat(dataType).isEqualTo("mediumtext");
+    }
+
+    @Test
     void acquireReturnsFirstTokenAndRejectsActiveCompetitor() {
         String workspaceId = workspaceId();
 
@@ -43,7 +55,7 @@ class WorkspaceMutationLeaseRepositoryTest {
     }
 
     @Test
-    void expiredLeaseGetsHigherTokenAndOldTokenCannotRenewOrReleaseIt() {
+    void expiredLeaseGetsHigherTokenAndOldTokenCannotValidateOrReleaseIt() {
         String workspaceId = workspaceId();
         WorkspaceMutationLease first = repository.acquire(
                 workspaceId, "proposal-old", Duration.ofMinutes(5)).orElseThrow();
@@ -57,12 +69,12 @@ class WorkspaceMutationLeaseRepositoryTest {
                 workspaceId, "proposal-new", Duration.ofMinutes(5)).orElseThrow();
 
         assertThat(replacement.fencingToken()).isGreaterThan(first.fencingToken());
-        assertThat(repository.renewForCommit(
-                workspaceId, first.proposalId(), first.fencingToken(), Duration.ofSeconds(30))).isFalse();
+        assertThat(repository.isCurrent(
+                workspaceId, first.proposalId(), first.fencingToken())).isFalse();
         assertThat(repository.release(
                 workspaceId, first.proposalId(), first.fencingToken())).isFalse();
-        assertThat(repository.renewForCommit(
-                workspaceId, replacement.proposalId(), replacement.fencingToken(), Duration.ofSeconds(30))).isTrue();
+        assertThat(repository.isCurrent(
+                workspaceId, replacement.proposalId(), replacement.fencingToken())).isTrue();
 
         String holder = jdbcTemplate.queryForObject(
                 "SELECT holder_proposal_id FROM workspace_mutation_lease WHERE workspace_id = ?",

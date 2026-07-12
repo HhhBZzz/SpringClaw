@@ -41,7 +41,11 @@ class WorkspaceGitGuardTest {
         resultSerializer = new ToolExecutionResultSerializer(new ObjectMapper());
         lease = new WorkspaceMutationLease(
                 "workspace-id", "tip-test-1", 7L, LocalDateTime.now().plusMinutes(5));
-        Mockito.when(leaseCoordinator.acquire(tmpRoot, "tip-test-1")).thenReturn(lease);
+        Mockito.doAnswer(invocation -> {
+            WorkspaceMutationLeaseCoordinator.LeaseWork<?> work = invocation.getArgument(2);
+            return work.execute(lease);
+        }).when(leaseCoordinator).executeExclusive(
+                Mockito.eq(tmpRoot), Mockito.eq("tip-test-1"), Mockito.any());
     }
 
     private WorkspaceGitGuard guard(GitOperations git) {
@@ -128,8 +132,7 @@ class WorkspaceGitGuardTest {
         assertThat(audit.path("gitCommitSha").asText()).isEqualTo("def5678");
         assertThat(audit.path("changedFiles").get(0).asText()).isEqualTo("src/A.java");
         assertThat(audit.path("result").asText()).isEqualTo("ok");
-        Mockito.verify(leaseCoordinator).renewForCommit(lease);
-        Mockito.verify(leaseCoordinator).release(lease);
+        Mockito.verify(leaseCoordinator).assertCurrent(lease);
     }
 
     @Test
@@ -151,9 +154,9 @@ class WorkspaceGitGuardTest {
         Mockito.verify(repository, Mockito.never())
                 .recordBaseline(Mockito.anyString(), Mockito.anyString());
         org.mockito.InOrder order = Mockito.inOrder(leaseCoordinator, git);
-        order.verify(leaseCoordinator).acquire(tmpRoot, "tip-test-1");
+        order.verify(leaseCoordinator).executeExclusive(
+                Mockito.eq(tmpRoot), Mockito.eq("tip-test-1"), Mockito.any());
         order.verify(git).headSha();
-        Mockito.verify(leaseCoordinator).release(lease);
     }
 
     @Test
@@ -261,24 +264,22 @@ class WorkspaceGitGuardTest {
         assertThat(audit.path("noOp").asBoolean()).isTrue();
         assertThat(audit.path("gitCommitSha").isNull()).isTrue();
         assertThat(audit.path("result").asText()).isEqualTo("ok");
-        Mockito.verify(leaseCoordinator).renewForCommit(lease);
-        Mockito.verify(leaseCoordinator).release(lease);
+        Mockito.verify(leaseCoordinator).assertCurrent(lease);
         Mockito.verify(git, Mockito.never()).add(Mockito.anyList());
         Mockito.verify(git, Mockito.never()).commit(Mockito.anyString());
     }
 
     @Test
-    void staleFencingToken_rollsBackAndNeverStagesCommitsOrRecordsSuccess() throws Exception {
+    void staleFencingTokenStopsPublishingWithoutMutatingSharedWorkspace() throws Exception {
         GitOperations git = Mockito.mock(GitOperations.class);
         Mockito.when(git.workspaceRoot()).thenReturn(tmpRoot);
         Mockito.when(git.headSha()).thenReturn("abc1234");
         Mockito.when(git.statusNameOnly())
                 .thenReturn(List.of())
                 .thenReturn(List.of("src/A.java"));
-        Mockito.when(git.isTracked("src/A.java")).thenReturn(true);
         Mockito.when(repository.recordBaseline(Mockito.anyString(), Mockito.anyString())).thenReturn(true);
         Mockito.doThrow(new SecurityException("fencing token 已失效"))
-                .when(leaseCoordinator).renewForCommit(lease);
+                .when(leaseCoordinator).assertCurrent(lease);
 
         WorkspaceGitGuard guard = guard(git);
         ToolInvocationProposal p = proposal("abc1234", List.of("src/A.java"));
@@ -287,12 +288,11 @@ class WorkspaceGitGuardTest {
                 .isInstanceOf(SecurityException.class)
                 .hasMessageContaining("fencing token 已失效");
 
-        Mockito.verify(git).checkoutFromSha("abc1234", "src/A.java");
+        Mockito.verify(git, Mockito.never()).checkoutFromSha(Mockito.anyString(), Mockito.anyString());
         Mockito.verify(git, Mockito.never()).add(Mockito.anyList());
         Mockito.verify(git, Mockito.never()).commit(Mockito.anyString());
         Mockito.verify(repository, Mockito.never()).recordCommit(
                 Mockito.anyString(), Mockito.any(), Mockito.anyList(), Mockito.anyString());
-        Mockito.verify(leaseCoordinator).release(lease);
     }
 
     @Test

@@ -28,17 +28,25 @@ class WorkspaceMutationLeaseCoordinatorTest {
     void setUp() {
         identity = mock(WorkspaceIdentity.class);
         repository = mock(WorkspaceMutationLeaseRepository.class);
-        coordinator = new WorkspaceMutationLeaseCoordinator(identity, repository, 300, 30);
+        coordinator = new WorkspaceMutationLeaseCoordinator(identity, repository, 300);
         when(identity.id(workspaceRoot)).thenReturn("workspace-id");
+        when(repository.release("workspace-id", "proposal-1", 7L)).thenReturn(true);
     }
 
     @Test
-    void acquireUsesWorkspaceIdentityAndConfiguredExecutionTtl() {
+    void executeExclusiveUsesWorkspaceIdentityConfiguredTtlAndExactReleaseToken() throws Exception {
         WorkspaceMutationLease lease = lease();
         when(repository.acquire("workspace-id", "proposal-1", Duration.ofSeconds(300)))
                 .thenReturn(Optional.of(lease));
 
-        assertThat(coordinator.acquire(workspaceRoot, "proposal-1")).isSameAs(lease);
+        String result = coordinator.executeExclusive(
+                workspaceRoot, "proposal-1", acquired -> {
+                    assertThat(acquired).isSameAs(lease);
+                    return "done";
+                });
+
+        assertThat(result).isEqualTo("done");
+        verify(repository).release("workspace-id", "proposal-1", 7L);
     }
 
     @Test
@@ -46,29 +54,20 @@ class WorkspaceMutationLeaseCoordinatorTest {
         when(repository.acquire("workspace-id", "proposal-2", Duration.ofSeconds(300)))
                 .thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> coordinator.acquire(workspaceRoot, "proposal-2"))
+        assertThatThrownBy(() -> coordinator.executeExclusive(
+                workspaceRoot, "proposal-2", lease -> "never"))
                 .isInstanceOf(SecurityException.class)
                 .hasMessageContaining("工作区正在被其他写任务占用");
     }
 
     @Test
-    void renewForCommitRejectsAStaleFencingToken() {
+    void assertCurrentRejectsAStaleFencingToken() {
         WorkspaceMutationLease lease = lease();
-        when(repository.renewForCommit(
-                "workspace-id", "proposal-1", 7L, Duration.ofSeconds(30))).thenReturn(false);
+        when(repository.isCurrent("workspace-id", "proposal-1", 7L)).thenReturn(false);
 
-        assertThatThrownBy(() -> coordinator.renewForCommit(lease))
+        assertThatThrownBy(() -> coordinator.assertCurrent(lease))
                 .isInstanceOf(SecurityException.class)
                 .hasMessageContaining("fencing token 已失效");
-    }
-
-    @Test
-    void releaseUsesTheExactHolderAndFencingToken() {
-        WorkspaceMutationLease lease = lease();
-
-        coordinator.release(lease);
-
-        verify(repository).release("workspace-id", "proposal-1", 7L);
     }
 
     private WorkspaceMutationLease lease() {

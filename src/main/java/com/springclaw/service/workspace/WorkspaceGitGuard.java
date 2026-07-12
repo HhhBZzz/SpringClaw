@@ -58,17 +58,10 @@ public class WorkspaceGitGuard {
      * the caller (Aspect) translates that into proposal=FAILED and bubbles to the user.
      */
     public <T> T execute(ToolInvocationProposal proposal, Callable<T> toolExecution) throws Exception {
-        WorkspaceMutationLease lease = leaseCoordinator.acquire(git.workspaceRoot(), proposal.proposalId());
-        try {
-            return executeWithLease(proposal, toolExecution, lease);
-        } finally {
-            try {
-                leaseCoordinator.release(lease);
-            } catch (RuntimeException ex) {
-                log.error("workspace lease release failed for proposal={}, token={}: {}",
-                        proposal.proposalId(), lease.fencingToken(), ex.getMessage());
-            }
-        }
+        return leaseCoordinator.executeExclusive(
+                git.workspaceRoot(),
+                proposal.proposalId(),
+                lease -> executeWithLease(proposal, toolExecution, lease));
     }
 
     private <T> T executeWithLease(ToolInvocationProposal proposal,
@@ -156,7 +149,10 @@ public class WorkspaceGitGuard {
             throw new SecurityException("工具改动超出授权范围: " + outOfScope + suffix);
         }
 
-        renewCommitFenceOrRollback(proposal, lease, currentSha, dirtyNonTargetSnapshots);
+        // The coordinator holds SELECT ... FOR UPDATE for the full callback. This check and
+        // the following Git publication/terminal write therefore cannot be overtaken by a
+        // higher fencing token. If ownership is uncertain, stop without mutating the workspace.
+        leaseCoordinator.assertCurrent(lease);
 
         // 不变量 14：工具成功但无实际 diff
         if (newlyChanged.isEmpty()) {
@@ -181,29 +177,6 @@ public class WorkspaceGitGuard {
                     proposal.proposalId(), commitSha);
         }
         return result;
-    }
-
-    private void renewCommitFenceOrRollback(
-            ToolInvocationProposal proposal,
-            WorkspaceMutationLease lease,
-            String baselineSha,
-            Map<String, DirtyFileSnapshot> dirtyNonTargetSnapshots) {
-        try {
-            leaseCoordinator.renewForCommit(lease);
-        } catch (SecurityException ex) {
-            List<String> failedTargets = rollbackPaths(baselineSha, proposal.targetPaths());
-            List<String> changedDirtyNonTargets = changedSnapshots(dirtyNonTargetSnapshots);
-            List<String> failedDirtyRestore = restoreSnapshots(
-                    dirtyNonTargetSnapshots, changedDirtyNonTargets);
-            if (failedTargets.isEmpty() && failedDirtyRestore.isEmpty()) {
-                throw ex;
-            }
-            List<String> failed = new ArrayList<>(failedTargets);
-            failed.addAll(failedDirtyRestore);
-            throw new SecurityException(
-                    ex.getMessage() + "；fencing 失败后的 rollback 部分失败，需手工介入: " + failed,
-                    ex);
-        }
     }
 
     private record DirtyFileSnapshot(boolean exists, byte[] content) { }

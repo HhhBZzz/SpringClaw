@@ -55,18 +55,14 @@ public class WorkspaceMutationLeaseRepository {
         return Optional.of(readLease(workspaceId));
     }
 
-    public boolean renewForCommit(String workspaceId,
-                                  String proposalId,
-                                  long fencingToken,
-                                  Duration ttl) {
-        long ttlSeconds = positiveSeconds(ttl);
-        return jdbcTemplate.update(
-                "UPDATE workspace_mutation_lease " +
-                        "SET lease_until = TIMESTAMPADD(SECOND, ?, CURRENT_TIMESTAMP(6)), " +
-                        "update_time = CURRENT_TIMESTAMP(6) " +
+    public boolean isCurrent(String workspaceId, String proposalId, long fencingToken) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workspace_mutation_lease " +
                         "WHERE workspace_id = ? AND holder_proposal_id = ? AND fencing_token = ? " +
                         "AND lease_until > CURRENT_TIMESTAMP(6)",
-                ttlSeconds, workspaceId, proposalId, fencingToken) == 1;
+                Integer.class,
+                workspaceId, proposalId, fencingToken);
+        return count != null && count == 1;
     }
 
     public boolean release(String workspaceId, String proposalId, long fencingToken) {

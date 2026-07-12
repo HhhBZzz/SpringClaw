@@ -10,7 +10,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -27,6 +26,8 @@ import java.util.stream.Collectors;
  *   <li>不变量 7：工具改动 ⊆ targetPaths（越界即 rollback + SecurityException）</li>
  *   <li>不变量 14：工具成功但 newlyChanged 为空 → EXECUTED, commitSha=null</li>
  *   <li>不变量 15：rollback 区分 tracked / untracked，不碰用户原 dirty 文件</li>
+ *   <li>不变量 16：同一工作区写执行必须持有独占租约，提交前 token 必须仍有效</li>
+ *   <li>不变量 17：成功终态保存真实工具结果、fencing token 与 Git 审计元数据</li>
  * </ul>
  */
 @Component
@@ -37,13 +38,19 @@ public class WorkspaceGitGuard {
     private final GitOperations git;
     private final PathNormalizer pathNormalizer;
     private final ToolInvocationProposalRepository repository;
+    private final WorkspaceMutationLeaseCoordinator leaseCoordinator;
+    private final ToolExecutionResultSerializer resultSerializer;
 
     public WorkspaceGitGuard(GitOperations git,
                              PathNormalizer pathNormalizer,
-                             ToolInvocationProposalRepository repository) {
+                             ToolInvocationProposalRepository repository,
+                             WorkspaceMutationLeaseCoordinator leaseCoordinator,
+                             ToolExecutionResultSerializer resultSerializer) {
         this.git = git;
         this.pathNormalizer = pathNormalizer;
         this.repository = repository;
+        this.leaseCoordinator = leaseCoordinator;
+        this.resultSerializer = resultSerializer;
     }
 
     /**
@@ -51,6 +58,15 @@ public class WorkspaceGitGuard {
      * the caller (Aspect) translates that into proposal=FAILED and bubbles to the user.
      */
     public <T> T execute(ToolInvocationProposal proposal, Callable<T> toolExecution) throws Exception {
+        return leaseCoordinator.executeExclusive(
+                git.workspaceRoot(),
+                proposal.proposalId(),
+                lease -> executeWithLease(proposal, toolExecution, lease));
+    }
+
+    private <T> T executeWithLease(ToolInvocationProposal proposal,
+                                   Callable<T> toolExecution,
+                                   WorkspaceMutationLease lease) throws Exception {
         String currentSha = git.headSha();
 
         // 不变量 10
@@ -104,7 +120,7 @@ public class WorkspaceGitGuard {
                 .map(p -> pathNormalizer.normalizeRepoPath(git.workspaceRoot(), p))
                 .collect(Collectors.toUnmodifiableSet());
 
-        Set<String> newlyChanged = new HashSet<>(afterDirty);
+        Set<String> newlyChanged = new LinkedHashSet<>(afterDirty);
         newlyChanged.removeAll(beforeDirty);
 
         Set<String> outOfScope = newlyChanged.stream()
@@ -133,10 +149,18 @@ public class WorkspaceGitGuard {
             throw new SecurityException("工具改动超出授权范围: " + outOfScope + suffix);
         }
 
+        // The coordinator holds SELECT ... FOR UPDATE for the full callback. This check and
+        // the following Git publication/terminal write therefore cannot be overtaken by a
+        // higher fencing token. If ownership is uncertain, stop without mutating the workspace.
+        assertCurrentOrRollbackExpiredLease(
+                proposal, lease, currentSha, dirtyNonTargetSnapshots);
+
         // 不变量 14：工具成功但无实际 diff
         if (newlyChanged.isEmpty()) {
+            String executionResult = resultSerializer.serialize(
+                    proposal, result, lease.fencingToken(), null, List.of(), true);
             if (!repository.recordCommit(proposal.proposalId(), null, List.of(),
-                    "no-op write; nothing committed")) {
+                    executionResult)) {
                 log.error("recordCommit(no-op) returned false for proposal={}, status no longer EXECUTING",
                         proposal.proposalId());
             }
@@ -145,12 +169,41 @@ public class WorkspaceGitGuard {
 
         git.add(proposal.targetPaths());
         String commitSha = git.commit(buildCommitMessage(proposal));
+        List<String> changedFiles = List.copyOf(newlyChanged);
+        String executionResult = resultSerializer.serialize(
+                proposal, result, lease.fencingToken(), commitSha, changedFiles, false);
         if (!repository.recordCommit(proposal.proposalId(), commitSha,
-                List.copyOf(newlyChanged), "ok")) {
+                changedFiles, executionResult)) {
             log.error("recordCommit returned false for proposal={} commit={}, status no longer EXECUTING — workspace already committed",
                     proposal.proposalId(), commitSha);
         }
         return result;
+    }
+
+    private void assertCurrentOrRollbackExpiredLease(
+            ToolInvocationProposal proposal,
+            WorkspaceMutationLease lease,
+            String baselineSha,
+            Map<String, DirtyFileSnapshot> dirtyNonTargetSnapshots) {
+        try {
+            leaseCoordinator.assertCurrent(lease);
+        } catch (WorkspaceLeaseExpiredException ex) {
+            // The false result came from MySQL while this transaction still owns the row lock,
+            // so no successor can exist yet and cleanup is authoritative. Other database/
+            // ownership failures are deliberately not caught: a stale worker must not mutate.
+            List<String> failedTargets = rollbackPaths(baselineSha, proposal.targetPaths());
+            List<String> changedDirtyNonTargets = changedSnapshots(dirtyNonTargetSnapshots);
+            List<String> failedDirtyRestore = restoreSnapshots(
+                    dirtyNonTargetSnapshots, changedDirtyNonTargets);
+            if (failedTargets.isEmpty() && failedDirtyRestore.isEmpty()) {
+                throw ex;
+            }
+            List<String> failed = new ArrayList<>(failedTargets);
+            failed.addAll(failedDirtyRestore);
+            throw new WorkspaceLeaseExpiredException(
+                    ex.getMessage() + "；租约过期后的 rollback 部分失败，需手工介入: " + failed,
+                    ex);
+        }
     }
 
     private record DirtyFileSnapshot(boolean exists, byte[] content) { }

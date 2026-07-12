@@ -1,5 +1,7 @@
 package com.springclaw.service.workspace;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.service.proposal.ToolInvocationProposal;
 import com.springclaw.service.proposal.ToolInvocationProposalRepository;
 import com.springclaw.service.proposal.ToolInvocationProposalStatus;
@@ -25,6 +27,9 @@ class WorkspaceGitGuardTest {
     private Path tmpRoot;
     private PathNormalizer pathNormalizer;
     private ToolInvocationProposalRepository repository;
+    private WorkspaceMutationLeaseCoordinator leaseCoordinator;
+    private ToolExecutionResultSerializer resultSerializer;
+    private WorkspaceMutationLease lease;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -32,6 +37,20 @@ class WorkspaceGitGuardTest {
         tmpRoot.toFile().deleteOnExit();
         pathNormalizer = new PathNormalizer();
         repository = Mockito.mock(ToolInvocationProposalRepository.class);
+        leaseCoordinator = Mockito.mock(WorkspaceMutationLeaseCoordinator.class);
+        resultSerializer = new ToolExecutionResultSerializer(new ObjectMapper());
+        lease = new WorkspaceMutationLease(
+                "workspace-id", "tip-test-1", 7L, LocalDateTime.now().plusMinutes(5));
+        Mockito.doAnswer(invocation -> {
+            WorkspaceMutationLeaseCoordinator.LeaseWork<?> work = invocation.getArgument(2);
+            return work.execute(lease);
+        }).when(leaseCoordinator).executeExclusive(
+                Mockito.eq(tmpRoot), Mockito.eq("tip-test-1"), Mockito.any());
+    }
+
+    private WorkspaceGitGuard guard(GitOperations git) {
+        return new WorkspaceGitGuard(
+                git, pathNormalizer, repository, leaseCoordinator, resultSerializer);
     }
 
     private ToolInvocationProposal proposal(String headSha, List<String> targetPaths) {
@@ -79,7 +98,7 @@ class WorkspaceGitGuardTest {
         Mockito.when(repository.recordCommit(Mockito.anyString(), Mockito.anyString(),
                 Mockito.anyList(), Mockito.anyString())).thenReturn(true);
 
-        WorkspaceGitGuard guard = new WorkspaceGitGuard(git, pathNormalizer, repository);
+        WorkspaceGitGuard guard = guard(git);
         ToolInvocationProposal p = proposal("abc1234", List.of("src/A.java"));
 
         String result = guard.execute(p, () -> "ok");
@@ -96,19 +115,31 @@ class WorkspaceGitGuardTest {
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<String>> changedCaptor = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<String> resultCaptor = ArgumentCaptor.forClass(String.class);
         Mockito.verify(repository).recordCommit(
                 Mockito.eq("tip-test-1"),
                 Mockito.eq("def5678"),
                 changedCaptor.capture(),
-                Mockito.eq("ok"));
+                resultCaptor.capture());
         Assertions.assertEquals(List.of("src/A.java"), changedCaptor.getValue());
+        JsonNode audit = new ObjectMapper().readTree(resultCaptor.getValue());
+        assertThat(audit.path("schema").asText()).isEqualTo("springclaw.tool-execution-result.v1");
+        assertThat(audit.path("proposalId").asText()).isEqualTo("tip-test-1");
+        assertThat(audit.path("toolName").asText())
+                .isEqualTo("WorkspaceEditToolPack.workspaceWriteFile");
+        assertThat(audit.path("fencingToken").asLong()).isEqualTo(7L);
+        assertThat(audit.path("noOp").asBoolean()).isFalse();
+        assertThat(audit.path("gitCommitSha").asText()).isEqualTo("def5678");
+        assertThat(audit.path("changedFiles").get(0).asText()).isEqualTo("src/A.java");
+        assertThat(audit.path("result").asText()).isEqualTo("ok");
+        Mockito.verify(leaseCoordinator).assertCurrent(lease);
     }
 
     @Test
     void baselineMismatch_throwsSecurityException() throws Exception {
         GitOperations git = mockGit(tmpRoot, "xyz0000");
 
-        WorkspaceGitGuard guard = new WorkspaceGitGuard(git, pathNormalizer, repository);
+        WorkspaceGitGuard guard = guard(git);
         ToolInvocationProposal p = proposal("abc1234", List.of("src/A.java"));
 
         @SuppressWarnings("unchecked")
@@ -122,13 +153,17 @@ class WorkspaceGitGuardTest {
         Mockito.verify(tool, Mockito.never()).call();
         Mockito.verify(repository, Mockito.never())
                 .recordBaseline(Mockito.anyString(), Mockito.anyString());
+        org.mockito.InOrder order = Mockito.inOrder(leaseCoordinator, git);
+        order.verify(leaseCoordinator).executeExclusive(
+                Mockito.eq(tmpRoot), Mockito.eq("tip-test-1"), Mockito.any());
+        order.verify(git).headSha();
     }
 
     @Test
     void targetPathsDirtyAtExecutionTime_throwsSecurityException() throws Exception {
         GitOperations git = mockGit(tmpRoot, "abc1234", List.of("src/A.java"));
 
-        WorkspaceGitGuard guard = new WorkspaceGitGuard(git, pathNormalizer, repository);
+        WorkspaceGitGuard guard = guard(git);
         ToolInvocationProposal p = proposal("abc1234", List.of("src/A.java"));
 
         @SuppressWarnings("unchecked")
@@ -154,7 +189,7 @@ class WorkspaceGitGuardTest {
         Mockito.when(git.isTracked("docs/UNRELATED.md")).thenReturn(false);
         Mockito.when(repository.recordBaseline(Mockito.anyString(), Mockito.anyString())).thenReturn(true);
 
-        WorkspaceGitGuard guard = new WorkspaceGitGuard(git, pathNormalizer, repository);
+        WorkspaceGitGuard guard = guard(git);
         ToolInvocationProposal p = proposal("abc1234", List.of("src/A.java"));
 
         SecurityException ex = Assertions.assertThrows(SecurityException.class,
@@ -188,7 +223,7 @@ class WorkspaceGitGuardTest {
         Mockito.when(git.isTracked("src/A.java")).thenReturn(true);
         Mockito.when(repository.recordBaseline(Mockito.anyString(), Mockito.anyString())).thenReturn(true);
 
-        WorkspaceGitGuard guard = new WorkspaceGitGuard(git, pathNormalizer, repository);
+        WorkspaceGitGuard guard = guard(git);
         ToolInvocationProposal p = proposal("abc1234", List.of("src/A.java"));
 
         assertThatThrownBy(() -> guard.execute(p, () -> {
@@ -215,15 +250,71 @@ class WorkspaceGitGuardTest {
         Mockito.when(repository.recordCommit(Mockito.anyString(), Mockito.any(),
                 Mockito.anyList(), Mockito.anyString())).thenReturn(true);
 
-        WorkspaceGitGuard guard = new WorkspaceGitGuard(git, pathNormalizer, repository);
+        WorkspaceGitGuard guard = guard(git);
         ToolInvocationProposal p = proposal("abc1234", List.of("src/A.java"));
 
         String result = guard.execute(p, () -> "ok");
 
         Assertions.assertEquals("ok", result);
 
+        ArgumentCaptor<String> resultCaptor = ArgumentCaptor.forClass(String.class);
         Mockito.verify(repository).recordCommit(
-                "tip-test-1", null, List.of(), "no-op write; nothing committed");
+                Mockito.eq("tip-test-1"), Mockito.isNull(), Mockito.eq(List.of()), resultCaptor.capture());
+        JsonNode audit = new ObjectMapper().readTree(resultCaptor.getValue());
+        assertThat(audit.path("noOp").asBoolean()).isTrue();
+        assertThat(audit.path("gitCommitSha").isNull()).isTrue();
+        assertThat(audit.path("result").asText()).isEqualTo("ok");
+        Mockito.verify(leaseCoordinator).assertCurrent(lease);
+        Mockito.verify(git, Mockito.never()).add(Mockito.anyList());
+        Mockito.verify(git, Mockito.never()).commit(Mockito.anyString());
+    }
+
+    @Test
+    void staleFencingTokenStopsPublishingWithoutMutatingSharedWorkspace() throws Exception {
+        GitOperations git = Mockito.mock(GitOperations.class);
+        Mockito.when(git.workspaceRoot()).thenReturn(tmpRoot);
+        Mockito.when(git.headSha()).thenReturn("abc1234");
+        Mockito.when(git.statusNameOnly())
+                .thenReturn(List.of())
+                .thenReturn(List.of("src/A.java"));
+        Mockito.when(repository.recordBaseline(Mockito.anyString(), Mockito.anyString())).thenReturn(true);
+        Mockito.doThrow(new SecurityException("fencing token 已失效"))
+                .when(leaseCoordinator).assertCurrent(lease);
+
+        WorkspaceGitGuard guard = guard(git);
+        ToolInvocationProposal p = proposal("abc1234", List.of("src/A.java"));
+
+        assertThatThrownBy(() -> guard.execute(p, () -> "tool-result"))
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("fencing token 已失效");
+
+        Mockito.verify(git, Mockito.never()).checkoutFromSha(Mockito.anyString(), Mockito.anyString());
+        Mockito.verify(git, Mockito.never()).add(Mockito.anyList());
+        Mockito.verify(git, Mockito.never()).commit(Mockito.anyString());
+        Mockito.verify(repository, Mockito.never()).recordCommit(
+                Mockito.anyString(), Mockito.any(), Mockito.anyList(), Mockito.anyString());
+    }
+
+    @Test
+    void authoritativelyExpiredLeaseRollsBackWhileRowLockIsStillHeld() throws Exception {
+        GitOperations git = Mockito.mock(GitOperations.class);
+        Mockito.when(git.workspaceRoot()).thenReturn(tmpRoot);
+        Mockito.when(git.headSha()).thenReturn("abc1234");
+        Mockito.when(git.statusNameOnly())
+                .thenReturn(List.of())
+                .thenReturn(List.of("src/A.java"));
+        Mockito.when(git.isTracked("src/A.java")).thenReturn(true);
+        Mockito.when(repository.recordBaseline(Mockito.anyString(), Mockito.anyString())).thenReturn(true);
+        Mockito.doThrow(new WorkspaceLeaseExpiredException("lease expired"))
+                .when(leaseCoordinator).assertCurrent(lease);
+
+        WorkspaceGitGuard guard = guard(git);
+
+        assertThatThrownBy(() -> guard.execute(
+                proposal("abc1234", List.of("src/A.java")), () -> "result"))
+                .isInstanceOf(WorkspaceLeaseExpiredException.class);
+
+        Mockito.verify(git).checkoutFromSha("abc1234", "src/A.java");
         Mockito.verify(git, Mockito.never()).add(Mockito.anyList());
         Mockito.verify(git, Mockito.never()).commit(Mockito.anyString());
     }
@@ -242,12 +333,13 @@ class WorkspaceGitGuardTest {
         Mockito.when(repository.recordCommit(Mockito.anyString(), Mockito.any(),
                 Mockito.anyList(), Mockito.anyString())).thenReturn(true);
 
-        WorkspaceGitGuard guard = new WorkspaceGitGuard(git, pathNormalizer, repository);
+        WorkspaceGitGuard guard = guard(git);
         ToolInvocationProposal p = proposal("abc1234", List.of("Desktop/hello.txt"));
 
         assertThatNoException().isThrownBy(() -> guard.execute(p, () -> "ok"));
 
-        Mockito.verify(repository).recordCommit("tip-test-1", null, List.of(), "no-op write; nothing committed");
+        Mockito.verify(repository).recordCommit(
+                Mockito.eq("tip-test-1"), Mockito.isNull(), Mockito.eq(List.of()), Mockito.anyString());
     }
 
     @Test
@@ -259,7 +351,7 @@ class WorkspaceGitGuardTest {
         Mockito.when(git.isTracked("src/A.java")).thenReturn(true);
         Mockito.when(repository.recordBaseline(Mockito.anyString(), Mockito.anyString())).thenReturn(true);
 
-        WorkspaceGitGuard guard = new WorkspaceGitGuard(git, pathNormalizer, repository);
+        WorkspaceGitGuard guard = guard(git);
         ToolInvocationProposal p = proposal("abc1234", List.of("src/A.java"));
 
         RuntimeException ex = Assertions.assertThrows(RuntimeException.class,
@@ -283,7 +375,7 @@ class WorkspaceGitGuardTest {
         Mockito.when(git.isTracked("src/A.java")).thenReturn(true);
         Mockito.when(repository.recordBaseline(Mockito.anyString(), Mockito.anyString())).thenReturn(true);
 
-        WorkspaceGitGuard guard = new WorkspaceGitGuard(git, pathNormalizer, repository);
+        WorkspaceGitGuard guard = guard(git);
         ToolInvocationProposal p = proposal("abc1234", List.of("src/A.java"));
 
         RuntimeException ex = Assertions.assertThrows(RuntimeException.class,
@@ -311,7 +403,7 @@ class WorkspaceGitGuardTest {
         ToolInvocationProposal p = proposalWithPreview(
                 "abc1234", List.of("src/A.java"),
                 "workspaceRunCommand: mvn -Dpassword=foo%bar deploy");
-        WorkspaceGitGuard guard = new WorkspaceGitGuard(git, pathNormalizer, repository);
+        WorkspaceGitGuard guard = guard(git);
 
         assertThatNoException().isThrownBy(() -> guard.execute(p, () -> "ok"));
 
@@ -325,7 +417,7 @@ class WorkspaceGitGuardTest {
         GitOperations git = mockGit(tmpRoot, "abc1234", List.of());
         ToolInvocationProposal p = proposal("abc1234", List.of("src/A.java"));
         Mockito.when(repository.recordBaseline("tip-test-1", "abc1234")).thenReturn(false);
-        WorkspaceGitGuard guard = new WorkspaceGitGuard(git, pathNormalizer, repository);
+        WorkspaceGitGuard guard = guard(git);
 
         @SuppressWarnings("unchecked")
         Callable<String> tool = Mockito.mock(Callable.class);
@@ -352,7 +444,7 @@ class WorkspaceGitGuardTest {
         Mockito.when(repository.recordBaseline(Mockito.anyString(), Mockito.anyString())).thenReturn(true);
 
         ToolInvocationProposal p = proposal("abc1234", List.of("src/A.java"));
-        WorkspaceGitGuard guard = new WorkspaceGitGuard(git, pathNormalizer, repository);
+        WorkspaceGitGuard guard = guard(git);
 
         assertThatThrownBy(() -> guard.execute(p, () -> "ok"))
                 .isInstanceOf(SecurityException.class)

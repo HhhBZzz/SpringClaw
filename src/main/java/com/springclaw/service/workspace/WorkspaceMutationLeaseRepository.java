@@ -3,6 +3,7 @@ package com.springclaw.service.workspace;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -22,17 +23,28 @@ public class WorkspaceMutationLeaseRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    @Transactional
-    public Optional<WorkspaceMutationLease> acquire(String workspaceId,
-                                                    String proposalId,
-                                                    Duration ttl) {
-        long ttlSeconds = positiveSeconds(ttl);
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void ensureWorkspace(String workspaceId) {
+        Integer existing = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workspace_mutation_lease WHERE workspace_id = ?",
+                Integer.class,
+                workspaceId);
+        if (existing != null && existing == 1) {
+            return;
+        }
         jdbcTemplate.update(
                 "INSERT IGNORE INTO workspace_mutation_lease " +
                         "(workspace_id, holder_proposal_id, fencing_token, lease_until, update_time) " +
                         "VALUES (?, NULL, 0, NULL, CURRENT_TIMESTAMP(6))",
                 workspaceId);
+    }
 
+    @Transactional
+    public Optional<WorkspaceMutationLease> acquire(String workspaceId,
+                                                    String proposalId,
+                                                    long fencingToken,
+                                                    Duration ttl) {
+        long ttlSeconds = positiveSeconds(ttl);
         LeaseRow current = lockRow(workspaceId);
         boolean active = current.holderProposalId() != null
                 && current.leaseUntil() != null
@@ -41,14 +53,18 @@ public class WorkspaceMutationLeaseRepository {
             return Optional.empty();
         }
 
-        long nextToken = Math.addExact(current.fencingToken(), 1L);
+        if (fencingToken <= current.fencingToken()) {
+            throw new IllegalStateException(
+                    "fencing token 必须严格递增: current=%d, allocated=%d"
+                            .formatted(current.fencingToken(), fencingToken));
+        }
         int updated = jdbcTemplate.update(
                 "UPDATE workspace_mutation_lease " +
                         "SET holder_proposal_id = ?, fencing_token = ?, " +
                         "lease_until = TIMESTAMPADD(SECOND, ?, CURRENT_TIMESTAMP(6)), " +
                         "update_time = CURRENT_TIMESTAMP(6) " +
                         "WHERE workspace_id = ?",
-                proposalId, nextToken, ttlSeconds, workspaceId);
+                proposalId, fencingToken, ttlSeconds, workspaceId);
         if (updated != 1) {
             throw new IllegalStateException("工作区租约行更新失败: " + workspaceId);
         }
@@ -77,7 +93,7 @@ public class WorkspaceMutationLeaseRepository {
         List<LeaseRow> rows = jdbcTemplate.query(
                 "SELECT workspace_id, holder_proposal_id, fencing_token, lease_until, " +
                         "CURRENT_TIMESTAMP(6) AS database_now " +
-                        "FROM workspace_mutation_lease WHERE workspace_id = ? FOR UPDATE",
+                        "FROM workspace_mutation_lease WHERE workspace_id = ? FOR UPDATE NOWAIT",
                 (rs, rowNum) -> new LeaseRow(
                         rs.getString("workspace_id"),
                         rs.getString("holder_proposal_id"),

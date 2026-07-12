@@ -152,7 +152,8 @@ public class WorkspaceGitGuard {
         // The coordinator holds SELECT ... FOR UPDATE for the full callback. This check and
         // the following Git publication/terminal write therefore cannot be overtaken by a
         // higher fencing token. If ownership is uncertain, stop without mutating the workspace.
-        leaseCoordinator.assertCurrent(lease);
+        assertCurrentOrRollbackExpiredLease(
+                proposal, lease, currentSha, dirtyNonTargetSnapshots);
 
         // 不变量 14：工具成功但无实际 diff
         if (newlyChanged.isEmpty()) {
@@ -177,6 +178,32 @@ public class WorkspaceGitGuard {
                     proposal.proposalId(), commitSha);
         }
         return result;
+    }
+
+    private void assertCurrentOrRollbackExpiredLease(
+            ToolInvocationProposal proposal,
+            WorkspaceMutationLease lease,
+            String baselineSha,
+            Map<String, DirtyFileSnapshot> dirtyNonTargetSnapshots) {
+        try {
+            leaseCoordinator.assertCurrent(lease);
+        } catch (WorkspaceLeaseExpiredException ex) {
+            // The false result came from MySQL while this transaction still owns the row lock,
+            // so no successor can exist yet and cleanup is authoritative. Other database/
+            // ownership failures are deliberately not caught: a stale worker must not mutate.
+            List<String> failedTargets = rollbackPaths(baselineSha, proposal.targetPaths());
+            List<String> changedDirtyNonTargets = changedSnapshots(dirtyNonTargetSnapshots);
+            List<String> failedDirtyRestore = restoreSnapshots(
+                    dirtyNonTargetSnapshots, changedDirtyNonTargets);
+            if (failedTargets.isEmpty() && failedDirtyRestore.isEmpty()) {
+                throw ex;
+            }
+            List<String> failed = new ArrayList<>(failedTargets);
+            failed.addAll(failedDirtyRestore);
+            throw new WorkspaceLeaseExpiredException(
+                    ex.getMessage() + "；租约过期后的 rollback 部分失败，需手工介入: " + failed,
+                    ex);
+        }
     }
 
     private record DirtyFileSnapshot(boolean exists, byte[] content) { }

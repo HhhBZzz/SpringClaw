@@ -296,6 +296,30 @@ class WorkspaceGitGuardTest {
     }
 
     @Test
+    void authoritativelyExpiredLeaseRollsBackWhileRowLockIsStillHeld() throws Exception {
+        GitOperations git = Mockito.mock(GitOperations.class);
+        Mockito.when(git.workspaceRoot()).thenReturn(tmpRoot);
+        Mockito.when(git.headSha()).thenReturn("abc1234");
+        Mockito.when(git.statusNameOnly())
+                .thenReturn(List.of())
+                .thenReturn(List.of("src/A.java"));
+        Mockito.when(git.isTracked("src/A.java")).thenReturn(true);
+        Mockito.when(repository.recordBaseline(Mockito.anyString(), Mockito.anyString())).thenReturn(true);
+        Mockito.doThrow(new WorkspaceLeaseExpiredException("lease expired"))
+                .when(leaseCoordinator).assertCurrent(lease);
+
+        WorkspaceGitGuard guard = guard(git);
+
+        assertThatThrownBy(() -> guard.execute(
+                proposal("abc1234", List.of("src/A.java")), () -> "result"))
+                .isInstanceOf(WorkspaceLeaseExpiredException.class);
+
+        Mockito.verify(git).checkoutFromSha("abc1234", "src/A.java");
+        Mockito.verify(git, Mockito.never()).add(Mockito.anyList());
+        Mockito.verify(git, Mockito.never()).commit(Mockito.anyString());
+    }
+
+    @Test
     void dirtyNonTargetDirectory_doesNotBlockToolExecution() throws Exception {
         Files.createDirectories(tmpRoot.resolve("docs/interview-prep"));
 

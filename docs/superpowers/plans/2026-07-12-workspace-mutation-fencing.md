@@ -24,21 +24,26 @@
 **Files:**
 - Create: `src/main/resources/db/migration/V5__workspace_mutation_lease.sql`
 - Create: `src/main/resources/db/migration/V6__expand_tool_execution_result.sql`
+- Create: `src/main/resources/db/migration/V7__durable_fencing_token_counter.sql`
 - Create: `src/main/java/com/springclaw/service/workspace/WorkspaceMutationLease.java`
 - Create: `src/main/java/com/springclaw/service/workspace/WorkspaceIdentity.java`
+- Create: `src/main/java/com/springclaw/service/workspace/WorkspaceFencingTokenAllocator.java`
+- Create: `src/main/java/com/springclaw/service/workspace/WorkspaceLeaseExpiredException.java`
 - Create: `src/main/java/com/springclaw/service/workspace/WorkspaceMutationLeaseRepository.java`
 - Test: `src/test/java/com/springclaw/service/workspace/WorkspaceIdentityTest.java`
 - Test: `src/test/java/com/springclaw/service/workspace/WorkspaceMutationLeaseRepositoryTest.java`
 - Test: `src/test/java/com/springclaw/service/workspace/WorkspaceMutationLeaseConcurrencyTest.java`
+- Test: `src/test/java/com/springclaw/service/workspace/WorkspaceFencingTokenAllocatorTest.java`
 
 **Interfaces:**
 - Produces: `WorkspaceIdentity.id(Path): String`。
-- Produces: `WorkspaceMutationLeaseRepository.acquire(String workspaceId, String proposalId, Duration ttl): Optional<WorkspaceMutationLease>`。
+- Produces: `WorkspaceFencingTokenAllocator.nextToken(String workspaceId, String proposalId): long`，以 `REQUIRES_NEW` 永久消耗 token。
+- Produces: `WorkspaceMutationLeaseRepository.acquire(String workspaceId, String proposalId, long fencingToken, Duration ttl): Optional<WorkspaceMutationLease>`。
 - Produces: `isCurrent(String workspaceId, String proposalId, long token): boolean` 和 `release(String workspaceId, String proposalId, long token): boolean`。
 
 - [ ] **Step 1: Write failing identity and repository tests**
 
-覆盖同一路径规范化稳定、不同路径 ID 不同；首次 acquire 返回 token 1、第二持有者被拒绝；把首租约改为过期后接管返回更大的 token；旧 token 的 current/release 返回 false 且新租约仍有效。另用两个真实线程和独立事务证明第一个执行回调结束前第二个回调不能进入。
+覆盖同一路径规范化稳定、不同路径 ID 不同；token 独立提交且严格递增；首次 acquire 消费给定 token、第二持有者被拒绝；把首租约改为过期后接管返回更大的 token；旧 token 的 current/release 返回 false。另用两个真实线程和独立事务证明竞争者 NOWAIT 快速失败，以及失败执行后同 proposal 的新 token 仍严格更大。
 
 - [ ] **Step 2: Run tests to verify RED**
 
@@ -48,7 +53,7 @@ Expected: FAIL，原因是迁移、记录或仓库类型尚不存在。
 
 - [ ] **Step 3: Add the Flyway table and minimal transactional repository**
 
-迁移创建 `workspace_mutation_lease(workspace_id, holder_proposal_id, fencing_token, lease_until, update_time)`，并把 proposal `execution_result` 扩为 `MEDIUMTEXT`。仓库的 acquire 使用 `INSERT IGNORE`、事务内 `SELECT ... FOR UPDATE` 和条件更新；current/release 同时匹配 workspace、proposal、token。
+迁移创建 workspace lease、扩展 `execution_result`，并新增从旧最大 token 初始化的 durable counter。工作区行短事务初始化；执行事务使用 `SELECT ... FOR UPDATE NOWAIT`；current/release 同时匹配 workspace、proposal、token。
 
 - [ ] **Step 4: Run focused tests to verify GREEN**
 

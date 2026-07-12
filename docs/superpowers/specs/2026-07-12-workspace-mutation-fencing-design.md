@@ -85,4 +85,3 @@ no-op 执行也必须通过同一 fencing 检查，防止旧执行者覆盖 prop
 - 单元测试验证工作区路径身份稳定且不同路径不碰撞。
 - `WorkspaceGitGuardTest` 验证租约生命周期、提交前 fencing、fencing 丢失时回滚且不提交、no-op 也 fencing、结构化结果包含真实返回值/commit/changed files/token。
 - 先运行聚焦测试，再运行完整 Maven 测试套件；最后在目标分支合并结果上再次完整回归。
-

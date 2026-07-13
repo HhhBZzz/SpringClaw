@@ -48,11 +48,11 @@ const requiredApplicationSettings = [
   'RABBITMQ_PASSWORD',
 ];
 
-const requiredNativeRuntimeSafetySettings = [
-  'SPRINGCLAW_PERSISTENCE_DB_ENABLED',
-  'SPRINGCLAW_FEISHU_OUTBOUND_ENABLED',
-  'SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED',
-];
+const requiredNativeRuntimeSafetySettings = {
+  SPRINGCLAW_PERSISTENCE_DB_ENABLED: 'true',
+  SPRINGCLAW_FEISHU_OUTBOUND_ENABLED: 'false',
+  SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED: 'false',
+};
 
 function fail(message) {
   process.stderr.write(`Native backend startup failed: ${message}\n`);
@@ -123,11 +123,15 @@ for (const key of requiredApplicationSettings) {
   );
 }
 
-for (const key of requiredNativeRuntimeSafetySettings) {
-  selectedEnvironment[key] = requireString(
+for (const [key, expectedValue] of Object.entries(requiredNativeRuntimeSafetySettings)) {
+  const resolvedValue = requireString(
     appEnvironment[key],
     'resolved Compose configuration is missing a required native runtime safety setting',
   );
+  if (resolvedValue !== expectedValue) {
+    fail('resolved Compose configuration has an invalid required native runtime safety setting');
+  }
+  selectedEnvironment[key] = resolvedValue;
 }
 
 for (const key of documentedSpringclawSettings) {

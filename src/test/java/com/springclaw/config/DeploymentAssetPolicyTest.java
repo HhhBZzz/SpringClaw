@@ -99,13 +99,19 @@ class DeploymentAssetPolicyTest {
     void nativeLauncherKeepsDeliveredPersistenceAndFeishuSafetySettings() throws IOException {
         String launcher = read("scripts/run-native-backend.mjs");
 
-        for (String setting : List.of(
-                "SPRINGCLAW_PERSISTENCE_DB_ENABLED",
-                "SPRINGCLAW_FEISHU_OUTBOUND_ENABLED",
-                "SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED"
-        )) {
-            assertThat(launcher).contains("'" + setting + "',");
-        }
+        assertThat(launcher).contains(
+                "const requiredNativeRuntimeSafetySettings = {",
+                "SPRINGCLAW_PERSISTENCE_DB_ENABLED: 'true',",
+                "SPRINGCLAW_FEISHU_OUTBOUND_ENABLED: 'false',",
+                "SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED: 'false',"
+        );
+    }
+
+    @Test
+    void nativeModeDocumentationRequiresABashCompatibleShell() throws IOException {
+        assertThat(read("README.md")).contains("Bash-compatible shell");
+        assertThat(read("README_CN.md")).contains("Bash 兼容 shell");
+        assertThat(read("RUN_REAL_ENVIRONMENT.md")).contains("Bash 兼容 shell");
     }
 
     @Test

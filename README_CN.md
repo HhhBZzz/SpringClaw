@@ -20,7 +20,7 @@ flowchart LR
 ## 环境要求
 
 - Docker Desktop（包含 Docker Compose v2）
-- 本地开发额外需要：JDK 17+、Maven 3.8+、Node.js 22+、npm
+- 本地开发额外需要：JDK 17+、Maven 3.8+、Node.js 22+、npm，以及 Bash 兼容 shell（Windows 请使用 WSL）。
 
 ## 首次配置
 

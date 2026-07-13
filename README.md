@@ -20,7 +20,7 @@ The release Compose file exposes only the frontend HTTP port. The application, M
 ## Prerequisites
 
 - Docker Desktop with Docker Compose v2
-- For native development: JDK 17+, Maven 3.8+, Node.js 22+ and npm
+- For native development: JDK 17+, Maven 3.8+, Node.js 22+, npm, and a Bash-compatible shell (use WSL on Windows).
 
 ## Configure once
 

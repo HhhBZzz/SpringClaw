@@ -65,6 +65,13 @@ function runLauncher(config) {
   });
 }
 
+function assertMavenWasNotLaunched(config, reason) {
+  rmSync(capturePath, { force: true });
+  const rejected = runLauncher(config);
+  assert.notEqual(rejected.status, 0, reason);
+  assert.equal(existsSync(capturePath), false, 'Maven does not start when runtime safety settings are invalid');
+}
+
 try {
   mkdirSync(binDirectory);
   writeFileSync(join(binDirectory, 'mvn'), `#!/usr/bin/env node
@@ -110,12 +117,13 @@ writeFileSync(process.env.NATIVE_BACKEND_ENV_CAPTURE, JSON.stringify(process.env
   assert.equal(capturedEnvironment.PATH, callerPath, 'container PATH cannot override the caller PATH');
   assert.equal(capturedEnvironment.HOME, callerHome, 'container HOME cannot override the caller HOME');
 
-  rmSync(capturePath);
-  const invalidConfig = resolvedConfig();
-  delete invalidConfig.services.app.environment.SPRINGCLAW_FEISHU_OUTBOUND_ENABLED;
-  const rejected = runLauncher(invalidConfig);
-  assert.notEqual(rejected.status, 0, 'missing runtime safety settings reject native startup');
-  assert.equal(existsSync(capturePath), false, 'Maven does not start when runtime safety settings are invalid');
+  const missingSafetyConfig = resolvedConfig();
+  delete missingSafetyConfig.services.app.environment.SPRINGCLAW_FEISHU_OUTBOUND_ENABLED;
+  assertMavenWasNotLaunched(missingSafetyConfig, 'missing runtime safety settings reject native startup');
+
+  const invalidSafetyConfig = resolvedConfig();
+  invalidSafetyConfig.services.app.environment.SPRINGCLAW_PERSISTENCE_DB_ENABLED = 'false';
+  assertMavenWasNotLaunched(invalidSafetyConfig, 'unexpected runtime safety values reject native startup');
 
   process.stdout.write('native backend launcher regression tests passed.\n');
 } finally {

@@ -6,7 +6,7 @@
 
 准备 Docker Desktop（Docker Compose v2），在项目根目录执行命令。另需为 `.env` 中的基础设施密码选择安全且互不相同的值。
 
-- **本地开发**：`make dev-infra` 只启动 MySQL、Redis、RabbitMQ；Maven 和 Vite 在宿主机启动。
+- **本地开发**：`make dev-infra` 只启动 MySQL、Redis、RabbitMQ；Maven 和 Vite 在宿主机启动。本地命令需要 Bash 兼容 shell；Windows 请使用 WSL。
 - **完整交付**：`make up` 启动 frontend、app、MySQL、Redis、RabbitMQ 五项服务，适用于演示、验收和单机部署。
 
 完整交付中只有 frontend 的 HTTP 端口映射到宿主机；app 和三项基础依赖保持在 Docker 内部网络。

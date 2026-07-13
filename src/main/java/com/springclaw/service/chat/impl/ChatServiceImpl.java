@@ -71,6 +71,7 @@ public class ChatServiceImpl implements ChatService {
     private final boolean modelLedStreamingEnabled;
     private final boolean basicStreamingEnabled;
     private LocalFileWriteProposalService localFileWriteProposalService;
+    private ApprovedCommandProposalService approvedCommandProposalService;
 
     @Autowired
     public ChatServiceImpl(AiProviderService aiProviderService,
@@ -122,6 +123,11 @@ public class ChatServiceImpl implements ChatService {
     @Autowired(required = false)
     void setLocalFileWriteProposalService(LocalFileWriteProposalService localFileWriteProposalService) {
         this.localFileWriteProposalService = localFileWriteProposalService;
+    }
+
+    @Autowired(required = false)
+    void setApprovedCommandProposalService(ApprovedCommandProposalService approvedCommandProposalService) {
+        this.approvedCommandProposalService = approvedCommandProposalService;
     }
 
     /**
@@ -367,6 +373,9 @@ public class ChatServiceImpl implements ChatService {
             ToolInvocationProposal toolProposal = localFileWriteProposalService == null
                     ? null
                     : localFileWriteProposalService.createProposalIfSupported(context).orElse(null);
+            if (toolProposal == null && approvedCommandProposalService != null) {
+                toolProposal = approvedCommandProposalService.createProposalIfSupported(context).orElse(null);
+            }
             if (toolProposal != null) {
                 sseEventBridge.sendToolActionRequired(emitter, toolProposal);
                 sseEventBridge.sendAnswerChunks(emitter,

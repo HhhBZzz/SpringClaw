@@ -13,7 +13,7 @@ cp .env.example .env
 
 # Native development: start only Docker dependencies, then host processes.
 make dev-infra
-mvn spring-boot:run
+make native-backend
 cd frontend && npm ci && npm run dev
 
 # Complete delivery: frontend, backend, MySQL, Redis, and RabbitMQ.
@@ -27,6 +27,8 @@ make down
 ```
 
 `make verify` validates Compose, waits for five healthy services, checks the frontend and API proxy, and performs an internal app Actuator health check. It uses Docker Compose's resolved `SPRINGCLAW_HTTP_PORT` from `.env` by default; an isolated caller can override the file with `ENV_FILE=/path/to/file` or intentionally override the probe port with `HTTP_PORT=...`. Preserve `COMPOSE_PROJECT_NAME` when invoking it for a separate Compose project.
+
+`make native-backend` validates Compose, resolves its environment, and exports only valid `MYSQL_*`, `REDIS_*`, `RABBITMQ_*`, and `SPRINGCLAW_*` assignments before it execs Maven. It does not source `.env`, evaluate values, or overwrite `PATH`/`HOME`.
 
 ## Deployment configuration
 

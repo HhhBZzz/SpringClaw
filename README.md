@@ -49,7 +49,7 @@ Use this mode while changing backend or frontend code. Docker supplies only loca
 
 ```bash
 make dev-infra
-mvn spring-boot:run
+make native-backend
 
 # In a second terminal
 cd frontend
@@ -57,7 +57,7 @@ npm ci
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`. Vite proxies `/api` to the native backend at `http://127.0.0.1:18080`.
+`make native-backend` resolves the supported database, Redis, RabbitMQ, and SpringClaw variables through Docker Compose before executing Maven. This keeps quoted values, inline comments, and interpolation consistent with `make up` without evaluating `.env` as shell code. Open `http://127.0.0.1:5173`; Vite proxies `/api` to the native backend at `http://127.0.0.1:18080`.
 
 ## Complete Docker Compose delivery
 

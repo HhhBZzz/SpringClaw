@@ -35,7 +35,7 @@ make verify
 
 ```bash
 make dev-infra
-mvn spring-boot:run
+make native-backend
 
 # 另开终端
 cd frontend
@@ -43,7 +43,7 @@ npm ci
 npm run dev
 ```
 
-这时 Vite 在 `http://127.0.0.1:5173` 提供前端，代理请求给本机 `http://127.0.0.1:18080`。`docker-compose.dev.yml` 仅把依赖端口绑定到回环地址，不应拿来作为正式公网交付文件。
+`make native-backend` 通过 Docker Compose 的已解析环境启动 Maven，并且只传递数据库、Redis、RabbitMQ 和 SpringClaw 前缀的配置。这样带引号的值、行尾注释和插值与完整 Compose 交付一致，同时不会执行 `.env` 内容。此时 Vite 在 `http://127.0.0.1:5173` 提供前端，代理请求给本机 `http://127.0.0.1:18080`。`docker-compose.dev.yml` 仅把依赖端口绑定到回环地址，不应拿来作为正式公网交付文件。
 
 ## 4. 数据库迁移与健康状态
 

@@ -218,14 +218,14 @@ RUN apt-get update \
 - [ ] **Step 6: Verify GREEN and commit.**
 
 ~~~bash
-mvn -Dtest=DeploymentAssetPolicyTest test
+mvn -Dtest=DeploymentAssetPolicyTest#releaseComposeHasAFrontendAndPinnedRuntimeImages+developmentOverlayOwnsLoopbackInfrastructurePorts test
 docker compose --env-file .env.example config --quiet
 docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.dev.yml config --quiet
 git add Dockerfile docker-compose.yml docker-compose.dev.yml .env.example frontend/Dockerfile frontend/nginx.conf
 git commit -m "feat: package complete docker delivery"
 ~~~
 
-Expected: policy test and both Compose validations exit 0.
+Expected: the two Compose-asset policy methods and both Compose validations exit 0. The documentation policy method remains RED until Task 4 updates the runbooks.
 
 ### Task 3: 收敛 Spring 配置、Flyway 与生产安全
 
@@ -270,7 +270,7 @@ springclaw:
 - [ ] **Step 4: Verify GREEN and commit.**
 
 ~~~bash
-mvn -Dtest=ApplicationYamlPolicyTest,DeploymentAssetPolicyTest test
+mvn -Dtest=ApplicationYamlPolicyTest,DeploymentAssetPolicyTest#releaseComposeHasAFrontendAndPinnedRuntimeImages+developmentOverlayOwnsLoopbackInfrastructurePorts test
 git add src/main/resources/application.yml src/main/resources/application-prod.yml src/test/java/com/springclaw/config/ApplicationYamlPolicyTest.java
 git commit -m "fix: align deployment configuration contract"
 ~~~
@@ -381,4 +381,3 @@ Only stage delivery files; never stage .env, .env.local, target/, frontend/dist/
 - Spec coverage is complete: Task 1 locks assets, Task 2 implements complete Compose/frontend/config template, Task 3 aligns Spring/Flyway/security, Task 4 supplies commands/docs, Task 5 verifies fresh start, restart, regressions and push.
 - Every task names exact paths, properties, commands and expected results.
 - SPRINGCLAW_HTTP_PORT, ENV_FILE, COMPOSE_PROJECT_NAME, MYSQL_*, /workspace, app:18080, make verify and springclaw-smoke are used consistently.
-

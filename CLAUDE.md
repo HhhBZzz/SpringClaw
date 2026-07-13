@@ -1,76 +1,62 @@
-# CLAUDE.md
+# SpringClaw contributor guide
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Project overview
 
-## Project Overview
+SpringClaw is a Java 17, single-module Spring Boot 3.5 application with Spring AI, MySQL, Redis, RabbitMQ, Flyway, and a Vue 3/Vite operations console. Tool calls are governed by runtime permission, risk, confirmation, and audit controls.
 
-OpenClaw Java is an enterprise AI Agent backend built with Spring Boot 3.5 + Spring AI 1.1. It provides multi-model chat with provider failover, dual-track memory (MySQL event stream + Redis vector store), tool/skill governance via AOP, and Feishu (Lark) integration. Java 17, single-module Maven project.
+## Supported run commands
 
-## Build & Run Commands
+Create `.env` from `.env.example` before starting any runtime. `.env` is private and must not be committed.
 
 ```bash
-# Build (skip tests)
-mvn clean package -DskipTests
+cp .env.example .env
 
-# Run locally (no real LLM needed — falls back to local skills)
-OPENCLAW_PRIMARY_API_KEY=test-key mvn spring-boot:run
+# Native development: start only Docker dependencies, then host processes.
+make dev-infra
+mvn spring-boot:run
+cd frontend && npm ci && npm run dev
 
-# Run with Docker (MySQL + Redis + RabbitMQ + App)
-OPENCLAW_PRIMARY_API_KEY=test-key docker compose up -d --build
+# Complete delivery: frontend, backend, MySQL, Redis, and RabbitMQ.
+make up
+make ps
+make verify
 
-# Health check (port 18080)
-curl http://127.0.0.1:18080/actuator/health
+# Diagnose or stop while preserving named volumes.
+make logs
+make down
 ```
+
+`make verify` validates Compose, waits for five healthy services, checks the frontend and API proxy, and performs an internal app Actuator health check. It uses `.env` by default; an isolated caller can override it with `ENV_FILE=/path/to/file`. Preserve `COMPOSE_PROJECT_NAME` when invoking it for a separate Compose project.
+
+## Deployment configuration
+
+- `SPRINGCLAW_ADMIN_USERNAMES` is the comma-separated admin bootstrap allowlist. Production should keep first-user bootstrap disabled.
+- Use `SPRINGCLAW_AUTH_COOKIE_SECURE=false` only for local HTTP. A TLS-terminating deployment must set it to `true`.
+- Flyway validates and applies migrations at application startup; destructive clean is disabled.
+- The release Compose topology exposes only the Nginx frontend. The development override is the only place infrastructure ports are published to host loopback.
+- See [RUN_REAL_ENVIRONMENT.md](./RUN_REAL_ENVIRONMENT.md) for backup, restore, upgrade, log, and cleanup procedures.
 
 ## Testing
 
-Tests are pure JUnit 5 + Mockito unit tests (no Spring context loading). 34 test files under `src/test/java/com/springclaw/`.
-
 ```bash
-mvn test                                                    # All tests
-mvn test -Dtest=ChatServiceImplModeTest                     # Single class
-mvn test -Dtest=ChatServiceImplModeTest#shouldDefaultTo...  # Single method
-mvn test -Dtest="com.springclaw.service.chat.**"              # Package pattern
+mvn test
+mvn test -Dtest=DeploymentAssetPolicyTest
+cd frontend && npm test && npm run build
+docker compose --env-file .env config --quiet
+make verify
 ```
 
-No linter (Checkstyle/SpotBugs/PMD) is configured.
+## Architecture map
 
-## Architecture
+1. Controllers in `controller/` expose REST, SSE, auth, admin, and webhook endpoints.
+2. `ChatServiceImpl` delegates through the simplified or OPAR runtime engines.
+3. Provider routing and failover live in `service/ai/`; governed Spring AI tools live under `tool/`.
+4. MySQL stores durable event and business data; Redis supplies cache, auth/session support, and vector memory; RabbitMQ handles asynchronous chat work.
+5. `frontend/` is a Vue 3 console. Its release image is built separately and served by Nginx, which proxies `/api` to `app:18080`.
 
-### Request Flow
+## Code conventions
 
-1. **Controllers** (`controller/`) receive HTTP requests. Chat endpoints: `POST /api/chat/{send,stream,async}`.
-2. **ChatServiceImpl** (`service/chat/impl/ChatServiceImpl.java`) is the master orchestrator. It delegates to one of two engines based on `ChatRoutingPolicyService`:
-   - **SimplifiedOparEngine** — default, faster for simple queries
-   - **OparLoopEngine** — full OPAR (Observe-Plan-Act-Reflect) loop for complex queries
-3. **ModelCallExecutor** handles the actual LLM call with automatic provider failover via **AiProviderService** (`service/ai/`), which manages multiple providers (primary/qwen/coding-plan/deepseek).
-4. Tools annotated with Spring AI `@Tool` in `tool/pack/` are dynamically injected. **ToolRuntimeAspect** (`tool/runtime/`) intercepts all tool calls via AOP for permission checking, rate limiting, and audit.
-
-### Key Subsystems
-
-- **Memory**: Dual-track — short-term via MySQL `message_event` table (`service/event/`), long-term via Redis Vector Store with embeddings (`service/memory/`). `ContextAssembler` (`service/context/`) builds the full conversation context including semantic recall.
-- **Channel Adapters** (`strategy/channel/`): Strategy pattern — `ChannelAdapter` interface with `FeishuChannelAdapter`, `TelegramChannelAdapter`, `WechatChannelAdapter`, selected by `ChannelAdapterFactory`.
-- **Skills** (`service/skill/`): Directory-based skills rooted at `skills/`. `SkillCatalogService` scans `SKILL.md` definitions. `SkillRuntimeService` executes `python` / historical `script` and `builtin` skills, while prompt-style markdown skills remain non-executable instructions. Governed by `skill_descriptor` and `skill_policy` entities.
-- **Auth** (`web/auth/`): Token-based auth with `@RequireRole` annotation. `TokenAuthenticationInterceptor` + `RoleAuthorizationInterceptor`. First registered user auto-promoted to ADMIN.
-- **Async Chat**: RabbitMQ-based — producer sends to queue, consumer processes, result stored in Redis with TTL. Poll via `GET /api/chat/async/{id}`.
-- **System Prompt**: Loaded from `SOUL.md` at project root by `SoulPromptService`.
-
-### Configuration
-
-Almost everything is externalized via `application.yml` with `${OPENCLAW_*}` environment variable overrides. Key env vars:
-- `OPENCLAW_PRIMARY_API_KEY` / `OPENCLAW_CODING_PLAN_API_KEY` / `OPENCLAW_DEEPSEEK_API_KEY` — LLM provider keys
-- `OPENCLAW_EMBEDDING_API_KEY` + `OPENCLAW_EMBEDDING_MODEL` — embedding config
-- `OPENCLAW_CHAT_AGENT_MODE` — `simplified` (default) or `opar`
-- `OPENCLAW_FEISHU_*` — Feishu integration settings
-
-Spring AI's auto-configured model beans are explicitly disabled (`spring.ai.model.chat: none`, etc.) — the project uses its own provider management via `springclaw.ai.providers.*`.
-
-## Code Conventions
-
-- **Constructor injection** throughout (no `@Autowired` on fields)
-- **Java records** for DTOs (`ChatRequest`, `ChatResponse`, `AssembledContext`, etc.)
-- **Unified API response**: All REST endpoints return `ApiResponse<T>` with `{code, message, data}`
-- **Interface + Impl separation**: e.g., `ChatService` → `ChatServiceImpl`, `MemoryService` → `VectorMemoryService`
-- **Lombok**: Used for `@Slf4j`, `@Data`, `@Builder`, `@RequiredArgsConstructor` etc.
-- **Graceful degradation**: When the AI model is unavailable, the system falls back to local skill execution
-- **Meta-guard**: `ChatResponsePolicyService` detects model identity/refusal leaks and retries automatically
+- Prefer constructor injection and keep controller responses in `ApiResponse<T>`.
+- Preserve permission checks, risk classification, confirmation proposals, and audit records around tool execution.
+- New behavior requires a focused test that first fails, followed by relevant regression tests.
+- Do not put credentials, private `.env` files, generated `target/`, or `frontend/dist/` into commits.

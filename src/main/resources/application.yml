@@ -9,10 +9,12 @@ spring:
     enabled: ${SPRINGCLAW_FLYWAY_ENABLED:true}
     baseline-on-migrate: true
     baseline-version: 0
+    validate-on-migrate: true
+    clean-disabled: true
     locations: classpath:db/migration
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DB:openclaw}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/${MYSQL_DB:springclaw}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false
     username: ${MYSQL_USER:root}
     password: ${MYSQL_PASSWORD:root}
     hikari:
@@ -348,7 +350,7 @@ springclaw:
     markdown-enabled: ${SPRINGCLAW_MARKDOWN_SKILL_ENABLED:true}
   webhook:
     security:
-      enabled: false
+      enabled: ${SPRINGCLAW_WEBHOOK_SECURITY_ENABLED:false}
       redis-enabled: true
       replay-seconds: 300
       default-secret: ${SPRINGCLAW_WEBHOOK_SECRET:}

@@ -34,9 +34,10 @@ management:
 
 springclaw:
   auth:
+    bootstrap-first-user-admin: ${SPRINGCLAW_AUTH_BOOTSTRAP_FIRST_USER_ADMIN:false}
     cookie:
       # Production must use HTTPS
-      secure: true
+      secure: ${SPRINGCLAW_AUTH_COOKIE_SECURE:true}
   chat:
     # Disable local fallback in production (model should always be available)
     local-fallback-enabled: ${SPRINGCLAW_CHAT_LOCAL_FALLBACK_ENABLED:false}

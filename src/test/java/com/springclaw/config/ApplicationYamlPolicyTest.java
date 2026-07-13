@@ -59,6 +59,17 @@ class ApplicationYamlPolicyTest {
         );
     }
 
+    @Test
+    void deploymentDefaultsUseSpringclawFlywayAndConfigurableWebhookSecurity() {
+        Properties properties = applicationProperties();
+
+        Assertions.assertTrue(properties.getProperty("spring.datasource.url").contains("${MYSQL_DB:springclaw}"));
+        Assertions.assertEquals("true", properties.getProperty("spring.flyway.validate-on-migrate"));
+        Assertions.assertEquals("true", properties.getProperty("spring.flyway.clean-disabled"));
+        Assertions.assertEquals("${SPRINGCLAW_WEBHOOK_SECURITY_ENABLED:false}",
+                properties.getProperty("springclaw.webhook.security.enabled"));
+    }
+
     private Properties applicationProperties() {
         YamlPropertiesFactoryBean factory = new YamlPropertiesFactoryBean();
         factory.setResources(new ClassPathResource("application.yml"));

@@ -1,0 +1,11 @@
+services:
+  mysql:
+    ports: ["127.0.0.1:${MYSQL_EXPOSED_PORT:-3306}:3306"]
+
+  redis:
+    ports: ["127.0.0.1:${REDIS_EXPOSED_PORT:-6379}:6379"]
+
+  rabbitmq:
+    ports:
+      - "127.0.0.1:${RABBITMQ_EXPOSED_PORT:-5672}:5672"
+      - "127.0.0.1:${RABBITMQ_MANAGEMENT_EXPOSED_PORT:-15672}:15672"

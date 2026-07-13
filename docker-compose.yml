@@ -1,67 +1,63 @@
 services:
   mysql:
-    image: mysql:8.0
-    container_name: springclaw-mysql
+    image: mysql:8.0.44
     restart: unless-stopped
-    command:
-      - --default-authentication-plugin=mysql_native_password
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_0900_ai_ci
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci", "--default-authentication-plugin=mysql_native_password"]
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
       MYSQL_DATABASE: ${MYSQL_DB:-springclaw}
+      MYSQL_USER: ${MYSQL_USER:?MYSQL_USER is required}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
       TZ: Asia/Shanghai
-    ports:
-      - "${MYSQL_EXPOSED_PORT:-3306}:3306"
     volumes:
       - springclaw-mysql-data:/var/lib/mysql
+    networks:
+      - internal
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p${MYSQL_ROOT_PASSWORD:-root} --silent"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
       interval: 10s
       timeout: 5s
       retries: 12
+      start_period: 30s
 
   redis:
-    image: redis/redis-stack-server:latest
-    container_name: springclaw-redis
+    image: redis:8.2.7
     restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
     environment:
-      # Do not override the image entrypoint/command with plain redis-server,
-      # otherwise Redis Stack modules (including RediSearch) will not be loaded.
-      REDIS_ARGS: "--appendonly yes"
-    ports:
-      - "6379:6379"
-      - "8001:8001"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     volumes:
       - springclaw-redis-data:/data
+    networks:
+      - internal
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 12
+      start_period: 10s
 
   rabbitmq:
-    image: rabbitmq:3-management
-    container_name: springclaw-rabbitmq
+    image: rabbitmq:3.13.7-management
     restart: unless-stopped
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-guest}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
-    ports:
-      - "5672:5672"
-      - "15672:15672"
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:?RABBITMQ_USERNAME is required}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+    volumes:
+      - springclaw-rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - internal
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
       interval: 10s
       timeout: 5s
       retries: 12
+      start_period: 30s
 
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: springclaw-app
+    build: .
     restart: unless-stopped
+    expose: ["18080"]
     depends_on:
       mysql:
         condition: service_healthy
@@ -71,43 +67,91 @@ services:
         condition: service_healthy
     environment:
       SERVER_PORT: 18080
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      SPRING_PROFILES_ACTIVE: prod
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
       MYSQL_DB: ${MYSQL_DB:-springclaw}
-      MYSQL_USER: ${MYSQL_USER:-root}
-      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_USER: ${MYSQL_USER:?MYSQL_USER is required}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD is required}
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: 5672
-      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
-      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:?RABBITMQ_USERNAME is required}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
       SPRINGCLAW_PERSISTENCE_DB_ENABLED: "true"
       SPRINGCLAW_AUTH_REDIS_ENABLED: "true"
-      SPRINGCLAW_GUARD_REDIS_ENABLED: "true"
-      SPRINGCLAW_TOOLS_GUARD_REDIS_ENABLED: "true"
-      SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED: "false"
-      SPRINGCLAW_FEISHU_OUTBOUND_ENABLED: "false"
+      SPRINGCLAW_LOCAL_FILES_ROOTS: /workspace
+      SPRINGCLAW_TOOL_FILE_ROOT: /workspace
+      SPRINGCLAW_TOOLS_LOCAL_WRITE_ROOT: /workspace
+      SPRINGCLAW_MEMORY_BANK_ROOT: /app/data/memory-bank
+      SPRINGCLAW_LEARNING_ROOT: /app/data/memory-bank
+      SPRINGCLAW_ADMIN_USERNAMES: ${SPRINGCLAW_ADMIN_USERNAMES:-admin}
+      SPRINGCLAW_PASSWORD_PEPPER: ${SPRINGCLAW_PASSWORD_PEPPER:-}
+      SPRINGCLAW_AUTH_BOOTSTRAP_FIRST_USER_ADMIN: ${SPRINGCLAW_AUTH_BOOTSTRAP_FIRST_USER_ADMIN:-false}
+      SPRINGCLAW_AUTH_COOKIE_SECURE: ${SPRINGCLAW_AUTH_COOKIE_SECURE:-false}
+      SPRINGCLAW_SYSTEM_COMMAND_ENABLED: ${SPRINGCLAW_SYSTEM_COMMAND_ENABLED:-false}
       SPRINGCLAW_AI_ACTIVE_PROVIDER: ${SPRINGCLAW_AI_ACTIVE_PROVIDER:-primary}
-      SPRINGCLAW_PRIMARY_ENABLED: ${SPRINGCLAW_PRIMARY_ENABLED:-true}
+      SPRINGCLAW_PRIMARY_ENABLED: ${SPRINGCLAW_PRIMARY_ENABLED:-false}
       SPRINGCLAW_PRIMARY_API_KEY: ${SPRINGCLAW_PRIMARY_API_KEY:-}
-      SPRINGCLAW_PRIMARY_BASE_URL: ${SPRINGCLAW_PRIMARY_BASE_URL:-https://api.zhongzhuan.win}
-      SPRINGCLAW_PRIMARY_MODEL: ${SPRINGCLAW_PRIMARY_MODEL:-claude-opus-4-6}
-      SPRINGCLAW_QWEN_ENABLED: ${SPRINGCLAW_QWEN_ENABLED:-true}
+      SPRINGCLAW_PRIMARY_BASE_URL: ${SPRINGCLAW_PRIMARY_BASE_URL:-}
+      SPRINGCLAW_PRIMARY_MODEL: ${SPRINGCLAW_PRIMARY_MODEL:-}
+      SPRINGCLAW_QWEN_ENABLED: ${SPRINGCLAW_QWEN_ENABLED:-false}
       SPRINGCLAW_QWEN_API_KEY: ${SPRINGCLAW_QWEN_API_KEY:-}
-      SPRINGCLAW_QWEN_BASE_URL: ${SPRINGCLAW_QWEN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
-      SPRINGCLAW_QWEN_MODEL: ${SPRINGCLAW_QWEN_MODEL:-qwen3.5-plus}
-      SPRINGCLAW_CODING_PLAN_ENABLED: ${SPRINGCLAW_CODING_PLAN_ENABLED:-true}
+      SPRINGCLAW_QWEN_BASE_URL: ${SPRINGCLAW_QWEN_BASE_URL:-}
+      SPRINGCLAW_QWEN_MODEL: ${SPRINGCLAW_QWEN_MODEL:-}
+      SPRINGCLAW_CODING_PLAN_ENABLED: ${SPRINGCLAW_CODING_PLAN_ENABLED:-false}
       SPRINGCLAW_CODING_PLAN_API_KEY: ${SPRINGCLAW_CODING_PLAN_API_KEY:-}
-      SPRINGCLAW_CODING_PLAN_BASE_URL: ${SPRINGCLAW_CODING_PLAN_BASE_URL:-https://coding.dashscope.aliyuncs.com/v1}
-      SPRINGCLAW_CODING_PLAN_MODEL: ${SPRINGCLAW_CODING_PLAN_MODEL:-qwen3.5-plus}
-    ports:
-      - "18080:18080"
+      SPRINGCLAW_CODING_PLAN_BASE_URL: ${SPRINGCLAW_CODING_PLAN_BASE_URL:-}
+      SPRINGCLAW_CODING_PLAN_MODEL: ${SPRINGCLAW_CODING_PLAN_MODEL:-}
+      SPRINGCLAW_DEEPSEEK_ENABLED: ${SPRINGCLAW_DEEPSEEK_ENABLED:-false}
+      SPRINGCLAW_DEEPSEEK_API_KEY: ${SPRINGCLAW_DEEPSEEK_API_KEY:-}
+      SPRINGCLAW_DEEPSEEK_BASE_URL: ${SPRINGCLAW_DEEPSEEK_BASE_URL:-}
+      SPRINGCLAW_DEEPSEEK_MODEL: ${SPRINGCLAW_DEEPSEEK_MODEL:-}
+      SPRINGCLAW_VOLCENGINE_CODING_PLAN_ENABLED: ${SPRINGCLAW_VOLCENGINE_CODING_PLAN_ENABLED:-false}
+      SPRINGCLAW_VOLCENGINE_CODING_PLAN_API_KEY: ${SPRINGCLAW_VOLCENGINE_CODING_PLAN_API_KEY:-}
+      SPRINGCLAW_VOLCENGINE_CODING_PLAN_BASE_URL: ${SPRINGCLAW_VOLCENGINE_CODING_PLAN_BASE_URL:-}
+      SPRINGCLAW_VOLCENGINE_CODING_PLAN_MODEL: ${SPRINGCLAW_VOLCENGINE_CODING_PLAN_MODEL:-}
     volumes:
-      - ./skills:/app/skills
-      - ./SOUL.md:/app/SOUL.md:ro
+      - springclaw-app-data:/app/data
+      - springclaw-workspace:/workspace
+    networks:
+      - edge
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:18080/actuator/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports: ["${SPRINGCLAW_HTTP_BIND_ADDRESS:-127.0.0.1}:${SPRINGCLAW_HTTP_PORT:-8080}:80"]
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
 volumes:
   springclaw-mysql-data:
   springclaw-redis-data:
+  springclaw-rabbitmq-data:
+  springclaw-app-data:
+  springclaw-workspace:
+
+networks:
+  edge:
+  internal:
+    internal: true

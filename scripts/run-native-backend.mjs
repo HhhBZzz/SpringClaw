@@ -16,6 +16,11 @@ const documentedSpringclawSettings = [
   'SPRINGCLAW_WEBHOOK_SECRET_TELEGRAM',
   'SPRINGCLAW_WEBHOOK_SECRET_WECHAT',
   'SPRINGCLAW_WEBHOOK_SECRET_FEISHU',
+  'SPRINGCLAW_FEISHU_APP_ID',
+  'SPRINGCLAW_FEISHU_APP_SECRET',
+  'SPRINGCLAW_FEISHU_VERIFICATION_TOKEN',
+  'SPRINGCLAW_FEISHU_ENCRYPT_KEY',
+  'SPRINGCLAW_FEISHU_DOMAIN',
   'SPRINGCLAW_AI_ACTIVE_PROVIDER',
   'SPRINGCLAW_PRIMARY_ENABLED',
   'SPRINGCLAW_PRIMARY_API_KEY',
@@ -49,9 +54,9 @@ const requiredApplicationSettings = [
 ];
 
 const requiredNativeRuntimeSafetySettings = {
-  SPRINGCLAW_PERSISTENCE_DB_ENABLED: 'true',
-  SPRINGCLAW_FEISHU_OUTBOUND_ENABLED: 'false',
-  SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED: 'false',
+  SPRINGCLAW_PERSISTENCE_DB_ENABLED: ['true'],
+  SPRINGCLAW_FEISHU_OUTBOUND_ENABLED: ['true', 'false'],
+  SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED: ['true', 'false'],
 };
 
 function fail(message) {
@@ -123,12 +128,12 @@ for (const key of requiredApplicationSettings) {
   );
 }
 
-for (const [key, expectedValue] of Object.entries(requiredNativeRuntimeSafetySettings)) {
+for (const [key, allowedValues] of Object.entries(requiredNativeRuntimeSafetySettings)) {
   const resolvedValue = requireString(
     appEnvironment[key],
     'resolved Compose configuration is missing a required native runtime safety setting',
   );
-  if (resolvedValue !== expectedValue) {
+  if (!allowedValues.includes(resolvedValue)) {
     fail('resolved Compose configuration has an invalid required native runtime safety setting');
   }
   selectedEnvironment[key] = resolvedValue;

@@ -28,6 +28,14 @@ const runtimeSafetySettings = {
   SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED: 'false',
 };
 
+const feishuCredentials = {
+  SPRINGCLAW_FEISHU_APP_ID: 'native-test-app-id',
+  SPRINGCLAW_FEISHU_APP_SECRET: 'native-test-app-secret',
+  SPRINGCLAW_FEISHU_VERIFICATION_TOKEN: 'native-test-verification-token',
+  SPRINGCLAW_FEISHU_ENCRYPT_KEY: 'native-test-encrypt-key',
+  SPRINGCLAW_FEISHU_DOMAIN: 'native-test.feishu.example',
+};
+
 function resolvedConfig() {
   return {
     services: {
@@ -40,6 +48,7 @@ function resolvedConfig() {
           RABBITMQ_USERNAME: 'native_test_rabbitmq_user',
           RABBITMQ_PASSWORD: 'native_test_rabbitmq_password',
           ...runtimeSafetySettings,
+          ...feishuCredentials,
           PATH: '/container-only/path',
           HOME: '/container-only/home',
         },
@@ -91,6 +100,11 @@ writeFileSync(process.env.NATIVE_BACKEND_ENV_CAPTURE, JSON.stringify(process.env
     'Maven receives the Compose-enforced persistence and Feishu safety settings exactly',
   );
   assert.deepEqual(
+    Object.fromEntries(Object.keys(feishuCredentials).map((key) => [key, capturedEnvironment[key]])),
+    feishuCredentials,
+    'Maven receives the explicitly allowed Feishu credential fields exactly',
+  );
+  assert.deepEqual(
     {
       MYSQL_DB: capturedEnvironment.MYSQL_DB,
       MYSQL_USER: capturedEnvironment.MYSQL_USER,
@@ -125,6 +139,19 @@ writeFileSync(process.env.NATIVE_BACKEND_ENV_CAPTURE, JSON.stringify(process.env
   const invalidSafetyConfig = resolvedConfig();
   invalidSafetyConfig.services.app.environment.SPRINGCLAW_PERSISTENCE_DB_ENABLED = 'false';
   assertMavenWasNotLaunched(invalidSafetyConfig, 'unexpected runtime safety values reject native startup');
+
+  const explicitlyEnabledFeishu = resolvedConfig();
+  explicitlyEnabledFeishu.services.app.environment.SPRINGCLAW_FEISHU_OUTBOUND_ENABLED = 'true';
+  explicitlyEnabledFeishu.services.app.environment.SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED = 'true';
+  const enabledLaunch = runLauncher(explicitlyEnabledFeishu);
+  assert.equal(enabledLaunch.status, 0, 'explicit Feishu opt-in values allow native startup');
+  const enabledEnvironment = JSON.parse(readFileSync(capturePath, 'utf8'));
+  assert.equal(enabledEnvironment.SPRINGCLAW_FEISHU_OUTBOUND_ENABLED, 'true');
+  assert.equal(enabledEnvironment.SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED, 'true');
+
+  const invalidFeishuSafetyConfig = resolvedConfig();
+  invalidFeishuSafetyConfig.services.app.environment.SPRINGCLAW_FEISHU_OUTBOUND_ENABLED = 'yes';
+  assertMavenWasNotLaunched(invalidFeishuSafetyConfig, 'invalid Feishu safety values reject native startup');
 
   const nonStringSafetyConfig = resolvedConfig();
   nonStringSafetyConfig.services.app.environment.SPRINGCLAW_FEISHU_OUTBOUND_ENABLED = true;

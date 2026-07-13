@@ -360,14 +360,14 @@ springclaw:
         feishu: ${SPRINGCLAW_WEBHOOK_SECRET_FEISHU:}
   channel:
     feishu:
-      outbound-enabled: ${SPRINGCLAW_FEISHU_OUTBOUND_ENABLED:true}
+      outbound-enabled: ${SPRINGCLAW_FEISHU_OUTBOUND_ENABLED:false}
       base-url: ${SPRINGCLAW_FEISHU_BASE_URL:https://open.feishu.cn}
       app-id: ${SPRINGCLAW_FEISHU_APP_ID:}
       app-secret: ${SPRINGCLAW_FEISHU_APP_SECRET:}
       verification-token: ${SPRINGCLAW_FEISHU_VERIFICATION_TOKEN:}
       encrypt-key: ${SPRINGCLAW_FEISHU_ENCRYPT_KEY:}
       long-connection:
-        enabled: ${SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED:true}
+        enabled: ${SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED:false}
         domain: ${SPRINGCLAW_FEISHU_DOMAIN:}
 
 management:

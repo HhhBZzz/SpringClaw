@@ -34,6 +34,7 @@ make down
 
 - `SPRINGCLAW_ADMIN_USERNAMES` is the comma-separated admin bootstrap allowlist. Production should keep first-user bootstrap disabled.
 - Use `SPRINGCLAW_AUTH_COOKIE_SECURE=false` only for local HTTP. A TLS-terminating deployment must set it to `true`.
+- Feishu delivery is disabled by default. To enable outbound delivery, set `SPRINGCLAW_FEISHU_OUTBOUND_ENABLED=true` and configure `SPRINGCLAW_FEISHU_APP_ID`, `SPRINGCLAW_FEISHU_APP_SECRET`, `SPRINGCLAW_FEISHU_VERIFICATION_TOKEN`, and `SPRINGCLAW_FEISHU_ENCRYPT_KEY`. To enable the long connection, also set `SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED=true` and `SPRINGCLAW_FEISHU_DOMAIN`; never log or commit credentials.
 - Flyway validates and applies migrations at application startup; destructive clean is disabled.
 - The release Compose topology exposes only the Nginx frontend. The development override is the only place infrastructure ports are published to host loopback.
 - See [RUN_REAL_ENVIRONMENT.md](./RUN_REAL_ENVIRONMENT.md) for backup, restore, upgrade, log, and cleanup procedures.

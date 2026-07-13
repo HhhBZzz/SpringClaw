@@ -40,6 +40,7 @@ cp .env.example .env
 | `SPRINGCLAW_HTTP_BIND_ADDRESS`、`SPRINGCLAW_HTTP_PORT` | Nginx 前端的宿主机绑定。没有 TLS 反向代理时请保持默认回环地址。 |
 | `SPRINGCLAW_AUTH_COOKIE_SECURE` | 本机 HTTP 调试才设为 `false`；HTTPS/TLS 入口必须设为 `true`。 |
 | `SPRINGCLAW_WEBHOOK_SECURITY_ENABLED`、`SPRINGCLAW_WEBHOOK_SECRET` 及渠道专用 Webhook 密钥 | 对每个公网可访问的入站 Webhook，都必须设置 `SPRINGCLAW_WEBHOOK_SECURITY_ENABLED=true` 并设置对应的默认或渠道密钥；密钥不得记录或提交。 |
+| `SPRINGCLAW_FEISHU_OUTBOUND_ENABLED`、`SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED` 及飞书凭据 | 飞书交付默认关闭。启用出站交付时设置 `SPRINGCLAW_FEISHU_OUTBOUND_ENABLED=true`，并完整配置 `SPRINGCLAW_FEISHU_APP_ID`、`SPRINGCLAW_FEISHU_APP_SECRET`、`SPRINGCLAW_FEISHU_VERIFICATION_TOKEN`、`SPRINGCLAW_FEISHU_ENCRYPT_KEY`。如需长连接，还要设置 `SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED=true` 和 `SPRINGCLAW_FEISHU_DOMAIN`。不得记录或提交凭据。 |
 | `SPRINGCLAW_AI_ACTIVE_PROVIDER` 及某个 provider 的 enabled/key/base-url/model | 所有模型都关闭时平台仍可健康启动；要实际聊天，必须明确启用并配置一个模型提供方。 |
 
 Flyway 会在应用启动时自动校验并按顺序执行迁移；已有数据库只会继续升级，不会自动清空数据，破坏性 clean 操作已禁用。

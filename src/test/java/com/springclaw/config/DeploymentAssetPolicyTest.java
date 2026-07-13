@@ -101,10 +101,56 @@ class DeploymentAssetPolicyTest {
 
         assertThat(launcher).contains(
                 "const requiredNativeRuntimeSafetySettings = {",
-                "SPRINGCLAW_PERSISTENCE_DB_ENABLED: 'true',",
-                "SPRINGCLAW_FEISHU_OUTBOUND_ENABLED: 'false',",
-                "SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED: 'false',"
+                "SPRINGCLAW_PERSISTENCE_DB_ENABLED: ['true'],",
+                "SPRINGCLAW_FEISHU_OUTBOUND_ENABLED: ['true', 'false'],",
+                "SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED: ['true', 'false'],"
         );
+    }
+
+    @Test
+    void feishuDeliveryIsExplicitlyOptInAcrossDeliveryAssets() throws IOException {
+        String compose = read("docker-compose.yml");
+        String env = read(".env.example");
+        String launcher = read("scripts/run-native-backend.mjs");
+        String application = read("src/main/resources/application.yml");
+        String englishReadme = read("README.md");
+        String chineseReadme = read("README_CN.md");
+        String runbook = read("RUN_REAL_ENVIRONMENT.md");
+        String contributorGuide = read("CLAUDE.md");
+
+        assertThat(compose)
+                .containsPattern("(?m)^\\s+SPRINGCLAW_FEISHU_OUTBOUND_ENABLED: \\$\\{SPRINGCLAW_FEISHU_OUTBOUND_ENABLED:-false}\\s*$")
+                .containsPattern("(?m)^\\s+SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED: \\$\\{SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED:-false}\\s*$");
+        for (String credential : List.of(
+                "SPRINGCLAW_FEISHU_APP_ID",
+                "SPRINGCLAW_FEISHU_APP_SECRET",
+                "SPRINGCLAW_FEISHU_VERIFICATION_TOKEN",
+                "SPRINGCLAW_FEISHU_ENCRYPT_KEY",
+                "SPRINGCLAW_FEISHU_DOMAIN"
+        )) {
+            assertThat(compose).containsPattern("(?m)^\\s+" + credential + ": \\$\\{" + credential + ":-}\\s*$");
+            assertThat(env).contains(credential + "=");
+            assertThat(launcher).contains("'" + credential + "',");
+        }
+        assertThat(env).contains(
+                "SPRINGCLAW_FEISHU_OUTBOUND_ENABLED=false",
+                "SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED=false"
+        );
+        assertThat(application).contains(
+                "outbound-enabled: ${SPRINGCLAW_FEISHU_OUTBOUND_ENABLED:false}",
+                "enabled: ${SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED:false}"
+        );
+        for (String documentation : List.of(englishReadme, chineseReadme, runbook, contributorGuide)) {
+            assertThat(documentation)
+                    .contains("SPRINGCLAW_FEISHU_OUTBOUND_ENABLED=true")
+                    .contains("SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED=true")
+                    .contains("SPRINGCLAW_FEISHU_APP_ID")
+                    .contains("SPRINGCLAW_FEISHU_DOMAIN");
+        }
+        assertThat(englishReadme).contains("Feishu delivery is disabled by default");
+        assertThat(chineseReadme).contains("飞书交付默认关闭");
+        assertThat(runbook).contains("飞书交付默认关闭");
+        assertThat(contributorGuide).contains("Feishu delivery is disabled by default");
     }
 
     @Test
@@ -115,18 +161,34 @@ class DeploymentAssetPolicyTest {
     }
 
     @Test
-    void dockerfilePinsBothJavaBaseImagesToImmutableDigests() throws IOException {
-        String dockerfile = read("Dockerfile");
-        List<String> javaFromLines = dockerfile.lines()
+    void everyDockerBuildAndComposeImagePinsItsVersionTagToAnImmutableDigest() throws IOException {
+        List<String> dockerfileFromLines = List.of(read("Dockerfile"), read("frontend/Dockerfile")).stream()
+                .flatMap(dockerfile -> dockerfile.lines())
                 .filter(line -> line.startsWith("FROM "))
-                .filter(line -> line.contains("maven:") || line.contains("eclipse-temurin:"))
+                .toList();
+        List<String> composeImageReferences = read("docker-compose.yml").lines()
+                .map(String::trim)
+                .filter(line -> line.startsWith("image:"))
+                .map(line -> line.substring("image:".length()).trim())
                 .toList();
 
-        assertThat(javaFromLines).containsExactly(
+        assertThat(dockerfileFromLines).allMatch(line -> line.matches(
+                "FROM\\s+[^\\s]+:[^\\s]+@sha256:[a-f0-9]{64}(?:\\s+AS\\s+[^\\s]+)?"
+        ));
+        assertThat(composeImageReferences).allMatch(reference -> reference.matches(
+                "[^\\s]+:[^\\s]+@sha256:[a-f0-9]{64}"
+        ));
+        assertThat(dockerfileFromLines).contains(
                 "FROM maven:3.9.9-eclipse-temurin-17@sha256:f58d59b6273e785ac0a4477f6e9b5ba1d7731c75b906c0f7b34076f1851318cc AS builder",
-                "FROM eclipse-temurin:17-jre@sha256:1824944ef1bd572d1ff0952afeb2fec7931d77c972c4fbc4dfcdf89f758fb490"
+                "FROM eclipse-temurin:17-jre@sha256:1824944ef1bd572d1ff0952afeb2fec7931d77c972c4fbc4dfcdf89f758fb490",
+                "FROM node:22.18.0-alpine@sha256:1b2479dd35a99687d6638f5976fd235e26c5b37e8122f786fcd5fe231d63de5b AS builder",
+                "FROM nginx:1.31.2-alpine@sha256:54f2a904c251d5a34adf545a72d32515a15e08418dae0266e23be2e18c66fefa"
         );
-        assertThat(javaFromLines).allMatch(line -> line.contains("@sha256:"));
+        assertThat(composeImageReferences).contains(
+                "mysql:8.0.44@sha256:9c3380eac945af0736031b200027f581925927c81e010056214a4bd6b6693714",
+                "redis:8.2.7@sha256:ccc02ba721bd2ddaf793bea8085c9079ce051f95a5142a2ac049a4b91954bd60",
+                "rabbitmq:3.13.7-management@sha256:e582c0bc7766f3342496d8485efb5a1df782b5ce3886ad017e2eaae442311f69"
+        );
     }
 
     @Test

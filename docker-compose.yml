@@ -1,6 +1,6 @@
 services:
   mysql:
-    image: mysql:8.0.44
+    image: mysql:8.0.44@sha256:9c3380eac945af0736031b200027f581925927c81e010056214a4bd6b6693714
     restart: unless-stopped
     command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci", "--default-authentication-plugin=mysql_native_password"]
     environment:
@@ -21,7 +21,7 @@ services:
       start_period: 30s
 
   redis:
-    image: redis:8.2.7
+    image: redis:8.2.7@sha256:ccc02ba721bd2ddaf793bea8085c9079ce051f95a5142a2ac049a4b91954bd60
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
     environment:
@@ -38,7 +38,7 @@ services:
       start_period: 10s
 
   rabbitmq:
-    image: rabbitmq:3.13.7-management
+    image: rabbitmq:3.13.7-management@sha256:e582c0bc7766f3342496d8485efb5a1df782b5ce3886ad017e2eaae442311f69
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:?RABBITMQ_USERNAME is required}
@@ -97,8 +97,13 @@ services:
       SPRINGCLAW_WEBHOOK_SECRET_TELEGRAM: ${SPRINGCLAW_WEBHOOK_SECRET_TELEGRAM:-}
       SPRINGCLAW_WEBHOOK_SECRET_WECHAT: ${SPRINGCLAW_WEBHOOK_SECRET_WECHAT:-}
       SPRINGCLAW_WEBHOOK_SECRET_FEISHU: ${SPRINGCLAW_WEBHOOK_SECRET_FEISHU:-}
-      SPRINGCLAW_FEISHU_OUTBOUND_ENABLED: "false"
-      SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED: "false"
+      SPRINGCLAW_FEISHU_OUTBOUND_ENABLED: ${SPRINGCLAW_FEISHU_OUTBOUND_ENABLED:-false}
+      SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED: ${SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED:-false}
+      SPRINGCLAW_FEISHU_APP_ID: ${SPRINGCLAW_FEISHU_APP_ID:-}
+      SPRINGCLAW_FEISHU_APP_SECRET: ${SPRINGCLAW_FEISHU_APP_SECRET:-}
+      SPRINGCLAW_FEISHU_VERIFICATION_TOKEN: ${SPRINGCLAW_FEISHU_VERIFICATION_TOKEN:-}
+      SPRINGCLAW_FEISHU_ENCRYPT_KEY: ${SPRINGCLAW_FEISHU_ENCRYPT_KEY:-}
+      SPRINGCLAW_FEISHU_DOMAIN: ${SPRINGCLAW_FEISHU_DOMAIN:-}
       SPRINGCLAW_AI_ACTIVE_PROVIDER: ${SPRINGCLAW_AI_ACTIVE_PROVIDER:-primary}
       SPRINGCLAW_PRIMARY_ENABLED: ${SPRINGCLAW_PRIMARY_ENABLED:-false}
       SPRINGCLAW_PRIMARY_API_KEY: ${SPRINGCLAW_PRIMARY_API_KEY:-}

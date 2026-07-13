@@ -63,6 +63,24 @@ service_is_healthy() {
   [[ "$state" == *'"State":"running"'* && "$state" == *'"Health":"healthy"'* ]]
 }
 
+verify_protected_api() {
+  local status
+
+  if ! status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+      "http://$HTTP_HOST:$HTTP_PORT/api/auth/me")"; then
+    fail "could not reach protected API endpoint"
+  fi
+
+  case "$status" in
+    200|401|403)
+      printf 'Protected API verification accepted HTTP %s.\n' "$status"
+      ;;
+    *)
+      fail "protected API endpoint returned unexpected HTTP status $status"
+      ;;
+  esac
+}
+
 trap cleanup EXIT
 [[ -f "$ENV_FILE" ]] || fail "environment file '$ENV_FILE' does not exist"
 compose config --quiet
@@ -103,7 +121,7 @@ while true; do
 done
 
 curl --fail --silent --show-error "http://$HTTP_HOST:$HTTP_PORT/" >/dev/null
-curl --silent --show-error "http://$HTTP_HOST:$HTTP_PORT/api/auth/me" >/dev/null || true
+verify_protected_api
 compose exec -T app curl --fail --silent --show-error http://127.0.0.1:18080/actuator/health >/dev/null
 
 printf 'Deployment verification succeeded.\n'

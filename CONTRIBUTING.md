@@ -4,25 +4,34 @@ Thanks for taking the time to improve SpringClaw. This project is a Spring Boot 
 
 ## Development Setup
 
-```bash
-mvn -q -DskipTests compile
+Create a private local configuration file, then replace every MySQL, Redis, and RabbitMQ password placeholder in it. Do not commit `.env`.
 
+```bash
+cp .env.example .env
+```
+
+For native backend and frontend development, use Docker only for local infrastructure. Maven and Vite use the same `.env` configuration:
+
+```bash
+make dev-infra
+make native-backend
+
+# In a second terminal
 cd frontend
-npm install
-npm run build
+npm ci
+npm run dev
 ```
 
-For a local backend run:
+Providers are disabled by default, so health and authentication work can be developed without provider credentials. To exercise chat, configure `SPRINGCLAW_AI_ACTIVE_PROVIDER` and the selected provider's current `SPRINGCLAW_*_ENABLED`, `SPRINGCLAW_*_API_KEY`, `SPRINGCLAW_*_BASE_URL`, and `SPRINGCLAW_*_MODEL` settings in `.env`.
+
+To validate the complete delivered stack rather than the native development path:
 
 ```bash
-OPENCLAW_PRIMARY_API_KEY=test-key mvn spring-boot:run
+make up
+make verify
 ```
 
-For infrastructure-backed runs:
-
-```bash
-OPENCLAW_PRIMARY_API_KEY=test-key docker compose up -d --build
-```
+`make verify` validates the resolved Compose configuration, waits for the delivery services, and accepts only HTTP 200, 401, or 403 from the protected authentication route.
 
 ## Contribution Guidelines
 

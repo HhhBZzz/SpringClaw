@@ -38,7 +38,11 @@ class DeploymentAssetPolicyTest {
     @Test
     void examplesAndRunbooksUseCanonicalVariablesAndFlyway() throws IOException {
         String env = read(".env.example");
-        String docs = read("README.md") + read("README_CN.md") + read("RUN_REAL_ENVIRONMENT.md");
+        String docs = read("README.md")
+                + read("README_CN.md")
+                + read("RUN_REAL_ENVIRONMENT.md")
+                + read("CONTRIBUTING.md")
+                + read("docs/ACCEPTANCE_CHECKLIST.md");
         assertThat(docs).contains("SPRINGCLAW_ADMIN_USERNAMES");
         assertThat(env).contains("MYSQL_PASSWORD=").contains("REDIS_PASSWORD=");
         assertThat(env).contains("SPRINGCLAW_ADMIN_USERNAMES=");

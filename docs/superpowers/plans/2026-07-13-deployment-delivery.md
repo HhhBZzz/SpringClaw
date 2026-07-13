@@ -307,7 +307,8 @@ The script uses set -Eeuo pipefail; checks ENV_FILE; runs Compose config validat
 
 ~~~bash
 curl --fail --silent --show-error "http://$HTTP_HOST:$HTTP_PORT/" >/dev/null
-curl --silent --show-error "http://$HTTP_HOST:$HTTP_PORT/api/auth/me" >/dev/null || true
+# Historical plan note: the implemented verifier is status-aware and accepts only 200, 401, or 403.
+verify_protected_api
 docker compose --env-file "$ENV_FILE" exec -T app curl --fail --silent --show-error http://127.0.0.1:18080/actuator/health
 ~~~
 

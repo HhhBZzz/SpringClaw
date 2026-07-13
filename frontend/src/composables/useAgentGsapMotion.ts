@@ -35,14 +35,15 @@ export function useAgentGsapMotion(options: AgentMotionOptions) {
       reduceMotion: '(prefers-reduced-motion: reduce)'
     }, (context) => {
       const { isDesktop, isMobile, reduceMotion } = context.conditions || {};
-      const introTargets = [
-        '.studio-nav',
-        '.runtime-left-sidebar',
-        '.studio-heading',
-        '.stitch-chat',
-        '.stitch-composer',
-        '.runtime-inspector'
-      ];
+      const studioNav = scopedElement<HTMLElement>('.studio-nav');
+      const leftSidebar = scopedElement<HTMLElement>('.runtime-left-sidebar');
+      const heading = scopedElement<HTMLElement>('.studio-heading');
+      const worktopActions = scopedElements<HTMLElement>('.runtime-mode-switch, .runtime-model-pill, .runtime-worktop-actions > *');
+      const chat = scopedElement<HTMLElement>('.stitch-chat');
+      const composer = scopedElement<HTMLElement>('.stitch-composer');
+      const inspector = scopedElement<HTMLElement>('.runtime-inspector');
+      const introTargets = [studioNav, leftSidebar, heading, ...worktopActions, chat, composer, inspector]
+        .filter((target): target is HTMLElement => target != null);
       if (reduceMotion) {
         gsap.set(introTargets, { clearProps: 'all' });
         return;
@@ -51,17 +52,16 @@ export function useAgentGsapMotion(options: AgentMotionOptions) {
       gsap.set(introTargets, {
         willChange: 'transform, opacity'
       });
-      const timeline = gsap.timeline({ defaults: { duration: isMobile ? 0.28 : 0.42 } })
-        .from('.studio-nav', { autoAlpha: 0, y: isMobile ? -8 : -14 })
-        .from('.studio-heading', { autoAlpha: 0, y: isMobile ? 8 : 14, scale: 0.992 }, '<0.04')
-        .from(['.runtime-mode-switch', '.runtime-model-pill', '.runtime-worktop-actions > *'], { autoAlpha: 0, y: 10, stagger: 0.04 }, '<0.04')
-        .from('.stitch-chat', { autoAlpha: 0, y: isMobile ? 8 : 14 }, '<0.04')
-        .from('.stitch-composer', { autoAlpha: 0, y: isMobile ? 8 : 14, scale: 0.995 }, '<0.02');
+      const timeline = gsap.timeline({ defaults: { duration: isMobile ? 0.28 : 0.42 } });
+      if (studioNav) timeline.from(studioNav, { autoAlpha: 0, y: isMobile ? -8 : -14 });
+      if (heading) timeline.from(heading, { autoAlpha: 0, y: isMobile ? 8 : 14, scale: 0.992 }, '<0.04');
+      if (worktopActions.length) timeline.from(worktopActions, { autoAlpha: 0, y: 10, stagger: 0.04 }, '<0.04');
+      if (chat) timeline.from(chat, { autoAlpha: 0, y: isMobile ? 8 : 14 }, '<0.04');
+      if (composer) timeline.from(composer, { autoAlpha: 0, y: isMobile ? 8 : 14, scale: 0.995 }, '<0.02');
 
       if (isDesktop) {
-        timeline
-          .from('.runtime-left-sidebar', { autoAlpha: 0, x: -14 }, '<0.05')
-          .from('.runtime-inspector', { autoAlpha: 0, x: 14 }, '<0.02');
+        if (leftSidebar) timeline.from(leftSidebar, { autoAlpha: 0, x: -14 }, '<0.05');
+        if (inspector) timeline.from(inspector, { autoAlpha: 0, x: 14 }, '<0.02');
       }
 
       return () => {
@@ -95,7 +95,11 @@ export function useAgentGsapMotion(options: AgentMotionOptions) {
   }
 
   async function revealActionCard() {
-    await revealCard('.action-required-card', { y: 14, scale: 0.975 });
+    await revealCard('.task-approval-card, .action-required-card', { y: 14, scale: 0.975 });
+  }
+
+  async function revealTaskStatus() {
+    await revealCard('.task-status-card', { y: 10, scale: 0.985 });
   }
 
   async function revealTrace() {
@@ -178,6 +182,7 @@ export function useAgentGsapMotion(options: AgentMotionOptions) {
     revealDecision,
     revealInspectorPanel,
     revealLastMessage,
+    revealTaskStatus,
     revealTrace
   };
 }

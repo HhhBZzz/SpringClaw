@@ -836,6 +836,12 @@ watch(taskPhase, (phase) => {
   if (!elapsedTimer) startElapsedTimer(taskStartedAt.value);
 });
 
+watch(taskPhase, (phase, previousPhase) => {
+  if (phase !== 'idle' && phase !== previousPhase) {
+    void motion.revealTaskStatus();
+  }
+});
+
 watch(sidebarOpen, (open) => {
   motion.animateSidebar(open, sidebarPinned.value);
 }, { flush: 'post' });

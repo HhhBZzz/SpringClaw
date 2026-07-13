@@ -36,6 +36,18 @@ class DeploymentAssetPolicyTest {
     }
 
     @Test
+    void frontendProxyDynamicallyResolvesDockerAppServiceForBackendOnlyUpgrades() throws IOException {
+        String nginx = read("frontend/nginx.conf");
+
+        assertThat(nginx)
+                .contains("resolver 127.0.0.11 valid=10s ipv6=off;")
+                .contains("resolver_timeout 5s;")
+                .containsPattern("(?m)^\\s*set \\$app_upstream app:18080;\\s*$")
+                .containsPattern("(?m)^\\s*proxy_pass http://\\$app_upstream;\\s*$")
+                .doesNotContain("proxy_pass http://app:18080;");
+    }
+
+    @Test
     void examplesAndRunbooksUseCanonicalVariablesAndFlyway() throws IOException {
         String env = read(".env.example");
         String docs = read("README.md")

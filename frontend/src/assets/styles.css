@@ -11881,3 +11881,159 @@ button.runtime-nav-item {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Safe task workspace: the default Agent path favors task status and human approval. */
+.runtime-console .task-status-card,
+.runtime-console .task-login-gate,
+.runtime-console .task-approval-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #121720;
+}
+
+.runtime-console .task-status-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  width: min(920px, 100%);
+  margin: 0 auto 14px;
+  padding: 14px 16px;
+  will-change: transform, opacity;
+}
+
+.runtime-console .task-status-card__phase {
+  color: var(--amber);
+  font: 760 11px/1 var(--font);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.runtime-console .task-status-card h3,
+.runtime-console .task-approval-card h3,
+.runtime-console .task-login-gate h3 {
+  margin: 6px 0;
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.runtime-console .task-status-card p,
+.runtime-console .task-approval-card p,
+.runtime-console .task-login-gate p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.runtime-console .task-status-card small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.runtime-console .task-status-card__actions,
+.runtime-console .task-approval-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.runtime-console .task-status-card.is-awaiting_approval,
+.runtime-console .task-approval-card {
+  border-color: rgba(242, 201, 76, 0.56);
+  background: rgba(242, 201, 76, 0.08);
+}
+
+.runtime-console .task-status-card.is-executing_approved_tool {
+  border-color: rgba(242, 201, 76, 0.4);
+}
+
+.runtime-console .task-status-card.is-failed,
+.runtime-console .task-status-card.is-status_unknown {
+  border-color: rgba(255, 107, 107, 0.62);
+}
+
+.runtime-console .task-status-card.is-completed {
+  border-color: rgba(74, 222, 128, 0.5);
+}
+
+.runtime-console .task-login-gate {
+  display: grid;
+  gap: 12px;
+  width: min(760px, 100%);
+  margin: 0 auto 16px;
+  padding: 16px;
+}
+
+.runtime-console .task-login-gate .login-card {
+  max-width: 520px;
+  margin-top: 4px;
+  background: #0f1117;
+}
+
+.runtime-console .task-approval-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 16px;
+  will-change: transform, opacity;
+}
+
+.runtime-console .task-approval-card__impact {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+
+.runtime-console .developer-details-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  width: calc(100% - clamp(28px, 6vw, 64px));
+  margin: 8px auto 12px;
+  border: 1px solid rgba(13, 148, 136, 0.42);
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: #b6fff5;
+  background: rgba(13, 148, 136, 0.1);
+  text-align: left;
+}
+
+.runtime-console .developer-details-toggle small {
+  color: #9fb2c1;
+  text-align: right;
+}
+
+@media (max-width: 760px) {
+  .runtime-console .task-status-card,
+  .runtime-console .task-approval-card {
+    grid-template-columns: 1fr;
+  }
+
+  .runtime-console .task-status-card__actions,
+  .runtime-console .task-approval-card__actions {
+    justify-content: stretch;
+  }
+
+  .runtime-console .task-status-card__actions > *,
+  .runtime-console .task-approval-card__actions > * {
+    flex: 1 1 140px;
+  }
+
+  .runtime-console .developer-details-toggle {
+    width: calc(100% - 24px);
+  }
+
+  .runtime-console .runtime-chat-log.stitch-chat {
+    min-height: 44dvh;
+    padding-bottom: 18px;
+  }
+
+  .runtime-console .runtime-composer.stitch-composer {
+    position: sticky;
+    bottom: 0;
+    z-index: 8;
+  }
+}

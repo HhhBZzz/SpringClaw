@@ -1,6 +1,7 @@
 package com.springclaw.config;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -162,15 +163,20 @@ class DeploymentAssetPolicyTest {
     }
 
     @Test
-    void mutableImageInADevelopmentOverlayWouldBeRejected() {
-        String mutableDevelopmentOverlay = """
+    void mutableImageInADevelopmentOverlayWouldBeRejected(@TempDir Path composeRoot) throws IOException {
+        Files.writeString(composeRoot.resolve("docker-compose.yml"), """
+                services:
+                  redis:
+                    image: redis:8.2.7@sha256:ccc02ba721bd2ddaf793bea8085c9079ce051f95a5142a2ac049a4b91954bd60
+                """);
+        Files.writeString(composeRoot.resolve("docker-compose.dev.yml"), """
                 services:
                   redis:
                     image: redis:8.2.7
-                """;
+                """);
 
         assertThatThrownBy(() -> assertComposeImageReferencesArePinned(
-                composeImageReferences(mutableDevelopmentOverlay)
+                composeImageReferencesFromDeliveryFiles(composeRoot)
         )).isInstanceOf(AssertionError.class);
     }
 
@@ -180,7 +186,9 @@ class DeploymentAssetPolicyTest {
                 .flatMap(dockerfile -> dockerfile.lines())
                 .filter(line -> line.startsWith("FROM "))
                 .toList();
-        List<String> composeImageReferences = composeImageReferencesFromDeliveryFiles();
+        List<String> composeImageReferences = composeImageReferencesFromDeliveryFiles(
+                Path.of(System.getProperty("user.dir"))
+        );
 
         assertThat(dockerfileFromLines).allMatch(line -> line.matches(
                 "FROM\\s+[^\\s]+:[^\\s]+@sha256:[a-f0-9]{64}(?:\\s+AS\\s+[^\\s]+)?"
@@ -212,10 +220,10 @@ class DeploymentAssetPolicyTest {
                 .doesNotContain("/api/auth/me` 代理响应");
     }
 
-    private List<String> composeImageReferencesFromDeliveryFiles() throws IOException {
+    private List<String> composeImageReferencesFromDeliveryFiles(Path composeRoot) throws IOException {
         return List.of(
-                        composeImageReferences(read("docker-compose.yml")),
-                        composeImageReferences(read("docker-compose.dev.yml"))
+                        composeImageReferences(Files.readString(composeRoot.resolve("docker-compose.yml"))),
+                        composeImageReferences(Files.readString(composeRoot.resolve("docker-compose.dev.yml")))
                 ).stream()
                 .flatMap(List::stream)
                 .toList();

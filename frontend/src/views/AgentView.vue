@@ -2942,7 +2942,9 @@ onUnmounted(() => {
                 </div>
                 <DeveloperDetailsToggle
                   v-if="hasRunDetails"
+                  class="runtime-debug-toggle"
                   :open="inspectorDrawerOpen"
+                  :aria-expanded="inspectorDrawerOpen"
                   :summary="`${runCurrentStepLabel} · ${runDurationLabel}`"
                   @toggle="toggleRuntimeInspector"
                 />

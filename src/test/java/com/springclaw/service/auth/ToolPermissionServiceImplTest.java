@@ -27,6 +27,23 @@ class ToolPermissionServiceImplTest {
     }
 
     @Test
+    void shouldDenyRunCommandForDeveloperEvenWhenDefaultPolicyAllowsOtherTools() {
+        ToolPermissionServiceImpl service = new ToolPermissionServiceImpl(
+                null,
+                new FixedAuthService("DEVELOPER"),
+                true,
+                false,
+                false,
+                "",
+                "SystemToolPack.now,SystemToolPack.uuid"
+        );
+
+        BusinessException ex = Assertions.assertThrows(BusinessException.class,
+                () -> service.checkPermission("dev-1", "SystemToolPack.runCommand"));
+        Assertions.assertEquals(40311, ex.getCode());
+    }
+
+    @Test
     void shouldAllowNowForGuestByDefault() {
         ToolPermissionServiceImpl service = new ToolPermissionServiceImpl(
                 null,

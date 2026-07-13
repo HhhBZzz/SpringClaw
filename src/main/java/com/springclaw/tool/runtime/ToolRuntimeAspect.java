@@ -14,6 +14,7 @@ import com.springclaw.service.proposal.ToolInvocationSnapshotService;
 import com.springclaw.service.proposal.ToolGateway;
 import com.springclaw.service.workspace.WorkspaceGitGuard;
 import com.springclaw.service.workspace.WorkspaceGuard;
+import com.springclaw.tool.pack.ApprovedSystemCommand;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
@@ -98,6 +99,7 @@ public class ToolRuntimeAspect {
                 || "execution".equalsIgnoreCase(riskLevel);
 
         try {
+            rejectUnsupportedSystemCommand(simpleClass, signature.getName(), args);
             Object result;
             if (!requiresProposal) {
                 // read / null → 旧路径
@@ -209,6 +211,16 @@ public class ToolRuntimeAspect {
             return "read";
         }
         return capabilityRegistry.findRiskLevelByClassName(simpleClass);
+    }
+
+    private void rejectUnsupportedSystemCommand(String simpleClass, String methodName, Object[] args) {
+        if (!"SystemToolPack".equals(simpleClass) || !"runCommand".equals(methodName)) {
+            return;
+        }
+        String command = args != null && args.length == 1 && args[0] instanceof String value ? value : null;
+        if (!ApprovedSystemCommand.isApproved(command)) {
+            throw new BusinessException(40062, "仅允许执行 echo <text>、pwd 或 git status");
+        }
     }
 
     private String resolveRuntimeToolName(String genericToolName, Object[] args) {

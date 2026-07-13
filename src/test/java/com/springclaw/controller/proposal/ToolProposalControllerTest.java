@@ -87,7 +87,7 @@ class ToolProposalControllerTest {
     }
 
     @Test
-    void confirm_allowsAdminForOtherUsersProposal() {
+    void confirm_rejectsAdminForOtherUsersProposal() {
         RequestUserContextHolder.set(new RequestUserContext("admin", "ADMIN", System.currentTimeMillis() + 60_000));
         ToolInvocationProposal proposal = new ToolInvocationProposal(
                 1L, "tip-1", "req-1", "run-1", "session-A", "other-user", "USER",
@@ -96,12 +96,12 @@ class ToolProposalControllerTest {
                 ToolInvocationProposalStatus.PENDING, 0, null, null, null, "head-sha", null, null,
                 List.of(), null, null, LocalDateTime.now(), LocalDateTime.now(), LocalDateTime.now().plusMinutes(15));
         when(proposalService.findByProposalId("tip-1")).thenReturn(Optional.of(proposal));
-        when(toolGateway.confirm("tip-1", "ok")).thenReturn(proposal);
+        assertThatThrownBy(() -> controller.confirm("tip-1", Map.of("reason", "ok")))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("code", 40332)
+                .hasMessage("无权处理该确认请求");
 
-        ApiResponse<ToolInvocationProposal> response = controller.confirm("tip-1", Map.of("reason", "ok"));
-
-        assertThat(response.getCode()).isEqualTo(0);
-        verify(toolGateway).confirm("tip-1", "ok");
+        verify(toolGateway, never()).confirm(any(), any());
     }
 
     @Test
@@ -114,6 +114,25 @@ class ToolProposalControllerTest {
 
         assertThat(response.getCode()).isEqualTo(0);
         assertThat(response.getData()).isSameAs(proposal);
+    }
+
+    @Test
+    void reject_rejectsAdminForOtherUsersProposal() {
+        RequestUserContextHolder.set(new RequestUserContext("admin", "ADMIN", System.currentTimeMillis() + 60_000));
+        ToolInvocationProposal proposal = new ToolInvocationProposal(
+                1L, "tip-1", "req-1", "run-1", "session-A", "other-user", "USER",
+                "WorkspaceTool.writeFile", "workspace", "{}", "hash", "HIGH",
+                List.of("README.md"), "preview", false, List.of(),
+                ToolInvocationProposalStatus.PENDING, 0, null, null, null, "head-sha", null, null,
+                List.of(), null, null, LocalDateTime.now(), LocalDateTime.now(), LocalDateTime.now().plusMinutes(15));
+        when(proposalService.findByProposalId("tip-1")).thenReturn(Optional.of(proposal));
+
+        assertThatThrownBy(() -> controller.reject("tip-1", Map.of("reason", "no")))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("code", 40332)
+                .hasMessage("无权处理该确认请求");
+
+        verify(proposalService, never()).reject(any(), any());
     }
 
     @Test

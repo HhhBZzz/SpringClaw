@@ -5,6 +5,7 @@ import com.springclaw.service.proposal.ToolInvocationProposal;
 import com.springclaw.service.proposal.ToolInvocationProposalService;
 import com.springclaw.service.proposal.ToolInvocationSnapshot;
 import com.springclaw.service.proposal.ToolInvocationSnapshotService;
+import com.springclaw.tool.pack.ApprovedSystemCommand;
 import com.springclaw.tool.runtime.ToolExecutionContext;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -22,7 +23,6 @@ public class ApprovedCommandProposalService {
     private static final String RISK_LEVEL = "execution";
     private static final String COMMAND_PREFIX = "请执行命令 ";
     private static final String PROPOSAL_PHASE = "APPROVED-COMMAND-PROPOSAL";
-    private static final String UNSAFE_COMMAND_CHARACTERS = ";|&<>$(){}[]";
 
     private final ToolInvocationSnapshotService snapshotService;
     private final ToolInvocationProposalService proposalService;
@@ -78,23 +78,6 @@ public class ApprovedCommandProposalService {
             return null;
         }
 
-        String command = message.substring(COMMAND_PREFIX.length());
-        if (containsUnsafeCharacter(command)) {
-            return null;
-        }
-        if ("pwd".equals(command) || "git status".equals(command)) {
-            return command;
-        }
-        if (command.startsWith("echo ") && StringUtils.hasText(command.substring("echo ".length()))) {
-            return command;
-        }
-        return null;
-    }
-
-    private boolean containsUnsafeCharacter(String command) {
-        if (command.indexOf('\\') >= 0 || command.indexOf('\n') >= 0 || command.indexOf('\r') >= 0) {
-            return true;
-        }
-        return command.chars().anyMatch(character -> UNSAFE_COMMAND_CHARACTERS.indexOf(character) >= 0);
+        return ApprovedSystemCommand.normalize(message.substring(COMMAND_PREFIX.length())).orElse(null);
     }
 }

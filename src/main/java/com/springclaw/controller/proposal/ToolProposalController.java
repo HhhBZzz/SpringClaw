@@ -48,7 +48,7 @@ public class ToolProposalController {
         RequestUserContext context = requireContext();
         ToolInvocationProposal existing = proposalService.findByProposalId(proposalId)
                 .orElseThrow(() -> new BusinessException(40404, "proposal 不存在"));
-        requireAccessible(existing, context);
+        requireOwner(existing, context);
         String reason = body == null ? null : body.get("reason");
         return ApiResponse.success(toolGateway.confirm(proposalId, reason));
     }
@@ -59,7 +59,7 @@ public class ToolProposalController {
         RequestUserContext context = requireContext();
         ToolInvocationProposal existing = proposalService.findByProposalId(proposalId)
                 .orElseThrow(() -> new BusinessException(40404, "proposal 不存在"));
-        requireAccessible(existing, context);
+        requireOwner(existing, context);
         String reason = body == null ? "" : body.getOrDefault("reason", "");
         return ApiResponse.success(proposalService.reject(proposalId, reason));
     }
@@ -69,7 +69,7 @@ public class ToolProposalController {
         RequestUserContext context = requireContext();
         ToolInvocationProposal proposal = proposalService.findByProposalId(proposalId)
                 .orElseThrow(() -> new BusinessException(40404, "proposal 不存在"));
-        requireAccessible(proposal, context);
+        requireVisible(proposal, context);
         return ApiResponse.success(proposal);
     }
 
@@ -99,7 +99,16 @@ public class ToolProposalController {
         return context != null && context.hasAnyRole("ADMIN", "DEVELOPER");
     }
 
-    private void requireAccessible(ToolInvocationProposal proposal, RequestUserContext context) {
+    private void requireOwner(ToolInvocationProposal proposal, RequestUserContext context) {
+        if (proposal == null) {
+            throw new BusinessException(40404, "proposal 不存在");
+        }
+        if (!Objects.equals(proposal.userId(), context.username())) {
+            throw new BusinessException(40332, "无权处理该确认请求");
+        }
+    }
+
+    private void requireVisible(ToolInvocationProposal proposal, RequestUserContext context) {
         if (proposal == null) {
             throw new BusinessException(40404, "proposal 不存在");
         }

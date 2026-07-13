@@ -10,6 +10,7 @@ const props = defineProps<{
   result: string;
   canRetry: boolean;
   canRefreshStatus: boolean;
+  canOpenDetails: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -42,7 +43,7 @@ const phaseLabel = computed(() => ({
     <div class="task-status-card__actions">
       <button v-if="canRetry" class="btn-subtle" type="button" @click="emit('retry')">重新发起</button>
       <button v-if="canRefreshStatus" class="btn-subtle" type="button" @click="emit('refreshStatus')">重新查询状态</button>
-      <button class="btn-subtle" type="button" @click="emit('openDetails')">开发者详情</button>
+      <button v-if="canOpenDetails" class="btn-subtle" type="button" @click="emit('openDetails')">开发者详情</button>
     </div>
   </section>
 </template>

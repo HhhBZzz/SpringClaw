@@ -563,6 +563,33 @@ class VueOnlyFrontendPolicyTest {
     }
 
     @Test
+    void agentConsoleSessionTransitionsShouldClearActiveTaskMonitoring() throws IOException {
+        String agentView = Files.readString(projectRoot.resolve("frontend/src/views/AgentView.vue"));
+
+        assertThat(agentView)
+                .contains("function resetTaskWorkspaceState()")
+                .contains("lastUserPrompt.value = '';")
+                .contains("persistCurrentMessages(true);\n  resetTaskWorkspaceState();\n  sessionKey.value = targetSessionKey;")
+                .contains("messages.value = [];\n  resetTaskWorkspaceState();\n  historyStatus.value = '当前会话历史已清空。';");
+    }
+
+    @Test
+    void mobileDeveloperDetailsShouldProvideAnInPanelExit() throws IOException {
+        String agentView = Files.readString(projectRoot.resolve("frontend/src/views/AgentView.vue"));
+        String styles = Files.readString(projectRoot.resolve("frontend/src/assets/styles.css"));
+
+        assertThat(agentView)
+                .contains("function closeRuntimeInspector()")
+                .contains("@keydown.esc=\"closeRuntimeInspector\"")
+                .contains("aria-label=\"关闭开发者详情\"")
+                .contains("ref=\"inspectorCloseButton\"");
+
+        assertThat(styles)
+                .contains(".runtime-inspector-drawer.sidebar-drawer")
+                .contains("grid-template-rows: auto auto minmax(0, 1fr);");
+    }
+
+    @Test
     void homePageShouldUseMatureProductHeroAndGsapMotion() throws IOException {
         String homeView = Files.readString(projectRoot.resolve("frontend/src/views/HomeView.vue"));
         String styles = Files.readString(projectRoot.resolve("frontend/src/assets/styles.css"));

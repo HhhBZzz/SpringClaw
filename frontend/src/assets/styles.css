@@ -6097,7 +6097,7 @@ button.runtime-nav-item {
 
 .runtime-inspector-drawer.sidebar-drawer {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 16px;
   height: 100%;
   padding: 0;
@@ -12004,6 +12004,21 @@ button.runtime-nav-item {
 .runtime-console .developer-details-toggle small {
   color: #9fb2c1;
   text-align: right;
+}
+
+.runtime-console .inspector-close-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.runtime-console .inspector-close-row h2 {
+  margin: 3px 0 0;
+  color: var(--ink);
+  font-size: 15px;
 }
 
 @media (max-width: 760px) {

@@ -42,6 +42,10 @@ export function isToolProposalTerminal(status?: string) {
   return TERMINAL_TOOL_STATUSES.has(normalizeStatus(status));
 }
 
+export function isTaskInputLocked(input: Pick<TaskLifecycleInput, 'streamActive'> & { phase: TaskPhase }) {
+  return input.streamActive || input.phase === 'awaiting_approval' || input.phase === 'executing_approved_tool';
+}
+
 export function resolveTaskPhase(input: TaskLifecycleInput): TaskPhase {
   const toolStatus = normalizeStatus(input.toolProposal?.status);
 

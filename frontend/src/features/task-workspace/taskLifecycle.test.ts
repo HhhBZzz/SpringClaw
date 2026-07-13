@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveTaskPhase, summarizeToolProposal } from './taskLifecycle';
+import { isTaskInputLocked, resolveTaskPhase, summarizeToolProposal } from './taskLifecycle';
 
 describe('resolveTaskPhase', () => {
   const base = {
@@ -74,5 +74,14 @@ describe('summarizeToolProposal', () => {
       targetPaths: [],
       executionError: '路径越界'
     })).toBe('执行失败：路径越界');
+  });
+});
+
+describe('isTaskInputLocked', () => {
+  it('locks a second task while an existing stream or approval is active, but leaves login drafts editable', () => {
+    expect(isTaskInputLocked({ streamActive: true, phase: 'running' })).toBe(true);
+    expect(isTaskInputLocked({ streamActive: false, phase: 'awaiting_approval' })).toBe(true);
+    expect(isTaskInputLocked({ streamActive: false, phase: 'executing_approved_tool' })).toBe(true);
+    expect(isTaskInputLocked({ streamActive: false, phase: 'idle' })).toBe(false);
   });
 });

@@ -2,13 +2,20 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import AgentMessage from '../components/AgentMessage.vue';
 import LoginPanel from '../components/LoginPanel.vue';
+import DeveloperDetailsToggle from '../components/task/DeveloperDetailsToggle.vue';
+import TaskApprovalCard from '../components/task/TaskApprovalCard.vue';
+import TaskLoginGate from '../components/task/TaskLoginGate.vue';
+import TaskStatusCard from '../components/task/TaskStatusCard.vue';
 import { useAgentGsapMotion } from '../composables/useAgentGsapMotion';
+import { useToolProposalMonitor } from '../composables/useToolProposalMonitor';
+import { resolveTaskPhase, summarizeToolProposal, taskPhaseCopy, type NormalActionOutcome } from '../features/task-workspace/taskLifecycle';
 import {
   cancelActionProposal,
   confirmActionProposal,
   confirmToolProposal,
   getChatHistory,
   getModelStatus,
+  getToolProposal,
   getRunMemoryUsage,
   getRunTrace,
   getRuntimeModelProviders,
@@ -101,6 +108,15 @@ const elapsedSeconds = ref(0);
 const firstTokenMs = ref<number | null>(null);
 const lastUserPrompt = ref('');
 const stoppingStream = ref(false);
+const taskStartedAt = ref<number | null>(null);
+const taskHasProgress = ref(false);
+const taskStreamFinished = ref(false);
+const taskStreamFailed = ref(false);
+const taskStoppedByUser = ref(false);
+const normalActionOutcome = ref<NormalActionOutcome>('none');
+const normalActionResult = ref('');
+const approvalSubmitting = ref<'none' | 'action' | 'tool'>('none');
+const toolProposalMonitor = useToolProposalMonitor(getToolProposal);
 const runtimeActionStatus = ref('');
 const activeResourceView = ref<RuntimeResourceView>('console');
 const inspectorDrawerOpen = ref(false);
@@ -508,12 +524,37 @@ const activeResponseMode = computed(() => {
 
 const hasRunDetails = computed(() => {
   return traceEvents.value.length > 0
-    || Boolean(agentDecision.value || verificationEvent.value || pendingAction.value || pendingToolAction.value || currentMemoryUsage.value);
+    || Boolean(agentDecision.value || verificationEvent.value || pendingAction.value || pendingToolAction.value || currentMemoryUsage.value || toolProposalMonitor.proposal.value);
 });
 
 const showRuntimeInspector = computed(() => activeResourceView.value === 'console' && hasRunDetails.value && inspectorDrawerOpen.value);
 
-const canSend = computed(() => Boolean(auth.profile && input.value.trim() && !busy.value));
+const taskPhase = computed(() => resolveTaskPhase({
+  authenticated: Boolean(auth.profile),
+  taskStarted: taskStartedAt.value != null,
+  hasProgress: taskHasProgress.value,
+  streamActive: busy.value,
+  streamFinished: taskStreamFinished.value,
+  streamFailed: taskStreamFailed.value,
+  stoppedByUser: taskStoppedByUser.value,
+  hasPendingAction: Boolean(pendingAction.value),
+  hasPendingToolAction: Boolean(pendingToolAction.value),
+  normalActionOutcome: normalActionOutcome.value,
+  toolProposal: toolProposalMonitor.proposal.value,
+  toolMonitorUnknown: toolProposalMonitor.unknown.value
+}));
+
+const taskCopy = computed(() => taskPhaseCopy(taskPhase.value));
+const taskElapsedLabel = computed(() => taskStartedAt.value == null ? '' : `${elapsedSeconds.value}s`);
+const taskResult = computed(() => normalActionResult.value || summarizeToolProposal(toolProposalMonitor.proposal.value));
+const taskInputLocked = computed(() => taskPhase.value === 'awaiting_approval' || taskPhase.value === 'executing_approved_tool');
+const composerDisabledReason = computed(() => {
+  if (taskPhase.value === 'awaiting_approval') return '请先完成当前风险操作的确认或拒绝。';
+  if (taskPhase.value === 'executing_approved_tool') return '工具正在执行，等待真实结果后再开始新任务。';
+  return '';
+});
+
+const canSend = computed(() => Boolean(auth.profile && input.value.trim() && !busy.value && !taskInputLocked.value));
 
 const sidebarOpen = computed(() => sidebarPinned.value || sidebarHovered.value);
 
@@ -784,6 +825,15 @@ watch(activeInspectorTab, () => {
 
 watch(hasRunDetails, (value) => {
   if (!value) inspectorDrawerOpen.value = false;
+});
+
+watch(taskPhase, (phase) => {
+  if (taskStartedAt.value == null) return;
+  if (phase === 'completed' || phase === 'failed' || phase === 'cancelled' || phase === 'status_unknown') {
+    stopElapsedTimer();
+    return;
+  }
+  if (!elapsedTimer) startElapsedTimer(taskStartedAt.value);
 });
 
 watch(sidebarOpen, (open) => {
@@ -1351,14 +1401,33 @@ function scheduleScrollBottom() {
   });
 }
 
+function resetTaskLifecycle(startedAt: number | null) {
+  toolProposalMonitor.clear();
+  taskStartedAt.value = startedAt;
+  taskHasProgress.value = false;
+  taskStreamFinished.value = false;
+  taskStreamFailed.value = false;
+  taskStoppedByUser.value = false;
+  normalActionOutcome.value = 'none';
+  normalActionResult.value = '';
+  approvalSubmitting.value = 'none';
+  if (startedAt == null) {
+    stopElapsedTimer();
+  } else {
+    startElapsedTimer(startedAt);
+  }
+}
+
 async function send() {
   const text = input.value.trim();
-  if (!text || busy.value) return;
+  if (!text || busy.value || taskInputLocked.value) return;
   if (!auth.profile) {
     composerAuthNotice.value = '请先登录，当前输入会保留，登录后可继续发送。';
     void motion.nudgeComposer();
     return;
   }
+  const startedAt = Date.now();
+  resetTaskLifecycle(startedAt);
   composerAuthNotice.value = '';
   input.value = '';
   busy.value = true;
@@ -1379,10 +1448,8 @@ async function send() {
   firstTokenMs.value = null;
   stoppingStream.value = false;
   lastUserPrompt.value = text;
-  const startedAt = Date.now();
   const streamController = new AbortController();
   activeStreamController = streamController;
-  startElapsedTimer(startedAt);
   localStorage.setItem(SESSION_KEY, sessionKey.value);
   addMessage('user', text);
   const agentMessageId = addMessage('agent', '');
@@ -1405,24 +1472,29 @@ async function send() {
           streamMeta.value = meta;
         },
         onDecision(decision) {
+          taskHasProgress.value = true;
           agentDecision.value = decision;
-          streamStatus.value = `自动判断：${decision.intent} / ${decision.executionPath}`;
+          streamStatus.value = '正在判断任务处理方式。';
         },
         onTrace(event) {
+          taskHasProgress.value = true;
           pushTraceEvent(event);
           if (event.detail) {
             streamStatus.value = `${event.stepName}：${event.detail}`;
           }
         },
         onToolCall(event) {
+          taskHasProgress.value = true;
           pushCapabilityEvent(event);
           streamStatus.value = `${event.capabilityId}：${event.summary || event.status}`;
         },
         onSkillCall(event) {
+          taskHasProgress.value = true;
           pushCapabilityEvent(event);
           streamStatus.value = `${event.capabilityId}：${event.summary || event.status}`;
         },
         onVerification(event) {
+          taskHasProgress.value = true;
           verificationEvent.value = event;
           streamStatus.value = `校验证据：${event.summary || event.status}`;
         },
@@ -1436,6 +1508,7 @@ async function send() {
           addMessage('system', `工具调用需要确认：${proposal.toolName}`);
         },
         onToken(token) {
+          taskHasProgress.value = true;
           if (firstTokenMs.value == null) {
             firstTokenMs.value = Date.now() - startedAt;
           }
@@ -1443,11 +1516,13 @@ async function send() {
           scheduleScrollBottom();
         },
         onError(message) {
+          taskStreamFailed.value = true;
           const current = getMessageContent(agentMessageId);
           setMessageContent(agentMessageId, current ? `${current}\n${message}` : message);
           void loadModelStatus();
         },
         onDone() {
+          taskStreamFinished.value = true;
           streamStatus.value = '已完成';
         }
       },
@@ -1458,9 +1533,12 @@ async function send() {
     }
   } catch (error) {
     if (stoppingStream.value) {
+      taskStoppedByUser.value = true;
+      taskStreamFinished.value = false;
       const current = getMessageContent(agentMessageId).trim();
       setMessageContent(agentMessageId, current ? `${current}\n\n已停止生成。` : '已停止生成。');
     } else {
+      taskStreamFailed.value = true;
       setMessageContent(agentMessageId, `请求失败：${error instanceof Error ? error.message : '未知错误'}`);
       void loadModelStatus();
     }
@@ -1470,7 +1548,6 @@ async function send() {
     if (activeStreamController === streamController) {
       activeStreamController = null;
     }
-    stopElapsedTimer();
     streamStatus.value = '';
     persistCurrentMessages(true);
     await scrollBottom();
@@ -1491,71 +1568,100 @@ async function retryLastPrompt() {
 }
 
 async function confirmPendingAction() {
-  if (!pendingAction.value || busy.value) return;
-  actionStatus.value = '正在确认执行...';
+  if (!pendingAction.value || busy.value || approvalSubmitting.value !== 'none') return;
+  approvalSubmitting.value = 'action';
+  actionStatus.value = '正在确认执行…';
   try {
     const result = await confirmActionProposal(pendingAction.value.proposalId, sessionKey.value);
-    actionStatus.value = result.message || '已确认。';
-    addMessage('agent', result.message || '动作已确认。');
+    normalActionOutcome.value = 'confirmed';
+    normalActionResult.value = result.message || '操作已确认并完成。';
+    actionStatus.value = normalActionResult.value;
+    addMessage('agent', normalActionResult.value);
     pendingAction.value = null;
     await scrollBottom();
   } catch (error) {
     actionStatus.value = error instanceof Error ? error.message : '确认失败。';
+  } finally {
+    approvalSubmitting.value = 'none';
   }
 }
 
 async function cancelPendingAction() {
-  if (!pendingAction.value || busy.value) return;
-  actionStatus.value = '正在取消...';
+  if (!pendingAction.value || busy.value || approvalSubmitting.value !== 'none') return;
+  approvalSubmitting.value = 'action';
+  actionStatus.value = '正在取消…';
   try {
     const result = await cancelActionProposal(pendingAction.value.proposalId);
-    actionStatus.value = result.message || '已取消。';
-    addMessage('system', result.message || '已取消，未执行任何动作。');
+    normalActionOutcome.value = 'cancelled';
+    normalActionResult.value = result.message || '已取消，未执行任何动作。';
+    actionStatus.value = normalActionResult.value;
+    addMessage('system', normalActionResult.value);
     pendingAction.value = null;
     await scrollBottom();
   } catch (error) {
     actionStatus.value = error instanceof Error ? error.message : '取消失败。';
+  } finally {
+    approvalSubmitting.value = 'none';
   }
 }
 
 async function confirmPendingToolAction() {
-  if (!pendingToolAction.value || busy.value) return;
-  if (!pendingToolAction.value.proposalId) {
-    toolActionStatus.value = '确认失败：缺少 proposalId，请重新发起请求。';
+  if (!pendingToolAction.value || busy.value || approvalSubmitting.value !== 'none') return;
+  const proposalId = pendingToolAction.value.proposalId;
+  if (!proposalId) {
+    toolActionStatus.value = '确认失败：缺少确认单标识，请重新发起请求。';
     return;
   }
-  toolActionStatus.value = '正在确认工具调用...';
+  approvalSubmitting.value = 'tool';
+  toolActionStatus.value = '正在确认工具调用…';
   try {
-    const result = await confirmToolProposal(pendingToolAction.value.proposalId, '用户确认执行工具调用');
-    toolActionStatus.value = `已确认，状态：${result.status || 'EXECUTING'}。工具执行将在后台继续，请稍后查看执行结果。`;
-    addMessage('system', `工具调用已确认：${pendingToolAction.value.toolName}，后台正在执行。`);
+    const proposal = await confirmToolProposal(proposalId, '用户确认执行工具调用');
+    toolActionStatus.value = '已确认，正在等待真实执行结果。';
     pendingToolAction.value = null;
+    await toolProposalMonitor.start(proposal.proposalId, proposal);
     await scrollBottom();
   } catch (error) {
     toolActionStatus.value = error instanceof Error ? error.message : '确认工具调用失败。';
+  } finally {
+    approvalSubmitting.value = 'none';
   }
 }
 
 async function rejectPendingToolAction() {
-  if (!pendingToolAction.value || busy.value) return;
-  if (!pendingToolAction.value.proposalId) {
-    toolActionStatus.value = '拒绝失败：缺少 proposalId，请重新发起请求。';
+  if (!pendingToolAction.value || busy.value || approvalSubmitting.value !== 'none') return;
+  const proposalId = pendingToolAction.value.proposalId;
+  if (!proposalId) {
+    toolActionStatus.value = '拒绝失败：缺少确认单标识，请重新发起请求。';
     return;
   }
-  toolActionStatus.value = '正在拒绝工具调用...';
+  approvalSubmitting.value = 'tool';
+  toolActionStatus.value = '正在拒绝工具调用…';
   try {
-    const result = await rejectToolProposal(pendingToolAction.value.proposalId, '用户拒绝执行工具调用');
-    toolActionStatus.value = `已拒绝，状态：${result.status || 'REJECTED'}`;
-    addMessage('system', `工具调用已拒绝：${pendingToolAction.value.toolName}`);
+    const proposal = await rejectToolProposal(proposalId, '用户拒绝执行工具调用');
+    await toolProposalMonitor.start(proposal.proposalId, proposal);
+    toolActionStatus.value = '已拒绝，风险操作没有执行。';
     pendingToolAction.value = null;
     await scrollBottom();
   } catch (error) {
     toolActionStatus.value = error instanceof Error ? error.message : '拒绝工具调用失败。';
+  } finally {
+    approvalSubmitting.value = 'none';
   }
+}
+
+async function refreshToolProposalStatus() {
+  const current = toolProposalMonitor.proposal.value;
+  if (!current?.proposalId) {
+    toolActionStatus.value = '暂时没有可查询的工具操作。';
+    return;
+  }
+  const latest = await toolProposalMonitor.start(current.proposalId, current);
+  toolActionStatus.value = latest ? `当前状态：${latest.status}。` : '暂时无法取得工具状态，请稍后重新查询。';
 }
 
 function newSession() {
   persistCurrentMessages(true);
+  resetTaskLifecycle(null);
   sessionKey.value = makeSessionKey();
   localStorage.setItem(SESSION_KEY, sessionKey.value);
   messages.value = [];
@@ -1965,6 +2071,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  toolProposalMonitor.stop();
   persistCurrentMessages(true);
   stopElapsedTimer();
   if (persistTimer) {
@@ -2682,6 +2789,20 @@ onUnmounted(() => {
               </section>
 
               <section v-else ref="chatLog" class="stitch-chat runtime-chat-log" aria-live="polite">
+                <TaskStatusCard
+                  v-if="taskStartedAt != null || !auth.profile"
+                  :phase="taskPhase"
+                  :title="taskCopy.title"
+                  :detail="composerDisabledReason || taskCopy.detail"
+                  :elapsed-label="taskElapsedLabel"
+                  :result="taskResult"
+                  :can-retry="taskPhase === 'failed' || taskPhase === 'cancelled'"
+                  :can-refresh-status="taskPhase === 'status_unknown'"
+                  @retry="retryLastPrompt"
+                  @refresh-status="refreshToolProposalStatus"
+                  @open-details="toggleRuntimeInspector"
+                />
+                <TaskLoginGate v-if="!auth.profile" :has-draft="Boolean(input.trim())" @authenticated="focusComposer" />
                 <div v-if="messages.length === 0" class="command-run-preview">
                   <article class="runtime-empty-brief">
                     <div>
@@ -2694,7 +2815,7 @@ onUnmounted(() => {
                         :key="prompt"
                         class="empty-prompt-button"
                         type="button"
-                        :disabled="busy"
+                        :disabled="busy || taskInputLocked"
                         @click="usePrompt(prompt)"
                       >
                         {{ prompt }}
@@ -2720,34 +2841,28 @@ onUnmounted(() => {
                 class="confirmation-tray"
                 aria-live="assertive"
               >
-                <div v-if="pendingAction" class="action-required-card">
-                  <div>
-                    <span class="risk-badge">{{ pendingAction.riskLevel }}</span>
-                    <h3>{{ pendingAction.title }}</h3>
-                    <p>{{ pendingAction.summary }}</p>
-                    <small>确认前不会执行。proposal: {{ pendingAction.proposalId.slice(0, 8) }}</small>
-                  </div>
-                  <div class="action-required-buttons">
-                    <button class="btn-subtle light" type="button" :disabled="busy" @click="cancelPendingAction">取消</button>
-                    <button class="btn-primary" type="button" :disabled="busy" @click="confirmPendingAction">确认执行</button>
-                  </div>
-                </div>
-                <div v-if="pendingToolAction" class="action-required-card tool-action-required-card">
-                  <div>
-                    <span class="risk-badge">{{ pendingToolAction.riskLevel }}</span>
-                    <h3>工具调用需要确认</h3>
-                    <p>{{ pendingToolAction.previewSummary || pendingToolAction.toolName }}</p>
-                    <small>工具：{{ pendingToolAction.toolName }}</small>
-                    <ul v-if="pendingToolAction.targetPaths.length" class="tool-target-paths">
-                      <li v-for="path in pendingToolAction.targetPaths" :key="path">{{ path }}</li>
-                    </ul>
-                    <small>确认前不会执行。proposal: {{ pendingToolAction.proposalId.slice(0, 8) }}</small>
-                  </div>
-                  <div class="action-required-buttons">
-                    <button class="btn-subtle light" type="button" :disabled="busy || !pendingToolAction.proposalId" @click="rejectPendingToolAction">拒绝</button>
-                    <button class="btn-primary" type="button" :disabled="busy || !pendingToolAction.proposalId" @click="confirmPendingToolAction">确认执行</button>
-                  </div>
-                </div>
+                <TaskApprovalCard
+                  v-if="pendingAction"
+                  :title="pendingAction.title || '需要确认的操作'"
+                  :summary="pendingAction.summary"
+                  :risk-level="pendingAction.riskLevel"
+                  :target-paths="[]"
+                  :submitting="busy || approvalSubmitting === 'action'"
+                  approve-label="确认执行"
+                  @approve="confirmPendingAction"
+                  @reject="cancelPendingAction"
+                />
+                <TaskApprovalCard
+                  v-if="pendingToolAction"
+                  title="需要确认的工具操作"
+                  :summary="pendingToolAction.previewSummary || pendingToolAction.toolName"
+                  :risk-level="pendingToolAction.riskLevel"
+                  :target-paths="pendingToolAction.targetPaths"
+                  :submitting="busy || approvalSubmitting === 'tool'"
+                  approve-label="确认执行"
+                  @approve="confirmPendingToolAction"
+                  @reject="rejectPendingToolAction"
+                />
                 <p v-if="actionStatus" class="stream-status">{{ actionStatus }}</p>
                 <p v-if="toolActionStatus" class="stream-status">{{ toolActionStatus }}</p>
               </div>
@@ -2759,7 +2874,7 @@ onUnmounted(() => {
                     :key="mode.label"
                     class="mode-chip-button"
                     type="button"
-                    :disabled="busy"
+                    :disabled="busy || taskInputLocked"
                     @click="usePrompt(mode.prompt)"
                   >
                     {{ mode.label }}
@@ -2774,15 +2889,17 @@ onUnmounted(() => {
                   id="agent-input"
                   v-model="input"
                   placeholder="问一个问题或给一个任务"
+                  :aria-describedby="composerDisabledReason ? 'composer-task-lock-reason' : undefined"
+                  :disabled="taskInputLocked"
                   @keydown.enter.exact.prevent="send"
                 />
                 <div v-if="composerLocked" class="composer-auth-gate" aria-live="polite">
                   <div>
                     <strong>登录后继续</strong>
-                    <span>{{ composerAuthNotice || '你的输入会保留，登录后可继续发送并同步历史。' }}</span>
+                    <span>{{ composerAuthNotice || '你的输入会保留，请使用上方登录卡后继续发送。' }}</span>
                   </div>
-                  <RouterLink class="btn-subtle light small-button" to="/admin">登录 / 注册</RouterLink>
                 </div>
+                <p v-if="composerDisabledReason" id="composer-task-lock-reason" class="stream-status">{{ composerDisabledReason }}</p>
                 <div class="composer-tools">
                   <div class="composer-left-actions" aria-label="Input helpers">
                     <button class="composer-icon-button" type="button" title="Use authorized local files" @click="startAttachFlow">文件</button>
@@ -2817,21 +2934,12 @@ onUnmounted(() => {
                   <strong>{{ latestTrace?.stepName }}</strong>
                   <small>{{ latestTrace?.detail || traceStatusLabel(latestTrace?.status) }}</small>
                 </div>
-                <div v-if="hasRunDetails" class="runtime-debug-summary" aria-label="运行摘要">
-                  <div>
-                    <span>{{ runStatus }}</span>
-                    <strong>{{ runCurrentStepLabel }}</strong>
-                    <small>{{ runDurationLabel }}</small>
-                  </div>
-                  <button
-                    class="runtime-debug-toggle"
-                    type="button"
-                    :aria-expanded="inspectorDrawerOpen"
-                    @click="toggleRuntimeInspector"
-                  >
-                    {{ inspectorDrawerOpen ? '收起调试' : '调试详情' }}
-                  </button>
-                </div>
+                <DeveloperDetailsToggle
+                  v-if="hasRunDetails"
+                  :open="inspectorDrawerOpen"
+                  :summary="`${runCurrentStepLabel} · ${runDurationLabel}`"
+                  @toggle="toggleRuntimeInspector"
+                />
               </footer>
             </div>
           </section>

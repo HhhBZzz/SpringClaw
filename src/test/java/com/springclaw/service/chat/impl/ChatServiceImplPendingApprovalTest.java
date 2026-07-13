@@ -53,6 +53,7 @@ class ChatServiceImplPendingApprovalTest {
     private final SseEventBridge sseEventBridge = mock(SseEventBridge.class);
     private final ToolInvocationProposalService proposalService = mock(ToolInvocationProposalService.class);
     private final LocalFileWriteProposalService localFileWriteProposalService = mock(LocalFileWriteProposalService.class);
+    private final ApprovedCommandProposalService approvedCommandProposalService = mock(ApprovedCommandProposalService.class);
 
     @Test
     void handlePendingApproval_proposalExists_sendsActionRequired() {
@@ -110,6 +111,28 @@ class ChatServiceImplPendingApprovalTest {
         method.invoke(chatService, context, "lock-token", new AtomicBoolean(false), emitter);
 
         verify(sseEventBridge).sendToolActionRequired(emitter, proposal);
+        verify(actionProposalService, never()).createProposal(
+                any(), any(), any(), any(), any(), any(), any());
+        verify(chatGuardService).releaseSessionLock("session-A", "lock-token");
+        verify(sseEventBridge).completeEmitter(emitter);
+    }
+
+    @Test
+    void streamActionRequired_approvedCommand_usesToolProposalInsteadOfLegacyActionProposal() throws Exception {
+        ChatServiceImpl chatService = buildService();
+        chatService.setApprovedCommandProposalService(approvedCommandProposalService);
+        SseEmitter emitter = new SseEmitter();
+        ChatContext context = approvedCommandContext();
+        ToolInvocationProposal proposal = proposal("tip-command");
+        when(approvedCommandProposalService.createProposalIfSupported(context)).thenReturn(Optional.of(proposal));
+
+        Method method = ChatServiceImpl.class.getDeclaredMethod(
+                "streamActionRequired", ChatContext.class, String.class, AtomicBoolean.class, SseEmitter.class);
+        method.setAccessible(true);
+        method.invoke(chatService, context, "lock-token", new AtomicBoolean(false), emitter);
+
+        verify(approvedCommandProposalService).createProposalIfSupported(context);
+        verify(sseEventBridge).sendToolActionRequired(eq(emitter), eq(proposal));
         verify(actionProposalService, never()).createProposal(
                 any(), any(), any(), any(), any(), any(), any());
         verify(chatGuardService).releaseSessionLock("session-A", "lock-token");
@@ -201,6 +224,32 @@ class ChatServiceImplPendingApprovalTest {
                 "agent",
                 "local_files",
                 new AgentDecision("local_files", "agent_tools", List.of("file"), "write", true, "desktop write")
+        );
+    }
+
+    private static ChatContext approvedCommandContext() {
+        String message = "请执行命令 pwd";
+        AgentSession session = new AgentSession();
+        session.setSessionKey("session-A");
+        session.setChannel("api");
+        session.setUserId("admin");
+        return new ChatContext(
+                session,
+                "api",
+                "admin",
+                "ADMIN",
+                message,
+                message,
+                "req-1",
+                "system",
+                new AssembledContext("session-A", "api", "admin", message, "", "", ""),
+                null,
+                "simplified",
+                "route",
+                "agent",
+                "model_control",
+                new AgentDecision("model_control", "agent_tools", List.of("system"), "execution", true,
+                        "command confirmation")
         );
     }
 }

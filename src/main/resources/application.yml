@@ -201,7 +201,7 @@ springclaw:
     redis-enabled: true
     default-role: USER
     anonymous-role: USER
-    bootstrap-first-user-admin: true
+    bootstrap-first-user-admin: ${SPRINGCLAW_AUTH_BOOTSTRAP_FIRST_USER_ADMIN:true}
     admin-usernames: ${SPRINGCLAW_ADMIN_USERNAMES:}
     token-ttl-hours: 24
     token-prefix: "springclaw:auth:token:"

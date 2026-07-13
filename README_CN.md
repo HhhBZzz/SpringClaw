@@ -39,6 +39,7 @@ cp .env.example .env
 | `SPRINGCLAW_PASSWORD_PEPPER` | 密码哈希可选附加密钥；一旦线上使用，不要在没有账号迁移方案时更换。 |
 | `SPRINGCLAW_HTTP_BIND_ADDRESS`、`SPRINGCLAW_HTTP_PORT` | Nginx 前端的宿主机绑定。没有 TLS 反向代理时请保持默认回环地址。 |
 | `SPRINGCLAW_AUTH_COOKIE_SECURE` | 本机 HTTP 调试才设为 `false`；HTTPS/TLS 入口必须设为 `true`。 |
+| `SPRINGCLAW_WEBHOOK_SECURITY_ENABLED`、`SPRINGCLAW_WEBHOOK_SECRET` 及渠道专用 Webhook 密钥 | 对每个公网可访问的入站 Webhook，都必须设置 `SPRINGCLAW_WEBHOOK_SECURITY_ENABLED=true` 并设置对应的默认或渠道密钥；密钥不得记录或提交。 |
 | `SPRINGCLAW_AI_ACTIVE_PROVIDER` 及某个 provider 的 enabled/key/base-url/model | 所有模型都关闭时平台仍可健康启动；要实际聊天，必须明确启用并配置一个模型提供方。 |
 
 Flyway 会在应用启动时自动校验并按顺序执行迁移；已有数据库只会继续升级，不会自动清空数据，破坏性 clean 操作已禁用。
@@ -69,7 +70,7 @@ make ps
 make verify
 ```
 
-`make verify` 会先校验 Compose 配置，再在最多 120 秒内等待五项服务健康；随后访问前端首页、确认 `/api/auth/me` 经过反向代理能返回任意 HTTP 响应（未登录是正常的），并在应用容器内部检查 Actuator 健康状态。它默认使用 Docker Compose 解析 `.env` 后得到的 `SPRINGCLAW_HTTP_PORT`；只有需要临时覆盖时才设置 `HTTP_PORT`。
+`make verify` 会先校验 Compose 配置，再在最多 120 秒内等待五项服务健康；随后访问前端首页、确认 `/api/auth/me` 经过反向代理仅接受 200、401 或 403（未登录是正常的），并在应用容器内部检查 Actuator 健康状态。它默认使用 Docker Compose 解析 `.env` 后得到的 `SPRINGCLAW_HTTP_PORT`；只有需要临时覆盖时才设置 `HTTP_PORT`。
 
 常用命令：
 

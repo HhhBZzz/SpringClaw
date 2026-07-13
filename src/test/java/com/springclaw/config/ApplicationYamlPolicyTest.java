@@ -70,9 +70,28 @@ class ApplicationYamlPolicyTest {
                 properties.getProperty("springclaw.webhook.security.enabled"));
     }
 
+    @Test
+    void bootstrapAdminIsConfigurableForNativeDevelopmentAndDisabledByDefaultInProduction() {
+        Properties baseProperties = applicationProperties();
+        Properties productionProperties = applicationProperties("application-prod.yml");
+
+        Assertions.assertEquals(
+                "${SPRINGCLAW_AUTH_BOOTSTRAP_FIRST_USER_ADMIN:true}",
+                baseProperties.getProperty("springclaw.auth.bootstrap-first-user-admin")
+        );
+        Assertions.assertEquals(
+                "${SPRINGCLAW_AUTH_BOOTSTRAP_FIRST_USER_ADMIN:false}",
+                productionProperties.getProperty("springclaw.auth.bootstrap-first-user-admin")
+        );
+    }
+
     private Properties applicationProperties() {
+        return applicationProperties("application.yml");
+    }
+
+    private Properties applicationProperties(String resourceName) {
         YamlPropertiesFactoryBean factory = new YamlPropertiesFactoryBean();
-        factory.setResources(new ClassPathResource("application.yml"));
+        factory.setResources(new ClassPathResource(resourceName));
         return factory.getObject();
     }
 }

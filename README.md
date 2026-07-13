@@ -39,6 +39,7 @@ Replace every infrastructure password placeholder, then review these settings:
 | `SPRINGCLAW_PASSWORD_PEPPER` | An optional, stable secret used while hashing passwords. Do not rotate it without a credential migration plan. |
 | `SPRINGCLAW_HTTP_BIND_ADDRESS`, `SPRINGCLAW_HTTP_PORT` | The host binding of the Nginx frontend. Keep the default loopback binding unless a TLS proxy is in front of it. |
 | `SPRINGCLAW_AUTH_COOKIE_SECURE` | Use `false` only for local HTTP. Set it to `true` behind HTTPS/TLS. |
+| `SPRINGCLAW_WEBHOOK_SECURITY_ENABLED`, `SPRINGCLAW_WEBHOOK_SECRET`, and channel-specific webhook secrets | For every publicly reachable inbound webhook, set `SPRINGCLAW_WEBHOOK_SECURITY_ENABLED=true` and the appropriate default or channel secret; never log or commit these secrets. |
 | `SPRINGCLAW_AI_ACTIVE_PROVIDER` and one provider's enabled/key/base-url/model values | A healthy platform can start with providers disabled, but chat needs one intentionally configured provider. |
 
 Flyway runs during application startup. It validates existing migrations, applies new migrations in order, and has destructive clean operations disabled. Do not replace this with manual database initialization.
@@ -69,7 +70,7 @@ make ps
 make verify
 ```
 
-`make verify` first validates the Compose configuration, waits up to 120 seconds for all five health checks, fetches the frontend root, confirms the `/api/auth/me` proxy route returns an HTTP response (authentication is not required), and checks the Actuator health endpoint from inside the application container. It obtains the effective `SPRINGCLAW_HTTP_PORT` from Docker Compose's resolved `.env` configuration; set `HTTP_PORT` only when intentionally overriding that port for a one-off check.
+`make verify` first validates the Compose configuration, waits up to 120 seconds for all five health checks, fetches the frontend root, confirms the `/api/auth/me` proxy route only accepts 200, 401, or 403 (authentication is not required), and checks the Actuator health endpoint from inside the application container. It obtains the effective `SPRINGCLAW_HTTP_PORT` from Docker Compose's resolved `.env` configuration; set `HTTP_PORT` only when intentionally overriding that port for a one-off check.
 
 Common commands:
 

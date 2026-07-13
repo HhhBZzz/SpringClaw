@@ -27,9 +27,10 @@ make verify
 - `SPRINGCLAW_PASSWORD_PEPPER`：如启用，必须稳定保管；随意改变会让旧密码无法验证。
 - `SPRINGCLAW_AUTH_COOKIE_SECURE`：本机纯 HTTP 仅可设为 `false`。若浏览器经 HTTPS/TLS 访问，必须设为 `true`。
 - `SPRINGCLAW_HTTP_BIND_ADDRESS`：默认 `127.0.0.1`。对公网服务时，让 TLS 反向代理转发到此回环端口，不要直接以纯 HTTP 暴露登录入口。
+- Webhook 签名安全：对每个公网可访问的入站 Webhook，必须设置 `SPRINGCLAW_WEBHOOK_SECURITY_ENABLED=true`，并配置对应的 `SPRINGCLAW_WEBHOOK_SECRET` 或渠道专用密钥；密钥不得记录或提交。
 - AI provider 配置：模板默认关闭全部 provider。应用可以健康启动，但聊天前必须显式配置一个 provider 的 enabled/key/base-url/model。
 
-`make verify` 是交付冒烟检查：它校验 Compose 配置，等待五项服务健康，检查前端首页和 `/api/auth/me` 代理响应，并从 app 容器内部检查 Actuator health。该 API 检查不要求登录，未认证响应是可接受的。验证器默认使用 Docker Compose 解析 `.env` 后的 `SPRINGCLAW_HTTP_PORT`；仅在独立冒烟环境需要临时覆盖时才传入 `HTTP_PORT`。
+`make verify` 是交付冒烟检查：它校验 Compose 配置，等待五项服务健康，检查前端首页，并确认 `/api/auth/me` 仅接受 200、401 或 403；该 API 检查不要求登录，未认证响应是可接受的。它还会从 app 容器内部检查 Actuator health。验证器默认使用 Docker Compose 解析 `.env` 后的 `SPRINGCLAW_HTTP_PORT`；仅在独立冒烟环境需要临时覆盖时才传入 `HTTP_PORT`。
 
 ## 3. 本地原生开发
 

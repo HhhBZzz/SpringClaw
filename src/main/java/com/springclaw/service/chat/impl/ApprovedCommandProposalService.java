@@ -34,7 +34,7 @@ public class ApprovedCommandProposalService {
     }
 
     public Optional<ToolInvocationProposal> createProposalIfSupported(ChatContext context) {
-        if (!isExecutionModelControlConfirmation(context)) {
+        if (!isConfirmedModelControlDecision(context)) {
             return Optional.empty();
         }
 
@@ -61,12 +61,11 @@ public class ApprovedCommandProposalService {
         return Optional.of(proposalService.createPending(snapshot, toolContext));
     }
 
-    private boolean isExecutionModelControlConfirmation(ChatContext context) {
+    private boolean isConfirmedModelControlDecision(ChatContext context) {
         AgentDecision decision = context == null ? null : context.decision();
         return decision != null
                 && decision.requiresConfirmation()
-                && "model_control".equalsIgnoreCase(decision.intent())
-                && RISK_LEVEL.equalsIgnoreCase(decision.riskLevel());
+                && "model_control".equalsIgnoreCase(decision.intent());
     }
 
     private String supportedCommand(String rawMessage) {

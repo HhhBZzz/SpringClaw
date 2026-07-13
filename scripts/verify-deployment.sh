@@ -16,25 +16,17 @@ compose() {
   docker compose --env-file "$ENV_FILE" "$@"
 }
 
-env_file_value() {
+compose_environment_value() {
   local expected_key="$1"
-  local line
-  local value=""
-  local found=false
 
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line%$'\r'}"
-    if [[ "$line" == "$expected_key="* ]]; then
-      value="${line#*=}"
-      found=true
-    fi
-  done < "$ENV_FILE"
-
-  if [[ "$found" == true ]]; then
-    printf '%s' "$value"
-    return 0
-  fi
-  return 1
+  compose config --environment | awk -v expected_key="$expected_key" '
+    index($0, expected_key "=") == 1 {
+      print substr($0, length(expected_key) + 2)
+      found = 1
+      exit
+    }
+    END { exit(found ? 0 : 1) }
+  '
 }
 
 service_is_healthy() {
@@ -46,8 +38,9 @@ service_is_healthy() {
 }
 
 [[ -f "$ENV_FILE" ]] || fail "environment file '$ENV_FILE' does not exist"
+compose config --quiet
 if [[ -z "${HTTP_PORT+x}" ]]; then
-  HTTP_PORT="$(env_file_value SPRINGCLAW_HTTP_PORT || true)"
+  HTTP_PORT="$(compose_environment_value SPRINGCLAW_HTTP_PORT || true)"
   HTTP_PORT="${HTTP_PORT:-8080}"
 fi
 readonly HTTP_PORT
@@ -55,8 +48,6 @@ readonly HTTP_PORT
   || fail "HTTP_PORT must be an integer between 1 and 65535"
 [[ "$TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail "TIMEOUT_SECONDS must be a positive integer"
 [[ "$POLL_INTERVAL_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail "POLL_INTERVAL_SECONDS must be a positive integer"
-
-compose config --quiet
 
 deadline=$((SECONDS + TIMEOUT_SECONDS))
 while true; do

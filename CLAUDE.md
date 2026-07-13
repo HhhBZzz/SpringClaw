@@ -26,7 +26,7 @@ make logs
 make down
 ```
 
-`make verify` validates Compose, waits for five healthy services, checks the frontend and API proxy, and performs an internal app Actuator health check. It uses `.env` by default, including its `SPRINGCLAW_HTTP_PORT`; an isolated caller can override the file with `ENV_FILE=/path/to/file` or intentionally override the probe port with `HTTP_PORT=...`. Preserve `COMPOSE_PROJECT_NAME` when invoking it for a separate Compose project.
+`make verify` validates Compose, waits for five healthy services, checks the frontend and API proxy, and performs an internal app Actuator health check. It uses Docker Compose's resolved `SPRINGCLAW_HTTP_PORT` from `.env` by default; an isolated caller can override the file with `ENV_FILE=/path/to/file` or intentionally override the probe port with `HTTP_PORT=...`. Preserve `COMPOSE_PROJECT_NAME` when invoking it for a separate Compose project.
 
 ## Deployment configuration
 

@@ -69,7 +69,7 @@ make ps
 make verify
 ```
 
-`make verify` 会先校验 Compose 配置，再在最多 120 秒内等待五项服务健康；随后访问前端首页、确认 `/api/auth/me` 经过反向代理能返回任意 HTTP 响应（未登录是正常的），并在应用容器内部检查 Actuator 健康状态。它默认从 `.env` 读取 `SPRINGCLAW_HTTP_PORT`；只有需要临时覆盖时才设置 `HTTP_PORT`。
+`make verify` 会先校验 Compose 配置，再在最多 120 秒内等待五项服务健康；随后访问前端首页、确认 `/api/auth/me` 经过反向代理能返回任意 HTTP 响应（未登录是正常的），并在应用容器内部检查 Actuator 健康状态。它默认使用 Docker Compose 解析 `.env` 后得到的 `SPRINGCLAW_HTTP_PORT`；只有需要临时覆盖时才设置 `HTTP_PORT`。
 
 常用命令：
 

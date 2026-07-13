@@ -29,7 +29,7 @@ make verify
 - `SPRINGCLAW_HTTP_BIND_ADDRESS`：默认 `127.0.0.1`。对公网服务时，让 TLS 反向代理转发到此回环端口，不要直接以纯 HTTP 暴露登录入口。
 - AI provider 配置：模板默认关闭全部 provider。应用可以健康启动，但聊天前必须显式配置一个 provider 的 enabled/key/base-url/model。
 
-`make verify` 是交付冒烟检查：它校验 Compose 配置，等待五项服务健康，检查前端首页和 `/api/auth/me` 代理响应，并从 app 容器内部检查 Actuator health。该 API 检查不要求登录，未认证响应是可接受的。验证器默认从 `.env` 的 `SPRINGCLAW_HTTP_PORT` 获取前端端口；仅在独立冒烟环境需要临时覆盖时才传入 `HTTP_PORT`。
+`make verify` 是交付冒烟检查：它校验 Compose 配置，等待五项服务健康，检查前端首页和 `/api/auth/me` 代理响应，并从 app 容器内部检查 Actuator health。该 API 检查不要求登录，未认证响应是可接受的。验证器默认使用 Docker Compose 解析 `.env` 后的 `SPRINGCLAW_HTTP_PORT`；仅在独立冒烟环境需要临时覆盖时才传入 `HTTP_PORT`。
 
 ## 3. 本地原生开发
 

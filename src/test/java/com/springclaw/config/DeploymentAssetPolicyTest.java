@@ -225,6 +225,28 @@ class DeploymentAssetPolicyTest {
     }
 
     @Test
+    void runbookKeepsDatabaseBackupsOutsideTheRepository() throws IOException {
+        String runbook = read("RUN_REAL_ENVIRONMENT.md");
+
+        assertThat(runbook)
+                .contains("umask 077")
+                .contains("SPRINGCLAW_BACKUP_DIR")
+                .contains("${SPRINGCLAW_BACKUP_DIR:-$HOME/.local/share/springclaw/backups}")
+                .contains("SPRINGCLAW_BACKUP_FILE")
+                .contains("test -f \"$SPRINGCLAW_BACKUP_FILE\"")
+                .doesNotContain("mkdir -p backups")
+                .doesNotContain("backups/springclaw");
+        assertThat(read(".gitignore")).contains("backups/");
+    }
+
+    @Test
+    void webhookSecurityProtocolCommentNamesImplementedSpringclawHeaders() throws IOException {
+        assertThat(read("src/main/java/com/springclaw/service/security/impl/DefaultWebhookSecurityService.java"))
+                .contains("X-Springclaw-Timestamp", "X-Springclaw-Nonce", "X-Springclaw-Signature")
+                .doesNotContain("X-Openclaw-");
+    }
+
+    @Test
     void acceptanceChatDocumentationRequiresBearerAuthenticationAndCurrentWebhookHeaders() throws IOException {
         String acceptance = read("docs/ACCEPTANCE_CHECKLIST.md");
 

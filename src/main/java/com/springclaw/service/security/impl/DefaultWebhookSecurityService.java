@@ -26,9 +26,9 @@ import java.util.concurrent.TimeUnit;
  * 默认 Webhook 安全校验实现。
  *
  * 协议定义：
- * - Header: X-Openclaw-Timestamp (epoch seconds)
- * - Header: X-Openclaw-Nonce
- * - Header: X-Openclaw-Signature (hex hmac-sha256)
+ * - Header: X-Springclaw-Timestamp (epoch seconds)
+ * - Header: X-Springclaw-Nonce
+ * - Header: X-Springclaw-Signature (hex hmac-sha256)
  * - SignText: timestamp + "\\n" + nonce + "\\n" + rawBody
  */
 @Service

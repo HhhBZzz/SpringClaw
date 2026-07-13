@@ -17,6 +17,9 @@ classpath.txt
 !*.example
 docs/PROJECT_MEMORY.md
 
+# Local database backup dumps (migrations remain tracked source)
+backups/
+
 # Logs
 *.log
 logs/

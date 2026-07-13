@@ -66,17 +66,20 @@ docker compose --env-file .env logs -f --tail=200 mysql
 
 ## 5. 备份
 
-升级前先备份 MySQL。下面的命令在数据库容器内使用其私有 root 密码，因此不会把密码打印到终端：
+升级前先备份 MySQL。备份默认写入当前操作员私有目录，而不是项目 checkout；可通过 `SPRINGCLAW_BACKUP_DIR` 显式指定其他**项目外**的备份位置。下面的命令在数据库容器内使用其私有 root 密码，因此不会把密码打印到终端：
 
 ```bash
-mkdir -p backups
+umask 077
+backup_dir="${SPRINGCLAW_BACKUP_DIR:-$HOME/.local/share/springclaw/backups}"
+mkdir -p -- "$backup_dir"
 stamp=$(date +%F-%H%M%S)
+backup_file="$backup_dir/springclaw-${stamp}.sql"
 docker compose --env-file .env exec -T mysql \
   sh -c 'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines --events --databases "$MYSQL_DATABASE"' \
-  > "backups/springclaw-${stamp}.sql"
+  > "$backup_file"
 ```
 
-备份文件包含用户、会话、审计和其他 MySQL 业务数据。把它加密并保存到宿主机以外的位置。Redis、应用数据和 workspace 是命名卷；如其中保存了业务资产，请按你的数据保留策略对 Docker 卷做快照。
+备份文件包含用户、会话、审计和其他 MySQL 业务数据，属于敏感数据。绝不能把它放进或提交到项目 Git 仓库；请加密并按保留策略保存。若需要外部存储，可在执行命令前设置 `SPRINGCLAW_BACKUP_DIR=/mnt/private-springclaw-db-dumps`。Redis、应用数据和 workspace 是命名卷；如其中保存了业务资产，请按你的数据保留策略对 Docker 卷做快照。
 
 ## 6. 恢复 MySQL 备份
 
@@ -85,7 +88,9 @@ docker compose --env-file .env exec -T mysql \
 ```bash
 make down
 docker compose --env-file .env up -d mysql
-cat backups/springclaw-YYYY-MM-DD-HHMMSS.sql | \
+: "${SPRINGCLAW_BACKUP_FILE:?Set SPRINGCLAW_BACKUP_FILE to an external backup file}"
+test -f "$SPRINGCLAW_BACKUP_FILE"
+cat -- "$SPRINGCLAW_BACKUP_FILE" | \
   docker compose --env-file .env exec -T mysql \
   sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD"'
 make up

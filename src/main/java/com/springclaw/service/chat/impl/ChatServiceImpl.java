@@ -379,7 +379,7 @@ public class ChatServiceImpl implements ChatService {
             if (toolProposal != null) {
                 sseEventBridge.sendToolActionRequired(emitter, toolProposal);
                 sseEventBridge.sendAnswerChunks(emitter,
-                        "这个本地文件写入操作需要确认。请在确认卡片里确认或拒绝；确认前不会写入文件。");
+                        "这个工具操作需要确认。请在确认卡片里确认或拒绝；确认前不会执行。");
                 return;
             }
             AgentActionProposal proposal = actionProposalService == null

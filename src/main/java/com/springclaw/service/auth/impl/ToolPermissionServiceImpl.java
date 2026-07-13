@@ -61,6 +61,9 @@ public class ToolPermissionServiceImpl implements ToolPermissionService {
         if ("ADMIN".equalsIgnoreCase(roleCode)) {
             return;
         }
+        if ("SystemToolPack.runCommand".equalsIgnoreCase(toolName)) {
+            throw new BusinessException(40311, "当前角色无权限调用工具: " + toolName + " (role=" + roleCode + ")");
+        }
 
         Boolean decision = findDbDecision(roleCode, toolName);
         if (decision == null) {

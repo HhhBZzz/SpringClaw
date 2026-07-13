@@ -1,5 +1,6 @@
 package com.springclaw.tool.runtime;
 
+import com.springclaw.common.exception.BusinessException;
 import com.springclaw.service.auth.ToolPermissionService;
 import com.springclaw.service.proposal.ApprovedProposalContext;
 import com.springclaw.service.proposal.PendingToolApprovalException;
@@ -208,6 +209,20 @@ class ToolRuntimeAspectGuardTest {
                         && "echo springclaw-approval-e2e".equals(args[0])),
                 Mockito.eq("execution")
         );
+    }
+
+    @Test
+    void systemRunCommand_unsupportedShape_neverCreatesProposal() {
+        SystemToolPack target = new SystemToolPack(true, "whitelist", "echo,pwd,git", "", 5, 2000);
+        AspectJProxyFactory proxyFactory = new AspectJProxyFactory(target);
+        proxyFactory.addAspect(aspect);
+        SystemToolPack systemToolPack = proxyFactory.getProxy();
+
+        BusinessException ex = Assertions.assertThrows(BusinessException.class,
+                () -> systemToolPack.runCommand("git config --get user.name"));
+
+        Assertions.assertEquals(40062, ex.getCode());
+        Mockito.verifyNoInteractions(snapshotService, toolGateway);
     }
 
     @Test

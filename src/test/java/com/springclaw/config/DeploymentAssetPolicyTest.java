@@ -96,6 +96,19 @@ class DeploymentAssetPolicyTest {
     }
 
     @Test
+    void nativeLauncherKeepsDeliveredPersistenceAndFeishuSafetySettings() throws IOException {
+        String launcher = read("scripts/run-native-backend.mjs");
+
+        for (String setting : List.of(
+                "SPRINGCLAW_PERSISTENCE_DB_ENABLED",
+                "SPRINGCLAW_FEISHU_OUTBOUND_ENABLED",
+                "SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED"
+        )) {
+            assertThat(launcher).contains("'" + setting + "',");
+        }
+    }
+
+    @Test
     void dockerfilePinsBothJavaBaseImagesToImmutableDigests() throws IOException {
         String dockerfile = read("Dockerfile");
         List<String> javaFromLines = dockerfile.lines()

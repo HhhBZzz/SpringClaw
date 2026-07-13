@@ -48,6 +48,12 @@ const requiredApplicationSettings = [
   'RABBITMQ_PASSWORD',
 ];
 
+const requiredNativeRuntimeSafetySettings = [
+  'SPRINGCLAW_PERSISTENCE_DB_ENABLED',
+  'SPRINGCLAW_FEISHU_OUTBOUND_ENABLED',
+  'SPRINGCLAW_FEISHU_LONG_CONNECTION_ENABLED',
+];
+
 function fail(message) {
   process.stderr.write(`Native backend startup failed: ${message}\n`);
   process.exit(1);
@@ -114,6 +120,13 @@ for (const key of requiredApplicationSettings) {
   selectedEnvironment[key] = requireString(
     appEnvironment[key],
     'resolved Compose configuration is missing a required native application setting',
+  );
+}
+
+for (const key of requiredNativeRuntimeSafetySettings) {
+  selectedEnvironment[key] = requireString(
+    appEnvironment[key],
+    'resolved Compose configuration is missing a required native runtime safety setting',
   );
 }
 

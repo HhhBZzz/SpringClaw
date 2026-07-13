@@ -58,7 +58,7 @@ npm ci
 npm run dev
 ```
 
-`make native-backend` resolves the development Compose topology as JSON before executing Maven. It preserves quoted, inline-comment, interpolated, and multiline values without evaluating `.env` as shell code; native MySQL, Redis, and RabbitMQ connections use the loopback ports resolved from `docker-compose.dev.yml`. Open `http://127.0.0.1:5173`; Vite proxies `/api` to the native backend at `http://127.0.0.1:18080`.
+`make native-backend` resolves the development Compose topology as JSON before executing Maven. It preserves quoted, inline-comment, interpolated, and multiline values without evaluating `.env` as shell code; native MySQL, Redis, and RabbitMQ connections use the loopback ports resolved from `docker-compose.dev.yml`. It also carries the delivered durable-persistence and Feishu-safe runtime settings alongside the documented user configuration. Open `http://127.0.0.1:5173`; Vite proxies `/api` to the native backend at `http://127.0.0.1:18080`.
 
 ## Complete Docker Compose delivery
 

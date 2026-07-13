@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class DeploymentAssetPolicyTest {
     @Test
@@ -161,23 +162,30 @@ class DeploymentAssetPolicyTest {
     }
 
     @Test
+    void mutableImageInADevelopmentOverlayWouldBeRejected() {
+        String mutableDevelopmentOverlay = """
+                services:
+                  redis:
+                    image: redis:8.2.7
+                """;
+
+        assertThatThrownBy(() -> assertComposeImageReferencesArePinned(
+                composeImageReferences(mutableDevelopmentOverlay)
+        )).isInstanceOf(AssertionError.class);
+    }
+
+    @Test
     void everyDockerBuildAndComposeImagePinsItsVersionTagToAnImmutableDigest() throws IOException {
         List<String> dockerfileFromLines = List.of(read("Dockerfile"), read("frontend/Dockerfile")).stream()
                 .flatMap(dockerfile -> dockerfile.lines())
                 .filter(line -> line.startsWith("FROM "))
                 .toList();
-        List<String> composeImageReferences = read("docker-compose.yml").lines()
-                .map(String::trim)
-                .filter(line -> line.startsWith("image:"))
-                .map(line -> line.substring("image:".length()).trim())
-                .toList();
+        List<String> composeImageReferences = composeImageReferencesFromDeliveryFiles();
 
         assertThat(dockerfileFromLines).allMatch(line -> line.matches(
                 "FROM\\s+[^\\s]+:[^\\s]+@sha256:[a-f0-9]{64}(?:\\s+AS\\s+[^\\s]+)?"
         ));
-        assertThat(composeImageReferences).allMatch(reference -> reference.matches(
-                "[^\\s]+:[^\\s]+@sha256:[a-f0-9]{64}"
-        ));
+        assertComposeImageReferencesArePinned(composeImageReferences);
         assertThat(dockerfileFromLines).contains(
                 "FROM maven:3.9.9-eclipse-temurin-17@sha256:f58d59b6273e785ac0a4477f6e9b5ba1d7731c75b906c0f7b34076f1851318cc AS builder",
                 "FROM eclipse-temurin:17-jre@sha256:1824944ef1bd572d1ff0952afeb2fec7931d77c972c4fbc4dfcdf89f758fb490",
@@ -202,6 +210,29 @@ class DeploymentAssetPolicyTest {
         assertThat(read("RUN_REAL_ENVIRONMENT.md"))
                 .contains("仅接受 200、401 或 403")
                 .doesNotContain("/api/auth/me` 代理响应");
+    }
+
+    private List<String> composeImageReferencesFromDeliveryFiles() throws IOException {
+        return List.of(
+                        composeImageReferences(read("docker-compose.yml")),
+                        composeImageReferences(read("docker-compose.dev.yml"))
+                ).stream()
+                .flatMap(List::stream)
+                .toList();
+    }
+
+    private List<String> composeImageReferences(String compose) {
+        return compose.lines()
+                .map(String::trim)
+                .filter(line -> line.startsWith("image:"))
+                .map(line -> line.substring("image:".length()).trim())
+                .toList();
+    }
+
+    private void assertComposeImageReferencesArePinned(List<String> references) {
+        assertThat(references).allMatch(reference -> reference.matches(
+                "[^\\s]+:[^\\s]+@sha256:[a-f0-9]{64}"
+        ));
     }
 
     private String read(String relativePath) throws IOException {

@@ -6,6 +6,7 @@ readonly HTTP_HOST="${HTTP_HOST:-127.0.0.1}"
 readonly TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-120}"
 readonly POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-2}"
 readonly SERVICES=(mysql redis rabbitmq app frontend)
+temporary_environment_file=""
 
 fail() {
   printf 'Deployment verification failed: %s\n' "$*" >&2
@@ -16,17 +17,42 @@ compose() {
   docker compose --env-file "$ENV_FILE" "$@"
 }
 
-compose_environment_value() {
-  local expected_key="$1"
+cleanup() {
+  if [[ -n "$temporary_environment_file" ]]; then
+    rm -f "$temporary_environment_file"
+  fi
+}
 
-  compose config --environment | awk -v expected_key="$expected_key" '
-    index($0, expected_key "=") == 1 {
-      print substr($0, length(expected_key) + 2)
+resolve_http_port() {
+  local port_key_state
+
+  umask 077
+  temporary_environment_file="$(mktemp "${TMPDIR:-/tmp}/springclaw-verify-environment.XXXXXX")" \
+    || fail "could not create a private Compose environment file"
+
+  if ! compose config --environment > "$temporary_environment_file"; then
+    fail "could not resolve the Compose environment"
+  fi
+
+  port_key_state="$(awk '
+    index($0, "SPRINGCLAW_HTTP_PORT=") == 1 {
       found = 1
       exit
     }
-    END { exit(found ? 0 : 1) }
-  '
+    END { print(found ? "present" : "missing") }
+  ' "$temporary_environment_file")" || fail "could not read the resolved Compose port"
+
+  if [[ "$port_key_state" == "present" ]]; then
+    HTTP_PORT="$(awk '
+    index($0, "SPRINGCLAW_HTTP_PORT=") == 1 {
+      value = substr($0, length("SPRINGCLAW_HTTP_PORT=") + 1)
+      print value
+      exit
+    }
+  ' "$temporary_environment_file")" || fail "could not read the resolved Compose port"
+  else
+    HTTP_PORT=8080
+  fi
 }
 
 service_is_healthy() {
@@ -37,11 +63,11 @@ service_is_healthy() {
   [[ "$state" == *'"State":"running"'* && "$state" == *'"Health":"healthy"'* ]]
 }
 
+trap cleanup EXIT
 [[ -f "$ENV_FILE" ]] || fail "environment file '$ENV_FILE' does not exist"
 compose config --quiet
 if [[ -z "${HTTP_PORT+x}" ]]; then
-  HTTP_PORT="$(compose_environment_value SPRINGCLAW_HTTP_PORT || true)"
-  HTTP_PORT="${HTTP_PORT:-8080}"
+  resolve_http_port
 fi
 readonly HTTP_PORT
 [[ "$HTTP_PORT" =~ ^[1-9][0-9]{0,4}$ ]] && ((10#$HTTP_PORT <= 65535)) \

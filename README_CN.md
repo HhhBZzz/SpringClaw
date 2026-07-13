@@ -57,7 +57,7 @@ npm ci
 npm run dev
 ```
 
-`make native-backend` 会先通过 Docker Compose 解析受支持的数据库、Redis、RabbitMQ 和 SpringClaw 配置，再启动 Maven；带引号的值、行尾注释和插值会与 `make up` 保持一致，且不会把 `.env` 当作 shell 代码执行。浏览器打开 `http://127.0.0.1:5173`。Vite 会将 `/api` 请求代理给本机 `http://127.0.0.1:18080` 后端。
+`make native-backend` 会先将开发 Compose 拓扑解析为 JSON，再启动 Maven；带引号的值、行尾注释、插值和多行值会与 `make up` 保持一致，且不会把 `.env` 当作 shell 代码执行。原生 MySQL、Redis、RabbitMQ 会使用 `docker-compose.dev.yml` 解析出的回环端口。浏览器打开 `http://127.0.0.1:5173`。Vite 会将 `/api` 请求代理给本机 `http://127.0.0.1:18080` 后端。
 
 ## 完整 Docker Compose 交付
 

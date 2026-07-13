@@ -28,7 +28,7 @@ make down
 
 `make verify` validates Compose, waits for five healthy services, checks the frontend and API proxy, and performs an internal app Actuator health check. It uses Docker Compose's resolved `SPRINGCLAW_HTTP_PORT` from `.env` by default; an isolated caller can override the file with `ENV_FILE=/path/to/file` or intentionally override the probe port with `HTTP_PORT=...`. Preserve `COMPOSE_PROJECT_NAME` when invoking it for a separate Compose project.
 
-`make native-backend` validates Compose, resolves its environment, and exports only valid `MYSQL_*`, `REDIS_*`, `RABBITMQ_*`, and `SPRINGCLAW_*` assignments before it execs Maven. It does not source `.env`, evaluate values, or overwrite `PATH`/`HOME`.
+`make native-backend` validates the Compose development overlay, resolves it as JSON, and starts Maven with only selected database, Redis, RabbitMQ, and documented SpringClaw settings. It uses loopback ports from the resolved development mappings, does not source or evaluate `.env`, preserves `PATH`/`HOME`, and never forwards arbitrary container-only settings.
 
 ## Deployment configuration
 

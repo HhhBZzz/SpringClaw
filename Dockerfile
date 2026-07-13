@@ -19,7 +19,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/target/springclaw-java-0.0.1-SNAPSHOT.jar ./app.jar
+COPY --from=builder /app/target/springclaw-0.0.1-SNAPSHOT.jar ./app.jar
 COPY --from=builder /app/skills ./skills
 COPY --from=builder /app/SOUL.md ./SOUL.md
 

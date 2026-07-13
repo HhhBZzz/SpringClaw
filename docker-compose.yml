@@ -12,7 +12,7 @@ services:
       MYSQL_DATABASE: ${MYSQL_DB:-springclaw}
       TZ: Asia/Shanghai
     ports:
-      - "3306:3306"
+      - "${MYSQL_EXPOSED_PORT:-3306}:3306"
     volumes:
       - springclaw-mysql-data:/var/lib/mysql
     healthcheck:

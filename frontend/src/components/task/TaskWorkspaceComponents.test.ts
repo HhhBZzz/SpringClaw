@@ -37,7 +37,8 @@ describe('task workspace components', () => {
         elapsedLabel: '12s',
         result: '',
         canRetry: true,
-        canRefreshStatus: true
+        canRefreshStatus: true,
+        canOpenDetails: true
       }
     });
 
@@ -50,6 +51,23 @@ describe('task workspace components', () => {
     expect(wrapper.emitted('retry')).toHaveLength(1);
     expect(wrapper.emitted('refreshStatus')).toHaveLength(1);
     expect(wrapper.emitted('openDetails')).toHaveLength(1);
+  });
+
+  it('does not offer developer details when the current task has none', () => {
+    const wrapper = mount(TaskStatusCard, {
+      props: {
+        phase: 'idle',
+        title: '可以开始新任务',
+        detail: '描述你希望 Agent 完成的事情。',
+        elapsedLabel: '',
+        result: '',
+        canRetry: false,
+        canRefreshStatus: false,
+        canOpenDetails: false
+      }
+    });
+
+    expect(wrapper.text()).not.toContain('开发者详情');
   });
 
   it('forwards successful login while keeping the parent-owned draft explanation', async () => {

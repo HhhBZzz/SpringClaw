@@ -33,8 +33,13 @@ export function useToolProposalMonitor(fetchProposal: FetchProposal, options: Mo
     polling.value = false;
   }
 
-  function clear() {
+  function invalidatePendingRequest() {
     generation += 1;
+    inFlight = false;
+  }
+
+  function clear() {
+    invalidatePendingRequest();
     stop();
     activeProposalId = '';
     startedAt = 0;
@@ -88,6 +93,7 @@ export function useToolProposalMonitor(fetchProposal: FetchProposal, options: Mo
     timer = setInterval(() => {
       if (timerGeneration !== generation) return;
       if (Date.now() - startedAt >= maxElapsedMs) {
+        invalidatePendingRequest();
         unknown.value = true;
         stop();
         return;
@@ -98,7 +104,7 @@ export function useToolProposalMonitor(fetchProposal: FetchProposal, options: Mo
     return refresh();
   }
 
-  onScopeDispose(stop);
+  onScopeDispose(clear);
 
   return { proposal, polling, unknown, start, refresh, stop, clear };
 }

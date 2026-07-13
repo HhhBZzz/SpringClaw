@@ -8,7 +8,7 @@ import TaskLoginGate from '../components/task/TaskLoginGate.vue';
 import TaskStatusCard from '../components/task/TaskStatusCard.vue';
 import { useAgentGsapMotion } from '../composables/useAgentGsapMotion';
 import { useToolProposalMonitor } from '../composables/useToolProposalMonitor';
-import { resolveTaskPhase, summarizeToolProposal, taskPhaseCopy, type NormalActionOutcome } from '../features/task-workspace/taskLifecycle';
+import { isTaskInputLocked, resolveTaskPhase, summarizeToolProposal, taskPhaseCopy, type NormalActionOutcome } from '../features/task-workspace/taskLifecycle';
 import {
   cancelActionProposal,
   confirmActionProposal,
@@ -161,6 +161,7 @@ const taskMetaExpanded = ref(false);
 const studioRoot = ref<HTMLElement | null>(null);
 const chatLog = ref<HTMLElement | null>(null);
 const confirmationTray = ref<HTMLElement | null>(null);
+const inspectorCloseButton = ref<HTMLButtonElement | null>(null);
 const motion = useAgentGsapMotion({ root: studioRoot, chatLog });
 let persistTimer: number | undefined;
 let scrollQueued = false;
@@ -547,10 +548,11 @@ const taskPhase = computed(() => resolveTaskPhase({
 const taskCopy = computed(() => taskPhaseCopy(taskPhase.value));
 const taskElapsedLabel = computed(() => taskStartedAt.value == null ? '' : `${elapsedSeconds.value}s`);
 const taskResult = computed(() => normalActionResult.value || summarizeToolProposal(toolProposalMonitor.proposal.value));
-const taskInputLocked = computed(() => taskPhase.value === 'awaiting_approval' || taskPhase.value === 'executing_approved_tool');
+const taskInputLocked = computed(() => isTaskInputLocked({ streamActive: busy.value, phase: taskPhase.value }));
 const composerDisabledReason = computed(() => {
   if (taskPhase.value === 'awaiting_approval') return '请先完成当前风险操作的确认或拒绝。';
   if (taskPhase.value === 'executing_approved_tool') return '工具正在执行，等待真实结果后再开始新任务。';
+  if (busy.value) return '当前任务正在执行，完成或停止后才能开始下一任务。';
   return '';
 });
 
@@ -978,11 +980,21 @@ function toggleRuntimeSidebar() {
 
 function toggleRuntimeInspector() {
   if (!hasRunDetails.value) return;
-  inspectorDrawerOpen.value = !inspectorDrawerOpen.value;
-  setRuntimeStatus(inspectorDrawerOpen.value ? '已展开调试详情。' : '已收起调试详情。');
   if (inspectorDrawerOpen.value) {
-    void motion.revealInspectorPanel();
+    closeRuntimeInspector();
+    return;
   }
+  inspectorDrawerOpen.value = !inspectorDrawerOpen.value;
+  setRuntimeStatus('已展开调试详情。');
+  void nextTick(() => inspectorCloseButton.value?.focus());
+  void motion.revealInspectorPanel();
+}
+
+function closeRuntimeInspector() {
+  if (!inspectorDrawerOpen.value) return;
+  inspectorDrawerOpen.value = false;
+  setRuntimeStatus('已收起调试详情。');
+  void nextTick(() => studioRoot.value?.querySelector<HTMLButtonElement>('.developer-details-toggle')?.focus());
 }
 
 async function activateRuntimeNav(key: RuntimeNavKey) {
@@ -1424,6 +1436,25 @@ function resetTaskLifecycle(startedAt: number | null) {
   }
 }
 
+function resetTaskWorkspaceState() {
+  resetTaskLifecycle(null);
+  streamStatus.value = '';
+  streamMeta.value = null;
+  traceEvents.value = [];
+  currentMemoryUsage.value = null;
+  capabilityEvents.value = [];
+  verificationEvent.value = null;
+  agentDecision.value = null;
+  pendingAction.value = null;
+  pendingToolAction.value = null;
+  actionStatus.value = '';
+  toolActionStatus.value = '';
+  inspectorDrawerOpen.value = false;
+  taskMetaExpanded.value = false;
+  lastUserPrompt.value = '';
+  composerAuthNotice.value = '';
+}
+
 async function send() {
   const text = input.value.trim();
   if (!text || busy.value || taskInputLocked.value) return;
@@ -1667,21 +1698,11 @@ async function refreshToolProposalStatus() {
 
 function newSession() {
   persistCurrentMessages(true);
-  resetTaskLifecycle(null);
+  resetTaskWorkspaceState();
   sessionKey.value = makeSessionKey();
   localStorage.setItem(SESSION_KEY, sessionKey.value);
   messages.value = [];
   input.value = '';
-  traceEvents.value = [];
-  currentMemoryUsage.value = null;
-  capabilityEvents.value = [];
-  verificationEvent.value = null;
-  agentDecision.value = null;
-  pendingAction.value = null;
-  pendingToolAction.value = null;
-  actionStatus.value = '';
-  toolActionStatus.value = '';
-  taskMetaExpanded.value = false;
   historyStatus.value = '已创建新会话。';
   setRuntimeStatus('已创建新会话。');
   void focusComposer();
@@ -1700,6 +1721,7 @@ async function runShortcut(prompt: string) {
 async function switchSession(targetSessionKey: string) {
   if (busy.value || !targetSessionKey || targetSessionKey === sessionKey.value) return;
   persistCurrentMessages(true);
+  resetTaskWorkspaceState();
   sessionKey.value = targetSessionKey;
   localStorage.setItem(SESSION_KEY, targetSessionKey);
   messages.value = readLocalMessages(targetSessionKey);
@@ -1719,10 +1741,7 @@ function clearCurrentHistory() {
   historySessions.value = historySessions.value.filter((item) => item.sessionKey !== sessionKey.value);
   saveHistorySessions();
   messages.value = [];
-  pendingAction.value = null;
-  pendingToolAction.value = null;
-  actionStatus.value = '';
-  toolActionStatus.value = '';
+  resetTaskWorkspaceState();
   historyStatus.value = '当前会话历史已清空。';
 }
 
@@ -2804,6 +2823,7 @@ onUnmounted(() => {
                   :result="taskResult"
                   :can-retry="taskPhase === 'failed' || taskPhase === 'cancelled'"
                   :can-refresh-status="taskPhase === 'status_unknown'"
+                  :can-open-details="hasRunDetails"
                   @retry="retryLastPrompt"
                   @refresh-status="refreshToolProposalStatus"
                   @open-details="toggleRuntimeInspector"
@@ -2952,8 +2972,15 @@ onUnmounted(() => {
             </div>
           </section>
 
-          <aside v-if="showRuntimeInspector" class="studio-sidebar runtime-inspector" aria-label="Run Inspector">
+          <aside v-if="showRuntimeInspector" class="studio-sidebar runtime-inspector" aria-label="开发者详情" @keydown.esc="closeRuntimeInspector">
             <div class="sidebar-drawer runtime-inspector-drawer">
+              <div class="inspector-close-row">
+                <div>
+                  <p class="eyebrow">Developer Details</p>
+                  <h2>开发者详情</h2>
+                </div>
+                <button ref="inspectorCloseButton" class="btn-subtle light small-button" type="button" aria-label="关闭开发者详情" @click="closeRuntimeInspector">关闭</button>
+              </div>
               <div class="inspector-tabs" role="tablist" aria-label="Inspector tabs">
                 <button
                   v-for="tab in inspectorTabs"

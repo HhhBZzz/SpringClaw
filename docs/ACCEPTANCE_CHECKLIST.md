@@ -33,15 +33,51 @@ curl http://127.0.0.1:18080/actuator/health
 curl -i http://127.0.0.1:18080/api/auth/me
 ```
 
-期望：健康端点返回正常状态；未携带会话的认证请求返回 401 或 403。配置好 provider 后，再执行下面的聊天验收。
+期望：健康端点返回正常状态；未携带会话的认证请求返回 401 或 403。配置好 provider 后，先取得聊天接口所需的认证 token，再执行下面的聊天验收。
 
 ## 3. 聊天与 Webhook 接口验收
+
+### 3.0 获取聊天认证 token（必做）
+
+`/api/chat/**` 要求 Bearer 认证。首次使用时执行 `POST /api/auth/register`；若账号已存在，将下面的 `AUTH_ENDPOINT` 改为 `login`，它会执行 `POST /api/auth/login`。两个端点都接收 `username` 和 `password`，并在成功响应的 `data.token` 返回 token。用户名长度为 3–64，密码长度为 6–64。
+
+```bash
+read -r -p '用户名：' USERNAME
+read -r -s -p '密码：' PASSWORD
+printf '\n'
+
+AUTH_ENDPOINT=register
+AUTH_BODY="$(
+  USERNAME="$USERNAME" PASSWORD="$PASSWORD" node -p \
+    'JSON.stringify({"username": process.env.USERNAME, "password": process.env.PASSWORD})'
+)"
+TOKEN="$(
+  curl --fail --silent --show-error \
+    -X POST "http://127.0.0.1:18080/api/auth/$AUTH_ENDPOINT" \
+    -H 'Content-Type: application/json' \
+    --data "$AUTH_BODY" |
+  node -e '
+    let response = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => { response += chunk; });
+    process.stdin.on("end", () => {
+      const token = JSON.parse(response).data?.token;
+      if (typeof token !== "string" || token.length === 0) process.exit(1);
+      process.stdout.write(token);
+    });
+  '
+)"
+unset PASSWORD AUTH_BODY
+```
+
+`node` 已是原生 Vite 验收所需工具。上述命令在 token 缺失或响应不是有效 JSON 时会失败；不要打印或提交 `$TOKEN`。
 
 ### 3.1 同步问答
 
 ```bash
 curl -X POST http://127.0.0.1:18080/api/chat/send \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"sessionKey":"demo-1","userId":"u1","message":"你好","channel":"api"}'
 ```
 
@@ -52,6 +88,7 @@ curl -X POST http://127.0.0.1:18080/api/chat/send \
 ```bash
 curl -N -X POST http://127.0.0.1:18080/api/chat/stream \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"sessionKey":"demo-1","userId":"u1","message":"继续","channel":"api"}'
 ```
 
@@ -87,8 +124,8 @@ Flyway 是唯一的数据库迁移机制。正常的原生后端或 Compose app 
 
 ## 5. Webhook 安全头规范（开启后）
 
-签名头沿用历史协议前缀 `X-Openclaw-*`（见 `DefaultWebhookSecurityService`）：
+开启签名校验时，使用以下当前协议头（见 `DefaultWebhookSecurityService`）：
 
-- `X-Openclaw-Timestamp`：秒级时间戳
-- `X-Openclaw-Nonce`：随机串
-- `X-Openclaw-Signature`：`hex(hmac_sha256(secret, timestamp + "\n" + nonce + "\n" + rawBody))`
+- `X-Springclaw-Timestamp`：秒级时间戳
+- `X-Springclaw-Nonce`：随机串
+- `X-Springclaw-Signature`：`hex(hmac_sha256(secret, timestamp + "\n" + nonce + "\n" + rawBody))`

@@ -224,6 +224,20 @@ class DeploymentAssetPolicyTest {
                 .doesNotContain("/api/auth/me` 代理响应");
     }
 
+    @Test
+    void acceptanceChatDocumentationRequiresBearerAuthenticationAndCurrentWebhookHeaders() throws IOException {
+        String acceptance = read("docs/ACCEPTANCE_CHECKLIST.md");
+
+        assertThat(acceptance)
+                .contains("/api/auth/register", "/api/auth/login", "\"username\"", "\"password\"", "data.token")
+                .contains("X-Springclaw-Timestamp", "X-Springclaw-Nonce", "X-Springclaw-Signature")
+                .doesNotContain("X-Openclaw-");
+        assertThat(codeBlockContaining(acceptance, "/api/chat/send"))
+                .contains("Authorization: Bearer $TOKEN");
+        assertThat(codeBlockContaining(acceptance, "/api/chat/stream"))
+                .contains("Authorization: Bearer $TOKEN");
+    }
+
     private List<String> composeImageReferencesFromDeliveryFiles(Path composeRoot) throws IOException {
         return List.of(
                         composeImageReferences(Files.readString(composeRoot.resolve("docker-compose.yml"))),
@@ -245,6 +259,13 @@ class DeploymentAssetPolicyTest {
         assertThat(references).allMatch(reference -> reference.matches(
                 "[^\\s]+:[^\\s]+@sha256:[a-f0-9]{64}"
         ));
+    }
+
+    private String codeBlockContaining(String document, String content) {
+        int contentIndex = document.indexOf(content);
+        int codeBlockStart = document.lastIndexOf("```bash", contentIndex);
+        int codeBlockEnd = document.indexOf("```", contentIndex);
+        return document.substring(codeBlockStart, codeBlockEnd);
     }
 
     private String read(String relativePath) throws IOException {

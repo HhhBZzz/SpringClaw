@@ -3,7 +3,6 @@ set -Eeuo pipefail
 
 readonly ENV_FILE="${ENV_FILE:-.env}"
 readonly HTTP_HOST="${HTTP_HOST:-127.0.0.1}"
-readonly HTTP_PORT="${HTTP_PORT:-8080}"
 readonly TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-120}"
 readonly POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-2}"
 readonly SERVICES=(mysql redis rabbitmq app frontend)
@@ -17,6 +16,27 @@ compose() {
   docker compose --env-file "$ENV_FILE" "$@"
 }
 
+env_file_value() {
+  local expected_key="$1"
+  local line
+  local value=""
+  local found=false
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    if [[ "$line" == "$expected_key="* ]]; then
+      value="${line#*=}"
+      found=true
+    fi
+  done < "$ENV_FILE"
+
+  if [[ "$found" == true ]]; then
+    printf '%s' "$value"
+    return 0
+  fi
+  return 1
+}
+
 service_is_healthy() {
   local service="$1"
   local state
@@ -26,6 +46,13 @@ service_is_healthy() {
 }
 
 [[ -f "$ENV_FILE" ]] || fail "environment file '$ENV_FILE' does not exist"
+if [[ -z "${HTTP_PORT+x}" ]]; then
+  HTTP_PORT="$(env_file_value SPRINGCLAW_HTTP_PORT || true)"
+  HTTP_PORT="${HTTP_PORT:-8080}"
+fi
+readonly HTTP_PORT
+[[ "$HTTP_PORT" =~ ^[1-9][0-9]{0,4}$ ]] && ((10#$HTTP_PORT <= 65535)) \
+  || fail "HTTP_PORT must be an integer between 1 and 65535"
 [[ "$TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail "TIMEOUT_SECONDS must be a positive integer"
 [[ "$POLL_INTERVAL_SECONDS" =~ ^[1-9][0-9]*$ ]] || fail "POLL_INTERVAL_SECONDS must be a positive integer"
 

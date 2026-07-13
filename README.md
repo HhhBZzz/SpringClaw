@@ -69,7 +69,7 @@ make ps
 make verify
 ```
 
-`make verify` first validates the Compose configuration, waits up to 120 seconds for all five health checks, fetches the frontend root, confirms the `/api/auth/me` proxy route returns an HTTP response (authentication is not required), and checks the Actuator health endpoint from inside the application container.
+`make verify` first validates the Compose configuration, waits up to 120 seconds for all five health checks, fetches the frontend root, confirms the `/api/auth/me` proxy route returns an HTTP response (authentication is not required), and checks the Actuator health endpoint from inside the application container. It reads `SPRINGCLAW_HTTP_PORT` from `.env`; set `HTTP_PORT` only when intentionally overriding that port for a one-off check.
 
 Common commands:
 

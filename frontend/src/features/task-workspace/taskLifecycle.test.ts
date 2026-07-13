@@ -75,6 +75,25 @@ describe('summarizeToolProposal', () => {
       executionError: '路径越界'
     })).toBe('执行失败：路径越界');
   });
+
+  it('shows command stdout even when the execution produced no file changes', () => {
+    const summary = summarizeToolProposal({
+      proposalId: 'tip-command',
+      status: 'EXECUTED',
+      toolName: 'SystemToolPack.runCommand',
+      targetPaths: [],
+      executionResult: JSON.stringify({
+        schema: 'springclaw.tool-execution-result.v1',
+        success: true,
+        noOp: true,
+        result: 'exitCode=0\nspringclaw-approved-execution-e2e\n',
+        changedFiles: []
+      })
+    });
+
+    expect(summary).toContain('exitCode=0');
+    expect(summary).toContain('springclaw-approved-execution-e2e');
+  });
 });
 
 describe('isTaskInputLocked', () => {

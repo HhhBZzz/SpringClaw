@@ -70,6 +70,7 @@ function assertMavenWasNotLaunched(config, reason) {
   const rejected = runLauncher(config);
   assert.notEqual(rejected.status, 0, reason);
   assert.equal(existsSync(capturePath), false, 'Maven does not start when runtime safety settings are invalid');
+  return rejected;
 }
 
 try {
@@ -124,6 +125,18 @@ writeFileSync(process.env.NATIVE_BACKEND_ENV_CAPTURE, JSON.stringify(process.env
   const invalidSafetyConfig = resolvedConfig();
   invalidSafetyConfig.services.app.environment.SPRINGCLAW_PERSISTENCE_DB_ENABLED = 'false';
   assertMavenWasNotLaunched(invalidSafetyConfig, 'unexpected runtime safety values reject native startup');
+
+  const nonStringSafetyConfig = resolvedConfig();
+  nonStringSafetyConfig.services.app.environment.SPRINGCLAW_FEISHU_OUTBOUND_ENABLED = true;
+  const nonStringRejected = assertMavenWasNotLaunched(
+    nonStringSafetyConfig,
+    'non-string runtime safety values reject native startup',
+  );
+  assert.match(
+    nonStringRejected.stderr,
+    /missing a required native runtime safety setting/,
+    'non-string runtime safety values fail through the required-string validation path',
+  );
 
   process.stdout.write('native backend launcher regression tests passed.\n');
 } finally {

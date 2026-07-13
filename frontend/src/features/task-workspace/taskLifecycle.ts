@@ -91,10 +91,10 @@ export function summarizeToolProposal(proposal: TaskLifecycleInput['toolProposal
   const changedFiles = parsed?.changedFiles.length ? parsed.changedFiles : proposal.gitChangedFiles || proposal.targetPaths || [];
   const changedSuffix = changedFiles.length ? `，影响 ${changedFiles.length} 个文件` : '';
 
-  if (parsed?.noOp) return `操作已完成，未产生文件变更${changedSuffix}。`;
   if (parsed?.result) {
-    return `操作已完成：${parsed.result}${changedSuffix}。${parsed.resultTruncated ? ' 结果已截断，请在开发者详情查看完整记录。' : ''}`;
+    return `操作已完成：${parsed.result}${changedSuffix}${parsed.noOp ? '，未产生文件变更' : ''}。${parsed.resultTruncated ? ' 结果已截断，请在开发者详情查看完整记录。' : ''}`;
   }
+  if (parsed?.noOp) return `操作已完成，未产生文件变更${changedSuffix}。`;
   if (proposal.executionResult?.trim() && !parsed) {
     return `操作已完成：${proposal.executionResult.trim().slice(0, 240)}${changedSuffix}。`;
   }

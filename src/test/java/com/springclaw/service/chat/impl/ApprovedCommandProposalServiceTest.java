@@ -36,8 +36,12 @@ class ApprovedCommandProposalServiceTest {
             new ApprovedCommandProposalService(snapshotService, proposalService);
 
     @Test
-    void createProposalIfSupported_freezesEchoCommandAndRequesterIdentity() {
-        ChatContext context = context("  请执行命令 echo springclaw-approval-e2e  ");
+    void createProposalIfSupported_freezesSideEffectModelControlEchoAndRequesterIdentity() {
+        ChatContext context = context(
+                "  请执行命令 echo springclaw-approval-e2e  ",
+                new AgentDecision("model_control", "agent_tools", List.of("system"), "side_effect", true,
+                        "model command confirmation")
+        );
         ToolInvocationSnapshot snapshot = snapshot();
         ToolInvocationProposal proposal = proposal("tip-command");
         ArgumentCaptor<String> toolNameCaptor = ArgumentCaptor.forClass(String.class);
@@ -102,7 +106,7 @@ class ApprovedCommandProposalServiceTest {
 
     @ParameterizedTest
     @MethodSource("nonExecutableDecisions")
-    void createProposalIfSupported_rejectsDecisionsOutsideExecutionRiskModelControl(AgentDecision decision) {
+    void createProposalIfSupported_rejectsUnconfirmedOrNonModelControlDecisions(AgentDecision decision) {
         Optional<ToolInvocationProposal> result = service.createProposalIfSupported(
                 context("请执行命令 pwd", decision)
         );
@@ -140,9 +144,8 @@ class ApprovedCommandProposalServiceTest {
 
     private static Stream<AgentDecision> nonExecutableDecisions() {
         return Stream.of(
-                new AgentDecision("workspace_analysis", "agent_tools", List.of("system"), "execution", true, "wrong intent"),
-                new AgentDecision("model_control", "agent_tools", List.of("system"), "read", true, "wrong risk"),
-                new AgentDecision("model_control", "agent_tools", List.of("system"), "execution", false, "confirmation missing")
+                new AgentDecision("workspace_analysis", "agent_tools", List.of("system"), "side_effect", true, "wrong intent"),
+                new AgentDecision("model_control", "agent_tools", List.of("system"), "side_effect", false, "confirmation missing")
         );
     }
 

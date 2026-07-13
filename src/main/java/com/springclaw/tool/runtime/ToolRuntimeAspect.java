@@ -198,6 +198,9 @@ public class ToolRuntimeAspect {
     }
 
     private String resolveRiskLevel(String simpleClass, String methodName) {
+        if ("SystemToolPack".equals(simpleClass) && "runCommand".equals(methodName)) {
+            return "execution";
+        }
         if ("FileToolPack".equals(simpleClass)
                 && ("listFiles".equals(methodName)
                 || "readTextFile".equals(methodName)

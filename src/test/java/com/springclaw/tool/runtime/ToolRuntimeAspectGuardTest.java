@@ -11,10 +11,12 @@ import com.springclaw.service.proposal.ToolInvocationSnapshotService;
 import com.springclaw.service.proposal.ToolGateway;
 import com.springclaw.service.workspace.WorkspaceGitGuard;
 import com.springclaw.tool.pack.FileToolPack;
+import com.springclaw.tool.pack.SystemToolPack;
 import com.springclaw.tool.pack.WorkspaceEditToolPack;
 import com.springclaw.tool.pack.WorkspaceSearchToolPack;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.reflect.MethodSignature;
+import org.springframework.aop.aspectj.annotation.AspectJProxyFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -158,6 +160,54 @@ class ToolRuntimeAspectGuardTest {
         Mockito.verifyNoInteractions(snapshotService);
         Mockito.verifyNoInteractions(proposalService);
         Mockito.verifyNoInteractions(workspaceGitGuard);
+    }
+
+    @Test
+    void systemRunCommand_noApproved_throwsPendingAndCreatesExecutionProposal() throws Throwable {
+        Mockito.when(capabilityRegistry.findToolsetByClassName("SystemToolPack"))
+                .thenReturn("system");
+        ToolInvocationSnapshot snapshot = new ToolInvocationSnapshot(
+                "SystemToolPack.runCommand",
+                "system",
+                "[\"echo springclaw-approval-e2e\"]",
+                "command-hash",
+                "execution",
+                List.of(),
+                "runCommand: echo springclaw-approval-e2e",
+                false,
+                Set.of(),
+                "abc1234"
+        );
+        Mockito.when(snapshotService.capture(
+                Mockito.eq("SystemToolPack.runCommand"),
+                Mockito.eq("system"),
+                ArgumentMatchers.<Object[]>argThat(args -> args.length == 1
+                        && "echo springclaw-approval-e2e".equals(args[0])),
+                Mockito.eq("execution")))
+                .thenReturn(snapshot);
+        ToolInvocationProposal pending = proposal(ToolInvocationProposalStatus.PENDING,
+                "SystemToolPack.runCommand", "req-x", "run-x", "user-x", "command-hash");
+        Mockito.when(toolGateway.requestApproval(Mockito.eq(snapshot), ArgumentMatchers.any()))
+                .thenReturn(pending);
+
+        SystemToolPack target = new SystemToolPack(true, "whitelist", "echo", "", 5, 2000);
+        AspectJProxyFactory proxyFactory = new AspectJProxyFactory(target);
+        proxyFactory.addAspect(aspect);
+        SystemToolPack systemToolPack = proxyFactory.getProxy();
+
+        PendingToolApprovalException ex = Assertions.assertThrows(
+                PendingToolApprovalException.class,
+                () -> systemToolPack.runCommand("echo springclaw-approval-e2e")
+        );
+
+        Assertions.assertEquals("tip-1", ex.proposalId());
+        Mockito.verify(snapshotService).capture(
+                Mockito.eq("SystemToolPack.runCommand"),
+                Mockito.eq("system"),
+                ArgumentMatchers.<Object[]>argThat(args -> args.length == 1
+                        && "echo springclaw-approval-e2e".equals(args[0])),
+                Mockito.eq("execution")
+        );
     }
 
     @Test

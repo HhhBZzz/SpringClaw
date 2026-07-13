@@ -325,8 +325,8 @@ springclaw:
       timeout-seconds: 8
     system:
       command-enabled: ${SPRINGCLAW_SYSTEM_COMMAND_ENABLED:true}
-      command-mode: ${SPRINGCLAW_SYSTEM_COMMAND_MODE:blacklist}
-      allowed-commands: ${SPRINGCLAW_SYSTEM_ALLOWED_COMMANDS:*}
+      command-mode: ${SPRINGCLAW_SYSTEM_COMMAND_MODE:whitelist}
+      allowed-commands: ${SPRINGCLAW_SYSTEM_ALLOWED_COMMANDS:echo,pwd,git}
       blocked-commands: ${SPRINGCLAW_SYSTEM_BLOCKED_COMMANDS:rm,dd,shutdown,reboot,halt,poweroff,mkfs,fdisk,kill,killall,pkill}
       command-timeout-seconds: ${SPRINGCLAW_SYSTEM_COMMAND_TIMEOUT_SECONDS:5}
       max-output-chars: ${SPRINGCLAW_SYSTEM_MAX_OUTPUT_CHARS:2000}

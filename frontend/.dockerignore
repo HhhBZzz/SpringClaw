@@ -1,0 +1,9 @@
+# Environment files must not enter the frontend build context.
+.env
+.env.*
+!.env.example
+
+# Generated and local dependency directories are rebuilt in the image.
+node_modules/
+dist/
+.vite/

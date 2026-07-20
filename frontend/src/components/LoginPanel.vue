@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { useAuthStore } from '../stores/auth';
 
 const auth = useAuthStore();
+const emit = defineEmits<{ authenticated: [] }>();
 const username = ref('');
 const password = ref('');
 const displayError = computed(() => formatAuthError(auth.error, auth.errorKind, auth.errorStatus));
@@ -14,6 +15,7 @@ async function submit(mode: 'login' | 'register') {
   try {
     await auth.signIn(trimmedUsername, password.value, mode);
     password.value = '';
+    emit('authenticated');
   } catch {
     // auth store already keeps a safe user-facing error.
   }

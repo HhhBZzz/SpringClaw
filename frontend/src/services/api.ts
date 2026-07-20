@@ -41,8 +41,7 @@ import type {
   RuntimeTool,
   RuntimeToolProposal,
   RuntimeUsageSummary,
-  ToolActionRequiredEvent,
-  ToolProposalResult
+  ToolActionRequiredEvent
 } from '../types';
 
 const TOKEN_KEY = 'springclaw.frontend.token';
@@ -161,17 +160,21 @@ export function cancelActionProposal(proposalId: string) {
 }
 
 export function confirmToolProposal(proposalId: string, reason = '用户确认执行') {
-  return request<ToolProposalResult>(`/api/tool-proposals/${encodeURIComponent(proposalId)}/confirm`, {
+  return request<RuntimeToolProposal>(`/api/tool-proposals/${encodeURIComponent(proposalId)}/confirm`, {
     method: 'POST',
     body: JSON.stringify({ reason })
   });
 }
 
 export function rejectToolProposal(proposalId: string, reason = '用户拒绝执行') {
-  return request<ToolProposalResult>(`/api/tool-proposals/${encodeURIComponent(proposalId)}/reject`, {
+  return request<RuntimeToolProposal>(`/api/tool-proposals/${encodeURIComponent(proposalId)}/reject`, {
     method: 'POST',
     body: JSON.stringify({ reason })
   });
+}
+
+export function getToolProposal(proposalId: string) {
+  return request<RuntimeToolProposal>(`/api/tool-proposals/${encodeURIComponent(proposalId)}`);
 }
 
 export function getToolProposals(input: { sessionKey?: string; status?: string } = {}) {

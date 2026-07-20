@@ -102,7 +102,7 @@ public class ToolInvocationSnapshotService {
     /**
      * 工具 → targetPaths 解析规则：
      * - workspaceWriteFile / workspaceApplyPatch / writeTextFile：args[0] 是 relativePath
-     * - workspaceRunCommand：无法静态预测目标文件，返回空列表（确认提示按命令文本展示）
+     * - workspaceRunCommand / runCommand：无法静态预测目标文件，返回空列表（确认提示按命令文本展示）
      * - 其他写工具：默认返回空列表（调用方按零目标处理，等于"无法预测影响范围"）
      */
     private List<String> parseTargetPaths(String toolName, Object[] args) {
@@ -122,7 +122,8 @@ public class ToolInvocationSnapshotService {
 
     private String buildPreview(String toolName, Object[] args, List<String> targetPaths) {
         String fn = simpleName(toolName);
-        if ("workspaceRunCommand".equals(fn) && args != null && args.length > 0) {
+        if (("workspaceRunCommand".equals(fn) || "runCommand".equals(fn))
+                && args != null && args.length > 0) {
             return fn + ": " + truncate(String.valueOf(args[0]), 240);
         }
         return fn + ": " + String.join(", ", targetPaths);

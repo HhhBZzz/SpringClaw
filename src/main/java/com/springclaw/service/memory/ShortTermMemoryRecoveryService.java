@@ -6,6 +6,7 @@ import com.springclaw.runtime.memory.contract.MemoryScopeType;
 import com.springclaw.runtime.memory.contract.ShortTermMemoryEntry;
 import com.springclaw.runtime.memory.port.ShortTermMemoryStore;
 import com.springclaw.service.event.MessageEventService;
+import com.springclaw.service.event.ShortTermChatEventRead;
 import org.redisson.api.RScript;
 import org.redisson.api.RedissonClient;
 import org.redisson.client.codec.StringCodec;
@@ -120,11 +121,12 @@ public class ShortTermMemoryRecoveryService {
     }
 
     private List<MessageEvent> loadEligibleEvents(MemoryScope scope, int limit) {
-        String userFilter = scope.scopeType() == MemoryScopeType.PERSONAL_SESSION
-                ? scope.authorizationPrincipal()
-                : null;
-        List<MessageEvent> events = messageEventService.listSessionEvents(
-                scope.sessionKey(), userFilter, null, "CHAT", limit, true);
+        ShortTermChatEventRead read = messageEventService.readShortTermChatEvents(scope, limit);
+        if (read.source() != ShortTermChatEventRead.Source.DURABLE) {
+            log.warn("短期记忆恢复未获得持久化事件源，跳过。scope={}", scope.scopeId());
+            return List.of();
+        }
+        List<MessageEvent> events = read.events();
         if (events == null || events.isEmpty()) {
             return List.of();
         }

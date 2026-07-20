@@ -89,6 +89,16 @@ class WebhookRouterServiceTest {
         assertThat(acceptance.getValue().roleCodeAtAcceptance()).isEqualTo("USER");
         assertThat(acceptance.getValue().originalMessage()).isEqualTo("hello");
         assertThat(acceptance.getValue().responseMode()).isEqualTo("agent");
+        assertThat(command.getValue().request().sessionKey())
+                .isEqualTo(acceptance.getValue().sessionKey());
+        assertThat(command.getValue().request().channel())
+                .isEqualTo(acceptance.getValue().channel());
+        assertThat(command.getValue().request().userId())
+                .isEqualTo(acceptance.getValue().userId());
+        assertThat(command.getValue().request().message())
+                .isEqualTo(acceptance.getValue().originalMessage());
+        assertThat(command.getValue().request().responseMode())
+                .isEqualTo(acceptance.getValue().responseMode());
         assertThat(acceptance.getValue().sessionAccessClaim().claimType())
                 .isEqualTo(SessionAccessClaim.ClaimType.PERSONAL);
         assertThat(acceptance.getValue().sessionAccessClaim().acceptanceOrigin())
@@ -191,13 +201,27 @@ class WebhookRouterServiceTest {
 
         ArgumentCaptor<RunAcceptance> acceptance =
                 ArgumentCaptor.forClass(RunAcceptance.class);
+        ArgumentCaptor<AcceptedChatCommand> command =
+                ArgumentCaptor.forClass(AcceptedChatCommand.class);
         verify(runtimeBridge).accepted(acceptance.capture());
+        verify(chatService).chat(command.capture());
         assertThat(acceptance.getValue().sessionAccessClaim().claimType())
                 .isEqualTo(SessionAccessClaim.ClaimType.SHARED);
         assertThat(acceptance.getValue().sessionAccessClaim().acceptanceOrigin())
                 .isEqualTo(SessionAccessClaim.AcceptanceOrigin.VERIFIED_WEBHOOK);
         assertThat(acceptance.getValue().sessionAccessClaim().ownerOrSharedPrincipal())
                 .isEqualTo("shared:feishu:feishu:group:g1");
+        assertThat(command.getValue().runId()).isEqualTo(acceptance.getValue().runId());
+        assertThat(command.getValue().request().sessionKey())
+                .isEqualTo(acceptance.getValue().sessionKey());
+        assertThat(command.getValue().request().channel())
+                .isEqualTo(acceptance.getValue().channel());
+        assertThat(command.getValue().request().userId())
+                .isEqualTo(acceptance.getValue().userId());
+        assertThat(command.getValue().request().message())
+                .isEqualTo(acceptance.getValue().originalMessage());
+        assertThat(command.getValue().request().responseMode())
+                .isEqualTo(acceptance.getValue().responseMode());
     }
 
     @Test

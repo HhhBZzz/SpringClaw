@@ -158,6 +158,21 @@ class ToolInvocationSnapshotServiceTest {
     }
 
     @Test
+    void captureSystemRunCommand_previewIncludesCommand() throws Exception {
+        Path root = tmpRoot();
+        GitOperations git = mockGit(root, "abc1234", List.of());
+        ToolInvocationSnapshotService svc = newService(git);
+
+        ToolInvocationSnapshot snap = svc.capture(
+                "SystemToolPack.runCommand",
+                "system",
+                new Object[]{"echo springclaw-approval-e2e"},
+                "execution");
+
+        assertThat(snap.previewSummary()).isEqualTo("runCommand: echo springclaw-approval-e2e");
+    }
+
+    @Test
     void captureRejectsCanonicalizeFailure() throws Exception {
         Path root = tmpRoot();
         GitOperations git = mockGit(root, "abc1234", List.of());

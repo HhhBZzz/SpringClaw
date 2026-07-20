@@ -21,18 +21,19 @@ export const useAuthStore = defineStore('auth', {
   },
   actions: {
     async loadMe() {
-      if (!readToken()) {
-        this.profile = null;
-        this.token = '';
-        this.clearError();
-        return;
-      }
+      const hadMemoryToken = Boolean(readToken());
       this.loading = true;
       this.clearError();
       try {
         this.profile = await me();
       } catch (error) {
-        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        if (error instanceof ApiError && error.status === 401 && !hadMemoryToken) {
+          this.profile = null;
+          this.token = '';
+          this.clearError();
+        } else if (error instanceof ApiError
+            && hadMemoryToken
+            && (error.status === 401 || error.status === 403)) {
           this.logout();
           this.setError(error, '登录态已失效，请重新登录。');
         } else {

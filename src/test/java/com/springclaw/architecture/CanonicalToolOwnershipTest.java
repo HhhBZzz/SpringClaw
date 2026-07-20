@@ -30,7 +30,7 @@ class CanonicalToolOwnershipTest {
             "src/main/java/com/springclaw/service/agent/executor/SystemHealthCapabilityExecutor.java",
             "src/main/java/com/springclaw/service/agent/executor/SkillCapabilityExecutor.java",
             "src/main/java/com/springclaw/service/agent/executor/RealtimeCapabilityExecutor.java",
-            "src/main/java/com/springclaw/service/proposal/ToolProposalExecutionService.java"
+            "src/main/java/com/springclaw/service/proposal/DefaultToolGateway.java"
     );
 
     @Test
@@ -46,7 +46,7 @@ class CanonicalToolOwnershipTest {
                 assertThat(arguments)
                         .as(file + " construction " + constructionCount)
                         .hasSize(7);
-                if (file.endsWith("ToolProposalExecutionService.java")) {
+                if (file.endsWith("DefaultToolGateway.java")) {
                     assertThat(arguments.get(3)).isEqualTo("proposal.requestId()");
                     assertThat(arguments.get(5)).isEqualTo("proposal.runId()");
                 } else {

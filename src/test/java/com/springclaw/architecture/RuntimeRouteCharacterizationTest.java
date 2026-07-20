@@ -225,15 +225,15 @@ class RuntimeRouteCharacterizationTest {
     class DefaultFallthrough {
 
         @Test
-        void noPrefixNoUpgradeKeepsConfiguredDefaultMode() {
+        void noPrefixNoUpgradeDoesNotLetStoredOparDefaultHijackGeneralQuestion() {
             RoutingDecision decision = service.decide(
                     "你好",
                     "USER", "opar", false, Set.of(), null);
 
-            assertThat(decision.executionMode()).isEqualTo("opar");
+            assertThat(decision.executionMode()).isEqualTo("simplified");
             assertThat(decision.autoUpgraded()).isFalse();
             assertThat(decision.manualOverride()).isFalse();
-            assertThat(decision.reason()).contains("默认链路");
+            assertThat(decision.reason()).contains("普通 Agent 问答保持轻量链路");
         }
 
         @Test

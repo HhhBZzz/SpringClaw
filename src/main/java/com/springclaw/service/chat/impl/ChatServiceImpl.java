@@ -309,7 +309,10 @@ public class ChatServiceImpl implements ChatService {
 
     private boolean shouldRequestActionConfirmation(ChatContext context) {
         AgentDecision decision = context == null ? null : context.decision();
-        return decision != null && decision.requiresConfirmation();
+        if (decision == null || !decision.requiresConfirmation()) {
+            return false;
+        }
+        return !"ask_clarification".equalsIgnoreCase(decision.executionPath());
     }
 
     private void emitLocalExecutionTraceIfNeeded(SseEmitter emitter,

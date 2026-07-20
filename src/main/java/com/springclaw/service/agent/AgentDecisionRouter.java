@@ -44,6 +44,10 @@ public class AgentDecisionRouter {
             return new AgentDecision("scheduled_task", "task_draft", List.of("scheduled-task"), risk, true,
                     "检测到定时/周期执行意图，先生成任务草稿并等待确认。");
         }
+        if (looksLikeModelControl(lower)) {
+            return new AgentDecision("model_control", "agent_tools", List.of("system", "skill-library"),
+                    "read", false, "检测到模型控制请求，走受控模型管理链路。");
+        }
         if (looksAmbiguousAction(lower)) {
             return AgentDecision.clarify("用户目标偏动作化但缺少对象，进入澄清或轻量模型分类。");
         }
@@ -131,6 +135,23 @@ public class AgentDecisionRouter {
     private boolean looksLikeScheduledTask(String lower) {
         return TextUtils.containsAny(lower, "定时", "任务", "每天", "每周", "每月", "cron", "提醒我", "定期")
                 && TextUtils.containsAny(lower, "每天", "每周", "每月", "cron", "定时", "定期", "9 点", "9点", "提醒");
+    }
+
+    private boolean looksLikeModelControl(String lower) {
+        if (!StringUtils.hasText(lower)) {
+            return false;
+        }
+        if (TextUtils.containsAny(lower,
+                "当前模型", "目前模型", "模型状态", "模型列表", "可用模型",
+                "provider", "active provider")) {
+            return true;
+        }
+        boolean switchVerb = TextUtils.containsAny(lower,
+                "切换", "切到", "切回", "改用", "换成", "换回", "switch", "use ");
+        boolean modelTarget = TextUtils.containsAny(lower,
+                "模型", "deepseek", "深度求索", "qwen", "千问", "claude",
+                "豆包", "doubao", "volcengine", "火山", "coding-plan");
+        return switchVerb && modelTarget;
     }
 
     private List<String> webCapabilities(List<CapabilityRegistry.CapabilityEntry> entries) {

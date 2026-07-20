@@ -150,6 +150,17 @@ class AgentDecisionRouterTest {
     }
 
     @Test
+    void shouldRouteNaturalLanguageModelSwitchToModelControlWithoutConfirmation() {
+        AgentDecision decision = router().routeByRules(request("切换DeepSeek模型"));
+
+        assertThat(decision.intent()).isEqualTo("model_control");
+        assertThat(decision.executionPath()).isEqualTo("agent_tools");
+        assertThat(decision.selectedCapabilities()).contains("system", "skill-library");
+        assertThat(decision.requiresConfirmation()).isFalse();
+        assertThat(decision.riskLevel()).isEqualTo("read");
+    }
+
+    @Test
     void shouldRouteWeatherQuestionToWeatherPrimaryCapability() {
         AgentDecision decision = router().routeByRules(request("哈尔滨天气怎样"));
 

@@ -71,11 +71,13 @@ public final class InMemoryShortTermMemoryStore implements ShortTermMemoryStore 
                 .map(entry -> Objects.requireNonNull(entry, "persisted entry"))
                 .filter(entry -> entry.eventId() <= watermark)
                 .toList();
-        if (eligible.isEmpty()) {
-            return;
-        }
         ScopeWindow window = windowForWrite(scope);
         synchronized (window) {
+            window.entries.removeIf(entry -> entry.eventId() <= watermark);
+            window.eventKeys.clear();
+            window.eventKeys.addAll(window.entries.stream()
+                    .map(ShortTermMemoryEntry::eventKey)
+                    .toList());
             for (ShortTermMemoryEntry entry : eligible) {
                 if (window.eventKeys.add(entry.eventKey())) {
                     window.entries.add(entry);

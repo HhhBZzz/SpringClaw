@@ -15,14 +15,20 @@ import com.springclaw.runtime.memory.contract.ShortTermMemoryEntry;
 import com.springclaw.runtime.memory.port.MemoryRecordStore;
 import com.springclaw.runtime.memory.port.ProjectMemorySource;
 import com.springclaw.runtime.memory.port.ShortTermMemoryStore;
+import com.springclaw.domain.entity.MessageEvent;
+import com.springclaw.service.event.MessageEventService;
+import com.springclaw.service.event.ShortTermChatEventRead;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -42,6 +48,7 @@ public class MemoryCoordinator {
     private final MemoryRecordStore recordStore;
     private final Supplier<ShortTermMemoryStore> shortTermStoreSupplier;
     private final ProjectMemorySource projectMemorySource;
+    private final MessageEventService messageEventService;
     private final Clock clock;
     private final int maxChars;
     private final int traceMaxWarnings;
@@ -58,6 +65,27 @@ public class MemoryCoordinator {
                 recordStore,
                 shortTermStoreProvider::getIfAvailable,
                 projectMemorySource,
+                null,
+                clock,
+                maxChars,
+                traceMaxWarnings
+        );
+    }
+
+    public MemoryCoordinator(
+            MemoryRecordStore recordStore,
+            ObjectProvider<ShortTermMemoryStore> shortTermStoreProvider,
+            ProjectMemorySource projectMemorySource,
+            MessageEventService messageEventService,
+            Clock clock,
+            int maxChars,
+            int traceMaxWarnings
+    ) {
+        this(
+                recordStore,
+                shortTermStoreProvider::getIfAvailable,
+                projectMemorySource,
+                messageEventService,
                 clock,
                 maxChars,
                 traceMaxWarnings
@@ -72,6 +100,26 @@ public class MemoryCoordinator {
             int maxChars,
             int traceMaxWarnings
     ) {
+        this(
+                recordStore,
+                shortTermStoreSupplier,
+                projectMemorySource,
+                null,
+                clock,
+                maxChars,
+                traceMaxWarnings
+        );
+    }
+
+    MemoryCoordinator(
+            MemoryRecordStore recordStore,
+            Supplier<ShortTermMemoryStore> shortTermStoreSupplier,
+            ProjectMemorySource projectMemorySource,
+            MessageEventService messageEventService,
+            Clock clock,
+            int maxChars,
+            int traceMaxWarnings
+    ) {
         this.recordStore = Objects.requireNonNull(recordStore, "recordStore");
         this.shortTermStoreSupplier = Objects.requireNonNull(
                 shortTermStoreSupplier,
@@ -81,6 +129,7 @@ public class MemoryCoordinator {
                 projectMemorySource,
                 "projectMemorySource"
         );
+        this.messageEventService = messageEventService;
         this.clock = Objects.requireNonNull(clock, "clock");
         this.maxChars = Math.max(1_000, maxChars);
         this.traceMaxWarnings = Math.max(1, traceMaxWarnings);
@@ -205,15 +254,101 @@ public class MemoryCoordinator {
             warnings.add("short-term store unavailable");
             return List.of();
         }
-        List<ShortTermMemoryEntry> entries = store.readRecent(
+        List<ShortTermMemoryEntry> cachedEntries = store.readRecent(
                 scope,
                 SHORT_TERM_ENTRY_LIMIT
         );
-        sourceCounts.add("shortTerm", entries.size());
+        if (messageEventService == null) {
+            sourceCounts.add("shortTerm", cachedEntries.size());
+            return toShortTermItems(scope, cachedEntries);
+        }
+        try {
+            ShortTermChatEventRead durableRead = messageEventService.readShortTermChatEvents(
+                    scope,
+                    SHORT_TERM_ENTRY_LIMIT
+            );
+            if (durableRead.source() != ShortTermChatEventRead.Source.DURABLE) {
+                warnings.add("durable short-term reconciliation unavailable");
+                sourceCounts.add("shortTerm", cachedEntries.size());
+                return toShortTermItems(scope, cachedEntries);
+            }
+
+            List<ShortTermMemoryEntry> entries = new ArrayList<>();
+            for (MessageEvent event : durableRead.events()) {
+                ShortTermMemoryEntry entry = toShortTermEntry(scope, event);
+                if (entry != null) {
+                    entries.add(entry);
+                }
+            }
+            entries.sort(Comparator.comparingLong(ShortTermMemoryEntry::eventId));
+            if (entries.size() > SHORT_TERM_ENTRY_LIMIT) {
+                entries = new ArrayList<>(entries.subList(
+                        entries.size() - SHORT_TERM_ENTRY_LIMIT,
+                        entries.size()
+                ));
+            }
+            long watermark = entries.stream()
+                    .mapToLong(ShortTermMemoryEntry::eventId)
+                    .max()
+                    .orElse(Long.MAX_VALUE);
+            try {
+                store.mergeRecovery(scope, watermark, entries);
+            } catch (RuntimeException ex) {
+                warnings.add("durable short-term cache repair unavailable: " + ex.getMessage());
+            }
+            sourceCounts.add("shortTerm", entries.size());
+            sourceCounts.add("persistedShortTerm", entries.size());
+            return toShortTermItems(scope, entries);
+        } catch (RuntimeException ex) {
+            warnings.add("durable short-term reconciliation unavailable: " + ex.getMessage());
+            sourceCounts.add("shortTerm", cachedEntries.size());
+            return toShortTermItems(scope, cachedEntries);
+        }
+    }
+
+    private static List<MemoryFrameItem> toShortTermItems(
+            MemoryScope scope,
+            List<ShortTermMemoryEntry> entries
+    ) {
         return entries.stream()
                 .filter(entry -> isAllowedShortTermRole(entry.role()))
                 .map(entry -> fromShortTerm(scope, entry))
                 .toList();
+    }
+
+    private static ShortTermMemoryEntry toShortTermEntry(
+            MemoryScope scope,
+            MessageEvent event
+    ) {
+        if (event == null
+                || event.getId() == null
+                || event.getId() <= 0
+                || !"CHAT".equalsIgnoreCase(event.getEventType())
+                || !isAllowedShortTermRole(event.getRole())
+                || !StringUtils.hasText(event.getEventKey())
+                || !StringUtils.hasText(event.getRequestId())
+                || !StringUtils.hasText(event.getUserId())
+                || !StringUtils.hasText(event.getContent())
+                || !scope.channel().equals(event.getChannel())
+                || !scope.sessionKey().equals(event.getSessionKey())) {
+            return null;
+        }
+        if (scope.scopeType() == MemoryScopeType.PERSONAL_SESSION
+                && !scope.authorizationPrincipal().equals(event.getUserId())) {
+            return null;
+        }
+        Instant occurredAt = event.getCreateTime() == null
+                ? Instant.EPOCH
+                : event.getCreateTime().atOffset(ZoneOffset.UTC).toInstant();
+        return new ShortTermMemoryEntry(
+                event.getId(),
+                event.getEventKey(),
+                event.getRequestId(),
+                event.getRole(),
+                event.getUserId(),
+                event.getContent(),
+                occurredAt
+        );
     }
 
     private List<MemoryFrameItem> recordItems(

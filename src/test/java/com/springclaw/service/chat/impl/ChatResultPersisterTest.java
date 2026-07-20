@@ -124,7 +124,7 @@ class ChatResultPersisterTest {
         persister.persist(context, "answer", result, ChatPersistenceIntent.TERMINAL_RESULT);
 
         verify(shortTermMemoryWriter).appendTerminal(
-                context, userReceipt, "你好", assistantReceipt, "answer");
+                context, userReceipt, "你好", assistantReceipt, "[REFLECT] answer");
     }
 
     @Test

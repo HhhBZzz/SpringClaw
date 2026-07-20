@@ -3,6 +3,7 @@ package com.springclaw.service.event;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.springclaw.domain.entity.MessageEvent;
+import com.springclaw.runtime.memory.contract.MemoryScope;
 
 import java.util.List;
 import java.util.Map;
@@ -13,6 +14,8 @@ import java.util.Map;
 public interface MessageEventService extends IService<MessageEvent> {
 
     MessageEventReceipt append(MessageEventWrite write);
+
+    ShortTermChatEventRead readShortTermChatEvents(MemoryScope scope, int limit);
 
     void recordSingle(String sessionKey,
                       String channel,

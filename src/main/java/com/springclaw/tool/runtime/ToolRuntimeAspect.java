@@ -11,8 +11,10 @@ import com.springclaw.service.proposal.ToolInvocationProposalService;
 import com.springclaw.service.proposal.ToolInvocationProposalStatus;
 import com.springclaw.service.proposal.ToolInvocationSnapshot;
 import com.springclaw.service.proposal.ToolInvocationSnapshotService;
+import com.springclaw.service.proposal.ToolGateway;
 import com.springclaw.service.workspace.WorkspaceGitGuard;
 import com.springclaw.service.workspace.WorkspaceGuard;
+import com.springclaw.tool.pack.ApprovedSystemCommand;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
@@ -46,6 +48,7 @@ public class ToolRuntimeAspect {
     private final ToolInvocationSnapshotService snapshotService;
     private final ToolInvocationProposalService proposalService;
     private final WorkspaceGitGuard workspaceGitGuard;
+    private final ToolGateway toolGateway;
 
     public ToolRuntimeAspect(ToolGuardService toolGuardService,
                              ToolAuditService toolAuditService,
@@ -53,7 +56,8 @@ public class ToolRuntimeAspect {
                              CapabilityRegistry capabilityRegistry,
                              ToolInvocationSnapshotService snapshotService,
                              ToolInvocationProposalService proposalService,
-                             WorkspaceGitGuard workspaceGitGuard) {
+                             WorkspaceGitGuard workspaceGitGuard,
+                             ToolGateway toolGateway) {
         this.toolGuardService = toolGuardService;
         this.toolAuditService = toolAuditService;
         this.toolPermissionService = toolPermissionService;
@@ -61,6 +65,7 @@ public class ToolRuntimeAspect {
         this.snapshotService = snapshotService;
         this.proposalService = proposalService;
         this.workspaceGitGuard = workspaceGitGuard;
+        this.toolGateway = toolGateway;
     }
 
     @Around("@annotation(org.springframework.ai.tool.annotation.Tool)")
@@ -94,6 +99,7 @@ public class ToolRuntimeAspect {
                 || "execution".equalsIgnoreCase(riskLevel);
 
         try {
+            rejectUnsupportedSystemCommand(simpleClass, signature.getName(), args);
             Object result;
             if (!requiresProposal) {
                 // read / null → 旧路径
@@ -108,7 +114,7 @@ public class ToolRuntimeAspect {
                     }
                     ToolInvocationSnapshot snapshot = snapshotService.capture(
                             genericToolName, toolsetId, args, riskLevel);
-                    ToolInvocationProposal proposal = proposalService.createPending(snapshot, context);
+                    ToolInvocationProposal proposal = toolGateway.requestApproval(snapshot, context);
                     throw new PendingToolApprovalException(proposal.proposalId());
                 }
                 // 已授权：DB 二次校验 + GitGuard 包住执行
@@ -194,6 +200,9 @@ public class ToolRuntimeAspect {
     }
 
     private String resolveRiskLevel(String simpleClass, String methodName) {
+        if ("SystemToolPack".equals(simpleClass) && "runCommand".equals(methodName)) {
+            return "execution";
+        }
         if ("FileToolPack".equals(simpleClass)
                 && ("listFiles".equals(methodName)
                 || "readTextFile".equals(methodName)
@@ -202,6 +211,16 @@ public class ToolRuntimeAspect {
             return "read";
         }
         return capabilityRegistry.findRiskLevelByClassName(simpleClass);
+    }
+
+    private void rejectUnsupportedSystemCommand(String simpleClass, String methodName, Object[] args) {
+        if (!"SystemToolPack".equals(simpleClass) || !"runCommand".equals(methodName)) {
+            return;
+        }
+        String command = args != null && args.length == 1 && args[0] instanceof String value ? value : null;
+        if (!ApprovedSystemCommand.isApproved(command)) {
+            throw new BusinessException(40062, "仅允许执行 echo <text>、pwd 或 git status");
+        }
     }
 
     private String resolveRuntimeToolName(String genericToolName, Object[] args) {

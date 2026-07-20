@@ -116,7 +116,10 @@ public class SystemToolPack {
             throw new BusinessException(40061, "命令不能为空");
         }
 
-        String[] parts = commandLine.trim().split("\\s+");
+        String approvedCommand = ApprovedSystemCommand.normalize(commandLine)
+                .orElseThrow(() -> new BusinessException(40062,
+                        "仅允许执行 echo <text>、pwd 或 git status"));
+        String[] parts = approvedCommand.split("\\s+");
         String command = parts[0].toLowerCase();
         if (!isCommandAllowed(command)) {
             if (isBlacklistMode()) {

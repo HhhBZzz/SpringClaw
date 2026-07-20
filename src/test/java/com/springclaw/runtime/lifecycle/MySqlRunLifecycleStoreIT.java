@@ -1,7 +1,6 @@
 package com.springclaw.runtime.lifecycle;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.springclaw.config.RuntimeLifecycleSchemaInitializer;
 import com.springclaw.config.RuntimeLifecycleStoreConfig;
 import com.springclaw.runtime.contract.ContextSnapshot;
 import com.springclaw.runtime.contract.ExecutionDecision;
@@ -55,8 +54,7 @@ class MySqlRunLifecycleStoreIT {
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @Import({
-            RuntimeLifecycleStoreConfig.class,
-            RuntimeLifecycleSchemaInitializer.class
+            RuntimeLifecycleStoreConfig.class
     })
     static class TestApp {
     }

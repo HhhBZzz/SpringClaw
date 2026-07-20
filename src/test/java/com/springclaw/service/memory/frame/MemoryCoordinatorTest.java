@@ -10,16 +10,22 @@ import com.springclaw.runtime.memory.contract.MemoryType;
 import com.springclaw.runtime.memory.contract.ProjectMemoryItem;
 import com.springclaw.runtime.memory.contract.ShortTermMemoryEntry;
 import com.springclaw.runtime.memory.port.ProjectMemorySource;
+import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.runtime.memory.store.InMemoryMemoryRecordStore;
 import com.springclaw.runtime.memory.store.InMemoryShortTermMemoryStore;
+import com.springclaw.service.event.MessageEventService;
+import com.springclaw.service.event.ShortTermChatEventRead;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class MemoryCoordinatorTest {
 
@@ -170,6 +176,85 @@ class MemoryCoordinatorTest {
     }
 
     @Test
+    void fallsBackToPersistedChatEventsWhenShortTermStoreIsEmpty() {
+        MemoryScope scope = MemoryScope.from(personalClaim("alice"));
+        InMemoryShortTermMemoryStore emptyShortTermStore = new InMemoryShortTermMemoryStore();
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        when(messageEventService.readShortTermChatEvents(scope, 40)).thenReturn(
+                new ShortTermChatEventRead(
+                        List.of(
+                                event(10L, "chat:run-old:user", "USER", "上一轮说我的昵称是小韩", "run-old"),
+                                event(11L, "chat:run-old:assistant:terminal", "ASSISTANT", "记住了，你的昵称是小韩。", "run-old")
+                        ),
+                        ShortTermChatEventRead.Source.DURABLE
+                )
+        );
+        MemoryCoordinator coordinator = new MemoryCoordinator(
+                new InMemoryMemoryRecordStore(),
+                () -> emptyShortTermStore,
+                ignored -> List.of(),
+                messageEventService,
+                CLOCK,
+                6000,
+                20
+        );
+
+        MemoryFrameResult result = coordinator.retrieve(new MemoryFrameRequest(
+                "run-1", scope, "我刚才说我的昵称是什么？"
+        ));
+
+        assertThat(result.frame().shortTermTurns())
+                .extracting(item -> item.content())
+                .containsExactly(
+                        "上一轮说我的昵称是小韩",
+                        "记住了，你的昵称是小韩。"
+                );
+        assertThat(result.trace().includedCounts()).containsEntry("shortTerm", 2);
+    }
+
+    @Test
+    void reconcilesNonEmptyRedisWindowWithNewerDurableChatEvent() {
+        MemoryScope scope = MemoryScope.from(personalClaim("alice"));
+        InMemoryShortTermMemoryStore shortTermStore = new InMemoryShortTermMemoryStore();
+        shortTermStore.append(scope, shortTerm(
+                10,
+                "chat:old:user",
+                "USER",
+                "old cached turn"
+        ));
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        when(messageEventService.readShortTermChatEvents(scope, 40)).thenReturn(
+                new ShortTermChatEventRead(
+                        List.of(
+                                event(10L, "chat:old:user", "USER", "old durable turn", "run-old"),
+                                event(11L, "chat:new:assistant", "ASSISTANT", "new durable answer", "run-new")
+                        ),
+                        ShortTermChatEventRead.Source.DURABLE
+                )
+        );
+        MemoryCoordinator coordinator = new MemoryCoordinator(
+                new InMemoryMemoryRecordStore(),
+                () -> shortTermStore,
+                ignored -> List.of(),
+                messageEventService,
+                CLOCK,
+                6000,
+                20
+        );
+
+        MemoryFrameResult result = coordinator.retrieve(new MemoryFrameRequest(
+                "run-1", scope, "question"
+        ));
+
+        assertThat(result.frame().shortTermTurns())
+                .extracting(item -> item.content())
+                .containsExactly("old durable turn", "new durable answer");
+        assertThat(shortTermStore.readRecent(scope, 40))
+                .extracting(ShortTermMemoryEntry::content)
+                .containsExactly("old durable turn", "new durable answer");
+    }
+
+    @Test
     void filtersCandidateAndRejectedProjectMemory() {
         MemoryScope scope = MemoryScope.from(personalClaim("alice"));
         ProjectMemorySource projectSource = ignored -> List.of(
@@ -307,5 +392,24 @@ class MemoryCoordinatorTest {
                 status,
                 T0
         );
+    }
+
+    private static MessageEvent event(long id,
+                                      String eventKey,
+                                      String role,
+                                      String content,
+                                      String requestId) {
+        MessageEvent event = new MessageEvent();
+        event.setId(id);
+        event.setSessionKey("session-1");
+        event.setChannel("api");
+        event.setUserId("alice");
+        event.setRole(role);
+        event.setEventType("CHAT");
+        event.setRequestId(requestId);
+        event.setEventKey(eventKey);
+        event.setContent(content);
+        event.setCreateTime(LocalDateTime.ofInstant(T0.plusSeconds(id), ZoneOffset.UTC));
+        return event;
     }
 }

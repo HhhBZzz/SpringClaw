@@ -21,9 +21,8 @@ import java.time.Instant;
 /**
  * Phase 3A1 Task 6：Redis 短期记忆影子存储。
  *
- * <p>每个 scope 一个 ZSET：score=persisted eventId，member=canonical JSON（含 eventKey）。
- * 一次 Lua 完成 ZADD NX + trim + EXPIRE，保证 append 原子且按 eventId 排序。乱序追加仍按
- * eventId 升序读出。mergeRecovery 只补 eventId<=watermark 的行，不删除既有 key。
+ * <p>每个 scope 使用一个 eventKey 排序 ZSET 和一个 JSON payload HASH。一次 Lua 完成
+ * ZADD NX、HSET、trim 和 EXPIRE，保证 eventKey 幂等且按持久化 eventId 排序。
  */
 public class RedisShortTermMemoryStore implements ShortTermMemoryStore {
 
@@ -32,14 +31,55 @@ public class RedisShortTermMemoryStore implements ShortTermMemoryStore {
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
 
     private static final String APPEND_SCRIPT = """
-            local key = KEYS[1]
+            local orderKey = KEYS[1]
+            local entryKey = KEYS[2]
             local score = tonumber(ARGV[1])
-            local member = ARGV[2]
-            local maxEntries = tonumber(ARGV[3])
-            local ttlSeconds = tonumber(ARGV[4])
-            redis.call('ZADD', key, 'NX', score, member)
-            redis.call('ZREMRANGEBYRANK', key, 0, -(maxEntries + 1))
-            redis.call('EXPIRE', key, ttlSeconds)
+            local eventKey = ARGV[2]
+            local payload = ARGV[3]
+            local maxEntries = tonumber(ARGV[4])
+            local ttlSeconds = tonumber(ARGV[5])
+            local added = redis.call('ZADD', orderKey, 'NX', score, eventKey)
+            if added == 1 then
+                redis.call('HSET', entryKey, eventKey, payload)
+            end
+            local removed = redis.call('ZRANGE', orderKey, 0, -(maxEntries + 1))
+            if #removed > 0 then
+                redis.call('ZREM', orderKey, unpack(removed))
+                redis.call('HDEL', entryKey, unpack(removed))
+            end
+            redis.call('EXPIRE', orderKey, ttlSeconds)
+            redis.call('EXPIRE', entryKey, ttlSeconds)
+            return 1
+            """;
+
+    private static final String MERGE_RECOVERY_SCRIPT = """
+            local orderKey = KEYS[1]
+            local entryKey = KEYS[2]
+            local watermark = tonumber(ARGV[1])
+            local maxEntries = tonumber(ARGV[2])
+            local ttlSeconds = tonumber(ARGV[3])
+            local entryCount = tonumber(ARGV[4])
+            local stale = redis.call('ZRANGEBYSCORE', orderKey, '-inf', watermark)
+            if #stale > 0 then
+                redis.call('ZREM', orderKey, unpack(stale))
+                redis.call('HDEL', entryKey, unpack(stale))
+            end
+            local offset = 5
+            for i = 1, entryCount do
+                local score = tonumber(ARGV[offset])
+                local eventKey = ARGV[offset + 1]
+                local payload = ARGV[offset + 2]
+                redis.call('ZADD', orderKey, score, eventKey)
+                redis.call('HSET', entryKey, eventKey, payload)
+                offset = offset + 3
+            end
+            local removed = redis.call('ZRANGE', orderKey, 0, -(maxEntries + 1))
+            if #removed > 0 then
+                redis.call('ZREM', orderKey, unpack(removed))
+                redis.call('HDEL', entryKey, unpack(removed))
+            end
+            redis.call('EXPIRE', orderKey, ttlSeconds)
+            redis.call('EXPIRE', entryKey, ttlSeconds)
             return 1
             """;
 
@@ -59,13 +99,17 @@ public class RedisShortTermMemoryStore implements ShortTermMemoryStore {
     public void append(MemoryScope scope, ShortTermMemoryEntry entry) {
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(entry, "entry");
+        if (entry.eventId() <= 0) {
+            throw new IllegalArgumentException("short-term eventId must be durable");
+        }
         try {
             redissonClient.getScript(StringCodec.INSTANCE).eval(
                     RScript.Mode.READ_WRITE,
                     APPEND_SCRIPT,
                     RScript.ReturnType.INTEGER,
-                    Collections.singletonList(key(scope)),
+                    List.of(orderKey(scope), entryKey(scope)),
                     String.valueOf(entry.eventId()),
+                    entry.eventKey(),
                     encode(entry),
                     String.valueOf(maxEntries),
                     String.valueOf(ttlSeconds)
@@ -83,22 +127,28 @@ public class RedisShortTermMemoryStore implements ShortTermMemoryStore {
             throw new IllegalArgumentException("limit must be positive");
         }
         try {
-            List<String> members = redissonClient.getScript(StringCodec.INSTANCE).eval(
+            List<String> payloads = redissonClient.getScript(StringCodec.INSTANCE).eval(
                     RScript.Mode.READ_ONLY,
-                    "local key = KEYS[1] local n = tonumber(ARGV[1]) "
-                            + "local count = redis.call('ZCARD', key) "
+                    "local orderKey = KEYS[1] local entryKey = KEYS[2] "
+                            + "local n = tonumber(ARGV[1]) "
+                            + "local count = redis.call('ZCARD', orderKey) "
                             + "local from = math.max(0, count - n) "
-                            + "return redis.call('ZRANGE', key, from, -1)",
+                            + "local keys = redis.call('ZRANGE', orderKey, from, -1) "
+                            + "if #keys == 0 then return {} end "
+                            + "return redis.call('HMGET', entryKey, unpack(keys))",
                     RScript.ReturnType.MULTI,
-                    Collections.singletonList(key(scope)),
+                    List.of(orderKey(scope), entryKey(scope)),
                     String.valueOf(limit)
             );
-            if (members == null || members.isEmpty()) {
+            if (payloads == null || payloads.isEmpty()) {
                 return List.of();
             }
-            List<ShortTermMemoryEntry> entries = new ArrayList<>(members.size());
-            for (Object member : members) {
-                ShortTermMemoryEntry decoded = decode(String.valueOf(member));
+            List<ShortTermMemoryEntry> entries = new ArrayList<>(payloads.size());
+            for (Object payload : payloads) {
+                if (payload == null) {
+                    continue;
+                }
+                ShortTermMemoryEntry decoded = decode(String.valueOf(payload));
                 if (decoded != null) {
                     entries.add(decoded);
                 }
@@ -119,27 +169,57 @@ public class RedisShortTermMemoryStore implements ShortTermMemoryStore {
     ) {
         Objects.requireNonNull(scope, "scope");
         Objects.requireNonNull(persistedEntries, "persistedEntries");
+        List<ShortTermMemoryEntry> eligible = new ArrayList<>(persistedEntries.size());
         for (ShortTermMemoryEntry entry : persistedEntries) {
             Objects.requireNonNull(entry, "persisted entry");
-            if (entry.eventId() > watermark) {
-                continue;
+            if (entry.eventId() <= watermark) {
+                eligible.add(entry);
             }
-            append(scope, entry);
+        }
+        List<Object> arguments = new ArrayList<>(4 + eligible.size() * 3);
+        arguments.add(String.valueOf(watermark));
+        arguments.add(String.valueOf(maxEntries));
+        arguments.add(String.valueOf(ttlSeconds));
+        arguments.add(String.valueOf(eligible.size()));
+        for (ShortTermMemoryEntry entry : eligible) {
+            arguments.add(String.valueOf(entry.eventId()));
+            arguments.add(entry.eventKey());
+            arguments.add(encode(entry));
+        }
+        try {
+            redissonClient.getScript(StringCodec.INSTANCE).eval(
+                    RScript.Mode.READ_WRITE,
+                    MERGE_RECOVERY_SCRIPT,
+                    RScript.ReturnType.INTEGER,
+                    List.of(orderKey(scope), entryKey(scope)),
+                    arguments.toArray()
+            );
+        } catch (Exception ex) {
+            log.warn("Redis 短期记忆恢复合并失败，降级 MySQL 恢复源。scope={}, reason={}",
+                    scope.scopeId(), ex.getMessage());
         }
     }
 
     /** 测试辅助：清理 scope key。 */
     void deleteScope(MemoryScope scope) {
         try {
-            redissonClient.getBucket(key(scope)).delete();
-            redissonClient.getKeys().delete(key(scope));
+            redissonClient.getKeys().delete(orderKey(scope), entryKey(scope));
         } catch (Exception ignored) {
             // best-effort cleanup
         }
     }
 
-    private static String key(MemoryScope scope) {
-        return "springclaw:memory:short-term:" + scope.scopeType().name() + ":" + scope.scopeId();
+    private static String baseKey(MemoryScope scope) {
+        return "springclaw:memory:short-term:v2:" + scope.scopeType().name()
+                + ":" + scope.scopeId();
+    }
+
+    private static String orderKey(MemoryScope scope) {
+        return baseKey(scope) + ":order";
+    }
+
+    private static String entryKey(MemoryScope scope) {
+        return baseKey(scope) + ":entry";
     }
 
     private static String encode(ShortTermMemoryEntry entry) {

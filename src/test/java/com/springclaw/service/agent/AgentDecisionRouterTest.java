@@ -78,6 +78,38 @@ class AgentDecisionRouterTest {
     }
 
     @Test
+    void shouldRouteDesktopTxtWriteToConfirmedFileTool() {
+        AgentDecision decision = router().routeByRules(request("请在桌面创建一个笑话.txt 文件，写几条笑话"));
+
+        assertThat(decision.intent()).isEqualTo("local_files");
+        assertThat(decision.executionPath()).isEqualTo("agent_tools");
+        assertThat(decision.selectedCapabilities()).containsExactly("local-files", "file");
+        assertThat(decision.riskLevel()).isEqualTo("write");
+        assertThat(decision.requiresConfirmation()).isTrue();
+    }
+
+    @Test
+    void shouldRouteDesktopDocumentWriteToConfirmedFileTool() {
+        AgentDecision decision = router().routeByRules(request("请在桌面创建一个笑话文档，写几条笑话"));
+
+        assertThat(decision.intent()).isEqualTo("local_files");
+        assertThat(decision.executionPath()).isEqualTo("agent_tools");
+        assertThat(decision.riskLevel()).isEqualTo("write");
+        assertThat(decision.requiresConfirmation()).isTrue();
+    }
+
+    @Test
+    void shouldRouteGenericLocalMarkdownWriteToConfirmedFileTool() {
+        AgentDecision decision = router().routeByRules(request("新建一个本地 notes.md 文件，写入会议纪要"));
+
+        assertThat(decision.intent()).isEqualTo("local_files");
+        assertThat(decision.executionPath()).isEqualTo("agent_tools");
+        assertThat(decision.selectedCapabilities()).containsExactly("local-files", "file");
+        assertThat(decision.riskLevel()).isEqualTo("write");
+        assertThat(decision.requiresConfirmation()).isTrue();
+    }
+
+    @Test
     void shouldTreatLocalFilesSkillMatchAsLocalFileIntentInsteadOfGenericSkillTask() {
         SkillRegistryService skillRegistryService = mock(SkillRegistryService.class);
         when(skillRegistryService.matchBestAgentVisibleDefinition(any(), anySet())).thenReturn(Optional.of(localFilesSkill()));

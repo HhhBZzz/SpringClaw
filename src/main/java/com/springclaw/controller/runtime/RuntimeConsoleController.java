@@ -4,6 +4,7 @@ import com.springclaw.common.exception.BusinessException;
 import com.springclaw.common.response.ApiResponse;
 import com.springclaw.domain.entity.LlmUsageRecord;
 import com.springclaw.domain.entity.ScheduledTask;
+import com.springclaw.runtime.memory.contract.MemoryFrame;
 import com.springclaw.service.agent.AgentRunTraceService;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.memory.evaluation.MemoryUsageTraceReader;
@@ -129,6 +130,22 @@ public class RuntimeConsoleController {
             throw new BusinessException(40103, "requestId 不能为空");
         }
         return ApiResponse.success(memoryUsageTraceReader.readLatest(
+                requestId,
+                isAdmin(context) ? null : context.username()
+        ));
+    }
+
+    /**
+     * 富记忆检索 frame：返回某次 run 召回了哪些记忆（每层片段）、为何漏掉某些（omission）、
+     * 来源统计。供前端 Run Timeline 的记忆步骤展示，补上"记忆读"这层黑箱。
+     */
+    @GetMapping("/runs/memory-frame")
+    public ApiResponse<MemoryFrame> runMemoryFrame(@RequestParam String requestId) {
+        RequestUserContext context = requireContext();
+        if (!StringUtils.hasText(requestId)) {
+            throw new BusinessException(40103, "requestId 不能为空");
+        }
+        return ApiResponse.success(agentRunTraceService.memoryFrame(
                 requestId,
                 isAdmin(context) ? null : context.username()
         ));

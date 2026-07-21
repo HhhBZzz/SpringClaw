@@ -4,6 +4,7 @@ import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.runtime.memory.contract.MemoryScope;
 import com.springclaw.runtime.memory.contract.MemoryStatus;
 import com.springclaw.runtime.memory.contract.MemoryType;
+import com.springclaw.runtime.lifecycle.RunCoordinator;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.memory.MemoryManagementService;
 import com.springclaw.service.memory.MemoryWriteCommand;
@@ -47,6 +48,9 @@ public class TerminalMemoryExtractionService {
     private final SemanticMemoryJudge judge;
     private final TerminalReflectionGenerator reflectionGenerator;
     private final MemoryExtractionPolicy policy;
+
+    @Autowired(required = false)
+    private ObjectProvider<RunCoordinator> runCoordinatorProvider;
 
     @Autowired
     public TerminalMemoryExtractionService(
@@ -103,8 +107,37 @@ public class TerminalMemoryExtractionService {
             return TerminalMemoryExtractionResult.empty();
         }
         int semanticWritten = extractSemantic(context);
+        if (semanticWritten > 0) {
+            emitMemoryTimelineEvent(context.runId(), true);
+        }
         int reflectionWritten = reflectTerminalRun(context);
+        if (reflectionWritten > 0) {
+            emitMemoryTimelineEvent(context.runId(), false);
+        }
         return new TerminalMemoryExtractionResult(semanticWritten, reflectionWritten);
+    }
+
+    /**
+     * 把记忆抽取/反思作为 observation 事件 emit 进 run timeline。
+     * 在 run 已终态后触发（revision 固定），CAS 安全；emit 失败不影响记忆写入。
+     */
+    private void emitMemoryTimelineEvent(String runId, boolean extracted) {
+        if (runCoordinatorProvider == null) {
+            return;
+        }
+        RunCoordinator coordinator = runCoordinatorProvider.getIfAvailable();
+        if (coordinator == null) {
+            return;
+        }
+        try {
+            if (extracted) {
+                coordinator.memoryExtracted(runId, Instant.now());
+            } else {
+                coordinator.reflected(runId, Instant.now());
+            }
+        } catch (RuntimeException ignored) {
+            // emit 失败不影响记忆写入主路径
+        }
     }
 
     private TerminalMemoryExtractionContext context(String runId, String userId) {

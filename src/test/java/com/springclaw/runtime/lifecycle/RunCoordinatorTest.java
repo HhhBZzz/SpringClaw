@@ -158,6 +158,30 @@ class RunCoordinatorTest {
     }
 
     @Test
+    void appendsMemoryObservationsAfterTerminal() {
+        coordinator.accept(acceptance());
+        coordinator.contextReady(RUN_ID, snapshot(), T0.plusSeconds(1));
+        coordinator.decided(RUN_ID, decision(), T0.plusSeconds(2));
+        coordinator.running(RUN_ID, "agent-runtime", T0.plusSeconds(3));
+        coordinator.verifying(RUN_ID, T0.plusSeconds(4));
+        coordinator.completed(
+                RUN_ID,
+                completion(CompletionDecision.Outcome.COMPLETE, T0.plusSeconds(5)),
+                result(RunStatus.COMPLETED, T0.plusSeconds(5)),
+                T0.plusSeconds(5)
+        );
+
+        RunEvent extracted = coordinator.memoryExtracted(RUN_ID, T0.plusSeconds(6));
+        RunEvent reflected = coordinator.reflected(RUN_ID, T0.plusSeconds(7));
+
+        assertThat(extracted.eventType()).isEqualTo(RunEventType.MEMORY_EXTRACTED);
+        assertThat(reflected.eventType()).isEqualTo(RunEventType.REFLECTED);
+        assertThat(store.findEventsByRunId(RUN_ID))
+                .extracting(RunEvent::eventType)
+                .endsWith(RunEventType.RUN_COMPLETED, RunEventType.MEMORY_EXTRACTED, RunEventType.REFLECTED);
+    }
+
+    @Test
     void confirmationRejectionFailsRunWithTypedBoundaryEvent() {
         coordinator.accept(acceptance());
         coordinator.contextReady(RUN_ID, snapshot(), T0.plusSeconds(1));

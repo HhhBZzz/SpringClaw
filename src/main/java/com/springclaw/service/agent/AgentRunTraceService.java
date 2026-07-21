@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.runtime.contract.RunEvent;
 import com.springclaw.runtime.contract.RunState;
+import com.springclaw.runtime.memory.contract.MemoryFrame;
 import com.springclaw.runtime.contract.RunStatus;
 import com.springclaw.runtime.contract.ToolInvocation;
 import com.springclaw.runtime.lifecycle.RunEventStore;
@@ -742,6 +743,21 @@ public class AgentRunTraceService {
             return null;
         }
         return runStateRepository.findByRunId(requestId.trim()).orElse(null);
+    }
+
+    /**
+     * 返回某次 run 的富记忆检索 frame（含每层召回片段、omission 原因、来源统计）。
+     * userId 非 null 时做归属隔离（非 admin 只能看自己的 run）。
+     */
+    public MemoryFrame memoryFrame(String requestId, String userId) {
+        RunState state = canonicalRun(requestId);
+        if (state == null || state.contextSnapshot() == null) {
+            return null;
+        }
+        if (userId != null && !userId.equals(state.userId())) {
+            return null;
+        }
+        return state.contextSnapshot().memoryFrame();
     }
 
     private String defaultText(String value, String fallback) {

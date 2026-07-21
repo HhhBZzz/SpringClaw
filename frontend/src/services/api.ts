@@ -310,6 +310,37 @@ export function getRunMemoryUsage(requestId: string) {
   return request<RuntimeMemoryUsageTrace>(`/api/runtime-console/runs/memory-usage?requestId=${encodeURIComponent(requestId)}`);
 }
 
+export interface RuntimeMemoryFrameItem {
+  sourceId: string;
+  layer: string;
+  memoryType: string;
+  content: string;
+  importance: number;
+  confidence: number;
+  score: number;
+}
+
+export interface RuntimeMemoryOmission {
+  category: string;
+  layer?: string;
+  reason?: string;
+}
+
+export interface RuntimeMemoryFrame {
+  runId: string;
+  shortTermTurns: RuntimeMemoryFrameItem[];
+  episodicItems: RuntimeMemoryFrameItem[];
+  semanticFacts: RuntimeMemoryFrameItem[];
+  proceduralRules: RuntimeMemoryFrameItem[];
+  projectItems: RuntimeMemoryFrameItem[];
+  omissions: RuntimeMemoryOmission[];
+  frameHash: string;
+}
+
+export function getRunMemoryFrame(requestId: string) {
+  return request<RuntimeMemoryFrame | null>(`/api/runtime-console/runs/memory-frame?requestId=${encodeURIComponent(requestId)}`);
+}
+
 export function getAuditLogs(input: { page?: number; size?: number } = {}) {
   const page = input.page ?? 1;
   const size = input.size ?? 12;

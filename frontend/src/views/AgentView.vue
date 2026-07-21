@@ -17,6 +17,7 @@ import {
   getModelStatus,
   getToolProposal,
   getRunMemoryUsage,
+  getRunMemoryFrame,
   getRunTrace,
   getRuntimeModelProviders,
   getRuntimeOverview,
@@ -278,7 +279,8 @@ const skillCards = [
   { id: 'clawhub-summarize', type: 'PROMPT', description: 'Markdown prompt skill，用于结构化总结。' }
 ] as const;
 
-const memoryContexts: Array<{ source: string; score: string; detail: string }> = [];
+const memoryContexts = ref<Array<{ source: string; score: string; detail: string }>>([]);
+const memoryOmissions = ref<Array<{ category: string; reason: string }>>([]);
 
 const sessionState = computed(() => {
   if (!auth.profile) return '需要登录';
@@ -1286,12 +1288,41 @@ async function replayRunTrace(requestId?: string) {
     return;
   }
   try {
-    const [events, memoryUsage] = await Promise.all([
+    const [events, memoryUsage, memoryFrame] = await Promise.all([
       getRunTrace(requestId, 80),
-      getRunMemoryUsage(requestId)
+      getRunMemoryUsage(requestId),
+      getRunMemoryFrame(requestId)
     ]);
     traceEvents.value = events;
     currentMemoryUsage.value = memoryUsage;
+    if (memoryFrame) {
+      const all: Array<{ source: string; score: string; detail: string }> = [];
+      const pushLayer = (
+        items: Array<{ sourceId?: string; content?: string; importance?: number; score?: number }> | undefined,
+        label: string
+      ) => {
+        if (!items) return;
+        for (const item of items) {
+          all.push({
+            source: `${label} · ${item.sourceId ?? 'memory'}`,
+            score: `score ${((item.score ?? item.importance ?? 0)).toFixed(2)}`,
+            detail: item.content ?? ''
+          });
+        }
+      };
+      pushLayer(memoryFrame.shortTermTurns, 'short-term');
+      pushLayer(memoryFrame.episodicItems, 'episodic');
+      pushLayer(memoryFrame.semanticFacts, 'semantic');
+      pushLayer(memoryFrame.proceduralRules, 'procedural');
+      pushLayer(memoryFrame.projectItems, 'project');
+      memoryContexts.value = all;
+      memoryOmissions.value = (memoryFrame.omissions ?? []).map((o) => ({
+        category: o.category ?? 'OMITTED',
+        reason: o.reason ?? o.category ?? ''
+      }));
+    }
+    activeResourceView.value = 'console';
+    inspectorDrawerOpen.value = true;
     activeInspectorTab.value = 'trace';
     setRuntimeStatus(`已回放 ${requestId} 的 trace 和 memory usage。`);
   } catch (error) {
@@ -1380,7 +1411,7 @@ function pushTraceEvent(event: AgentTraceEvent) {
     status: event.status || 'success',
     timestamp: event.timestamp || Date.now()
   };
-  traceEvents.value = [...traceEvents.value.slice(-8), normalized];
+  traceEvents.value = [...traceEvents.value.slice(-79), normalized];
 }
 
 function pushCapabilityEvent(event: AgentCapabilityEvent) {
@@ -3107,7 +3138,16 @@ onUnmounted(() => {
                   </div>
                   <span>{{ memory.score }}</span>
                 </article>
-                <p v-if="!memoryContexts.length" class="empty-history">暂无真实 memory chunks。后端返回召回片段后会显示来源和相关度。</p>
+                <p v-if="!memoryContexts.length" class="empty-history">暂无召回片段。回放一次 run（运行记录页点击）后会显示每层召回的记忆与相关度。</p>
+                <div v-if="memoryOmissions.length" class="memory-omissions">
+                  <p class="eyebrow">未注入的记忆（omission）</p>
+                  <article v-for="(o, idx) in memoryOmissions" :key="idx" class="memory-card omission">
+                    <div>
+                      <strong>{{ o.category }}</strong>
+                      <small>{{ o.reason }}</small>
+                    </div>
+                  </article>
+                </div>
               </section>
 
               <section v-else class="inspector-panel">

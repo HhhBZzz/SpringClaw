@@ -172,6 +172,21 @@ public final class RunCoordinator {
         return appendObservation(runId, RunEventType.MODEL_CALLED, at);
     }
 
+    /**
+     * 记录终态后异步的语义记忆抽取（抽取了哪些候选），让"记忆写"这步进 run timeline。
+     * 在 run 已终态后触发，observation 复用终态 revision/status。
+     */
+    public RunEvent memoryExtracted(String runId, Instant at) {
+        return appendObservation(runId, RunEventType.MEMORY_EXTRACTED, at);
+    }
+
+    /**
+     * 记录终态后异步的反思（产出 EPISODIC meta-knowledge 候选）。
+     */
+    public RunEvent reflected(String runId, Instant at) {
+        return appendObservation(runId, RunEventType.REFLECTED, at);
+    }
+
     public RunState verifying(String runId, Instant at) {
         RunState current = require(runId);
         return commit(
@@ -276,11 +291,17 @@ public final class RunCoordinator {
             RunEventType eventType,
             Instant at
     ) {
-        RunState current = require(runId);
+        // observation 事件只追加事件日志、不改状态机状态，因此允许在终态后追加
+        // （如终态后异步的记忆抽取/反思）；commit 路径仍走 require() 禁止终态改状态。
+        RunState current = requireForObservation(runId);
         return store.append(
                 current.revision(),
                 event(current, eventType, at)
         );
+    }
+
+    private RunState requireForObservation(String runId) {
+        return store.requireByRunId(runId);
     }
 
     private static RunState copy(

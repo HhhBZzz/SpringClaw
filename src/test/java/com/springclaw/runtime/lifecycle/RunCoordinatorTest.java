@@ -140,6 +140,24 @@ class RunCoordinatorTest {
     }
 
     @Test
+    void appendsModelCalledObservationWithoutChangingState() {
+        coordinator.accept(acceptance());
+        coordinator.contextReady(RUN_ID, snapshot(), T0.plusSeconds(1));
+        coordinator.decided(RUN_ID, decision(), T0.plusSeconds(2));
+        RunState running = coordinator.running(
+                RUN_ID, "agent-runtime", T0.plusSeconds(3)
+        );
+
+        RunEvent emitted = coordinator.modelCalled(RUN_ID, T0.plusSeconds(4));
+
+        assertThat(emitted.eventType()).isEqualTo(RunEventType.MODEL_CALLED);
+        assertThat(store.requireByRunId(RUN_ID)).isEqualTo(running);
+        assertThat(store.findEventsByRunId(RUN_ID))
+                .extracting(RunEvent::eventType)
+                .endsWith(RunEventType.MODEL_CALLED);
+    }
+
+    @Test
     void confirmationRejectionFailsRunWithTypedBoundaryEvent() {
         coordinator.accept(acceptance());
         coordinator.contextReady(RUN_ID, snapshot(), T0.plusSeconds(1));

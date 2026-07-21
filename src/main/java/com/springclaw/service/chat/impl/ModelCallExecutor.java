@@ -1,6 +1,7 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.common.util.TextUtils;
+import com.springclaw.runtime.lifecycle.RunCoordinator;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.usage.LlmUsageRecordService;
 import com.springclaw.service.usage.ModelCallMetricsService;
@@ -8,11 +9,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -30,6 +33,28 @@ public class ModelCallExecutor {
     private final ModelCallMetricsService modelCallMetricsService;
     private final int maxFailoverAttempts;
     private final int maxSameModelRetries;
+
+    @Autowired(required = false)
+    private ObjectProvider<RunCoordinator> runCoordinatorProvider;
+
+    private void emitModelCalled(ChatRequestContext requestContext) {
+        if (requestContext == null || runCoordinatorProvider == null) {
+            return;
+        }
+        String runId = requestContext.requestId();
+        if (!StringUtils.hasText(runId)) {
+            return;
+        }
+        RunCoordinator coordinator = runCoordinatorProvider.getIfAvailable();
+        if (coordinator == null) {
+            return;
+        }
+        try {
+            coordinator.modelCalled(runId, Instant.now());
+        } catch (RuntimeException ignored) {
+            // emit 失败不影响模型调用主路径
+        }
+    }
 
     @Autowired
     public ModelCallExecutor(AiProviderService aiProviderService,
@@ -73,6 +98,7 @@ public class ModelCallExecutor {
                                               ChatRequestContext requestContext,
                                               boolean allowFailover,
                                               ChatOperation<T> operation) throws Exception {
+        emitModelCalled(requestContext);
         return executeInternal(
                 activeClient,
                 source,

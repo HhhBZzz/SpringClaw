@@ -24,6 +24,8 @@ public enum RunEventType {
     TOOL_SUCCEEDED("tool.succeeded"),
     TOOL_FAILED("tool.failed"),
     VERIFICATION_COMPLETED("verification.completed"),
+    MEMORY_EXTRACTED("memory.extracted"),
+    REFLECTED("reflect.completed"),
     ANSWER_COMPOSED("answer.composed"),
     RUN_COMPLETED("run.completed"),
     RUN_DEGRADED("run.degraded"),

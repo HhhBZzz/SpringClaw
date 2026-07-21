@@ -11,6 +11,7 @@ import com.springclaw.service.proposal.ToolInvocationProposalService;
 import com.springclaw.service.proposal.ToolInvocationProposalStatus;
 import com.springclaw.service.proposal.ToolInvocationSnapshot;
 import com.springclaw.service.proposal.ToolInvocationSnapshotService;
+import com.springclaw.runtime.lifecycle.RunCoordinator;
 import com.springclaw.service.proposal.ToolGateway;
 import com.springclaw.service.workspace.WorkspaceGitGuard;
 import com.springclaw.service.workspace.WorkspaceGuard;
@@ -19,8 +20,10 @@ import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -49,6 +52,9 @@ public class ToolRuntimeAspect {
     private final ToolInvocationProposalService proposalService;
     private final WorkspaceGitGuard workspaceGitGuard;
     private final ToolGateway toolGateway;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private ObjectProvider<RunCoordinator> runCoordinatorProvider;
 
     public ToolRuntimeAspect(ToolGuardService toolGuardService,
                              ToolAuditService toolAuditService,
@@ -102,8 +108,34 @@ public class ToolRuntimeAspect {
             rejectUnsupportedSystemCommand(simpleClass, signature.getName(), args);
             Object result;
             if (!requiresProposal) {
-                // read / null → 旧路径
-                result = joinPoint.proceed();
+                // read / null → 旧路径 + canonical timeline emit（写工具由 ToolGateway emit，只读工具在这里补）
+                String runId = context == null ? null : context.runId();
+                RunCoordinator coordinator = (runId == null || runCoordinatorProvider == null)
+                        ? null : runCoordinatorProvider.getIfAvailable();
+                if (coordinator != null) {
+                    try {
+                        coordinator.toolStarted(runId, Instant.now());
+                    } catch (RuntimeException ignored) {
+                        // emit 失败不影响工具执行
+                    }
+                }
+                boolean readOnlySucceeded = false;
+                try {
+                    result = joinPoint.proceed();
+                    readOnlySucceeded = true;
+                } finally {
+                    if (coordinator != null) {
+                        try {
+                            if (readOnlySucceeded) {
+                                coordinator.toolSucceeded(runId, Instant.now());
+                            } else {
+                                coordinator.toolFailed(runId, Instant.now());
+                            }
+                        } catch (RuntimeException ignored) {
+                            // emit 失败不影响工具执行
+                        }
+                    }
+                }
             } else {
                 ApprovedProposalContext approved = ToolExecutionContextHolder.getApprovedProposal();
                 if (approved == null) {

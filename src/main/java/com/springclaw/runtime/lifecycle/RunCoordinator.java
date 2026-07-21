@@ -164,6 +164,14 @@ public final class RunCoordinator {
         return appendObservation(runId, RunEventType.TOOL_FAILED, at);
     }
 
+    /**
+     * 记录一次模型调用（含 failover 的每次尝试），让"模型调用"这步进 run timeline。
+     * MVP 版只发事件本身；provider/model 等载荷可后续通过带 payload 的 observation 扩展。
+     */
+    public RunEvent modelCalled(String runId, Instant at) {
+        return appendObservation(runId, RunEventType.MODEL_CALLED, at);
+    }
+
     public RunState verifying(String runId, Instant at) {
         RunState current = require(runId);
         return commit(

@@ -1,8 +1,8 @@
 # SpringClaw
 
-**Enterprise AI Agent Runtime for Spring Boot.**
+**A self-hosted, governed AI Agent runtime for Spring Boot — run it, read it, learn from it.**
 
-SpringClaw is a production-oriented Java agent runtime built on Spring Boot 3.5 and Spring AI 1.1. It combines multi-model orchestration, memory, tool governance, skill execution, channel adapters, and an operations console into one backend-first platform for building auditable AI agents.
+SpringClaw is a self-hosted, governed Java agent runtime built on Spring Boot 3.5 and Spring AI 1.1. It brings multi-model orchestration, memory, tool governance, skill execution, channel adapters, and an operations console into one backend, and exposes the full agent pipeline — decision routing → governed tools → memory loop → reflection — so developers can deploy it for real work, extend it, or use it as a readable reference for learning production-grade agent architecture.
 
 [![Java 17](https://img.shields.io/badge/Java-17-007396?logo=openjdk&logoColor=white)](https://openjdk.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
@@ -25,7 +25,18 @@ Most agent demos stop at a chat endpoint plus a few hard-coded tools. SpringClaw
 - **Operations surface** with Vue 3 screens for users, roles, models, memory, cache, audit, sessions, and token usage.
 - **Channel adapters** for REST API and Feishu/Lark, with extension points for Telegram and WeChat.
 
-The result is a Spring-native foundation for building agents that can be observed, governed, and extended without turning every new capability into another service branch.
+The result is a Spring-native agent runtime you can actually observe and learn from — not a black-box demo.
+
+### See the full agent pipeline
+
+SpringClaw is built to make the whole agent flow visible, so it doubles as a reference for learning how a production agent works:
+
+- **Decision routing** — rule-based plus model-assisted routing across simplified and OPAR (Observe-Plan-Act-Reflect) engines, with deterministic fallback when no model is available.
+- **Governed tools** — every `@Tool` call passes through one AOP guard: permission, rate limit, risk classification, confirmation proposals, hash-verified execution, and audit. Write actions run inside a fenced workspace with HEAD-baseline rollback.
+- **Memory loop** — a real Write-Manage-Read cycle: MySQL as authority, Redis short-term hot window, Redis Vector Store as a derived index, plus terminal semantic extraction and reflection you can review in the console.
+- **Observability** — the Vue console surfaces sessions, tool proposals, memory candidates, knowledge sources, evaluation redlines, and model usage, so you can watch a run move through the pipeline.
+
+Open the Runtime Console at `/#/agent` after a chat to inspect each stage of the last run.
 
 ## Architecture
 
@@ -199,6 +210,7 @@ The catalog exposes skill metadata without eagerly loading every support file. S
 - Harden skill import/export and permission review flows.
 - Add more channel adapters and outbound delivery strategies.
 - Publish deployment presets for small-team internal agent installations.
+- Add an annotated agent-pipeline walkthrough so new developers can learn the runtime by tracing one run end to end.
 
 ## Contributing
 

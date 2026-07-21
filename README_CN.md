@@ -1,8 +1,8 @@
 # SpringClaw
 
-**面向 Spring Boot 的企业级 AI Agent Runtime。**
+**面向 Spring Boot 的自部署可治理 AI Agent Runtime —— 可跑、可读、可学。**
 
-SpringClaw 基于 Spring Boot 3.5 和 Spring AI 1.1 构建，目标不是做一个简单聊天 Demo，而是沉淀一套可以长期运行、可治理、可审计、可扩展的 Java Agent 基座。它把多模型编排、记忆、工具治理、Skill 运行时、飞书/API 渠道接入和 Vue 管理后台放在同一个工程里，适合用于内部 AI 助手、研发工作台、企业自动化 Agent 的底层运行时。
+SpringClaw 基于 Spring Boot 3.5 和 Spring AI 1.1 构建，是开发者和技术团队自部署的可治理 Java Agent 基座。它把多模型编排、记忆、工具治理、Skill 运行时、渠道接入和 Vue 管理后台放在同一个工程里，完整呈现"决策路由 → 工具治理 → 记忆闭环 → 反思"的 agent 流程，适合自部署、二次开发，也可作为学习生产级 agent 架构的参考实现。
 
 [English README](./README.md) · [真实环境运行指南](./RUN_REAL_ENVIRONMENT.md) · [变更日志](./CHANGELOG.md) · [Script Skill 指南](./docs/SCRIPT_SKILL_GUIDE.md)
 
@@ -17,6 +17,17 @@ SpringClaw 关注的是 Agent 产品真正难维护的部分：
 - 工具不是裸奔调用，统一经过权限、限流、风险分级、动作确认和审计。
 - Skill 不是继续堆 Java 分支，而是以 `SKILL.md` 目录包的方式注册、查看、执行和统计。
 - 后台不是展示假数据，而是围绕模型、用户、角色、工具、Skill、记忆、缓存、审计、会话和 token 用量提供真实运维入口。
+
+## 完整 agent 流程可观察
+
+SpringClaw 把整个 agent 流程做成可见的，因此也适合作为学习生产级 agent 的参考实现：
+
+- **决策路由**：规则 + 模型辅助路由，在 simplified 和 OPAR（观察-计划-行动-反思）引擎间选择，模型不可用时确定性降级。
+- **工具治理**：每个 `@Tool` 调用都经过同一套 AOP 守卫——权限、限流、风险分级、确认 proposal、哈希校验执行、审计；写动作在带 HEAD 基线回滚的围栏工作区里执行。
+- **记忆闭环**：真正的 Write-Manage-Read——MySQL 为权威，Redis 短期热窗，Redis VectorStore 为派生索引，外加终态语义抽取与反思，可在后台审核。
+- **可观测性**：Vue 后台展示会话、工具确认单、记忆候选、知识源、评估红线、模型用量，能直观看到一次 run 如何走完整个流水线。
+
+聊完一次后打开运行时控制台 `/#/agent`，即可查看上一次 run 的每个阶段。
 
 ## 核心能力
 

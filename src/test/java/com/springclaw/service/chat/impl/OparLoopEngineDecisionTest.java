@@ -175,7 +175,8 @@ class OparLoopEngineDecisionTest {
                 "general",
                 AgentDecision.general("test"),
                 ContextInjection.empty(),
-                OparPromptSupportTypedContextTest.snapshotForTest()
+                OparPromptSupportTypedContextTest.snapshotForTest(),
+                null
         );
     }
 }

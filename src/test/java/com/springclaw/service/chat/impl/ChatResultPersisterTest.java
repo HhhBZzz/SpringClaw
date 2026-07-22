@@ -90,7 +90,7 @@ class ChatResultPersisterTest {
         return new ChatContext(
                 session, "api", "u1", "USER", "你好", "你好", "req-1", "system",
                 null, null, "simplified", "默认", "agent", "general", null, null,
-                snapshot);
+                snapshot, null);
     }
 
     @Test

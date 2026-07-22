@@ -86,7 +86,8 @@ class ShortTermMemoryWriterTest {
         );
         return new ChatContext(
                 session, "api", "u1", "USER", "hello", "hello", "req-1", "system",
-                null, null, "simplified", "default", "agent", "general", null, null, snapshot
+                null, null, "simplified", "default", "agent", "general", null, null, snapshot,
+                null
         );
     }
 }

@@ -75,7 +75,8 @@ class OparPromptSupportTypedContextTest {
                 "general",
                 com.springclaw.service.agent.AgentDecision.general("test"),
                 ContextInjection.empty(),
-                snapshotForTest()
+                snapshotForTest(),
+                null
         );
     }
 

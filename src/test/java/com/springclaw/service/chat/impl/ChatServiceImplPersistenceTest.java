@@ -87,7 +87,7 @@ class ChatServiceImplPersistenceTest {
         when(chatGuardService.acquireSessionLock("s1")).thenReturn("lock");
         when(aiProviderService.activeClient()).thenReturn(activeClient);
         when(chatContextFactory.build(any(ChatRequest.class), anyBoolean(), anyString())).thenReturn(context);
-        when(engineSelector.select(any(ChatContext.class))).thenReturn(oparLoopEngine);
+        when(engineSelector.select(any(ChatContext.class), any())).thenReturn(oparLoopEngine);
         when(oparLoopEngine.execute(any(), any()))
                 .thenReturn(new ChatExecutionResult(
                         assembled.observePrompt(),
@@ -188,7 +188,7 @@ class ChatServiceImplPersistenceTest {
         when(chatGuardService.acquireSessionLock("task:shadow:t1")).thenReturn("lock");
         when(aiProviderService.activeClient()).thenReturn(activeClient);
         when(chatContextFactory.build(any(ChatRequest.class), anyBoolean(), anyString())).thenReturn(context);
-        when(engineSelector.select(any(ChatContext.class))).thenReturn(simplifiedOparEngine);
+        when(engineSelector.select(any(ChatContext.class), any())).thenReturn(simplifiedOparEngine);
         when(simplifiedOparEngine.execute(any(), any()))
                 .thenReturn(new ChatExecutionResult(
                         assembled.observePrompt(),

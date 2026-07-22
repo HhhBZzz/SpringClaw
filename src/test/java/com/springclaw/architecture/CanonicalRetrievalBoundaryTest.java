@@ -282,6 +282,7 @@ class CanonicalRetrievalBoundaryTest {
                 null,
                 null,
                 Map.of(),
+                null,
                 null
         );
     }
@@ -313,6 +314,7 @@ class CanonicalRetrievalBoundaryTest {
                 null,
                 null,
                 Map.of(),
+                null,
                 null
         );
     }

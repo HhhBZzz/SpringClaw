@@ -104,7 +104,7 @@ class ToolProposalLifecycleListenerTest {
                         "user"
                 ),
                 "USER", "hello", "agent",
-                T0, T0.plus(Duration.ofMinutes(30))));
+                T0, T0.plus(Duration.ofMinutes(30)), null));
         ChatContext context = context();
         observer.contextAndDecisionObserved(context, T0.plusSeconds(1));
         observer.executionStarted(context, "simplified", T0.plusSeconds(2));

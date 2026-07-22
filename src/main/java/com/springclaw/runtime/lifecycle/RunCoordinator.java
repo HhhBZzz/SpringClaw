@@ -34,7 +34,8 @@ public final class RunCoordinator {
                 acceptance.roleCodeAtAcceptance(), acceptance.originalMessage(),
                 acceptance.responseMode(), acceptance.acceptedAt(), null,
                 acceptance.acceptedAt(), null, acceptance.deadlineAt(),
-                null, null, "", 1, "", List.of(), null, null, Map.of(), null
+                null, null, "", 1, "", List.of(), null, null, Map.of(), null,
+                acceptance.paradigm()
         );
         return store.create(
                 created,
@@ -327,7 +328,8 @@ public final class RunCoordinator {
                 current.responseMode(), current.acceptedAt(), startedAt, updatedAt,
                 finishedAt, current.deadlineAt(), contextSnapshot, executionDecision,
                 strategyId, current.attempt(), pendingProposalId,
-                current.toolInvocations(), completionDecision, result, usage, failure
+                current.toolInvocations(), completionDecision, result, usage, failure,
+                current.paradigm()
         );
     }
 

@@ -271,7 +271,7 @@ class AgentRunTraceServiceTest {
         coordinator.accept(new RunAcceptance(
                 "req-canonical", "s1", "api", "u1",
                 claim("s1", "u1"), "USER", "hi", "agent",
-                now, now.plus(Duration.ofMinutes(30))));
+                now, now.plus(Duration.ofMinutes(30)), null));
         coordinator.failed("req-canonical",
                 new RunState.Failure("LEGACY_EXECUTION_FAILED", "boom", false), now);
 
@@ -312,7 +312,7 @@ class AgentRunTraceServiceTest {
         coordinator.accept(new RunAcceptance(
                 "req-terminal", "s1", "api", "u1",
                 claim("s1", "u1"), "USER", "hi", "agent",
-                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30)), null));
         coordinator.failed(
                 "req-terminal",
                 new RunState.Failure("LEGACY_EXECUTION_FAILED", "boom", false),
@@ -351,7 +351,7 @@ class AgentRunTraceServiceTest {
         coordinator.accept(new RunAcceptance(
                 "req-canonical-trace", "s1", "api", "u1",
                 claim("s1", "u1"), "USER", "hi", "agent",
-                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30)), null));
         coordinator.toolStarted("req-canonical-trace", acceptedAt.plusSeconds(2));
 
         MessageEventService messageEventService = mock(MessageEventService.class);
@@ -412,7 +412,7 @@ class AgentRunTraceServiceTest {
         coordinator.accept(new RunAcceptance(
                 "req-private-trace", "s1", "api", "owner-user",
                 claim("s1", "owner-user"), "USER", "hi", "agent",
-                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30)), null));
 
         MessageEventService messageEventService = mock(MessageEventService.class);
         AgentRunTraceService service = new AgentRunTraceService(
@@ -434,7 +434,7 @@ class AgentRunTraceServiceTest {
         coordinator.accept(new RunAcceptance(
                 "req-canonical-run-list", "s1", "api", "u1",
                 claim("s1", "u1"), "USER", "hi", "agent",
-                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30)), null));
         coordinator.toolStarted("req-canonical-run-list", acceptedAt.plusSeconds(3));
 
         MessageEventService messageEventService = mock(MessageEventService.class);
@@ -496,11 +496,11 @@ class AgentRunTraceServiceTest {
         coordinator.accept(new RunAcceptance(
                 "req-visible-run", "s1", "api", "u1",
                 claim("s1", "u1"), "USER", "hi", "agent",
-                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30)), null));
         coordinator.accept(new RunAcceptance(
                 "req-hidden-run", "s2", "api", "u2",
                 claim("s2", "u2"), "USER", "hi", "agent",
-                acceptedAt.plusSeconds(1), acceptedAt.plus(Duration.ofMinutes(30))));
+                acceptedAt.plusSeconds(1), acceptedAt.plus(Duration.ofMinutes(30)), null));
 
         MessageEventService messageEventService = mock(MessageEventService.class);
         AgentRunTraceService service = new AgentRunTraceService(
@@ -523,7 +523,7 @@ class AgentRunTraceServiceTest {
         coordinator.accept(new RunAcceptance(
                 "req-canonical-replay", "s1", "api", "u1",
                 claim("s1", "u1"), "USER", "hi", "agent",
-                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30)), null));
         coordinator.toolStarted("req-canonical-replay", acceptedAt.plusSeconds(2));
 
         MessageEventService messageEventService = mock(MessageEventService.class);

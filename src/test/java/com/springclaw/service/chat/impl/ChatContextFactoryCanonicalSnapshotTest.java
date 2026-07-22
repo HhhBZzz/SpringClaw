@@ -417,6 +417,7 @@ class ChatContextFactoryCanonicalSnapshotTest {
                 null,
                 null,
                 Map.of(),
+                null,
                 null
         );
     }
@@ -454,6 +455,7 @@ class ChatContextFactoryCanonicalSnapshotTest {
                 null,
                 null,
                 Map.of(),
+                null,
                 null
         );
     }

@@ -259,7 +259,8 @@ class RunStateContractTest {
                 completion("run-1", CompletionDecision.Outcome.FAIL, 0),
                 result("run-1", RunStatus.FAILED, recoveredAt, "failed"),
                 Map.of(),
-                failure()
+                failure(),
+                null
         )).doesNotThrowAnyException();
     }
 
@@ -1260,7 +1261,8 @@ class RunStateContractTest {
                 completionDecision,
                 result,
                 usage,
-                failure
+                failure,
+                null
         );
     }
 
@@ -1310,7 +1312,8 @@ class RunStateContractTest {
                 completionDecision,
                 result,
                 usage,
-                failure
+                failure,
+                null
         );
     }
 
@@ -1358,7 +1361,8 @@ class RunStateContractTest {
                 completionDecision,
                 result,
                 usage,
-                failure
+                failure,
+                null
         );
     }
 
@@ -1399,7 +1403,8 @@ class RunStateContractTest {
                 source.completionDecision(),
                 source.result(),
                 source.usage(),
-                source.failure()
+                source.failure(),
+                null
         );
     }
 
@@ -1433,7 +1438,8 @@ class RunStateContractTest {
                 source.completionDecision(),
                 source.result(),
                 source.usage(),
-                source.failure()
+                source.failure(),
+                null
         );
     }
 
@@ -1469,7 +1475,8 @@ class RunStateContractTest {
                 source.completionDecision(),
                 source.result(),
                 source.usage(),
-                source.failure()
+                source.failure(),
+                null
         );
     }
 
@@ -1507,7 +1514,8 @@ class RunStateContractTest {
                 null,
                 null,
                 Map.of(),
-                failure
+                failure,
+                null
         );
     }
 

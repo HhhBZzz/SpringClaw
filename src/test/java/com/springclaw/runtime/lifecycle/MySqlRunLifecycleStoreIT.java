@@ -168,7 +168,8 @@ class MySqlRunLifecycleStoreIT {
     private static RunAcceptance acceptance(String runId) {
         return new RunAcceptance(
                 runId, "session-1", "api", "user-1", claim(),
-                "USER", "hello", "agent", T0, T0.plusSeconds(300)
+                "USER", "hello", "agent", T0, T0.plusSeconds(300),
+                null
         );
     }
 
@@ -186,7 +187,8 @@ class MySqlRunLifecycleStoreIT {
                 "session-1", "api", "user-1", claim(),
                 "USER", message, "agent",
                 at, null, at, null, at.plusSeconds(300),
-                null, null, "", 1, "", List.of(), null, null, Map.of(), null
+                null, null, "", 1, "", List.of(), null, null, Map.of(), null,
+                null
         );
     }
 
@@ -197,7 +199,8 @@ class MySqlRunLifecycleStoreIT {
                 "USER", message, "agent",
                 T0, null, T0.plusSeconds(1), T0.plusSeconds(1), T0.plusSeconds(300),
                 null, null, "", 1, "", List.of(), null, null, Map.of(),
-                new RunState.Failure("LEGACY_FAILED", "failed", false)
+                new RunState.Failure("LEGACY_FAILED", "failed", false),
+                null
         );
     }
 

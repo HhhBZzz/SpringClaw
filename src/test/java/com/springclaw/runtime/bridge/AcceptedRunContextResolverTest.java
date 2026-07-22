@@ -194,7 +194,8 @@ class AcceptedRunContextResolverTest {
                 null,
                 null,
                 Map.of(),
-                failure
+                failure,
+                null
         );
     }
 }

@@ -59,7 +59,8 @@ class AgentLearningServiceTest {
                 "command.run",
                 "../outside",
                 "workspace",
-                "write"
+                "write",
+                null
         );
 
         var entry = service.captureTraceFailure(event);
@@ -96,7 +97,8 @@ class AgentLearningServiceTest {
                 "context.load",
                 "prompt",
                 "context",
-                "read"
+                "read",
+                null
         );
 
         service.captureTraceFailure(event);
@@ -125,7 +127,8 @@ class AgentLearningServiceTest {
                 "command.run",
                 "mvn test",
                 "workspace",
-                "write"
+                "write",
+                null
         );
 
         service.captureTraceFailure(event);

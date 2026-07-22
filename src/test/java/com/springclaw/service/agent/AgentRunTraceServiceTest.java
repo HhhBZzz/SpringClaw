@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.springclaw.domain.entity.MessageEvent;
+import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.runtime.contract.RunState;
 import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.lifecycle.InMemoryRunLifecycleStore;
@@ -371,6 +372,31 @@ class AgentRunTraceServiceTest {
         assertThat(trace.get(0).source()).isEqualTo("canonical");
         verify(messageEventService, org.mockito.Mockito.never())
                 .listRequestEvents(any(), any(), any(), any(), any(Integer.class), any(Boolean.class));
+    }
+
+    @Test
+    void traceEventCarriesParadigmFromRunEvent() {
+        InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+        RunCoordinator coordinator = new RunCoordinator(store);
+        Instant acceptedAt = Instant.parse("2026-06-26T00:00:00Z");
+        coordinator.accept(new RunAcceptance(
+                "req-paradigm-trace", "s1", "api", "u1",
+                claim("s1", "u1"), "USER", "hi", "agent",
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30)),
+                AgentParadigm.OPAR));
+        coordinator.toolStarted("req-paradigm-trace", acceptedAt.plusSeconds(2));
+
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        AgentRunTraceService service = new AgentRunTraceService(
+                messageEventService, new ObjectMapper(), (JdbcTemplate) null, null, store);
+
+        List<AgentRunTraceEvent> trace = service.listTrace(
+                "req-paradigm-trace", "u1", 20);
+
+        assertThat(trace).isNotEmpty();
+        assertThat(trace)
+                .as("canonical RunEvent.paradigm 透出到 AgentRunTraceEvent.paradigm")
+                .allSatisfy(event -> assertThat(event.paradigm()).isEqualTo(AgentParadigm.OPAR));
     }
 
     @Test

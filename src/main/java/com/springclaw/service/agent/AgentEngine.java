@@ -22,6 +22,17 @@ public interface AgentEngine {
     String name();
 
     /**
+     * 此引擎归属的 Agent 范式。
+     * <p>
+     * EngineSelector 在请求显式指定 paradigm 时按此过滤选择;
+     * 不指定时此值仅用于 trace/timeline 范式标注。
+     * </p>
+     *
+     * @see AgentParadigm
+     */
+    AgentParadigm paradigm();
+
+    /**
      * 优先级，数字越小越优先。
      * EngineSelector 按 priority 升序排列，选择第一个 supports()=true 的引擎。
      */

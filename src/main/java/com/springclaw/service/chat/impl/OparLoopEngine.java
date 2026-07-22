@@ -4,6 +4,7 @@ import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
+import com.springclaw.service.agent.AgentParadigm;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.tool.pack.FileToolPack;
@@ -76,6 +77,11 @@ public class OparLoopEngine implements AgentEngine {
     @Override
     public String name() {
         return "opar-loop";
+    }
+
+    @Override
+    public AgentParadigm paradigm() {
+        return AgentParadigm.OPAR;
     }
 
     @Override

@@ -4,6 +4,7 @@ import com.springclaw.common.util.TextUtils;
 import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
+import com.springclaw.service.agent.AgentParadigm;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.guard.ChatGuardService;
@@ -70,6 +71,11 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
     @Override
     public String name() {
         return "basic-stream";
+    }
+
+    @Override
+    public AgentParadigm paradigm() {
+        return AgentParadigm.SINGLE_TURN;
     }
 
     @Override

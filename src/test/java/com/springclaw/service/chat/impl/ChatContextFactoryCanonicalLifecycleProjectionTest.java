@@ -53,7 +53,7 @@ class ChatContextFactoryCanonicalLifecycleProjectionTest {
         Fixture fixture = new Fixture();
 
         fixture.factory.build(
-                new ChatRequest("session-1", "user-1", "hello", "api", "agent"),
+                new ChatRequest("session-1", "user-1", "hello", "api", "agent", null),
                 true,
                 RUN_ID
         );
@@ -66,7 +66,7 @@ class ChatContextFactoryCanonicalLifecycleProjectionTest {
         Fixture fixture = new Fixture();
 
         ChatContext context = fixture.factory.build(
-                new ChatRequest("session-1", "user-1", "hello", "api", "agent"),
+                new ChatRequest("session-1", "user-1", "hello", "api", "agent", null),
                 true,
                 RUN_ID
         );

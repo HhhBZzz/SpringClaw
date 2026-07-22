@@ -1,6 +1,7 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.common.util.TextUtils;
+import com.springclaw.service.agent.AgentParadigm;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import com.springclaw.tool.runtime.CapabilityRegistry;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -58,11 +59,36 @@ public class ChatRoutingPolicyService {
                                   boolean autoUpgradeEnabled,
                                   Set<String> allowedToolPacks,
                                   String responseMode) {
+        return decide(question, roleCode, defaultMode, autoUpgradeEnabled, allowedToolPacks, responseMode, null);
+    }
+
+    public RoutingDecision decide(String question,
+                                  String roleCode,
+                                  String defaultMode,
+                                  boolean autoUpgradeEnabled,
+                                  Set<String> allowedToolPacks,
+                                  String responseMode,
+                                  AgentParadigm paradigm) {
         String normalizedQuestion = StringUtils.hasText(question) ? question.trim() : "";
         String normalizedRole = normalizeRole(roleCode);
         String normalizedDefaultMode = normalizeMode(defaultMode);
         String normalizedResponseMode = normalizeResponseMode(responseMode);
         String intent = detectIntent(normalizedQuestion, allowedToolPacks);
+
+        // paradigm 显式指定:跳过自动路由(shouldAutoUpgrade/前缀强制/responseMode 链路),
+        // executionMode 按 paradigm 映射,让 EngineSelector.select(ctx, paradigm) 能选到对应引擎。
+        if (paradigm != null) {
+            PrefixMatch stripped = stripAnyModePrefix(normalizedQuestion);
+            return new RoutingDecision(
+                    stripped.content(),
+                    paradigmToExecutionMode(paradigm),
+                    true,
+                    false,
+                    "用户显式指定范式 " + paradigm + "(" + paradigm.description() + "),跳过自动路由。",
+                    normalizedResponseMode,
+                    intent
+            );
+        }
 
         if ("fast".equals(normalizedResponseMode)) {
             PrefixMatch stripped = stripAnyModePrefix(normalizedQuestion);
@@ -238,6 +264,15 @@ public class ChatRoutingPolicyService {
 
     private boolean canManuallyOverride(String roleCode) {
         return "ADMIN".equals(roleCode) || "DEVELOPER".equals(roleCode);
+    }
+
+    /**
+     * 范式 → executionMode 映射,让引擎 supports() 能匹配 paradigm 选择。
+     * 占位范式(REACT/PLAN_EXECUTE/REFLECTION/MULTI_AGENT)由 EngineSelector.select 拦截
+     * (isImplemented false 抛"未实现"),不到达此处;故此处只映射 SINGLE_TURN→simplified,其余→opar。
+     */
+    private static String paradigmToExecutionMode(AgentParadigm paradigm) {
+        return paradigm == AgentParadigm.SINGLE_TURN ? "simplified" : "opar";
     }
 
 

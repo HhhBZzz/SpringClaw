@@ -162,7 +162,7 @@ class ContextPropagationCharacterizationTest {
 
         String acceptedRunId = "11111111111111111111111111111111";
         ChatContext context = factory.build(
-                new ChatRequest("session-A", "alice", "为什么登录失败", "api", "agent"),
+                new ChatRequest("session-A", "alice", "为什么登录失败", "api", "agent", null),
                 true,
                 acceptedRunId
         );

@@ -85,7 +85,8 @@ class PromptInjectionTest {
                 "general",
                 com.springclaw.service.agent.AgentDecision.general("test"),
                 ContextInjection.empty(),
-                snapshot()
+                snapshot(),
+                null
         );
     }
 

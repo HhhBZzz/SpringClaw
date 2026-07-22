@@ -1,5 +1,6 @@
 package com.springclaw.service.chat.impl;
 
+import com.springclaw.service.agent.AgentParadigm;
 import com.springclaw.service.skill.bundle.SkillCatalogService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import com.springclaw.tool.runtime.CapabilityRegistry;
@@ -235,5 +236,45 @@ class ChatRoutingPolicyServiceTest {
         Assertions.assertEquals("agent", decision.responseMode());
         Assertions.assertEquals("simplified", decision.executionMode());
         Assertions.assertEquals("control-plane", decision.intent());
+    }
+
+    @Test
+    void decideWithParadigmSkipsAutoUpgradeAndMapsExecutionMode() {
+        // 复用既有 autoUpgrade 测试的问题 + 工具包,确保不带 paradigm 时命中 shouldAutoUpgrade
+        String complexQuestion = "先查启动日志，再定位报错原因，并给出修复方案";
+
+        // 不带 paradigm(6 参):复杂任务 autoUpgrade 到 opar
+        ChatRoutingPolicyService.RoutingDecision auto = service.decide(
+                complexQuestion, "USER", "simplified", true,
+                Set.of("workspace", "file", "script"), null);
+        Assertions.assertEquals("opar", auto.executionMode());
+        Assertions.assertTrue(auto.autoUpgraded());
+
+        // 带 OPAR paradigm(7 参):短路,autoUpgraded=false,executionMode=opar(映射),manualOverride=true
+        ChatRoutingPolicyService.RoutingDecision byParadigm = service.decide(
+                complexQuestion, "USER", "simplified", true,
+                Set.of("workspace", "file", "script"), null, AgentParadigm.OPAR);
+        Assertions.assertEquals("opar", byParadigm.executionMode());
+        Assertions.assertFalse(byParadigm.autoUpgraded());
+        Assertions.assertTrue(byParadigm.manualOverride());
+        Assertions.assertTrue(byParadigm.reason().contains("OPAR"));
+    }
+
+    @Test
+    void decideWithSingleTurnParadigmMapsToSimplified() {
+        ChatRoutingPolicyService.RoutingDecision d = service.decide(
+                "复杂任务", "USER", "opar", true, Set.of(), null, AgentParadigm.SINGLE_TURN);
+        Assertions.assertEquals("simplified", d.executionMode());
+        Assertions.assertFalse(d.autoUpgraded());
+    }
+
+    @Test
+    void decideWithNullParadigmFallsBackToAutoRouting() {
+        // null paradigm(7 参)与 6 参 decide 等价
+        ChatRoutingPolicyService.RoutingDecision d = service.decide(
+                "简单问题", "USER", "simplified", true, Set.of(), null, null);
+        ChatRoutingPolicyService.RoutingDecision baseline = service.decide(
+                "简单问题", "USER", "simplified", true, Set.of(), null);
+        Assertions.assertEquals(baseline, d);
     }
 }

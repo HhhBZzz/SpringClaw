@@ -241,7 +241,7 @@ public class ChatServiceImpl implements ChatService {
                     "intent=" + TextUtils.safe(context.intent()) + "，path=" + TextUtils.safe(decisionPath) + "，原因=" + TextUtils.safe(decisionReason),
                     System.currentTimeMillis() - requestStartedAt);
             // 统一路由：通过 EngineSelector 选择引擎
-            AgentEngine engine = engineSelector.select(context);
+            AgentEngine engine = engineSelector.select(context, context.paradigm());
             if (lifecycleObserver != null) {
                 lifecycleObserver.executionStarted(context, engine.name(), Instant.now());
             }
@@ -653,7 +653,7 @@ public class ChatServiceImpl implements ChatService {
             if (lifecycleObserver != null) {
                 lifecycleObserver.contextAndDecisionObserved(context, contextAt);
             }
-            AgentEngine engine = engineSelector.select(context);
+            AgentEngine engine = engineSelector.select(context, context.paradigm());
             if (lifecycleObserver != null) {
                 lifecycleObserver.executionStarted(context, engine.name(), Instant.now());
             }
@@ -693,7 +693,7 @@ public class ChatServiceImpl implements ChatService {
     }
 
     private ChatExecutionResult runAgentExecution(ChatContext context) {
-        return executeSelected(context, engineSelector.select(context));
+        return executeSelected(context, engineSelector.select(context, context.paradigm()));
     }
 
     private ChatExecutionResult executeSelected(ChatContext context, AgentEngine engine) {

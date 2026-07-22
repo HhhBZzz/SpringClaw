@@ -98,6 +98,7 @@ class ChatMessageConsumerTest {
         assertThat(command.getValue().request().userId()).isEqualTo(canonical.userId());
         assertThat(command.getValue().request().message()).isEqualTo(canonical.originalMessage());
         assertThat(command.getValue().request().responseMode()).isEqualTo(canonical.responseMode());
+        assertThat(command.getValue().request().paradigm()).isEqualTo(message.paradigm());
         verify(producer).sendResponse(payload);
         verify(messaging).convertAndSend("/topic/chat/" + message.requestId(), payload);
     }
@@ -114,7 +115,8 @@ class ChatMessageConsumerTest {
                 message.message(),
                 message.channel(),
                 message.createdAt(),
-                message.responseMode()
+                message.responseMode(),
+                null
         ));
         when(repository.requireByRunId(message.requestId())).thenReturn(conflicting);
         ChatMessageConsumer consumer = new ChatMessageConsumer(
@@ -169,7 +171,8 @@ class ChatMessageConsumerTest {
                 "hello",
                 "api",
                 100L,
-                "agent"
+                "agent",
+                null
         );
     }
 

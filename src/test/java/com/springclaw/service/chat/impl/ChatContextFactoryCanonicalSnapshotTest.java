@@ -54,7 +54,7 @@ class ChatContextFactoryCanonicalSnapshotTest {
         Fixture fixture = new Fixture(false);
 
         ChatContext context = fixture.factory.build(
-                new ChatRequest("s1", "u1", "hello", "api", "agent"),
+                new ChatRequest("s1", "u1", "hello", "api", "agent", null),
                 true,
                 "0123456789abcdef0123456789abcdef"
         );
@@ -72,7 +72,7 @@ class ChatContextFactoryCanonicalSnapshotTest {
         Fixture fixture = new Fixture(true);
 
         ChatContext context = fixture.factory.build(
-                new ChatRequest("s1", "u1", "hello", "api", "agent"),
+                new ChatRequest("s1", "u1", "hello", "api", "agent", null),
                 true,
                 "0123456789abcdef0123456789abcdef"
         );
@@ -90,7 +90,7 @@ class ChatContextFactoryCanonicalSnapshotTest {
         Fixture fixture = new Fixture(true, stored, contextReadyRun(stored));
 
         ChatContext context = fixture.factory.build(
-                new ChatRequest("s1", "u1", "hello", "api", "agent"),
+                new ChatRequest("s1", "u1", "hello", "api", "agent", null),
                 true,
                 "0123456789abcdef0123456789abcdef"
         );
@@ -109,7 +109,7 @@ class ChatContextFactoryCanonicalSnapshotTest {
         Fixture fixture = new Fixture(true, stored, contextReadyRun(stored));
 
         assertThatThrownBy(() -> fixture.factory.build(
-                new ChatRequest("s1", "u1", "hello", "api", "agent"),
+                new ChatRequest("s1", "u1", "hello", "api", "agent", null),
                 true,
                 "0123456789abcdef0123456789abcdef"
         ))
@@ -125,7 +125,7 @@ class ChatContextFactoryCanonicalSnapshotTest {
         Fixture fixture = new Fixture(true, stored, contextReadyRun(stored));
 
         assertThatThrownBy(() -> fixture.factory.build(
-                new ChatRequest("s1", "u1", "hello", "api", "agent"),
+                new ChatRequest("s1", "u1", "hello", "api", "agent", null),
                 true,
                 "0123456789abcdef0123456789abcdef"
         ))
@@ -140,7 +140,7 @@ class ChatContextFactoryCanonicalSnapshotTest {
         Fixture fixture = new Fixture(true, stored, contextReadyRun(stored));
 
         ChatContext context = fixture.factory.build(
-                new ChatRequest("s1", "u1", "hello", "api", "agent"),
+                new ChatRequest("s1", "u1", "hello", "api", "agent", null),
                 true,
                 "0123456789abcdef0123456789abcdef"
         );

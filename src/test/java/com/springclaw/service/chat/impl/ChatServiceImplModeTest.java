@@ -506,7 +506,7 @@ class ChatServiceImplModeTest {
         }
 
         private Fixture useEngine(AgentEngine engine) {
-            when(engineSelector.select(any(ChatContext.class))).thenReturn(engine);
+            when(engineSelector.select(any(ChatContext.class), any())).thenReturn(engine);
             return this;
         }
 

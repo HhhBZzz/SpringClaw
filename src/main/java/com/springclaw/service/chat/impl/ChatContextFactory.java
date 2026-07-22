@@ -15,6 +15,7 @@ import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentDecisionRequest;
 import com.springclaw.service.agent.AgentDecisionService;
+import com.springclaw.service.agent.AgentParadigm;
 import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.context.ContextAssembler;
@@ -190,7 +191,8 @@ public class ChatContextFactory {
             CanonicalPlanning planning = createCanonicalPlanning(
                     accepted,
                     accepted.originalMessage(),
-                    true
+                    true,
+                    request.paradigm()
             );
             candidatePlanning.set(planning);
             return snapshotFactory.create(requestFactory.create(
@@ -207,7 +209,8 @@ public class ChatContextFactory {
             planning = createCanonicalPlanning(
                     accepted,
                     snapshot.effectiveMessage(),
-                    false
+                    false,
+                    request.paradigm()
             );
         }
         LegacyContextView view = viewAdapter.adapt(snapshot);
@@ -228,7 +231,8 @@ public class ChatContextFactory {
                 planning.decision().intent(),
                 planning.decision(),
                 view.injection(),
-                snapshot
+                snapshot,
+                request.paradigm()
         );
     }
 
@@ -249,7 +253,8 @@ public class ChatContextFactory {
                 roleCode,
                 acceptedRunId,
                 request.message(),
-                request.responseMode()
+                request.responseMode(),
+                request.paradigm()
         );
         AssembledContext assembled = contextAssembler.assemble(
                 session.getSessionKey(),
@@ -285,14 +290,16 @@ public class ChatContextFactory {
                 planning.decision().intent(),
                 planning.decision(),
                 injection,
-                null
+                null,
+                request.paradigm()
         );
     }
 
     private CanonicalPlanning createCanonicalPlanning(
             AcceptedRunContext accepted,
             String routingQuestion,
-            boolean buildPrompt
+            boolean buildPrompt,
+            AgentParadigm paradigm
     ) {
         return createPlanning(
                 accepted.sessionKey(),
@@ -302,7 +309,8 @@ public class ChatContextFactory {
                 accepted.runId(),
                 routingQuestion,
                 accepted.responseMode(),
-                buildPrompt
+                buildPrompt,
+                paradigm
         );
     }
 
@@ -313,7 +321,8 @@ public class ChatContextFactory {
             String roleCode,
             String requestId,
             String message,
-            String responseMode
+            String responseMode,
+            AgentParadigm paradigm
     ) {
         return createPlanning(
                 sessionKey,
@@ -330,7 +339,8 @@ public class ChatContextFactory {
                         responseMode
                 ),
                 responseMode,
-                true
+                true,
+                paradigm
         );
     }
 
@@ -342,7 +352,8 @@ public class ChatContextFactory {
             String requestId,
             String routingQuestion,
             String responseMode,
-            boolean buildPrompt
+            boolean buildPrompt,
+            AgentParadigm paradigm
     ) {
         var allowedToolPacks = skillService.resolveAllowedToolPacks(channel, userId);
         AgentDecision decision = agentDecisionService.decide(new AgentDecisionRequest(
@@ -363,7 +374,8 @@ public class ChatContextFactory {
                 effectiveDefaultMode,
                 effectiveAutoUpgrade,
                 allowedToolPacks,
-                responseMode
+                responseMode,
+                paradigm
         );
         if (routingDecision == null) {
             routingDecision = new ChatRoutingPolicyService.RoutingDecision(

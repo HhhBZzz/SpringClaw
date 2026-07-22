@@ -179,7 +179,7 @@ class ChatControllerCanonicalHttpSmokeTest {
                     true
             ));
             EngineSelector engineSelector = mock(EngineSelector.class);
-            when(engineSelector.select(any())).thenReturn(engine);
+            when(engineSelector.select(any(), any())).thenReturn(engine);
 
             ChatContextFactory contextFactory = contextFactory(
                     aiProviderService,

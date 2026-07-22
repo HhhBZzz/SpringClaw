@@ -90,6 +90,42 @@ public class EngineSelector {
                 + (ctx == null ? "null" : ctx.requestId()));
     }
 
+    /**
+     * 按请求显式指定的范式选择引擎。
+     * <ul>
+     *   <li>{@code paradigm == null}:走 {@link #select(ChatContext)} 默认路由(向后兼容)。</li>
+     *   <li>占位范式({@link AgentParadigm#isImplemented()} false):抛"范式未实现"。</li>
+     *   <li>已实现范式:在 {@code engine.paradigm() == paradigm} 且 {@code supports(ctx)} 的引擎里
+     *       按 (priority, legacyRank) 选第一个;无匹配抛"无可用引擎"(不回退到别的范式)。</li>
+     * </ul>
+     *
+     * @param ctx      聊天上下文
+     * @param paradigm 请求指定的范式,null 表示走默认路由
+     * @return 匹配的引擎
+     * @throws IllegalStateException 占位范式未实现,或无该范式的引擎支持当前请求
+     */
+    public AgentEngine select(ChatContext ctx, AgentParadigm paradigm) {
+        if (paradigm == null) {
+            return select(ctx);
+        }
+        if (!paradigm.isImplemented()) {
+            throw new IllegalStateException(
+                    "范式 " + paradigm + "(" + paradigm.description() + ")尚未实现,待增量支持。"
+            );
+        }
+        for (AgentEngine engine : engines) {
+            if (engine.paradigm() == paradigm && engine.supports(ctx)) {
+                log.debug("范式选择: {} (priority={}) paradigm={} for requestId={}",
+                        engine.name(), engine.priority(), paradigm, ctx.requestId());
+                return engine;
+            }
+        }
+        throw new IllegalStateException(
+                "没有 paradigm=" + paradigm + " 的引擎支持当前请求。requestId="
+                        + (ctx == null ? "null" : ctx.requestId())
+        );
+    }
+
     /** 列出所有已注册的引擎信息（用于调试和管理面板） */
     public List<AgentEngine> listAll() {
         return engines;

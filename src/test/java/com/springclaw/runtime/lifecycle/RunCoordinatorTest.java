@@ -300,6 +300,16 @@ class RunCoordinatorTest {
         assertThat(state.paradigm()).isNull();
     }
 
+    @Test
+    void eventsCarryParadigmFromState() {
+        coordinator.accept(acceptance(RUN_ID, AgentParadigm.OPAR));
+        coordinator.contextReady(RUN_ID, snapshot(), T0.plusSeconds(1));
+        // event() 是单点:RUN_CREATED + CONTEXT_READY 全部事件都应带 OPAR
+        assertThat(store.findEventsByRunId(RUN_ID))
+                .extracting(RunEvent::paradigm)
+                .allMatch(p -> p == AgentParadigm.OPAR);
+    }
+
     private void prepareVerifyingRun() {
         coordinator.accept(acceptance());
         coordinator.contextReady(RUN_ID, snapshot(), T0.plusSeconds(1));

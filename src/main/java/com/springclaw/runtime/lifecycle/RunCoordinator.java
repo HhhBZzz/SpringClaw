@@ -340,7 +340,7 @@ public final class RunCoordinator {
     ) {
         return new RunEvent.Draft(
                 state.runId(), eventType, "lifecycle", state.status(), at, 0,
-                PAYLOAD_SCHEMA, "{}", null, state.requestId()
+                PAYLOAD_SCHEMA, "{}", null, state.requestId(), state.paradigm()
         );
     }
 }

@@ -1,6 +1,7 @@
 package com.springclaw.runtime.bridge;
 
 import com.springclaw.dto.chat.ChatRequest;
+import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.runtime.contract.RunState;
 import com.springclaw.runtime.contract.RunStatus;
 import com.springclaw.runtime.contract.SessionAccessClaim;
@@ -121,6 +122,42 @@ class AcceptedRunContextResolverTest {
                 .isEqualTo(CanonicalRunContextException.Code.RUN_ALREADY_TERMINAL);
     }
 
+    @Test
+    void resolveRejectsParadigmMismatchWhenRequestSpecifiesOne() {
+        // runState 记录 paradigm=OPAR(accept 时焊入);request 显式 SINGLE_TURN → canonical mismatch
+        RunStateRepository repository = mock(RunStateRepository.class);
+        when(repository.requireByRunId(RUN_ID)).thenReturn(createdRunWithParadigm(AgentParadigm.OPAR));
+
+        assertThatThrownBy(() -> new AcceptedRunContextResolver(repository).resolve(
+                RUN_ID,
+                new ChatRequest(
+                        "session-1",
+                        "user-1",
+                        SECRET_MESSAGE,
+                        "api",
+                        "agent",
+                        AgentParadigm.SINGLE_TURN
+                )
+        ))
+                .isInstanceOf(CanonicalRunContextException.class)
+                .satisfies(error -> {
+                    CanonicalRunContextException failure =
+                            (CanonicalRunContextException) error;
+                    assertThat(failure.code()).isEqualTo(
+                            CanonicalRunContextException.Code.ACCEPTED_REQUEST_MISMATCH
+                    );
+                    assertThat(failure.getMessage()).contains("paradigm");
+                    assertThat(failure.getMessage()).doesNotContain(SECRET_MESSAGE);
+                });
+
+        // request.paradigm()=null(webhook/task 风格)容忍 runState 的 OPAR,不报 mismatch
+        AcceptedRunContext tolerated = new AcceptedRunContextResolver(repository).resolve(
+                RUN_ID,
+                new ChatRequest("session-1", "user-1", SECRET_MESSAGE, "api", "agent", null)
+        );
+        assertThat(tolerated.runState().paradigm()).isEqualTo(AgentParadigm.OPAR);
+    }
+
     private static void assertMismatch(String expectedField, String suppliedRunId, ChatRequest request) {
         RunStateRepository repository = mock(RunStateRepository.class);
         when(repository.requireByRunId(suppliedRunId)).thenReturn(createdRun());
@@ -150,6 +187,10 @@ class AcceptedRunContextResolverTest {
         return state(RunStatus.CREATED, null, null);
     }
 
+    private static RunState createdRunWithParadigm(AgentParadigm paradigm) {
+        return state(RunStatus.CREATED, null, null, paradigm);
+    }
+
     private static RunState failedRun() {
         return state(
                 RunStatus.FAILED,
@@ -162,6 +203,15 @@ class AcceptedRunContextResolverTest {
             RunStatus status,
             Instant finishedAt,
             RunState.Failure failure
+    ) {
+        return state(status, finishedAt, failure, null);
+    }
+
+    private static RunState state(
+            RunStatus status,
+            Instant finishedAt,
+            RunState.Failure failure,
+            AgentParadigm paradigm
     ) {
         return new RunState(
                 RUN_ID,
@@ -195,7 +245,7 @@ class AcceptedRunContextResolverTest {
                 null,
                 Map.of(),
                 failure,
-                null
+                paradigm
         );
     }
 }

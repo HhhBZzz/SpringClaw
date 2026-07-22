@@ -55,7 +55,7 @@ class CanonicalRetrievalBoundaryTest {
         Fixture fixture = new Fixture(true);
 
         fixture.factory.build(
-                new ChatRequest("session-1", "user-1", "hello", "api", "agent"),
+                new ChatRequest("session-1", "user-1", "hello", "api", "agent", null),
                 true,
                 RUN_ID
         );
@@ -70,7 +70,7 @@ class CanonicalRetrievalBoundaryTest {
         Fixture fixture = new Fixture(false);
 
         fixture.factory.build(
-                new ChatRequest("session-1", "user-1", "hello", "api", "agent"),
+                new ChatRequest("session-1", "user-1", "hello", "api", "agent", null),
                 true,
                 RUN_ID
         );

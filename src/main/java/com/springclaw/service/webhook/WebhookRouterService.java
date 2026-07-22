@@ -132,7 +132,8 @@ public class WebhookRouterService {
                             inboundMessage.userId(),
                             inboundMessage.text(),
                             inboundMessage.channel(),
-                            "agent"
+                            "agent",
+                            null
                     )
             ));
         } catch (Exception ex) {

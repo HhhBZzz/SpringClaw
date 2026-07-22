@@ -97,7 +97,7 @@ class ChatControllerAuthTest {
                 });
         RequestUserContextHolder.set(new RequestUserContext("user_local", "USER", System.currentTimeMillis() + 60_000));
 
-        ApiResponse<ChatResponse> response = controller.send(new ChatRequest("s1", null, "你好", "api", "agent"));
+        ApiResponse<ChatResponse> response = controller.send(new ChatRequest("s1", null, "你好", "api", "agent", null));
 
         Assertions.assertEquals(0, response.getCode());
         ArgumentCaptor<AcceptedChatCommand> captor =
@@ -146,8 +146,8 @@ class ChatControllerAuthTest {
         ));
 
         ApiResponse<ChatResponse> syncResponse =
-                controller.send(new ChatRequest("s1", null, "你好", "api", "agent"));
-        controller.stream(new ChatRequest("s1", null, "继续", "api", "agent"));
+                controller.send(new ChatRequest("s1", null, "你好", "api", "agent", null));
+        controller.stream(new ChatRequest("s1", null, "继续", "api", "agent", null));
 
         assertThat(syncResponse.getData().requestId())
                 .isEqualTo("11111111111111111111111111111111");
@@ -216,7 +216,7 @@ class ChatControllerAuthTest {
         ));
 
         ApiResponse<AsyncChatAcceptedResponse> response = controller.sendAsync(
-                new ChatRequest("s1", null, "异步处理", "api", "agent")
+                new ChatRequest("s1", null, "异步处理", "api", "agent", null)
         );
 
         ArgumentCaptor<AsyncChatRequestMessage> message =
@@ -271,7 +271,8 @@ class ChatControllerAuthTest {
                 null,
                 "hello",
                 "feishu",
-                "agent"
+                "agent",
+                null
         ));
 
         ArgumentCaptor<RunAcceptance> acceptance =
@@ -320,13 +321,14 @@ class ChatControllerAuthTest {
                 System.currentTimeMillis() + 60_000
         ));
 
-        controller.send(new ChatRequest(" s1 ", null, "sync", "api", "agent"));
+        controller.send(new ChatRequest(" s1 ", null, "sync", "api", "agent", null));
         controller.sendAsync(new ChatRequest(
                 " s1 ",
                 null,
                 "async",
                 "api",
-                "agent"
+                "agent",
+                null
         ));
 
         ArgumentCaptor<RunAcceptance> acceptances =
@@ -376,7 +378,7 @@ class ChatControllerAuthTest {
         Assertions.assertThrows(
                 IllegalStateException.class,
                 () -> controller.sendAsync(
-                        new ChatRequest("s1", null, "异步处理", "api", "agent")
+                        new ChatRequest("s1", null, "异步处理", "api", "agent", null)
                 )
         );
 

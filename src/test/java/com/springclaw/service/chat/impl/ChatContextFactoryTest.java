@@ -111,7 +111,7 @@ class ChatContextFactoryTest {
 
         String acceptedRunId = "0123456789abcdef0123456789abcdef";
         ChatContext context = factory.build(
-                new ChatRequest("s1", "u1", "北京呢", "api", "agent"),
+                new ChatRequest("s1", "u1", "北京呢", "api", "agent", null),
                 true,
                 acceptedRunId
         );

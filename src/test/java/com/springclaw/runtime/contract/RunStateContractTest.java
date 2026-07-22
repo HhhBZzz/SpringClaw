@@ -1333,7 +1333,7 @@ class RunStateContractTest {
                 result,
                 usage,
                 failure,
-                null
+                previous.paradigm()
         );
     }
 
@@ -1382,7 +1382,7 @@ class RunStateContractTest {
                 result,
                 usage,
                 failure,
-                null
+                previous.paradigm()
         );
     }
 
@@ -1424,7 +1424,7 @@ class RunStateContractTest {
                 source.result(),
                 source.usage(),
                 source.failure(),
-                null
+                source.paradigm()
         );
     }
 
@@ -1491,7 +1491,7 @@ class RunStateContractTest {
                 source.result(),
                 source.usage(),
                 source.failure(),
-                null
+                source.paradigm()
         );
     }
 
@@ -1528,7 +1528,7 @@ class RunStateContractTest {
                 source.result(),
                 source.usage(),
                 source.failure(),
-                null
+                source.paradigm()
         );
     }
 

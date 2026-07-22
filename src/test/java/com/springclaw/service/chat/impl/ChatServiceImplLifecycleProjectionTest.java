@@ -64,7 +64,7 @@ class ChatServiceImplLifecycleProjectionTest {
         when(engine.name()).thenReturn("simplified");
         when(engine.execute(any(), any())).thenReturn(
                 new ChatExecutionResult("observe", "PLAN", "ACTION", "answer", true));
-        when(f.engineSelector.select(any())).thenReturn(engine);
+        when(f.engineSelector.select(any(), any())).thenReturn(engine);
         when(f.chatContextFactory.build(any(ChatRequest.class), anyBoolean(), anyString()))
                 .thenReturn(context);
 
@@ -94,7 +94,7 @@ class ChatServiceImplLifecycleProjectionTest {
         when(engine.name()).thenReturn("simplified");
         when(engine.execute(any(), any())).thenReturn(
                 new ChatExecutionResult("observe", "PLAN", "ACTION", "answer", true));
-        when(f.engineSelector.select(any())).thenReturn(engine);
+        when(f.engineSelector.select(any(), any())).thenReturn(engine);
         when(f.chatContextFactory.build(any(ChatRequest.class), anyBoolean(), anyString()))
                 .thenReturn(context);
 
@@ -123,7 +123,7 @@ class ChatServiceImplLifecycleProjectionTest {
         when(engine.name()).thenReturn("simplified");
         when(engine.execute(any(), any()))
                 .thenThrow(new IllegalStateException("engine blew up"));
-        when(f.engineSelector.select(any())).thenReturn(engine);
+        when(f.engineSelector.select(any(), any())).thenReturn(engine);
         when(f.chatContextFactory.build(any(ChatRequest.class), anyBoolean(), anyString()))
                 .thenReturn(context);
 

@@ -2,7 +2,7 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
-import com.springclaw.service.agent.AgentParadigm;
+import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.service.agent.AgentRuntimeEngine;
 import com.springclaw.service.agent.CapabilityExecutorRegistry;
 import com.springclaw.service.agent.EngineSelector;

@@ -1,6 +1,6 @@
 package com.springclaw.service.chat.async;
 
-import com.springclaw.service.agent.AgentParadigm;
+import com.springclaw.runtime.contract.AgentParadigm;
 
 public record AsyncChatRequestMessage(
         String requestId,

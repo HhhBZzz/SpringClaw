@@ -1,4 +1,4 @@
-package com.springclaw.service.agent;
+package com.springclaw.runtime.contract;
 
 import org.junit.jupiter.api.Test;
 

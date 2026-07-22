@@ -1,4 +1,4 @@
-package com.springclaw.service.agent;
+package com.springclaw.runtime.contract;
 
 /**
  * Agent 思考范式——用户可在每次请求显式选择的一等概念。

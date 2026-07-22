@@ -99,7 +99,7 @@ class AcceptedRunCanonicalSmokeTest {
         );
 
         ChatContext context = factory.build(
-                new ChatRequest("session-1", "user-1", "hello", "api", "agent"),
+                new ChatRequest("session-1", "user-1", "hello", "api", "agent", null),
                 true,
                 RUN_ID
         );

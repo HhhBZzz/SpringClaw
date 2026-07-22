@@ -253,7 +253,8 @@ public class TaskExecutionService {
                                 task.getOwnerUserId(),
                                 prompt,
                                 TextUtils.safe(task.getChannel(), "api"),
-                                "agent"
+                                "agent",
+                                null
                         ),
                         shouldPersistToSession(task),
                         runId

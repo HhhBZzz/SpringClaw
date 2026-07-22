@@ -213,7 +213,8 @@ class TransportParityCharacterizationTest {
                         message.userId(),
                         message.message(),
                         message.channel(),
-                        message.responseMode()
+                        message.responseMode(),
+                        message.paradigm()
                 )
         );
         ChatResponse response = new ChatResponse(
@@ -270,7 +271,8 @@ class TransportParityCharacterizationTest {
                         message.userId(),
                         message.message(),
                         message.channel(),
-                        message.responseMode()
+                        message.responseMode(),
+                        message.paradigm()
                 )
         );
         AsyncChatResultPayload payload = new AsyncChatResultPayload(
@@ -430,7 +432,8 @@ class TransportParityCharacterizationTest {
                 "hello",
                 "api",
                 100L,
-                "standard"
+                "standard",
+                null
         );
     }
 

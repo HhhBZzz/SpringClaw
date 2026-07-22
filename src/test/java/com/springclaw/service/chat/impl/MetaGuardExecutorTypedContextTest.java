@@ -103,7 +103,8 @@ class MetaGuardExecutorTypedContextTest {
                 "general",
                 com.springclaw.service.agent.AgentDecision.general("test"),
                 ContextInjection.empty(),
-                OparPromptSupportTypedContextTest.snapshotForTest()
+                OparPromptSupportTypedContextTest.snapshotForTest(),
+                null
         );
     }
 }

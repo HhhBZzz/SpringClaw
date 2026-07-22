@@ -5,6 +5,7 @@ import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentDecisionRequest;
 import com.springclaw.service.agent.AgentDecisionService;
+import com.springclaw.service.agent.AgentParadigm;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.auth.AuthService;
 import com.springclaw.service.context.AssembledContext;
@@ -111,7 +112,7 @@ class ChatContextFactoryTest {
 
         String acceptedRunId = "0123456789abcdef0123456789abcdef";
         ChatContext context = factory.build(
-                new ChatRequest("s1", "u1", "北京呢", "api", "agent"),
+                new ChatRequest("s1", "u1", "北京呢", "api", "agent", null),
                 true,
                 acceptedRunId
         );
@@ -124,5 +125,67 @@ class ChatContextFactoryTest {
         assertThat(context.userMessage()).isEqualTo("北京呢");
         assertThat(context.effectiveUserMessage()).isEqualTo("北京呢");
         assertThat(context.decision()).isEqualTo(decision);
+    }
+
+    @Test
+    void buildPropagatesRequestParadigmIntoContext() {
+        AiProviderService aiProviderService = mock(AiProviderService.class);
+        SoulPromptService soulPromptService = mock(SoulPromptService.class);
+        AgentSessionService agentSessionService = mock(AgentSessionService.class);
+        AuthService authService = mock(AuthService.class);
+        SkillService skillService = mock(SkillService.class);
+        SkillRegistryService skillRegistryService = mock(SkillRegistryService.class);
+        ContextAssembler contextAssembler = mock(ContextAssembler.class);
+        ChatRoutingStateService chatRoutingStateService = mock(ChatRoutingStateService.class);
+        ChatRoutingPolicyService chatRoutingPolicyService = mock(ChatRoutingPolicyService.class);
+        AgentDecisionService agentDecisionService = mock(AgentDecisionService.class);
+        AgentSession session = new AgentSession();
+        session.setId(1L);
+        session.setSessionKey("s1");
+        Set<String> allowedToolPacks = Set.of();
+        AgentDecision decision = new AgentDecision(
+                "general", "basic_model", List.of(), "read", false, "范式透传测试。");
+        when(agentSessionService.getOrCreate("s1", "api", "u1")).thenReturn(session);
+        when(authService.resolveRoleByUserId("u1")).thenReturn("USER");
+        when(skillService.resolveAllowedToolPacks("api", "u1")).thenReturn(allowedToolPacks);
+        when(agentDecisionService.decide(org.mockito.ArgumentMatchers.any(AgentDecisionRequest.class))).thenReturn(decision);
+        when(chatRoutingStateService.resolveDefaultMode("simplified")).thenReturn("simplified");
+        when(chatRoutingStateService.resolveAutoUpgrade(true)).thenReturn(true);
+        when(chatRoutingPolicyService.decide(
+                eq("分析项目"),
+                eq("USER"),
+                eq("simplified"),
+                eq(true),
+                eq(allowedToolPacks),
+                eq("agent"),
+                eq(AgentParadigm.OPAR)
+        )).thenReturn(new ChatRoutingPolicyService.RoutingDecision(
+                "分析项目", "opar", true, false,
+                "用户显式指定范式。", "agent", "general"
+        ));
+        when(skillRegistryService.matchAgentVisibleDefinitions("分析项目", allowedToolPacks, 2)).thenReturn(List.of());
+        when(soulPromptService.buildSystemPrompt("api", "u1", List.of())).thenReturn("system");
+        ChatContextFactory factory = new ChatContextFactory(
+                aiProviderService,
+                soulPromptService,
+                agentSessionService,
+                authService,
+                skillService,
+                skillRegistryService,
+                contextAssembler,
+                chatRoutingStateService,
+                chatRoutingPolicyService,
+                agentDecisionService,
+                "simplified",
+                true
+        );
+
+        ChatContext context = factory.build(
+                new ChatRequest("s1", "u1", "分析项目", "api", "agent", AgentParadigm.OPAR),
+                true,
+                "run-test"
+        );
+
+        assertThat(context.paradigm()).isEqualTo(AgentParadigm.OPAR);
     }
 }

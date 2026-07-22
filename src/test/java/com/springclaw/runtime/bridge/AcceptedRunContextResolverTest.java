@@ -50,7 +50,7 @@ class AcceptedRunContextResolverTest {
 
         AcceptedRunContext context = new AcceptedRunContextResolver(repository).resolve(
                 RUN_ID,
-                new ChatRequest("session-1", "user-1", SECRET_MESSAGE, "", "")
+                new ChatRequest("session-1", "user-1", SECRET_MESSAGE, "", "", null)
         );
 
         assertThat(context.channel()).isEqualTo("api");
@@ -67,7 +67,7 @@ class AcceptedRunContextResolverTest {
         assertMismatch(
                 "sessionKey",
                 RUN_ID,
-                new ChatRequest("other-session", "user-1", SECRET_MESSAGE, "api", "agent")
+                new ChatRequest("other-session", "user-1", SECRET_MESSAGE, "api", "agent", null)
         );
     }
 
@@ -76,7 +76,7 @@ class AcceptedRunContextResolverTest {
         assertMismatch(
                 "channel",
                 RUN_ID,
-                new ChatRequest("session-1", "user-1", SECRET_MESSAGE, "webhook", "agent")
+                new ChatRequest("session-1", "user-1", SECRET_MESSAGE, "webhook", "agent", null)
         );
     }
 
@@ -85,7 +85,7 @@ class AcceptedRunContextResolverTest {
         assertMismatch(
                 "userId",
                 RUN_ID,
-                new ChatRequest("session-1", "other-user", SECRET_MESSAGE, "api", "agent")
+                new ChatRequest("session-1", "other-user", SECRET_MESSAGE, "api", "agent", null)
         );
     }
 
@@ -94,7 +94,7 @@ class AcceptedRunContextResolverTest {
         assertMismatch(
                 "message",
                 RUN_ID,
-                new ChatRequest("session-1", "user-1", "other message", "api", "agent")
+                new ChatRequest("session-1", "user-1", "other message", "api", "agent", null)
         );
     }
 
@@ -103,7 +103,7 @@ class AcceptedRunContextResolverTest {
         assertMismatch(
                 "responseMode",
                 RUN_ID,
-                new ChatRequest("session-1", "user-1", SECRET_MESSAGE, "api", "stream")
+                new ChatRequest("session-1", "user-1", SECRET_MESSAGE, "api", "stream", null)
         );
     }
 
@@ -143,7 +143,7 @@ class AcceptedRunContextResolverTest {
     }
 
     private static ChatRequest matchingRequest() {
-        return new ChatRequest("session-1", "user-1", SECRET_MESSAGE, "api", "agent");
+        return new ChatRequest("session-1", "user-1", SECRET_MESSAGE, "api", "agent", null);
     }
 
     private static RunState createdRun() {

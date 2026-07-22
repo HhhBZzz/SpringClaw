@@ -60,7 +60,7 @@ class ChatContextFactoryCanonicalOwnershipTest {
                 .thenReturn(sharedRunState());
 
         assertThatThrownBy(() -> fixture.factory.build(
-                new ChatRequest("forged-session", "mallory", "hello", "api", "agent"),
+                new ChatRequest("forged-session", "mallory", "hello", "api", "agent", null),
                 true,
                 RUN_ID
         ))
@@ -90,7 +90,7 @@ class ChatContextFactoryCanonicalOwnershipTest {
                 .thenReturn(sharedContextReady(fixture.snapshot));
 
         ChatContext context = fixture.factory.build(
-                new ChatRequest("group-1", "ou-1", "hello", "feishu", "agent"),
+                new ChatRequest("group-1", "ou-1", "hello", "feishu", "agent", null),
                 true,
                 RUN_ID
         );
@@ -111,7 +111,7 @@ class ChatContextFactoryCanonicalOwnershipTest {
         Fixture fixture = new Fixture(false);
 
         ChatContext context = fixture.factory.build(
-                new ChatRequest("session-1", "alice", "hello", "api", "agent"),
+                new ChatRequest("session-1", "alice", "hello", "api", "agent", null),
                 true,
                 RUN_ID
         );
@@ -128,7 +128,7 @@ class ChatContextFactoryCanonicalOwnershipTest {
                 .thenThrow(new IllegalStateException("run not found: " + RUN_ID));
 
         assertThatThrownBy(() -> fixture.factory.build(
-                new ChatRequest("session-1", "alice", "hello", "api", "agent"),
+                new ChatRequest("session-1", "alice", "hello", "api", "agent", null),
                 true,
                 RUN_ID
         )).hasMessageContaining("run not found");

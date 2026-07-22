@@ -39,7 +39,8 @@ class CanonicalTransportIdentityTest {
                 "userId:String",
                 "message:String",
                 "channel:String",
-                "responseMode:String"
+                "responseMode:String",
+                "paradigm:AgentParadigm"
         );
         assertThat(recordShape(ChatResponse.class)).containsExactly(
                 "requestId:String",
@@ -55,7 +56,8 @@ class CanonicalTransportIdentityTest {
                 "message:String",
                 "channel:String",
                 "createdAt:long",
-                "responseMode:String"
+                "responseMode:String",
+                "paradigm:AgentParadigm"
         );
     }
 
@@ -70,7 +72,8 @@ class CanonicalTransportIdentityTest {
                 "hello",
                 "api",
                 100L,
-                "agent"
+                "agent",
+                null
         );
         RunStateRepository repository = mock(RunStateRepository.class);
         when(repository.requireByRunId(message.requestId()))

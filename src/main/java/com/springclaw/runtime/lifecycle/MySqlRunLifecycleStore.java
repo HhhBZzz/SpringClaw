@@ -327,6 +327,7 @@ public class MySqlRunLifecycleStore implements RunLifecycleStore {
                 && existing.roleCodeAtAcceptance().equals(candidate.roleCodeAtAcceptance())
                 && existing.originalMessage().equals(candidate.originalMessage())
                 && existing.responseMode().equals(candidate.responseMode())
+                && Objects.equals(existing.paradigm(), candidate.paradigm())
                 && existing.acceptedAt().equals(candidate.acceptedAt())
                 && existing.deadlineAt().equals(candidate.deadlineAt());
     }

@@ -1,5 +1,6 @@
 package com.springclaw.runtime.lifecycle;
 
+import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.runtime.contract.RunEvent;
 import com.springclaw.runtime.contract.RunEventType;
 import com.springclaw.runtime.contract.RunState;
@@ -106,6 +107,20 @@ class InMemoryRunLifecycleStoreTest {
     }
 
     @Test
+    void creationWithDifferentParadigmConflicts() {
+        store.create(
+                createdState("hello"),
+                event(RunEventType.RUN_CREATED, RunStatus.CREATED, T0)
+        );
+
+        assertThatThrownBy(() -> store.create(
+                createdState("hello", AgentParadigm.OPAR),
+                event(RunEventType.RUN_CREATED, RunStatus.CREATED, T0)
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("conflicting");
+    }
+
+    @Test
     void staleRevisionWritesNeitherStateNorEvent() {
         store.create(
                 createdState("hello"),
@@ -181,6 +196,17 @@ class InMemoryRunLifecycleStoreTest {
         return createdState(
                 message,
                 SessionAccessClaim.AcceptanceOrigin.AUTHENTICATED_API
+        );
+    }
+
+    private static RunState createdState(String message, AgentParadigm paradigm) {
+        return new RunState(
+                RUN_ID, RUN_ID, 0, RunStatus.CREATED,
+                "session-1", "api", "user-1", claim(),
+                "USER", message, "agent",
+                T0, null, T0, null, T0.plusSeconds(300),
+                null, null, "", 1, "", List.of(), null, null, Map.of(), null,
+                paradigm
         );
     }
 

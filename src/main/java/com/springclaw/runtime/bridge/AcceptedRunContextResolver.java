@@ -44,6 +44,14 @@ public final class AcceptedRunContextResolver {
                 normalizeResponseMode(request.responseMode()),
                 runState.responseMode()
         );
+        // paradigm 容错:仅当请求显式指定 paradigm 时才比对(webhook/task 路径 request.paradigm()=null,容忍)
+        if (request.paradigm() != null) {
+            requireMatching(
+                    "paradigm",
+                    request.paradigm().name(),
+                    runState.paradigm() == null ? null : runState.paradigm().name()
+            );
+        }
         requireMatchingClaim(runState);
         return new AcceptedRunContext(runState);
     }

@@ -510,6 +510,26 @@ class RunStateContractTest {
     }
 
     @Test
+    void transitionsPreserveParadigmAcrossAdvancement() {
+        // paradigm 是 acceptance-immutable:转换时 previous.paradigm() 必须 == next.paradigm()
+        RunState created = createdState();
+        RunState valid = nextState(
+                created, 1, RunStatus.CONTEXT_READY, T1, null,
+                snapshot("run-1"), null, "", 1, "", List.of(), null, null,
+                Map.of(), null
+        );
+        // 两侧都 null(既有 fixture 默认)→ 合法
+        assertThatCode(() -> RunTransitionPolicy.validate(created, valid))
+                .doesNotThrowAnyException();
+
+        // next 翻转 paradigm(previous=null,next=OPAR)→ 不变性拒绝
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                created,
+                paradigmVariant(valid, AgentParadigm.OPAR)
+        )).hasMessageContaining("paradigm");
+    }
+
+    @Test
     void transitionsPreserveContextSnapshotHistory() {
         RunState created = createdState();
         RunState failedWithPrematureSnapshot = nextState(
@@ -1405,6 +1425,38 @@ class RunStateContractTest {
                 source.usage(),
                 source.failure(),
                 null
+        );
+    }
+
+    private static RunState paradigmVariant(RunState source, AgentParadigm paradigm) {
+        return new RunState(
+                source.runId(),
+                source.requestId(),
+                source.revision(),
+                source.status(),
+                source.sessionKey(),
+                source.channel(),
+                source.userId(),
+                source.sessionAccessClaim(),
+                source.roleCodeAtAcceptance(),
+                source.originalMessage(),
+                source.responseMode(),
+                source.acceptedAt(),
+                source.startedAt(),
+                source.updatedAt(),
+                source.finishedAt(),
+                source.deadlineAt(),
+                source.contextSnapshot(),
+                source.executionDecision(),
+                source.strategyId(),
+                source.attempt(),
+                source.pendingProposalId(),
+                source.toolInvocations(),
+                source.completionDecision(),
+                source.result(),
+                source.usage(),
+                source.failure(),
+                paradigm
         );
     }
 

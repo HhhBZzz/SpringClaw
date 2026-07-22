@@ -67,7 +67,8 @@ class RunStateContextSnapshotRequestFactoryTest {
                 "original", "agent", T0, null, T0.plusSeconds(1),
                 T0.plusSeconds(1), T0.plusSeconds(300),
                 null, null, "", 1, "", List.of(), null, null, Map.of(),
-                new RunState.Failure("FAILED", "boom", false)
+                new RunState.Failure("FAILED", "boom", false),
+                null
         );
 
         assertThatThrownBy(() -> new RunStateContextSnapshotRequestFactory()
@@ -81,7 +82,8 @@ class RunStateContextSnapshotRequestFactoryTest {
                 claim.sessionKey(), claim.channel(), claim.acceptedUserId(),
                 claim, "USER", "original", "agent", T0, null, T0,
                 null, T0.plusSeconds(300), null, null, "", 1, "",
-                List.of(), null, null, Map.of(), null
+                List.of(), null, null, Map.of(), null,
+                null
         );
     }
 

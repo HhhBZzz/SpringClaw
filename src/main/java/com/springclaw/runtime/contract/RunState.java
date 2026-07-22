@@ -48,7 +48,8 @@ public record RunState(
         CompletionDecision completionDecision,
         RunResult result,
         Map<String, Long> usage,
-        Failure failure
+        Failure failure,
+        AgentParadigm paradigm
 ) {
     public record Failure(String code, String message, boolean retryable) {
         public Failure {

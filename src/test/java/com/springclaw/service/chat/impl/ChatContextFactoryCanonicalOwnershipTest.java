@@ -328,6 +328,7 @@ class ChatContextFactoryCanonicalOwnershipTest {
                 null,
                 null,
                 Map.of(),
+                null,
                 null
         );
     }
@@ -388,6 +389,7 @@ class ChatContextFactoryCanonicalOwnershipTest {
                 null,
                 null,
                 Map.of(),
+                null,
                 null
         );
     }

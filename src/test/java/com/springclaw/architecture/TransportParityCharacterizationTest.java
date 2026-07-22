@@ -420,7 +420,8 @@ class TransportParityCharacterizationTest {
                 message.responseMode() == null ? "agent" : message.responseMode(),
                 acceptedAt, null, acceptedAt, null,
                 acceptedAt.plus(Duration.ofMinutes(30)),
-                null, null, "", 1, "", List.of(), null, null, Map.of(), null
+                null, null, "", 1, "", List.of(), null, null, Map.of(), null,
+                null
         );
     }
 

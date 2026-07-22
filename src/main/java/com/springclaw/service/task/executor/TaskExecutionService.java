@@ -162,7 +162,8 @@ public class TaskExecutionService {
                     originalMessage,
                     responseMode,
                     acceptedAt,
-                    acceptedAt.plus(RUN_DEADLINE)
+                    acceptedAt.plus(RUN_DEADLINE),
+                    null
             ));
             execution = scheduledTaskExecutionService.start(
                     task.getTaskId(),

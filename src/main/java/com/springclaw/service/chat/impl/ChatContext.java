@@ -2,6 +2,7 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.domain.entity.AgentSession;
 import com.springclaw.runtime.contract.ContextSnapshot;
+import com.springclaw.service.agent.AgentParadigm;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.context.AssembledContext;
@@ -26,7 +27,8 @@ public record ChatContext(AgentSession session,
                           String intent,
                           AgentDecision decision,
                           ContextInjection contextInjection,
-                          ContextSnapshot contextSnapshot) {
+                          ContextSnapshot contextSnapshot,
+                          AgentParadigm paradigm) {
 
     public ChatContext {
         contextInjection = contextInjection == null ? ContextInjection.empty() : contextInjection;
@@ -50,6 +52,7 @@ public record ChatContext(AgentSession session,
                 "agent", "general",
                 AgentDecision.general("兼容旧构造器，默认普通聊天。"),
                 ContextInjection.empty(),
+                null,
                 null);
     }
 
@@ -72,6 +75,7 @@ public record ChatContext(AgentSession session,
         this(session, channel, userId, roleCode, userMessage, effectiveUserMessage, requestId, systemPrompt,
                 assembled, activeClient, executionMode, routingReason, responseMode, intent, decision,
                 ContextInjection.empty(),
+                null,
                 null);
     }
 
@@ -95,6 +99,7 @@ public record ChatContext(AgentSession session,
         this(session, channel, userId, roleCode, userMessage, effectiveUserMessage, requestId, systemPrompt,
                 assembled, activeClient, executionMode, routingReason, responseMode, intent, decision,
                 contextInjection,
+                null,
                 null);
     }
 }

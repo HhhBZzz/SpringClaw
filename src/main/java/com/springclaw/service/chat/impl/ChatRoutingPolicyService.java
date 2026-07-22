@@ -266,7 +266,11 @@ public class ChatRoutingPolicyService {
         return "ADMIN".equals(roleCode) || "DEVELOPER".equals(roleCode);
     }
 
-    /** 范式 → executionMode 映射,让引擎 supports() 能匹配 paradigm 选择。 */
+    /**
+     * 范式 → executionMode 映射,让引擎 supports() 能匹配 paradigm 选择。
+     * 占位范式(REACT/PLAN_EXECUTE/REFLECTION/MULTI_AGENT)由 EngineSelector.select 拦截
+     * (isImplemented false 抛"未实现"),不到达此处;故此处只映射 SINGLE_TURN→simplified,其余→opar。
+     */
     private static String paradigmToExecutionMode(AgentParadigm paradigm) {
         return paradigm == AgentParadigm.SINGLE_TURN ? "simplified" : "opar";
     }

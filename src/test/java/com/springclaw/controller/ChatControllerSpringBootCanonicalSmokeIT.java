@@ -183,7 +183,7 @@ class ChatControllerSpringBootCanonicalSmokeIT {
                         "springboot smoke answer",
                         true
                 ));
-        when(engineSelector.select(any(ChatContext.class))).thenReturn(engine);
+        when(engineSelector.select(any(ChatContext.class), any())).thenReturn(engine);
     }
 
     @AfterEach

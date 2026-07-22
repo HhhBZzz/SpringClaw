@@ -2,6 +2,7 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
+import com.springclaw.service.agent.AgentParadigm;
 import com.springclaw.service.agent.AgentRuntimeEngine;
 import com.springclaw.service.agent.CapabilityExecutorRegistry;
 import com.springclaw.service.agent.EngineSelector;
@@ -39,6 +40,12 @@ class EngineSelectorTest {
     }
 
     @Test
+    void runtimeAndOparEnginesDeclareOparParadigm() {
+        assertThat(runtimeEngine().paradigm()).isEqualTo(AgentParadigm.OPAR);
+        assertThat(oparLoopEngine().paradigm()).isEqualTo(AgentParadigm.OPAR);
+    }
+
+    @Test
     void shouldFailInitializationWhenEngineNameHasNoLegacyRank() {
         AgentEngine unknown = new AgentEngine() {
             @Override
@@ -60,6 +67,11 @@ class EngineSelectorTest {
             public com.springclaw.service.chat.impl.ChatExecutionResult execute(
                     ChatContext ctx, AgentEngine.FallbackResponder fallbackResponder) {
                 throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public AgentParadigm paradigm() {
+                return AgentParadigm.SINGLE_TURN;
             }
         };
 

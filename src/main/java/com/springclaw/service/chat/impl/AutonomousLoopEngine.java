@@ -5,6 +5,7 @@ import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
+import com.springclaw.service.agent.AgentParadigm;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.guard.ChatGuardService;
@@ -94,6 +95,11 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
     @Override
     public String name() {
         return "autonomous-loop";
+    }
+
+    @Override
+    public AgentParadigm paradigm() {
+        return AgentParadigm.AUTONOMOUS_LOOP;
     }
 
     @Override

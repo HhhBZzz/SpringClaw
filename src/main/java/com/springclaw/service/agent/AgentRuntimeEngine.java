@@ -96,6 +96,11 @@ public class AgentRuntimeEngine implements AgentEngine {
     }
 
     @Override
+    public AgentParadigm paradigm() {
+        return AgentParadigm.OPAR;
+    }
+
+    @Override
     public int priority() {
         return 2;
     }

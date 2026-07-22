@@ -236,7 +236,7 @@ class InMemoryRunLifecycleStoreTest {
     ) {
         return new RunEvent.Draft(
                 runId, type, "lifecycle", status, timestamp, 0,
-                "springclaw.runtime.lifecycle.v1", "{}", null, runId
+                "springclaw.runtime.lifecycle.v1", "{}", null, runId, null
         );
     }
 

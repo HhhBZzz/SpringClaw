@@ -154,7 +154,8 @@ public class ChatController {
                 normalizedRequest.message(),
                 channel,
                 System.currentTimeMillis(),
-                normalizedRequest.responseMode()
+                normalizedRequest.responseMode(),
+                normalizedRequest.paradigm()
         );
         Instant acceptedAt = Instant.ofEpochMilli(message.createdAt());
         acceptRun(requestId, normalizedRequest, acceptedAt);
@@ -259,7 +260,8 @@ public class ChatController {
                 effectiveUserId.trim(),
                 request.message(),
                 request.channel(),
-                request.responseMode()
+                request.responseMode(),
+                request.paradigm()
         );
     }
 

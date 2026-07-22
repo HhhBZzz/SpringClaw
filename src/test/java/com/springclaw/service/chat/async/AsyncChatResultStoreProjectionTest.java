@@ -160,7 +160,7 @@ class AsyncChatResultStoreProjectionTest {
 
     private static AsyncChatRequestMessage message() {
         return new AsyncChatRequestMessage(
-                RUN_ID, "session", "user", "hello", "api", 100L, "agent");
+                RUN_ID, "session", "user", "hello", "api", 100L, "agent", null);
     }
 
     private static ChatContext context() {

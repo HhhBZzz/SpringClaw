@@ -1,5 +1,7 @@
 package com.springclaw.service.chat.async;
 
+import com.springclaw.service.agent.AgentParadigm;
+
 public record AsyncChatRequestMessage(
         String requestId,
         String sessionKey,
@@ -7,7 +9,8 @@ public record AsyncChatRequestMessage(
         String message,
         String channel,
         long createdAt,
-        String responseMode
+        String responseMode,
+        AgentParadigm paradigm
 ) {
     public AsyncChatRequestMessage(String requestId,
                                    String sessionKey,
@@ -15,6 +18,6 @@ public record AsyncChatRequestMessage(
                                    String message,
                                    String channel,
                                    long createdAt) {
-        this(requestId, sessionKey, userId, message, channel, createdAt, null);
+        this(requestId, sessionKey, userId, message, channel, createdAt, null, null);
     }
 }

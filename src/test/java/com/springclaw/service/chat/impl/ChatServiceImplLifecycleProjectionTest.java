@@ -147,7 +147,8 @@ class ChatServiceImplLifecycleProjectionTest {
                         "u1"
                 ),
                 "USER", "你好", "agent",
-                now, now.plusSeconds(1800)
+                now, now.plusSeconds(1800),
+                null
         ));
     }
 

@@ -123,7 +123,8 @@ public class WebhookRouterService {
                     inboundMessage.text(),
                     "agent",
                     acceptedAt,
-                    acceptedAt.plus(RUN_DEADLINE)
+                    acceptedAt.plus(RUN_DEADLINE),
+                    null
             ));
             response = chatService.chat(new AcceptedChatCommand(
                     requestId,

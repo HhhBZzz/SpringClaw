@@ -1,5 +1,6 @@
 package com.springclaw.runtime.lifecycle;
 
+import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.runtime.contract.CompletionDecision;
 import com.springclaw.runtime.contract.ContextSnapshot;
 import com.springclaw.runtime.contract.ExecutionDecision;
@@ -255,7 +256,8 @@ class RunCoordinatorTest {
                 "hello",
                 "agent",
                 T0,
-                T0.plusSeconds(300)
+                T0.plusSeconds(300),
+                null
         )).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("channel");
     }
@@ -277,12 +279,35 @@ class RunCoordinatorTest {
                 "hello",
                 "agent",
                 T0,
-                T0.plusSeconds(300)
+                T0.plusSeconds(300),
+                null
         );
 
         assertThat(acceptance.sessionKey()).isEqualTo("session-1");
         assertThat(acceptance.channel()).isEqualTo("api");
         assertThat(acceptance.userId()).isEqualTo("user-1");
+    }
+
+    @Test
+    void acceptRecordsParadigmFromAcceptance() {
+        RunState state = coordinator.accept(acceptance(AgentParadigm.OPAR));
+        assertThat(state.paradigm()).isEqualTo(AgentParadigm.OPAR);
+    }
+
+    @Test
+    void acceptAllowsNullParadigmForWebhookAndTaskPaths() {
+        RunState state = coordinator.accept(acceptance());
+        assertThat(state.paradigm()).isNull();
+    }
+
+    @Test
+    void eventsCarryParadigmFromState() {
+        coordinator.accept(acceptance(RUN_ID, AgentParadigm.OPAR));
+        coordinator.contextReady(RUN_ID, snapshot(), T0.plusSeconds(1));
+        // event() 是单点:RUN_CREATED + CONTEXT_READY 全部事件都应带 OPAR
+        assertThat(store.findEventsByRunId(RUN_ID))
+                .extracting(RunEvent::paradigm)
+                .allMatch(p -> p == AgentParadigm.OPAR);
     }
 
     private void prepareVerifyingRun() {
@@ -294,10 +319,18 @@ class RunCoordinatorTest {
     }
 
     private static RunAcceptance acceptance() {
-        return acceptance(RUN_ID);
+        return acceptance(RUN_ID, null);
     }
 
     private static RunAcceptance acceptance(String runId) {
+        return acceptance(runId, null);
+    }
+
+    private static RunAcceptance acceptance(AgentParadigm paradigm) {
+        return acceptance(RUN_ID, paradigm);
+    }
+
+    private static RunAcceptance acceptance(String runId, AgentParadigm paradigm) {
         return new RunAcceptance(
                 runId, "session-1", "api", "user-1",
                 SessionAccessClaim.personal(
@@ -307,7 +340,8 @@ class RunCoordinatorTest {
                         "user-1"
                 ),
                 "USER", "hello",
-                "agent", T0, T0.plusSeconds(300)
+                "agent", T0, T0.plusSeconds(300),
+                paradigm
         );
     }
 

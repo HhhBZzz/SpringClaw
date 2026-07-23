@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.springclaw.domain.entity.MessageEvent;
+import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.runtime.contract.RunState;
 import com.springclaw.runtime.contract.SessionAccessClaim;
 import com.springclaw.runtime.lifecycle.InMemoryRunLifecycleStore;
@@ -271,7 +272,7 @@ class AgentRunTraceServiceTest {
         coordinator.accept(new RunAcceptance(
                 "req-canonical", "s1", "api", "u1",
                 claim("s1", "u1"), "USER", "hi", "agent",
-                now, now.plus(Duration.ofMinutes(30))));
+                now, now.plus(Duration.ofMinutes(30)), null));
         coordinator.failed("req-canonical",
                 new RunState.Failure("LEGACY_EXECUTION_FAILED", "boom", false), now);
 
@@ -312,7 +313,7 @@ class AgentRunTraceServiceTest {
         coordinator.accept(new RunAcceptance(
                 "req-terminal", "s1", "api", "u1",
                 claim("s1", "u1"), "USER", "hi", "agent",
-                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30)), null));
         coordinator.failed(
                 "req-terminal",
                 new RunState.Failure("LEGACY_EXECUTION_FAILED", "boom", false),
@@ -351,7 +352,7 @@ class AgentRunTraceServiceTest {
         coordinator.accept(new RunAcceptance(
                 "req-canonical-trace", "s1", "api", "u1",
                 claim("s1", "u1"), "USER", "hi", "agent",
-                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30)), null));
         coordinator.toolStarted("req-canonical-trace", acceptedAt.plusSeconds(2));
 
         MessageEventService messageEventService = mock(MessageEventService.class);
@@ -371,6 +372,31 @@ class AgentRunTraceServiceTest {
         assertThat(trace.get(0).source()).isEqualTo("canonical");
         verify(messageEventService, org.mockito.Mockito.never())
                 .listRequestEvents(any(), any(), any(), any(), any(Integer.class), any(Boolean.class));
+    }
+
+    @Test
+    void traceEventCarriesParadigmFromRunEvent() {
+        InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+        RunCoordinator coordinator = new RunCoordinator(store);
+        Instant acceptedAt = Instant.parse("2026-06-26T00:00:00Z");
+        coordinator.accept(new RunAcceptance(
+                "req-paradigm-trace", "s1", "api", "u1",
+                claim("s1", "u1"), "USER", "hi", "agent",
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30)),
+                AgentParadigm.OPAR));
+        coordinator.toolStarted("req-paradigm-trace", acceptedAt.plusSeconds(2));
+
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        AgentRunTraceService service = new AgentRunTraceService(
+                messageEventService, new ObjectMapper(), (JdbcTemplate) null, null, store);
+
+        List<AgentRunTraceEvent> trace = service.listTrace(
+                "req-paradigm-trace", "u1", 20);
+
+        assertThat(trace).isNotEmpty();
+        assertThat(trace)
+                .as("canonical RunEvent.paradigm 透出到 AgentRunTraceEvent.paradigm")
+                .allSatisfy(event -> assertThat(event.paradigm()).isEqualTo(AgentParadigm.OPAR));
     }
 
     @Test
@@ -412,7 +438,7 @@ class AgentRunTraceServiceTest {
         coordinator.accept(new RunAcceptance(
                 "req-private-trace", "s1", "api", "owner-user",
                 claim("s1", "owner-user"), "USER", "hi", "agent",
-                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30)), null));
 
         MessageEventService messageEventService = mock(MessageEventService.class);
         AgentRunTraceService service = new AgentRunTraceService(
@@ -434,7 +460,7 @@ class AgentRunTraceServiceTest {
         coordinator.accept(new RunAcceptance(
                 "req-canonical-run-list", "s1", "api", "u1",
                 claim("s1", "u1"), "USER", "hi", "agent",
-                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30)), null));
         coordinator.toolStarted("req-canonical-run-list", acceptedAt.plusSeconds(3));
 
         MessageEventService messageEventService = mock(MessageEventService.class);
@@ -496,11 +522,11 @@ class AgentRunTraceServiceTest {
         coordinator.accept(new RunAcceptance(
                 "req-visible-run", "s1", "api", "u1",
                 claim("s1", "u1"), "USER", "hi", "agent",
-                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30)), null));
         coordinator.accept(new RunAcceptance(
                 "req-hidden-run", "s2", "api", "u2",
                 claim("s2", "u2"), "USER", "hi", "agent",
-                acceptedAt.plusSeconds(1), acceptedAt.plus(Duration.ofMinutes(30))));
+                acceptedAt.plusSeconds(1), acceptedAt.plus(Duration.ofMinutes(30)), null));
 
         MessageEventService messageEventService = mock(MessageEventService.class);
         AgentRunTraceService service = new AgentRunTraceService(
@@ -523,7 +549,7 @@ class AgentRunTraceServiceTest {
         coordinator.accept(new RunAcceptance(
                 "req-canonical-replay", "s1", "api", "u1",
                 claim("s1", "u1"), "USER", "hi", "agent",
-                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30))));
+                acceptedAt, acceptedAt.plus(Duration.ofMinutes(30)), null));
         coordinator.toolStarted("req-canonical-replay", acceptedAt.plusSeconds(2));
 
         MessageEventService messageEventService = mock(MessageEventService.class);

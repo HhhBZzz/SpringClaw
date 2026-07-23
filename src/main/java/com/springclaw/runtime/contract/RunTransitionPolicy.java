@@ -38,6 +38,7 @@ public final class RunTransitionPolicy {
                 next.roleCodeAtAcceptance(),
                 "roleCodeAtAcceptance"
         );
+        requireEqual(previous.paradigm(), next.paradigm(), "paradigm");
         requireEqual(previous.originalMessage(), next.originalMessage(), "originalMessage");
         requireEqual(previous.responseMode(), next.responseMode(), "responseMode");
         requireEqual(previous.acceptedAt(), next.acceptedAt(), "acceptedAt");

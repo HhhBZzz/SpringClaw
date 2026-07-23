@@ -3,6 +3,7 @@ package com.springclaw.service.agent;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.common.util.TextUtils;
+import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.chat.impl.ChatContext;
 import com.springclaw.service.chat.impl.ChatExecutionResult;

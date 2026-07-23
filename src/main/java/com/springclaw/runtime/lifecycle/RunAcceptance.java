@@ -1,5 +1,6 @@
 package com.springclaw.runtime.lifecycle;
 
+import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.runtime.contract.SessionAccessClaim;
 
 import java.time.Instant;
@@ -15,7 +16,8 @@ public record RunAcceptance(
         String originalMessage,
         String responseMode,
         Instant acceptedAt,
-        Instant deadlineAt
+        Instant deadlineAt,
+        AgentParadigm paradigm
 ) {
     public RunAcceptance {
         runId = requireText(runId, "runId");

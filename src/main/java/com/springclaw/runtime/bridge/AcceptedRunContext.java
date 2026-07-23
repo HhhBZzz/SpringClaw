@@ -1,5 +1,6 @@
 package com.springclaw.runtime.bridge;
 
+import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.runtime.contract.RunState;
 import com.springclaw.runtime.contract.SessionAccessClaim;
 
@@ -41,5 +42,9 @@ public record AcceptedRunContext(RunState runState) {
 
     public SessionAccessClaim sessionAccessClaim() {
         return runState.sessionAccessClaim();
+    }
+
+    public AgentParadigm paradigm() {
+        return runState.paradigm();
     }
 }

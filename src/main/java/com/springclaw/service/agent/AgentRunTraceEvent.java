@@ -1,5 +1,7 @@
 package com.springclaw.service.agent;
 
+import com.springclaw.runtime.contract.AgentParadigm;
+
 public record AgentRunTraceEvent(String requestId,
                                  String stepName,
                                  String type,
@@ -15,7 +17,8 @@ public record AgentRunTraceEvent(String requestId,
                                  String action,
                                  String target,
                                  String source,
-                                 String riskLevel) {
+                                 String riskLevel,
+                                 AgentParadigm paradigm) {
 
     public static final String TIMELINE_STEP_SCHEMA = "springclaw.timeline-step.v1";
 
@@ -54,7 +57,8 @@ public record AgentRunTraceEvent(String requestId,
                 defaultText(type, "agent"),
                 defaultText(stepName, type),
                 "",
-                defaultRisk(type));
+                defaultRisk(type),
+                null);
     }
 
     public AgentRunTraceEvent {

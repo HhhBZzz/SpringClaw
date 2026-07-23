@@ -264,6 +264,7 @@ class ChatContextFactoryCanonicalLifecycleProjectionTest {
                 null,
                 null,
                 Map.of(),
+                null,
                 null
         );
     }
@@ -295,6 +296,7 @@ class ChatContextFactoryCanonicalLifecycleProjectionTest {
                 null,
                 null,
                 Map.of(),
+                null,
                 null
         );
     }

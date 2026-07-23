@@ -1,6 +1,6 @@
 package com.springclaw.dto.chat;
 
-import com.springclaw.service.agent.AgentParadigm;
+import com.springclaw.runtime.contract.AgentParadigm;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

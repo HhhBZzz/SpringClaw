@@ -190,7 +190,8 @@ public class AgentRunTraceService {
                 action,
                 target,
                 source,
-                riskLevel
+                riskLevel,
+                null
         );
     }
 
@@ -254,7 +255,8 @@ public class AgentRunTraceService {
                 action,
                 event.stage(),
                 "canonical",
-                ""
+                "",
+                event.paradigm()
         );
     }
 
@@ -365,6 +367,7 @@ public class AgentRunTraceService {
         row.put("channel", state.channel());
         row.put("responseMode", state.responseMode());
         row.put("source", "canonical");
+        row.put("paradigm", state.paradigm() == null ? null : state.paradigm().name());
         return row;
     }
 
@@ -855,6 +858,7 @@ public class AgentRunTraceService {
         result.put("duration_ms", canonicalDurationMs(state));
         result.put("error_message", state.failure() == null ? null : state.failure().message());
         result.put("source", "canonical");
+        result.put("paradigm", state.paradigm() == null ? null : state.paradigm().name());
         result.put("steps", canonicalReplaySteps(events));
         result.put("toolInvocations", canonicalReplayToolInvocations(state));
         return result;

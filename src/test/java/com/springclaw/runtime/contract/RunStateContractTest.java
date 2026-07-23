@@ -259,7 +259,8 @@ class RunStateContractTest {
                 completion("run-1", CompletionDecision.Outcome.FAIL, 0),
                 result("run-1", RunStatus.FAILED, recoveredAt, "failed"),
                 Map.of(),
-                failure()
+                failure(),
+                null
         )).doesNotThrowAnyException();
     }
 
@@ -506,6 +507,26 @@ class RunStateContractTest {
                         )
                 )
         )).hasMessageContaining("sessionAccessClaim");
+    }
+
+    @Test
+    void transitionsPreserveParadigmAcrossAdvancement() {
+        // paradigm 是 acceptance-immutable:转换时 previous.paradigm() 必须 == next.paradigm()
+        RunState created = createdState();
+        RunState valid = nextState(
+                created, 1, RunStatus.CONTEXT_READY, T1, null,
+                snapshot("run-1"), null, "", 1, "", List.of(), null, null,
+                Map.of(), null
+        );
+        // 两侧都 null(既有 fixture 默认)→ 合法
+        assertThatCode(() -> RunTransitionPolicy.validate(created, valid))
+                .doesNotThrowAnyException();
+
+        // next 翻转 paradigm(previous=null,next=OPAR)→ 不变性拒绝
+        assertThatThrownBy(() -> RunTransitionPolicy.validate(
+                created,
+                paradigmVariant(valid, AgentParadigm.OPAR)
+        )).hasMessageContaining("paradigm");
     }
 
     @Test
@@ -1260,7 +1281,8 @@ class RunStateContractTest {
                 completionDecision,
                 result,
                 usage,
-                failure
+                failure,
+                null
         );
     }
 
@@ -1310,7 +1332,8 @@ class RunStateContractTest {
                 completionDecision,
                 result,
                 usage,
-                failure
+                failure,
+                previous.paradigm()
         );
     }
 
@@ -1358,7 +1381,8 @@ class RunStateContractTest {
                 completionDecision,
                 result,
                 usage,
-                failure
+                failure,
+                previous.paradigm()
         );
     }
 
@@ -1399,7 +1423,40 @@ class RunStateContractTest {
                 source.completionDecision(),
                 source.result(),
                 source.usage(),
-                source.failure()
+                source.failure(),
+                source.paradigm()
+        );
+    }
+
+    private static RunState paradigmVariant(RunState source, AgentParadigm paradigm) {
+        return new RunState(
+                source.runId(),
+                source.requestId(),
+                source.revision(),
+                source.status(),
+                source.sessionKey(),
+                source.channel(),
+                source.userId(),
+                source.sessionAccessClaim(),
+                source.roleCodeAtAcceptance(),
+                source.originalMessage(),
+                source.responseMode(),
+                source.acceptedAt(),
+                source.startedAt(),
+                source.updatedAt(),
+                source.finishedAt(),
+                source.deadlineAt(),
+                source.contextSnapshot(),
+                source.executionDecision(),
+                source.strategyId(),
+                source.attempt(),
+                source.pendingProposalId(),
+                source.toolInvocations(),
+                source.completionDecision(),
+                source.result(),
+                source.usage(),
+                source.failure(),
+                paradigm
         );
     }
 
@@ -1433,7 +1490,8 @@ class RunStateContractTest {
                 source.completionDecision(),
                 source.result(),
                 source.usage(),
-                source.failure()
+                source.failure(),
+                source.paradigm()
         );
     }
 
@@ -1469,7 +1527,8 @@ class RunStateContractTest {
                 source.completionDecision(),
                 source.result(),
                 source.usage(),
-                source.failure()
+                source.failure(),
+                source.paradigm()
         );
     }
 
@@ -1507,7 +1566,8 @@ class RunStateContractTest {
                 null,
                 null,
                 Map.of(),
-                failure
+                failure,
+                null
         );
     }
 

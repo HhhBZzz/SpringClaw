@@ -1,6 +1,6 @@
 package com.springclaw.service.chat.impl;
 
-import com.springclaw.service.agent.AgentParadigm;
+import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.service.skill.bundle.SkillCatalogService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import com.springclaw.tool.runtime.CapabilityRegistry;

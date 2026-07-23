@@ -197,6 +197,7 @@ class CanonicalContextSnapshotResolverTest {
                 null,
                 null,
                 Map.of(),
+                null,
                 null
         );
     }

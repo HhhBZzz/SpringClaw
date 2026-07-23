@@ -37,7 +37,8 @@ class RunLifecycleBridgeCompatibilityTest {
                 ),
                 "USER", "hello",
                 "agent", Instant.parse("2026-06-21T00:00:00Z"),
-                Instant.parse("2026-06-21T00:05:00Z")
+                Instant.parse("2026-06-21T00:05:00Z"),
+                null
         ));
 
         assertThat(store.requireByRunId(RUN_ID).runId()).isEqualTo(RUN_ID);

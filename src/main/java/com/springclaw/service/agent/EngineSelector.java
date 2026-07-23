@@ -1,5 +1,6 @@
 package com.springclaw.service.agent;
 
+import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.service.chat.impl.ChatContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

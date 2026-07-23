@@ -1,6 +1,6 @@
 package com.springclaw.dto.chat;
 
-import com.springclaw.service.agent.AgentParadigm;
+import com.springclaw.runtime.contract.AgentParadigm;
 import jakarta.validation.constraints.NotBlank;
 
 /**

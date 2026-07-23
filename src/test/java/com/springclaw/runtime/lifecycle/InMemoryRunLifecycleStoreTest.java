@@ -1,5 +1,6 @@
 package com.springclaw.runtime.lifecycle;
 
+import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.runtime.contract.RunEvent;
 import com.springclaw.runtime.contract.RunEventType;
 import com.springclaw.runtime.contract.RunState;
@@ -106,6 +107,20 @@ class InMemoryRunLifecycleStoreTest {
     }
 
     @Test
+    void creationWithDifferentParadigmConflicts() {
+        store.create(
+                createdState("hello"),
+                event(RunEventType.RUN_CREATED, RunStatus.CREATED, T0)
+        );
+
+        assertThatThrownBy(() -> store.create(
+                createdState("hello", AgentParadigm.OPAR),
+                event(RunEventType.RUN_CREATED, RunStatus.CREATED, T0)
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("conflicting");
+    }
+
+    @Test
     void staleRevisionWritesNeitherStateNorEvent() {
         store.create(
                 createdState("hello"),
@@ -184,6 +199,17 @@ class InMemoryRunLifecycleStoreTest {
         );
     }
 
+    private static RunState createdState(String message, AgentParadigm paradigm) {
+        return new RunState(
+                RUN_ID, RUN_ID, 0, RunStatus.CREATED,
+                "session-1", "api", "user-1", claim(),
+                "USER", message, "agent",
+                T0, null, T0, null, T0.plusSeconds(300),
+                null, null, "", 1, "", List.of(), null, null, Map.of(), null,
+                paradigm
+        );
+    }
+
     private static RunState createdState(
             String message,
             SessionAccessClaim.AcceptanceOrigin origin
@@ -193,7 +219,8 @@ class InMemoryRunLifecycleStoreTest {
                 "session-1", "api", "user-1", claim(origin),
                 "USER", message, "agent",
                 T0, null, T0, null, T0.plusSeconds(300),
-                null, null, "", 1, "", List.of(), null, null, Map.of(), null
+                null, null, "", 1, "", List.of(), null, null, Map.of(), null,
+                null
         );
     }
 
@@ -203,7 +230,8 @@ class InMemoryRunLifecycleStoreTest {
                 "session-1", "api", "user-1", claim(),
                 "USER", "hello", "agent",
                 at, null, at, null, at.plusSeconds(300),
-                null, null, "", 1, "", List.of(), null, null, Map.of(), null
+                null, null, "", 1, "", List.of(), null, null, Map.of(), null,
+                null
         );
     }
 
@@ -213,7 +241,8 @@ class InMemoryRunLifecycleStoreTest {
                 "session-1", "api", "user-1", claim(), "USER", "hello", "agent",
                 T0, null, T1, T1, T0.plusSeconds(300),
                 null, null, "", 1, "", List.of(), null, null, Map.of(),
-                new RunState.Failure("LEGACY_FAILED", "failed", false)
+                new RunState.Failure("LEGACY_FAILED", "failed", false),
+                null
         );
     }
 
@@ -233,7 +262,7 @@ class InMemoryRunLifecycleStoreTest {
     ) {
         return new RunEvent.Draft(
                 runId, type, "lifecycle", status, timestamp, 0,
-                "springclaw.runtime.lifecycle.v1", "{}", null, runId
+                "springclaw.runtime.lifecycle.v1", "{}", null, runId, null
         );
     }
 

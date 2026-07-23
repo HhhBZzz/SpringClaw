@@ -20,7 +20,7 @@ class RunEventContractTest {
                 "context", RunStatus.CONTEXT_READY,
                 Instant.parse("2026-06-19T00:00:00Z"), 12,
                 "springclaw.run-event.context-ready.v1", "{\"hash\":\"h1\"}",
-                "cmd-1", "run-1"
+                "cmd-1", "run-1", AgentParadigm.OPAR
         );
 
         assertThat(mapper.writeValueAsString(event))
@@ -32,7 +32,7 @@ class RunEventContractTest {
         assertThatThrownBy(() -> new RunEvent(
                 "evt-1", "run-1", 0, RunEventType.RUN_CREATED,
                 "acceptance", RunStatus.CREATED, Instant.now(), 0,
-                "v1", "{}", null, "run-1"
+                "v1", "{}", null, "run-1", null
         )).isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("sequence");
     }
@@ -50,7 +50,8 @@ class RunEventContractTest {
                 "springclaw.run-event.context-ready.v1",
                 "{\"hash\":\"h1\"}",
                 "cmd-1",
-                "run-1"
+                "run-1",
+                AgentParadigm.OPAR
         );
 
         assertThat(draft.runId()).isEqualTo("run-1");
@@ -63,6 +64,7 @@ class RunEventContractTest {
         assertThat(draft.payload()).isEqualTo("{\"hash\":\"h1\"}");
         assertThat(draft.causationId()).isEqualTo("cmd-1");
         assertThat(draft.correlationId()).isEqualTo("run-1");
+        assertThat(draft.paradigm()).isEqualTo(AgentParadigm.OPAR);
 
         RunEvent persisted = draft.persisted("evt-1", 7L);
 
@@ -78,6 +80,7 @@ class RunEventContractTest {
         assertThat(persisted.payload()).isEqualTo(draft.payload());
         assertThat(persisted.causationId()).isEqualTo(draft.causationId());
         assertThat(persisted.correlationId()).isEqualTo(draft.correlationId());
+        assertThat(persisted.paradigm()).isEqualTo(draft.paradigm());
 
         assertThatThrownBy(() -> draft.persisted("evt-2", 0))
                 .isInstanceOf(IllegalArgumentException.class)

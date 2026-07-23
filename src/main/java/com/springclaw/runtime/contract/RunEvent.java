@@ -25,7 +25,8 @@ public record RunEvent(
         String payloadSchema,
         String payload,
         String causationId,
-        String correlationId
+        String correlationId,
+        AgentParadigm paradigm
 ) {
     public RunEvent {
         eventId = requireText(eventId, "eventId");
@@ -44,6 +45,7 @@ public record RunEvent(
         payload = Objects.requireNonNullElse(payload, "{}");
         causationId = causationId; // nullable: root events have no causation
         correlationId = requireText(correlationId, "correlationId");
+        paradigm = paradigm; // nullable: webhook/task-path runs may not carry a paradigm
     }
 
     /**
@@ -60,7 +62,8 @@ public record RunEvent(
             String payloadSchema,
             String payload,
             String causationId,
-            String correlationId
+            String correlationId,
+            AgentParadigm paradigm
     ) {
         public Draft {
             runId = requireText(runId, "runId");
@@ -73,6 +76,7 @@ public record RunEvent(
             payloadSchema = requireText(payloadSchema, "payloadSchema");
             payload = Objects.requireNonNullElse(payload, "{}");
             correlationId = requireText(correlationId, "correlationId");
+            paradigm = paradigm; // nullable: webhook/task-path runs may not carry a paradigm
         }
 
         public RunEvent persisted(String eventId, long sequence) {
@@ -88,7 +92,8 @@ public record RunEvent(
                     payloadSchema,
                     payload,
                     causationId,
-                    correlationId
+                    correlationId,
+                    paradigm
             );
         }
     }

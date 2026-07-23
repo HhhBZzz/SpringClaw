@@ -141,7 +141,8 @@ class AsyncChatResultStoreProjectionTest {
                         "user"
                 ),
                 "USER", "hello", "agent",
-                T0, T0.plus(Duration.ofMinutes(30))
+                T0, T0.plus(Duration.ofMinutes(30)),
+                null
         ));
     }
 

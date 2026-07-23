@@ -1,7 +1,7 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.common.util.TextUtils;
-import com.springclaw.service.agent.AgentParadigm;
+import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.service.skill.impl.SkillRegistryService;
 import com.springclaw.tool.runtime.CapabilityRegistry;
 import org.springframework.beans.factory.annotation.Autowired;

@@ -286,7 +286,8 @@ public class ChatController {
                 request.message(),
                 normalizedResponseMode(request.responseMode()),
                 acceptedAt,
-                acceptedAt.plus(RUN_DEADLINE)
+                acceptedAt.plus(RUN_DEADLINE),
+                request.paradigm()
         ));
     }
 

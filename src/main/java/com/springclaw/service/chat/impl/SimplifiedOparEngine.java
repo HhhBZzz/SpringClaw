@@ -3,7 +3,7 @@ package com.springclaw.service.chat.impl;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
-import com.springclaw.service.agent.AgentParadigm;
+import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.context.ContextInjection;

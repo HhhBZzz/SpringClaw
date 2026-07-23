@@ -8,6 +8,7 @@ import com.springclaw.runtime.contract.RunTransitionPolicy;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -164,6 +165,7 @@ public final class InMemoryRunLifecycleStore implements RunLifecycleStore {
                 && existing.roleCodeAtAcceptance().equals(candidate.roleCodeAtAcceptance())
                 && existing.originalMessage().equals(candidate.originalMessage())
                 && existing.responseMode().equals(candidate.responseMode())
+                && Objects.equals(existing.paradigm(), candidate.paradigm())
                 && existing.acceptedAt().equals(candidate.acceptedAt())
                 && existing.deadlineAt().equals(candidate.deadlineAt());
     }

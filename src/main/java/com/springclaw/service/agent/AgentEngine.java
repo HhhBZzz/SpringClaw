@@ -1,5 +1,6 @@
 package com.springclaw.service.agent;
 
+import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.service.chat.impl.ChatContext;
 import com.springclaw.service.chat.impl.ChatExecutionResult;
 import com.springclaw.service.context.AssembledContext;

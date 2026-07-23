@@ -62,7 +62,8 @@ class RunLifecycleObserverCanonicalModeTest {
                 "original",
                 "agent",
                 T0,
-                T0.plusSeconds(300)
+                T0.plusSeconds(300),
+                null
         ));
         ChatContext context = context(RUN_ID);
         coordinator.contextReady(
@@ -103,7 +104,8 @@ class RunLifecycleObserverCanonicalModeTest {
                 "original",
                 "agent",
                 T0,
-                T0.plusSeconds(300)
+                T0.plusSeconds(300),
+                null
         ));
         ChatContext context = context(RUN_ID);
         new CanonicalContextReadyProjector(coordinator, store)

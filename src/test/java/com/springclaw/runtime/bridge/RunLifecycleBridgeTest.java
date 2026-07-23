@@ -39,7 +39,8 @@ class RunLifecycleBridgeTest {
                 "hello",
                 "agent",
                 T0,
-                T0.plusSeconds(300)
+                T0.plusSeconds(300),
+                null
         ));
         bridge.contextObserved(
                 RUN_ID,

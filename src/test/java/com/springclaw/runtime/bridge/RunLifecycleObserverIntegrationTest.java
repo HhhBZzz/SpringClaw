@@ -34,7 +34,8 @@ class RunLifecycleObserverIntegrationTest {
         coordinator.accept(new RunAcceptance(
                 RUN_ID, "session-1", "api", "user-1",
                 claim(), "USER", "original",
-                "agent", T0, T0.plusSeconds(300)
+                "agent", T0, T0.plusSeconds(300),
+                null
         ));
         RunLifecycleObserver observer = new RunLifecycleObserver(
                 new DefaultRunLifecycleBridge(coordinator),
@@ -75,7 +76,8 @@ class RunLifecycleObserverIntegrationTest {
         coordinator.accept(new RunAcceptance(
                 RUN_ID, "session-1", "api", "user-1",
                 claim(), "USER", "original",
-                "agent", T0, T0.plusSeconds(300)
+                "agent", T0, T0.plusSeconds(300),
+                null
         ));
         RunLifecycleObserver observer = new RunLifecycleObserver(
                 new DefaultRunLifecycleBridge(coordinator),

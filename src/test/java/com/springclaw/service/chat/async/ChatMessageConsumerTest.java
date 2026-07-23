@@ -219,6 +219,7 @@ class ChatMessageConsumerTest {
                 null,
                 null,
                 Map.of(),
+                null,
                 null
         );
     }

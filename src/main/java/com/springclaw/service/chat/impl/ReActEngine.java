@@ -9,6 +9,8 @@ import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
+import com.springclaw.tool.runtime.ToolExecutionContext;
+import com.springclaw.tool.runtime.ToolExecutionContextHolder;
 import com.springclaw.tool.runtime.ToolOrchestrator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -202,7 +204,20 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
         final StringJoiner actionTrace = new StringJoiner("\n");
         String history = "";
 
-        try {
+        // 工具执行上下文 scope —— 让 Spring AI 原生工具调用(.tools())经 ToolRuntimeAspect 时
+        // 能读到 userId/sessionKey/runId 等做权限检查 + 审计 + emit TOOL_* 事件(对齐
+        // AutonomousLoopEngine L223-235)。本 Task 仅 open scope;AutonomousExecutionTracker
+        // 留待 Task 4(届时在 scope 内 setTracker + finally clearTracker)。
+        ToolExecutionContext toolContext = new ToolExecutionContext(
+                assembled == null ? null : assembled.sessionKey(),
+                ctx.channel(),
+                ctx.userId(),
+                requestId,
+                "REACT",
+                requestId,
+                ctx.roleCode()
+        );
+        try (ToolExecutionContextHolder.Scope scope = ToolExecutionContextHolder.open(toolContext)) {
             for (int stepNo = 1; stepNo <= maxReactSteps; stepNo++) {
                 log.info("ReAct 步骤 {}/{}: requestId={}, riskLevel={}, toolsCount={}",
                         stepNo, maxReactSteps, requestId, riskLevel, tools == null ? 0 : tools.length);

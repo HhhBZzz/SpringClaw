@@ -21,12 +21,12 @@ class AgentParadigmTest {
     }
 
     @Test
-    void firstThreeAreImplementedRestArePlaceholders() {
+    void firstFourAreImplementedRestArePlaceholders() {
         assertThat(AgentParadigm.SINGLE_TURN.isImplemented()).isTrue();
         assertThat(AgentParadigm.OPAR.isImplemented()).isTrue();
         assertThat(AgentParadigm.AUTONOMOUS_LOOP.isImplemented()).isTrue();
+        assertThat(AgentParadigm.REACT.isImplemented()).isTrue();
 
-        assertThat(AgentParadigm.REACT.isImplemented()).isFalse();
         assertThat(AgentParadigm.PLAN_EXECUTE.isImplemented()).isFalse();
         assertThat(AgentParadigm.REFLECTION.isImplemented()).isFalse();
         assertThat(AgentParadigm.MULTI_AGENT.isImplemented()).isFalse();

@@ -3,8 +3,10 @@ package com.springclaw.service.chat.impl;
 import com.springclaw.common.util.TextUtils;
 import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.runtime.contract.AgentParadigm;
+import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
 import com.springclaw.service.ai.AiProviderService;
+import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
 import com.springclaw.tool.runtime.ToolOrchestrator;
@@ -18,7 +20,11 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
 
 import java.lang.reflect.Method;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -30,14 +36,17 @@ import java.util.concurrent.atomic.AtomicReference;
  * 把 Observation 回灌给模型进入下一轮 Thought——直到模型给出 Final Answer。
  * </p>
  * <p>
- * <b>本类当前是骨架(Task 1)</b>:只完成接入地基——
+ * <b>当前状态:Task 1-3 已完成</b>——
  * <ul>
  *   <li>{@code paradigm()} 声明 {@link AgentParadigm#REACT}(配合
  *       {@link AgentParadigm#isImplemented()} 与 {@code EngineSelector.LEGACY_RANK} 登记);</li>
  *   <li>{@code supports()} 仅在 {@code ctx.paradigm() == REACT} 时为真;</li>
- *   <li>{@code execute} / {@code stream} 返回占位结果,不进入循环——循环体留待 Task 3 实现。</li>
+ *   <li>{@code execute} / {@code stream} 跑 {@link #runReActLoop}:每步一次模型调用 +
+ *       原生工具调用({@code .tools()})+ Thought/Action/Observation 历史 + "无工具调用即终止" + max-steps。</li>
+ *   <li>待办:Task 4 假完成守护;Task 5 DeepSeek V4 显式文本回退(!supportsNativeToolCalling 路径);
+ *       Task 6 ChatExecutionResult/trace 精细化投影。</li>
  * </ul>
- * 构造函数已全量复用 AutonomousLoopEngine 的 11 bean 依赖,Task 3 填充循环时无需改签名。
+ * 构造函数全量复用 AutonomousLoopEngine 的 11 bean 依赖。
  * </p>
  */
 @Service
@@ -105,28 +114,19 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
     }
 
     /**
-     * 阻塞执行入口——Task 3 填充 Thought-Action-Observation 循环。
-     * <p>骨架占位:不进入循环,直接返回降级结果(不炸)。</p>
+     * 阻塞执行入口——内部跑 {@link #runReActLoop}(无 emitter)。
+     * <p>结构对齐 {@link AutonomousLoopEngine#execute}:直接进入循环,返回 {@link ChatExecutionResult}。</p>
      */
     @Override
     public ChatExecutionResult execute(ChatContext ctx, FallbackResponder fallbackResponder) {
-        log.debug("ReActEngine.execute 骨架占位(待 Task 3 实现): requestId={}", ctx.requestId());
-        AssembledContext assembled = ctx.assembled();
-        String observe = assembled == null ? "" : assembled.observePrompt();
-        String fallback = assembled == null ? "" : fallbackResponder.respond("ReAct", assembled);
-        return new ChatExecutionResult(
-                observe,
-                "ReAct 阻塞入口(待 Task 3 实现)",
-                "",
-                fallback,
-                false
-        );
+        return runReActLoop(ctx, null, ctx.requestId());
     }
 
     /**
-     * 流式执行入口——Task 3 填充。
-     * <p>骨架占位:不启动流,返回 {@code null}(与 {@link AutonomousLoopEngine#stream}
-     * 返回 null 一致,由调用方处理)。</p>
+     * 流式执行入口——管理完整 SSE 生命周期,内部跑 {@link #runReActLoop}。
+     * <p>结构对齐 {@link AutonomousLoopEngine#stream}:trace(started) → 循环 → 发送最终答案 →
+     * persist(TERMINAL_RESULT) → reportResult → trace(success) → releaseLockOnce → completeEmitter;
+     * 异常委托 {@code fallbackHandler}。</p>
      */
     @Override
     public Disposable stream(ChatContext context,
@@ -135,8 +135,279 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
                              AtomicBoolean lockReleased,
                              AtomicReference<Disposable> disposableRef,
                              OnStreamFailure fallbackHandler) {
-        log.debug("ReActEngine.stream 骨架占位(待 Task 3 实现): requestId={}", context.requestId());
+        try {
+            sseEventBridge.sendTrace(emitter, context, "ReAct 循环", "react", "started",
+                    "进入 ReAct Thought-Action-Observation 循环。", 0L);
+            sseEventBridge.sendStatus(emitter, "ReAct 循环执行中");
+
+            ChatExecutionResult result = runReActLoop(context, emitter, context.requestId());
+
+            String finalAnswer = resolveFinalAnswer(result);
+            sseEventBridge.sendAnswerChunks(emitter, finalAnswer);
+            chatResultPersister.persist(context, finalAnswer, result, ChatPersistenceIntent.TERMINAL_RESULT);
+            reportResult(context, result, finalAnswer);
+
+            sseEventBridge.sendTrace(emitter, context, "ReAct 循环", "react", "success",
+                    "ReAct 循环执行完成(" + result.plan() + ")。", 0L);
+            sseEventBridge.sendTrace(emitter, context, "完成", "final", "success",
+                    "已生成最终回答。", 0L);
+            releaseLockOnce(context, lockToken, lockReleased);
+            sseEventBridge.completeEmitter(emitter);
+        } catch (Exception ex) {
+            log.warn("ReAct 循环 SSE 执行失败: sessionKey={}, reason={}",
+                    context.assembled() == null ? "?" : context.assembled().sessionKey(), ex.getMessage());
+            try {
+                String simplifiedReason = chatResponsePolicyService.simplifyFailureReason(ex.getMessage());
+                sseEventBridge.sendTrace(emitter, context, "ReAct 循环", "react", "failed", simplifiedReason, 0L);
+            } catch (Exception ignored) {}
+            fallbackHandler.handle(context, ex, emitter, lockToken, lockReleased);
+        }
         return null;
+    }
+
+    // === Thought-Action-Observation 循环(Task 3 主路径:原生工具调用) ===
+
+    /**
+     * ReAct 核心循环——每步一次模型调用,根据 LLM 输出判定是否发起了工具调用,
+     * 无工具调用即视为最终答案并终止;否则把本轮 Thought/Action/Observation 拼入历史进入下一轮。
+     * <p>结构对齐 {@link AutonomousLoopEngine#runAutonomousLoop}(L194-411):
+     * 模型不可用降级 → 选工具 → 步数受限的阻塞循环 → 每步 sendStatus + 模型调用 + trace → 终止/max-steps。</p>
+     * <p><b>主路径(Task 3)</b>:{@code DeepSeekChatCompatibility.supportsNativeToolCalling} 为真时挂 {@code .tools(tools)},
+     * 由 Spring AI 在 {@code .call()} 内部完成工具往返;DeepSeek V4 的显式文本回退留待 Task 5。
+     * 假完成守护留待 Task 4;ChatExecutionResult/trace 的精细化投影留待 Task 6。</p>
+     */
+    private ChatExecutionResult runReActLoop(ChatContext ctx, SseEmitter emitter, String requestId) {
+        AiProviderService.ActiveChatClient activeClient = ctx.activeClient();
+        AssembledContext assembled = ctx.assembled();
+        AgentDecision decision = ctx.decision();
+        if (requestId == null) requestId = ctx.requestId();
+        String riskLevel = decision != null ? decision.riskLevel() : "read";
+
+        // 模型不可用 → 降级(对齐 AutonomousLoop L202-210)
+        if (!modelTransportGuardService.isModelCallEnabled(activeClient)) {
+            LocalSkillFallbackService.LocalSkillResult fallback =
+                    localExecutionSupport.tryFallback(assembled == null ? "" : assembled.question(), true);
+            return new ChatExecutionResult(
+                    observePrompt(ctx),
+                    modelTransportGuardService.disabledModelPlanReason(activeClient),
+                    fallback != null ? fallback.executionDetails() : modelTransportGuardService.disabledModelActionReason(activeClient),
+                    fallback != null ? fallback.fallbackAnswer() : "",
+                    false
+            );
+        }
+
+        final Object[] tools = toolOrchestrator.selectAutonomousTools(ctx.channel(), ctx.userId(), decision);
+        final boolean allowFailover = isSafeToRetry(tools);
+        final List<ReActStep> steps = new ArrayList<>();
+        final StringJoiner actionTrace = new StringJoiner("\n");
+        String history = "";
+
+        try {
+            for (int stepNo = 1; stepNo <= maxReactSteps; stepNo++) {
+                log.info("ReAct 步骤 {}/{}: requestId={}, riskLevel={}, toolsCount={}",
+                        stepNo, maxReactSteps, requestId, riskLevel, tools == null ? 0 : tools.length);
+
+                if (emitter != null) {
+                    try {
+                        sseEventBridge.sendStatus(emitter, "ReAct 步骤 " + stepNo + "/" + maxReactSteps);
+                    } catch (Exception e) {
+                        log.warn("SSE 进度事件发送失败（可能客户端已断开）: stepNo={}", stepNo);
+                    }
+                }
+
+                final String systemPrompt = renderReActPrompt(ctx, tools, history, riskLevel);
+                ModelCallExecutor.ModelCallResult<String> callResult = modelCallExecutor.executeChat(
+                        activeClient,
+                        "react-step-" + stepNo,
+                        new ModelCallExecutor.ChatRequestContext(
+                                requestId,
+                                assembled == null ? "" : assembled.sessionKey(),
+                                ctx.channel(),
+                                ctx.userId()
+                        ),
+                        allowFailover,
+                        client -> {
+                            var req = client.chatClient().prompt()
+                                    .system(systemPrompt)
+                                    .user(TypedContextPromptRenderer.question(ctx));
+                            // 主路径:原生工具调用(Spring AI 在 .call() 内完成 tool 往返)。
+                            // Task 5:!supportsNativeToolCalling 时改走显式 prompt 回退(本 Task 先不实现)。
+                            if (DeepSeekChatCompatibility.supportsNativeToolCalling(client)
+                                    && tools != null && tools.length > 0) {
+                                req = req.tools(tools);
+                            }
+                            var resp = conversationAdvisorSupport.apply(
+                                            req,
+                                            assembled == null ? "" : assembled.sessionKey(),
+                                            ctx.userId())
+                                    .call()
+                                    .chatResponse();
+                            return new ModelCallExecutor.ChatOperationResult<>(
+                                    ModelCallExecutor.extractText(resp), resp);
+                        }
+                );
+
+                String thought = callResult.value();
+                activeClient = callResult.client(); // failover 后更新
+
+                if (!StringUtils.hasText(thought)) {
+                    log.warn("ReAct 步骤 {} 模型输出为空,终止循环: requestId={}", stepNo, requestId);
+                    break;
+                }
+
+                boolean hasToolCall = hasActionLine(thought);
+                String action = describeAction(thought, hasToolCall);
+                String observation = describeObservation(hasToolCall);
+                steps.add(new ReActStep(thought, action, observation));
+                actionTrace.add("[Step " + stepNo + "] " + TextUtils.truncate(action, 400));
+
+                if (emitter != null) {
+                    try {
+                        sseEventBridge.sendTrace(emitter, ctx, "ReAct Thought " + stepNo,
+                                "react", "thought", TextUtils.truncate(thought, 200), 0L);
+                    } catch (Exception ignored) {}
+                }
+
+                history = buildReActHistory(steps);
+
+                // 终止:本轮无工具调用(纯最终答案)= 完成。Task 4 在此之前加假完成守护。
+                if (!hasToolCall) {
+                    log.info("ReAct 任务完成: requestId={}, steps={}", requestId, stepNo);
+                    return finalResult(ctx, steps, actionTrace, thought);
+                }
+            }
+
+            // 达到 maxReactSteps 仍未终止 → 返回当前最佳(降级提示)
+            log.info("ReAct 达到最大步数限制: requestId={}, maxSteps={}", requestId, maxReactSteps);
+            return finalResult(ctx, steps, actionTrace,
+                    "已达 max-react-steps(" + maxReactSteps + "),返回当前最佳答案");
+        } catch (Exception ex) {
+            log.warn("ReAct 循环执行失败: requestId={}, reason={}", requestId, ex.getMessage());
+            LocalSkillFallbackService.LocalSkillResult fallback =
+                    localExecutionSupport.tryFallback(assembled == null ? "" : assembled.question(), true);
+            return new ChatExecutionResult(
+                    observePrompt(ctx),
+                    "ReAct 循环异常终止: " + chatResponsePolicyService.simplifyFailureReason(ex.getMessage()),
+                    actionTrace.toString(),
+                    fallback != null ? fallback.fallbackAnswer() : "",
+                    false
+            );
+        }
+    }
+
+    /**
+     * 构造终态 {@link ChatExecutionResult}(Task 6 细化,本 Task 基础版)。
+     * <ul>
+     *   <li>observe = observePrompt</li>
+     *   <li>plan = "ReAct 执行 N 步"(stream success trace 复用)</li>
+     *   <li>action = Action 轨迹(每步一行)</li>
+     *   <li>reflect = 最终答案({@link #resolveFinalAnswer} 直接取此字段回传用户)</li>
+     * </ul>
+     */
+    private ChatExecutionResult finalResult(ChatContext ctx, List<ReActStep> steps,
+                                            StringJoiner actionTrace, String finalAnswer) {
+        return new ChatExecutionResult(
+                observePrompt(ctx),
+                "ReAct 执行 " + steps.size() + " 步",
+                actionTrace.toString(),
+                StringUtils.hasText(finalAnswer) ? finalAnswer : "ReAct 循环未产生最终答案。",
+                true
+        );
+    }
+
+    private String resolveFinalAnswer(ChatExecutionResult result) {
+        if (StringUtils.hasText(result.reflect())) {
+            return result.reflect();
+        }
+        if (!result.modelEnabled()) {
+            return "ReAct 循环执行完成,但模型不可用。";
+        }
+        return "ReAct 循环执行完成,共 " + result.plan() + "。";
+    }
+
+    /**
+     * 判定本轮模型输出是否发起了工具调用。
+     * <p>{@link ModelCallExecutor#executeChat} 内部只透出文本(L122 取
+     * {@code ChatOperationResult.value()}, {@link org.springframework.ai.chat.model.ChatResponse}
+     * 不外露),故无法从响应元数据读 tool call。此处以 ReAct 协议文本契约为信号:
+     * 模型本轮输出含以 "Action:" 起首的行 → 视为发起工具调用。</p>
+     * <ul>
+     *   <li>原生工具调用主路径(Task 3):Spring AI 在 {@code .call()} 内完成 tool 往返,
+     *       返回的是观察后的推理/最终答案,通常不再含 "Action:" 行 → 循环很快终止(多数 1 步)。</li>
+     *   <li>DeepSeek 文本回退(Task 5):不走 {@code .tools()},模型在文本里输出 "Action:",
+     *       引擎解析后手动执行——此判定驱动真正的多步循环。</li>
+     * </ul>
+     */
+    private boolean hasActionLine(String thought) {
+        if (!StringUtils.hasText(thought)) return false;
+        for (String line : thought.split("\n")) {
+            if (line.strip().toLowerCase(Locale.ROOT).startsWith("action:")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 从模型输出提取 Action 描述(取首个 "Action:" 行);无工具调用时标注为最终答案。
+     * 用于 history/trace 投影(Task 6 细化)。
+     */
+    private String describeAction(String thought, boolean hasToolCall) {
+        if (!hasToolCall) {
+            return "(无工具调用,给出最终答案)";
+        }
+        for (String line : thought.split("\n")) {
+            String stripped = line.strip();
+            if (stripped.toLowerCase(Locale.ROOT).startsWith("action:")) {
+                return TextUtils.truncate(stripped, 400);
+            }
+        }
+        return "(原生工具调用)";
+    }
+
+    /**
+     * 描述本轮 Observation。原生工具调用时 Spring AI 在 {@code .call()} 内部执行工具并回灌结果,
+     * 工具输出不外露(ModelCallExecutor 只返回文本),故此处给占位说明;
+     * Task 5(DeepSeek 文本回退)将在此填入引擎手动执行的 Observation。
+     */
+    private String describeObservation(boolean hasToolCall) {
+        if (!hasToolCall) return "";
+        return "(原生工具调用已由 Spring AI 内部执行,Observation 已并入下一轮上下文)";
+    }
+
+    private String observePrompt(ChatContext ctx) {
+        return ctx.assembled() == null ? "" : ctx.assembled().observePrompt();
+    }
+
+    private void reportResult(ChatContext context, ChatExecutionResult result, String answer) {
+        if (lifecycleObserver == null) return;
+        try {
+            lifecycleObserver.resultReturned(context, result, answer, Instant.now());
+        } catch (RuntimeException ex) {
+            log.error("canonical lifecycle projection failed after react persistence, requestId={}",
+                    context.requestId(), ex);
+        }
+    }
+
+    private void releaseLockOnce(ChatContext context, String lockToken, AtomicBoolean lockReleased) {
+        if (!lockReleased.compareAndSet(false, true) || lockToken == null) return;
+        String sessionKey = context.assembled() == null ? null : context.assembled().sessionKey();
+        if (sessionKey != null) {
+            chatGuardService.releaseSessionLock(sessionKey, lockToken);
+        }
+    }
+
+    /**
+     * 是否允许同 provider 内 failover——含副作用型工具(写文件/脚本)时禁止重试,避免重复执行。
+     * 复制自 {@link AutonomousLoopEngine}(L635-642)。
+     */
+    private boolean isSafeToRetry(Object[] tools) {
+        if (tools == null) return true;
+        for (Object tool : tools) {
+            if (tool instanceof com.springclaw.tool.pack.WorkspaceEditToolPack) return false;
+            if (tool instanceof com.springclaw.tool.pack.ScriptSkillToolPack) return false;
+        }
+        return true;
     }
 
     // === Prompt 渲染(Task 2) ===

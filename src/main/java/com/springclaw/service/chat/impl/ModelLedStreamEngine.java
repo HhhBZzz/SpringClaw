@@ -141,7 +141,7 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
                         var requestSpec = activeClient.chatClient().prompt()
                                 .system(ctx.systemPrompt())
                                 .user(renderModelLedPrompt(ctx));
-                        if (DeepSeekChatCompatibility.supportsNativeToolCalling(activeClient) && tools != null && tools.length > 0) {
+                        if (tools != null && tools.length > 0) {
                             requestSpec = requestSpec.tools(tools);
                         }
                         var response = conversationAdvisorSupport.apply(
@@ -219,7 +219,7 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
             var requestSpec = streamClient.chatClient().prompt()
                     .system(context.systemPrompt())
                     .user(renderModelLedPrompt(context));
-            if (DeepSeekChatCompatibility.supportsNativeToolCalling(streamClient) && tools != null && tools.length > 0) {
+            if (tools != null && tools.length > 0) {
                 requestSpec = requestSpec.tools(tools);
             }
             ToolExecutionContext toolContext = new ToolExecutionContext(

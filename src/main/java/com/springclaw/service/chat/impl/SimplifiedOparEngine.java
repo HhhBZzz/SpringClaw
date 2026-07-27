@@ -189,7 +189,7 @@ public class SimplifiedOparEngine implements AgentEngine {
                                 .user(chatContext == null
                                         ? renderUserPrompt(injection, assembled.question())
                                         : renderUserPrompt(chatContext));
-                        if (DeepSeekChatCompatibility.supportsNativeToolCalling(client) && tools != null && tools.length > 0) {
+                        if (tools != null && tools.length > 0) {
                             requestSpec = requestSpec.tools(tools);
                         }
                         var response = conversationAdvisorSupport.apply(

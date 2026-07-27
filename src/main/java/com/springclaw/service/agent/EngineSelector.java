@@ -36,7 +36,8 @@ public class EngineSelector {
             "opar-loop", 40,
             "model-led-stream", 50,
             "simplified", 60,
-            "react-loop", 70
+            "react-loop", 70,
+            "plan-execute-loop", 80
     );
 
     private final List<AgentEngine> engines;

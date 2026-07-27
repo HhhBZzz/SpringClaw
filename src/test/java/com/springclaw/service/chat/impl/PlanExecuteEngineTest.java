@@ -216,8 +216,106 @@ class PlanExecuteEngineTest {
         // 循环行为:plan(1) + 2 step = 3 次 LLM 调用
         assertThat(result.modelEnabled()).isTrue();
         assertThat(result.reflect()).contains("X 是一个 AI 框架"); // 末步综合答案
-        assertThat(result.plan()).contains("2 步计划");
+        assertThat(result.plan()).contains("Plan 2 步").contains("Execute 2 步");
         verify(executor, times(3)).executeChat(any(), anyString(), any(), anyBoolean(), any());
+    }
+
+    // === PE-T5: ChatExecutionResult 五字段投影 + resolveFinalAnswer ===
+
+    /**
+     * PE-T5 结果投影:驱动完整 Plan + Execute(2 步计划,第1步调工具,第2步综合),
+     * 断言 {@link ChatExecutionResult} 五字段完整投影——
+     * <ul>
+     *   <li>plan = "Plan-Execute: Plan 2 步,Execute 2 步"(Plan 步数 + Execute 步数双计数)</li>
+     *   <li>action = Plan 轨迹(两步 stepText)+ Execute 轨迹(每步 stepText + Thought + Observation)</li>
+     *   <li>reflect = 末步最终答案 + "步骤概要:\n" + buildExecutedHistory(每步 stepText/Thought/Observation)</li>
+     *   <li>modelEnabled = true</li>
+     * </ul>
+     * <p>对齐 ReActEngineTest 的结果断言风格,聚焦结果结构而非循环行为(循环由 PE-T4 测试覆盖)。</p>
+     */
+    @Test
+    void buildsChatExecutionResultWithPlanExecuteTrace() throws Exception {
+        ModelCallExecutor executor = mock(ModelCallExecutor.class);
+        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
+        ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
+        PlanExecuteToolFixture fixture = new PlanExecuteToolFixture();
+        PlanExecuteEngine engine = newPlanExecuteEngine(executor, toolOrchestrator, guard,
+                new ExplicitToolExecutioner(), 2);
+
+        AiProviderService.ActiveChatClient client = planExecuteClient();
+        when(guard.isModelCallEnabled(client)).thenReturn(true);
+        when(toolOrchestrator.selectAutonomousTools(any(), any(), any()))
+                .thenReturn(new Object[]{fixture});
+
+        // Plan:2 步计划
+        PlanExecuteEngine.Plan plan = new PlanExecuteEngine.Plan(List.of(
+                new PlanExecuteEngine.PlanStep("搜索 X 相关资料"),
+                new PlanExecuteEngine.PlanStep("综合搜索结果给出回答")
+        ));
+        doReturn(planCallResult(plan, client))
+                .when(executor).executeChat(any(), eq("plan-execute-plan"), any(), anyBoolean(), any());
+
+        // Execute:第1步调 search 工具,第2步综合(无 Action)
+        String step1Thought = "Thought: 需要搜索 X\nAction: search(query=\"X\")";
+        String step2Thought = "最终答案: X 是一个 AI 框架(已综合)。";
+        doReturn(textCallResult(step1Thought, client), textCallResult(step2Thought, client))
+                .when(executor).executeChat(any(), startsWith("plan-execute-step"), any(), anyBoolean(), any());
+
+        ChatExecutionResult result = engine.execute(planExecuteCtx(client), (reason, ctx) -> "fallback");
+
+        // plan 字段:Plan 步数 + Execute 步数双计数(透明反映 Plan/Execute 两阶段)
+        assertThat(result.plan()).isEqualTo("Plan-Execute: Plan 2 步,Execute 2 步");
+
+        // action 字段:Plan 轨迹([Plan] N. stepText)+ Execute 轨迹([Step N] stepText + Thought + Observation)
+        assertThat(result.action())
+                .contains("[Plan] 1. 搜索 X 相关资料")
+                .contains("[Plan] 2. 综合搜索结果给出回答")
+                .contains("[Step 1] 搜索 X 相关资料")
+                .contains("Thought: 需要搜索 X")
+                .contains("Observation: 搜索结果:X") // 第1步工具真实 observation
+                .contains("[Step 2] 综合搜索结果给出回答")
+                .contains("X 是一个 AI 框架"); // 第2步 Thought(综合答案)
+
+        // reflect 字段:末步最终答案 + 步骤概要(每步 stepText/Thought/Observation)
+        assertThat(result.reflect())
+                .contains("X 是一个 AI 框架") // 末步答案
+                .contains("步骤概要")
+                .contains("搜索 X 相关资料") // 步骤概要含 plan stepText
+                .contains("Observation: 搜索结果:X"); // 步骤概要含工具 observation
+
+        assertThat(result.modelEnabled()).isTrue();
+    }
+
+    /**
+     * M1:首次 Plan 返回空计划时,终态 reflect 是 "Plan 阶段未生成有效步骤",
+     * <b>不是</b> max-replan 兜底消息 "已达 max-replan"——两路径消息区分,避免混淆。
+     * <p>且循环在首次空计划即返回(1 次 plan 调用,0 次 step 调用,不进入 Execute)。</p>
+     */
+    @Test
+    void emptyPlanDistinguishedFromMaxReplanFallback() throws Exception {
+        ModelCallExecutor executor = mock(ModelCallExecutor.class);
+        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
+        ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
+        PlanExecuteEngine engine = newPlanExecuteEngine(executor, toolOrchestrator, guard,
+                new ExplicitToolExecutioner(), 2);
+
+        AiProviderService.ActiveChatClient client = planExecuteClient();
+        when(guard.isModelCallEnabled(client)).thenReturn(true);
+        when(toolOrchestrator.selectAutonomousTools(any(), any(), any())).thenReturn(new Object[0]);
+
+        // Plan 始终返回空计划
+        doReturn(planCallResult(new PlanExecuteEngine.Plan(List.of()), client))
+                .when(executor).executeChat(any(), eq("plan-execute-plan"), any(), anyBoolean(), any());
+
+        ChatExecutionResult result = engine.execute(planExecuteCtx(client), (reason, ctx) -> "fallback");
+
+        assertThat(result.modelEnabled()).isTrue();
+        // M1:空计划消息,不是 max-replan 兜底
+        assertThat(result.reflect()).startsWith("Plan 阶段未生成有效步骤");
+        assertThat(result.reflect()).doesNotContain("已达 max-replan");
+        // 首次空计划即终止:1 次 plan 调用,未进入 Execute(0 次 step)
+        verify(executor, times(1)).executeChat(any(), eq("plan-execute-plan"), any(), anyBoolean(), any());
+        verify(executor, times(0)).executeChat(any(), startsWith("plan-execute-step"), any(), anyBoolean(), any());
     }
 
     /**

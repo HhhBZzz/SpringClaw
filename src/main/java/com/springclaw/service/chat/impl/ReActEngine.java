@@ -22,6 +22,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -47,8 +48,12 @@ import java.util.concurrent.atomic.AtomicReference;
  *       原生工具调用({@code .tools()})+ Thought/Action/Observation 历史 + "无工具调用即终止" + max-steps。</li>
  *   <li>假完成守护(Task 4):复用 {@link AutonomousExecutionTracker},write/side_effect/dangerous
  *       任务在完成判定处校验工具证据,无证据则拒绝并注入提示继续循环。</li>
- *   <li>待办:Task 5 DeepSeek V4 显式文本回退(!supportsNativeToolCalling 路径);
- *       Task 6 ChatExecutionResult/trace 精细化投影。</li>
+ *   <li>DeepSeek V4 显式 prompt 回退(Task 5):{@code !supportsNativeToolCalling} 时不挂 {@code .tools()},
+ *       LLM 文本输出 Thought + Action,引擎解析 Action({@link #findActionLine} 容错 markdown 噪声)→
+ *       在 tools 中按名查找 @Tool 方法({@link #findToolMethod})→ 参数绑定({@link #bindArguments},
+ *       支持命名/位置参数)→ 反射调用 Spring 代理 bean(经 ToolRuntimeAspect 审计 + tracker 证据上报)→
+ *       结果作为 Observation 拼入历史,驱动真正的多步 Thought-Action-Observation 循环。</li>
+ *   <li>待办:Task 6 ChatExecutionResult/trace 精细化投影。</li>
  * </ul>
  * 构造函数全量复用 AutonomousLoopEngine 的 11 bean 依赖。
  * </p>
@@ -177,7 +182,9 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
      * <p>结构对齐 {@link AutonomousLoopEngine#runAutonomousLoop}(L194-411):
      * 模型不可用降级 → 选工具 → 步数受限的阻塞循环 → 每步 sendStatus + 模型调用 + trace → 终止/max-steps。</p>
      * <p><b>主路径(Task 3)</b>:{@code DeepSeekChatCompatibility.supportsNativeToolCalling} 为真时挂 {@code .tools(tools)},
-     * 由 Spring AI 在 {@code .call()} 内部完成工具往返;DeepSeek V4 的显式文本回退留待 Task 5。
+     * 由 Spring AI 在 {@code .call()} 内部完成工具往返。
+     * <b>显式 prompt 回退(Task 5)</b>:该判定为假(DeepSeek V4 等)时不挂 {@code .tools()},
+     * LLM 文本输出 Thought + Action,引擎解析 Action 后手动执行工具并回灌 Observation。
      * 假完成守护已由 Task 4 接入({@link AutonomousExecutionTracker} 在 scope 内 setTracker,
      * 完成判定处校验工具证据);ChatExecutionResult/trace 的精细化投影留待 Task 6。</p>
      */
@@ -256,7 +263,8 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
                                     .system(systemPrompt)
                                     .user(TypedContextPromptRenderer.question(ctx));
                             // 主路径:原生工具调用(Spring AI 在 .call() 内完成 tool 往返)。
-                            // Task 5:!supportsNativeToolCalling 时改走显式 prompt 回退(本 Task 先不实现)。
+                            // DeepSeek V4(!supportsNativeToolCalling)不挂 .tools(),改走显式 prompt 回退——
+                            // LLM 文本输出 Action,循环下方 executeExplicitAction 解析+手动执行(Task 5)。
                             if (DeepSeekChatCompatibility.supportsNativeToolCalling(client)
                                     && tools != null && tools.length > 0) {
                                 req = req.tools(tools);
@@ -280,9 +288,19 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
                     break;
                 }
 
+                boolean nativeTools = DeepSeekChatCompatibility.supportsNativeToolCalling(activeClient);
                 boolean hasToolCall = hasActionLine(thought);
                 String action = describeAction(thought, hasToolCall);
-                String observation = describeObservation(hasToolCall);
+                // DeepSeek V4(!supportsNativeToolCalling)显式 prompt 回退:LLM 在文本里输出
+                // Thought + Action,引擎解析 Action 后手动执行工具(经 Spring AOP 代理 →
+                // ToolRuntimeAspect 审计 + tracker 证据上报),把结果作为 Observation 拼入历史。
+                // 原生路径下工具由 Spring AI 在 .call() 内执行,Observation 不外露,此处只标占位。
+                String observation;
+                if (hasToolCall && !nativeTools) {
+                    observation = executeExplicitAction(thought, tools, requestId);
+                } else {
+                    observation = describeObservation(hasToolCall);
+                }
                 steps.add(new ReActStep(thought, action, observation));
                 actionTrace.add("[Step " + stepNo + "] " + TextUtils.truncate(action, 400));
 
@@ -379,7 +397,8 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
      * <p>{@link ModelCallExecutor#executeChat} 内部只透出文本(L122 取
      * {@code ChatOperationResult.value()}, {@link org.springframework.ai.chat.model.ChatResponse}
      * 不外露),故无法从响应元数据读 tool call。此处以 ReAct 协议文本契约为信号:
-     * 模型本轮输出含以 "Action:" 起首的行 → 视为发起工具调用。</p>
+     * 模型本轮输出含以 "Action:" 起首的行(经 markdown 归一化,容忍 {@code **Action:**} /
+     * {@code - Action:} / {@code ## Action:} 等噪声)→ 视为发起工具调用。</p>
      * <ul>
      *   <li>原生工具调用主路径(Task 3):Spring AI 在 {@code .call()} 内完成 tool 往返,
      *       返回的是观察后的推理/最终答案,通常不再含 "Action:" 行 → 循环很快终止(多数 1 步)。</li>
@@ -388,13 +407,46 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
      * </ul>
      */
     private boolean hasActionLine(String thought) {
-        if (!StringUtils.hasText(thought)) return false;
+        return findActionLine(thought) != null;
+    }
+
+    /**
+     * 扫描模型输出,返回首个 "Action:" 行的**内容**(去掉 "Action:" 前缀,保留原大小写供参数解析),
+     * 经 markdown 归一化后行首匹配。无 Action 行返回 null。
+     * <p>归一化借鉴 {@link AutonomousLoopEngine#normalizeMarkerLine}:去 {@code `} / 粗体斜体 /
+     * heading / 列表符 / 数字列表前缀,容忍行尾标点。与该类的差异:不 lowercases 全行(参数需保大小写),
+     * 只在比较前缀时局部 lowercase。</p>
+     */
+    private String findActionLine(String thought) {
+        if (!StringUtils.hasText(thought)) return null;
         for (String line : thought.split("\n")) {
-            if (line.strip().toLowerCase(Locale.ROOT).startsWith("action:")) {
-                return true;
+            String stripped = stripMarkdownLinePrefix(line);
+            if (stripped == null) continue;
+            if (stripped.toLowerCase(Locale.ROOT).startsWith("action:")) {
+                return stripped.substring("action:".length());
             }
         }
-        return false;
+        return null;
+    }
+
+    /**
+     * 去掉行首 markdown 噪声(`、**、*、__、heading、列表符、数字列表)与两端空白。
+     * 空行返回 null。保留内容大小写(Action 参数可能含大写)。
+     */
+    private String stripMarkdownLinePrefix(String line) {
+        String s = line.strip();
+        if (s.isEmpty()) return null;
+        s = s.replace("`", "");
+        s = s.replaceAll("\\*\\*(.+?)\\*\\*", "$1");  // **bold**
+        s = s.replaceAll("\\*(.+?)\\*", "$1");        // *italic*
+        s = s.replaceAll("__(.+?)__", "$1");           // __bold__
+        s = s.strip();
+        if (s.isEmpty()) return null;
+        s = s.replaceAll("^#{1,6}\\s*", "");           // heading
+        s = s.replaceAll("^[-*+]\\s+", "");            // list bullet
+        s = s.replaceAll("^\\d+[.)]\\s+", "");         // numbered list
+        s = s.strip();
+        return s.isEmpty() ? null : s;
     }
 
     /**
@@ -405,23 +457,270 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
         if (!hasToolCall) {
             return "(无工具调用,给出最终答案)";
         }
-        for (String line : thought.split("\n")) {
-            String stripped = line.strip();
-            if (stripped.toLowerCase(Locale.ROOT).startsWith("action:")) {
-                return TextUtils.truncate(stripped, 400);
-            }
-        }
-        return "(原生工具调用)";
+        String content = findActionLine(thought);
+        return content == null ? "(原生工具调用)" : TextUtils.truncate(content.trim(), 400);
     }
 
     /**
      * 描述本轮 Observation。原生工具调用时 Spring AI 在 {@code .call()} 内部执行工具并回灌结果,
      * 工具输出不外露(ModelCallExecutor 只返回文本),故此处给占位说明;
-     * Task 5(DeepSeek 文本回退)将在此填入引擎手动执行的 Observation。
+     * DeepSeek 文本回退路径({@link #executeExplicitAction})返回引擎手动执行的真实 Observation。
      */
     private String describeObservation(boolean hasToolCall) {
         if (!hasToolCall) return "";
         return "(原生工具调用已由 Spring AI 内部执行,Observation 已并入下一轮上下文)";
+    }
+
+    // === DeepSeek V4 显式 prompt 回退(Task 5)===
+    // !supportsNativeToolCalling 路径:LLM 文本输出 Thought + Action,引擎解析 Action →
+    // 在 tools 中按名查 @Tool 方法 → 解析参数 → 反射调用(经 Spring AOP 代理 → ToolRuntimeAspect
+    // 审计 + AutonomousExecutionTracker 证据上报)→ 结果作为 Observation。
+
+    /** 解析后的 Action:工具名 + 原始参数串(尚未拆分)。 */
+    private record ParsedAction(String toolName, String rawArgs) {
+    }
+
+    /** 工具定位结果:Spring 代理 bean + @Tool 方法。 */
+    private record ToolMethod(Object bean, Method method) {
+    }
+
+    /**
+     * 显式 prompt 回退主逻辑:从模型输出解析 Action 行,在 tools 中按名查找 @Tool 方法,
+     * 手动调用(经 Spring AOP 代理 → ToolRuntimeAspect 审计 + tracker 证据上报),
+     * 把结果作为 Observation 返回。
+     * <p>解析失败 / 工具未找到 / 执行异常时返回错误说明字符串(不抛,保持循环推进,让 LLM 下一轮纠错)。</p>
+     */
+    private String executeExplicitAction(String thought, Object[] tools, String requestId) {
+        String actionContent = findActionLine(thought);
+        if (actionContent == null) {
+            return "(Action 行解析失败)";
+        }
+        ParsedAction parsed = splitAction(actionContent);
+        if (parsed == null) {
+            return "(Action 格式无法解析: " + TextUtils.truncate(actionContent.trim(), 120) + ")";
+        }
+        ToolMethod target = findToolMethod(tools, parsed.toolName());
+        if (target == null) {
+            log.warn("ReAct 显式回退未找到工具: tool={}, requestId={}", parsed.toolName(), requestId);
+            return "(未找到工具: " + parsed.toolName() + ")";
+        }
+        try {
+            Object[] args = bindArguments(target.method(), parsed.rawArgs());
+            target.method().setAccessible(true);
+            // 反射调用 Spring 代理 bean → Java 虚拟分派到 CGLIB override → ToolRuntimeAspect @Around
+            // 拦截(权限/限流/审计 + tracker 证据上报 + RunCoordinator TOOL_* emit)。
+            Object result = target.method().invoke(target.bean(), args);
+            String obs = result == null ? "(工具返回 null)" : String.valueOf(result);
+            log.info("ReAct 显式回退执行工具: tool={}, requestId={}, observationLen={}",
+                    parsed.toolName(), requestId, obs.length());
+            return TextUtils.truncate(obs, 400);
+        } catch (Exception ex) {
+            Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+            log.warn("ReAct 显式回退工具执行失败: tool={}, requestId={}, reason={}",
+                    parsed.toolName(), requestId, cause.getMessage());
+            return "(工具执行失败: " + cause.getClass().getSimpleName() + ": "
+                    + TextUtils.truncate(String.valueOf(cause.getMessage()), 200) + ")";
+        }
+    }
+
+    /**
+     * 把 "search(query=\"q\")" 拆成 (toolName=search, rawArgs=query="q")。
+     * 无括号的裸工具名(无参)也接受。格式不符返回 null。
+     */
+    private ParsedAction splitAction(String actionContent) {
+        String s = actionContent.trim();
+        int open = s.indexOf('(');
+        int close = s.lastIndexOf(')');
+        if (open <= 0 || close <= open) {
+            // 无括号:仅当整体是一个裸标识符(无空白)时视为零参工具调用
+            if (StringUtils.hasText(s) && !s.contains(" ") && s.matches("[\\w-]+")) {
+                return new ParsedAction(s, "");
+            }
+            return null;
+        }
+        String name = s.substring(0, open).trim();
+        String args = s.substring(open + 1, close).trim();
+        if (!StringUtils.hasText(name)) return null;
+        return new ParsedAction(name, args);
+    }
+
+    /**
+     * 在 tools 数组里按名(忽略大小写)查找 @Tool 方法。工具名取 {@link Tool#name()}(空则取方法名)。
+     * 经 {@link #getTargetClass} 穿透 CGLIB 代理。
+     */
+    private ToolMethod findToolMethod(Object[] tools, String toolName) {
+        if (tools == null || !StringUtils.hasText(toolName)) return null;
+        for (Object bean : tools) {
+            if (bean == null) continue;
+            Class<?> targetClass = getTargetClass(bean);
+            for (Method method : targetClass.getDeclaredMethods()) {
+                Tool anno = method.getAnnotation(Tool.class);
+                if (anno == null) continue;
+                String name = StringUtils.hasText(anno.name()) ? anno.name() : method.getName();
+                if (toolName.equalsIgnoreCase(name)) {
+                    return new ToolMethod(bean, method);
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 把原始参数串绑定到方法的形参,返回可反射 invoke 的 Object[]。
+     * 支持:
+     * <ul>
+     *   <li>命名参数 {@code name="value"}(形参名经 {@code -parameters} 保留,按名匹配;)</li>
+     *   <li>位置参数 {@code "value"} / 裸 token(按序填充空位)</li>
+     *   <li>混合:命名找不到形参时回退位置绑定</li>
+     *   <li>引号剥离 + String/int/long/boolean/double 类型转换</li>
+     * </ul>
+     * 顶层级逗号拆分(尊重 "..." 与 '...' 引号及 ()/[]/{})。缺省值:null(对象)/0false(原始)。
+     */
+    private Object[] bindArguments(Method method, String rawArgs) {
+        Parameter[] params = method.getParameters();
+        Object[] bound = new Object[params.length];
+        if (params.length == 0 || !StringUtils.hasText(rawArgs)) {
+            return fillDefaults(bound, params);
+        }
+        List<String> tokens = splitArgs(rawArgs);
+        boolean anyNamed = false;
+        for (String t : tokens) {
+            if (nameValueSplitIndex(t) >= 0) { anyNamed = true; break; }
+        }
+        int pos = 0;
+        for (String token : tokens) {
+            int eq = anyNamed ? nameValueSplitIndex(token) : -1;
+            if (eq >= 0) {
+                String nm = token.substring(0, eq).trim();
+                String val = token.substring(eq + 1).trim();
+                int idx = findParamIndex(params, nm);
+                if (idx >= 0) {
+                    bound[idx] = parseValue(val, params[idx].getType());
+                    continue;
+                }
+                // 命名但形参名不匹配(如未带 -parameters)→ 回退位置绑定(用 value)
+                int slot = nextSlot(bound, pos);
+                if (slot >= 0) {
+                    bound[slot] = parseValue(val, params[slot].getType());
+                    pos = slot + 1;
+                }
+            } else {
+                int slot = nextSlot(bound, pos);
+                if (slot >= 0) {
+                    bound[slot] = parseValue(token, params[slot].getType());
+                    pos = slot + 1;
+                }
+            }
+        }
+        return fillDefaults(bound, params);
+    }
+
+    /** 顶层级逗号拆分,尊重双引号/单引号与 ()/[]/{} 嵌套。 */
+    private List<String> splitArgs(String rawArgs) {
+        List<String> out = new ArrayList<>();
+        StringBuilder cur = new StringBuilder();
+        char quote = 0;
+        int depth = 0;
+        for (int i = 0; i < rawArgs.length(); i++) {
+            char c = rawArgs.charAt(i);
+            if (quote != 0) {
+                cur.append(c);
+                if (c == quote) quote = 0;
+            } else if (c == '"' || c == '\'') {
+                quote = c;
+                cur.append(c);
+            } else if (c == '(' || c == '[' || c == '{') {
+                depth++;
+                cur.append(c);
+            } else if (c == ')' || c == ']' || c == '}') {
+                depth--;
+                cur.append(c);
+            } else if (c == ',' && depth == 0) {
+                String t = cur.toString().trim();
+                if (!t.isEmpty()) out.add(t);
+                cur.setLength(0);
+            } else {
+                cur.append(c);
+            }
+        }
+        String last = cur.toString().trim();
+        if (!last.isEmpty()) out.add(last);
+        return out;
+    }
+
+    /**
+     * 返回 token 中分隔命名参数的 {@code =} 的索引;不是命名参数返回 -1。
+     * 规则:= 左侧必须是纯标识符([A-Za-z0-9_-],避开 ==、&gt;=、&lt;=、!=)。
+     */
+    private int nameValueSplitIndex(String token) {
+        if (token == null || token.isEmpty()) return -1;
+        int eq = token.indexOf('=');
+        if (eq <= 0) return -1;
+        String lhs = token.substring(0, eq);
+        if (lhs.endsWith(">") || lhs.endsWith("<") || lhs.endsWith("!")) return -1;
+        for (int i = 0; i < lhs.length(); i++) {
+            char c = lhs.charAt(i);
+            if (!(Character.isLetterOrDigit(c) || c == '_' || c == '-')) return -1;
+        }
+        return eq;
+    }
+
+    private int findParamIndex(Parameter[] params, String name) {
+        for (int i = 0; i < params.length; i++) {
+            if (name.equalsIgnoreCase(params[i].getName())) return i;
+        }
+        return -1;
+    }
+
+    private int nextSlot(Object[] bound, int from) {
+        for (int i = from; i < bound.length; i++) {
+            if (bound[i] == null) return i;
+        }
+        return -1;
+    }
+
+    /** 剥引号 + 按 target 类型转换(String/int/long/boolean/double);其余按 String 返回。 */
+    private Object parseValue(String value, Class<?> type) {
+        String v = value == null ? "" : value.trim();
+        if (v.length() >= 2 && ((v.startsWith("\"") && v.endsWith("\""))
+                || (v.startsWith("'") && v.endsWith("'")))) {
+            v = v.substring(1, v.length() - 1);
+        }
+        if (type == String.class) return v;
+        if (type == int.class || type == Integer.class) {
+            try { return Integer.parseInt(v); } catch (Exception e) { return 0; }
+        }
+        if (type == long.class || type == Long.class) {
+            try { return Long.parseLong(v); } catch (Exception e) { return 0L; }
+        }
+        if (type == boolean.class || type == Boolean.class) {
+            return "true".equalsIgnoreCase(v) || "1".equals(v);
+        }
+        if (type == double.class || type == Double.class) {
+            try { return Double.parseDouble(v); } catch (Exception e) { return 0d; }
+        }
+        return v;
+    }
+
+    private Object[] fillDefaults(Object[] bound, Parameter[] params) {
+        for (int i = 0; i < bound.length; i++) {
+            if (bound[i] == null) {
+                bound[i] = primitiveDefault(params[i].getType());
+            }
+        }
+        return bound;
+    }
+
+    private Object primitiveDefault(Class<?> type) {
+        if (type == int.class) return 0;
+        if (type == long.class) return 0L;
+        if (type == boolean.class) return false;
+        if (type == double.class) return 0d;
+        if (type == float.class) return 0f;
+        if (type == short.class) return (short) 0;
+        if (type == byte.class) return (byte) 0;
+        if (type == char.class) return (char) 0;
+        return null;
     }
 
     private String observePrompt(ChatContext ctx) {
@@ -484,7 +783,8 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
 
                 # 推理协议
                 每一步:先输出 Thought(简短推理:分析现状、决定下一步),再决定:
-                  - 调用一个工具 → 输出 Action(工具会自动执行,结果作为下一步的 Observation)
+                  - 调用一个工具 → 输出一行 Action: 工具名(参数名="值", ...),例如 Action: search(query="Spring AI")
+                    工具会被引擎执行,结果作为下一步的 Observation;若工具无参数则写 Action: 工具名()
                   - 或已得到最终答案 → 直接输出最终答案(不输出 Action 视为完成)
 
                 # 可用工具
@@ -558,9 +858,11 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
     }
 
     /**
-     * 反射扫描工具 bean 上的 {@link Tool} 注解,列成 "- name: description" 清单。
-     * <p>与 {@link AutonomousLoopEngine#renderToolList} 等价(含 CGLIB 代理穿透),复制于该类——
-     * 二者都是 private,暂不抽公共基类以免越出 Task 2 范围。</p>
+     * 反射扫描工具 bean 上的 {@link Tool} 注解,列成 "- name(param1, param2): description" 清单。
+     * <p>与 {@link AutonomousLoopEngine#renderToolList} 等价(含 CGLIB 代理穿透),差异:ReAct
+     * 额外列出形参名(Task 5 显式 prompt 回退需要——DeepSeek V4 不走 .tools(),LLM 据此格式化
+     * {@code Action: toolName(param="value")})。复制于 AutonomousLoopEngine 的同名方法,二者都是
+     * private,暂不抽公共基类以免越出 Task 范围。</p>
      */
     private String renderToolList(Object[] tools) {
         if (tools == null || tools.length == 0) {
@@ -575,11 +877,24 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
                 if (toolAnno != null) {
                     String toolName = StringUtils.hasText(toolAnno.name()) ? toolAnno.name() : method.getName();
                     String description = toolAnno.description();
-                    builder.append("- ").append(toolName).append(": ").append(description).append("\n");
+                    builder.append("- ").append(toolName)
+                            .append("(").append(renderParamSignature(method)).append(")")
+                            .append(": ").append(description).append("\n");
                 }
             }
         }
         return builder.toString().trim();
+    }
+
+    /** 渲染方法形参名清单(逗号分隔),供显式 prompt 回退时 LLM 格式化 Action 入参。 */
+    private String renderParamSignature(Method method) {
+        Parameter[] params = method.getParameters();
+        if (params.length == 0) return "";
+        StringJoiner sj = new StringJoiner(", ");
+        for (Parameter p : params) {
+            sj.add(p.getName());
+        }
+        return sj.toString();
     }
 
     private Class<?> getTargetClass(Object bean) {

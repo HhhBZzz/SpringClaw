@@ -2,26 +2,36 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.runtime.contract.AgentParadigm;
+import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
 import com.springclaw.tool.runtime.ToolOrchestrator;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.converter.BeanOutputConverter;
+import org.springframework.ai.tool.annotation.Tool;
 
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
- * PlanExecuteEngine 骨架单测(PE-T2):只锁定接入地基不变量——
- * 声明 PLAN_EXECUTE 范式、name() 登记 "plan-execute-loop"、supports() 仅在 paradigm=PLAN_EXECUTE 时为真。
- * Plan/Execute 循环体留待 Task 3/4 填充,故此处不驱动 execute/stream。
+ * PlanExecuteEngine 单测(PE-T2 骨架 + PE-T3 Plan 阶段 + PE-T4 Execute/Replan/假完成守护)。
+ * <p>PE-T4 新增:Execute 逐步(ExplicitToolExecutioner 手动执行工具)+ Replan(失败/假完成反馈)
+ * + 假完成守护(write 任务校验工具证据)+ max-replan 兜底。mock ModelCallExecutor 控制 Plan 与
+ * Execute 每步的 LLM 输出;ExplicitToolExecutioner 用真实实例 + fixture(对齐 ReActEngineTest 风格,
+ * 更端到端:LLM 文本 → 真实解析 Action → 反射调 fixture.@Tool → 真实 Observation)。</p>
  */
 class PlanExecuteEngineTest {
 
@@ -82,13 +92,13 @@ class PlanExecuteEngineTest {
     }
 
     /**
-     * executeChat 抛异常时 runPlan 降级为空列表(不向调用方抛),为 Task 4 重规划/兜底留出判断空间。
+     * executeChat 抛异常时 runPlan 降级为空列表(不向调用方抛),为 PE-T4 重规划/兜底留出判断空间。
      */
     @Test
     void runPlanReturnsEmptyOnException() throws Exception {
         ModelCallExecutor executor = mock(ModelCallExecutor.class);
         AiProviderService.ActiveChatClient client = planExecuteClient();
-        doThrow(new RuntimeException("model unavailable"))
+        org.mockito.Mockito.doThrow(new RuntimeException("model unavailable"))
                 .when(executor).executeChat(
                         any(AiProviderService.ActiveChatClient.class),
                         eq("plan-execute-plan"),
@@ -123,8 +133,189 @@ class PlanExecuteEngineTest {
         assertThat(plan.steps().get(1).stepText()).isEqualTo("综合结果");
     }
 
+    // === PE-T4: Execute 逐步 + Replan + 假完成守护 ===
+
+    /**
+     * 主路径:Plan 产 2 步计划 → Execute 逐步(经真实 ExplicitToolExecutioner 手动执行工具)→ read 任务完成。
+     * <p>断言要点:</p>
+     * <ul>
+     *   <li>search 工具被手动执行恰好 1 次(第1步 Action,第2步综合无 Action)——证明 Execute 真正手动调了 @Tool;</li>
+     *   <li>循环跑满 plan 的 2 步(2 次 step LLM 调用)+ 1 次 plan LLM 调用 = 3 次;</li>
+     *   <li>最终答案取末步(综合步)的 LLM 输出。</li>
+     * </ul>
+     */
+    @Test
+    void executeRunsEachPlanStepWithManualToolLoop() throws Exception {
+        ModelCallExecutor executor = mock(ModelCallExecutor.class);
+        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
+        ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
+        PlanExecuteToolFixture fixture = new PlanExecuteToolFixture();
+        PlanExecuteEngine engine = newPlanExecuteEngine(executor, toolOrchestrator, guard,
+                new ExplicitToolExecutioner(), 2);
+
+        AiProviderService.ActiveChatClient client = planExecuteClient();
+        when(guard.isModelCallEnabled(client)).thenReturn(true);
+        when(toolOrchestrator.selectAutonomousTools(any(), any(), any()))
+                .thenReturn(new Object[]{fixture});
+
+        // Plan:2 步计划
+        PlanExecuteEngine.Plan plan = new PlanExecuteEngine.Plan(List.of(
+                new PlanExecuteEngine.PlanStep("搜索 X 相关资料"),
+                new PlanExecuteEngine.PlanStep("综合搜索结果给出回答")
+        ));
+        doReturn(planCallResult(plan, client))
+                .when(executor).executeChat(any(), eq("plan-execute-plan"), any(), anyBoolean(), any());
+
+        // Execute 两步的 LLM 输出
+        String step1Thought = "Thought: 需要搜索 X\nAction: search(query=\"X\")";
+        String step2Thought = "最终答案: X 是一个 AI 框架(已综合)。";
+        doReturn(textCallResult(step1Thought, client), textCallResult(step2Thought, client))
+                .when(executor).executeChat(any(), startsWith("plan-execute-step"), any(), anyBoolean(), any());
+
+        ChatExecutionResult result = engine.execute(planExecuteCtx(client), (reason, ctx) -> "fallback");
+
+        // 工具被手动执行(Execute 主路径核心证据)
+        assertThat(fixture.searchCalls.get())
+                .as("Execute 应手动执行 search 工具恰好 1 次(第1步 Action,第2步综合无 Action)")
+                .isEqualTo(1);
+        // 循环行为:plan(1) + 2 step = 3 次 LLM 调用
+        assertThat(result.modelEnabled()).isTrue();
+        assertThat(result.reflect()).contains("X 是一个 AI 框架"); // 末步综合答案
+        assertThat(result.plan()).contains("2 步计划");
+        verify(executor, times(3)).executeChat(any(), anyString(), any(), anyBoolean(), any());
+    }
+
+    /**
+     * Replan 路径:第1次 plan 的步骤工具失败(未找到工具)→ 带 feedback Replan → 新 plan 的步骤成功 → 完成。
+     * <p>断言:plan 调用 2 次(首规划 + 1 次 Replan)、step 调用 2 次(失败步 + 成功步)共 4 次 LLM 调用;
+     * 最终答案取第2次 plan 成功步的输出。</p>
+     */
+    @Test
+    void replanOnStepFailureAndRetry() throws Exception {
+        ModelCallExecutor executor = mock(ModelCallExecutor.class);
+        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
+        ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
+        // tools 为空 → ExplicitToolExecutioner 找不到 unknownTool → "(未找到工具: unknownTool)" → stepFailed
+        PlanExecuteEngine engine = newPlanExecuteEngine(executor, toolOrchestrator, guard,
+                new ExplicitToolExecutioner(), 2);
+
+        AiProviderService.ActiveChatClient client = planExecuteClient();
+        when(guard.isModelCallEnabled(client)).thenReturn(true);
+        when(toolOrchestrator.selectAutonomousTools(any(), any(), any())).thenReturn(new Object[0]);
+
+        // Plan:第1次返回含未知工具步骤,第2次 Replan 返回综合步骤
+        PlanExecuteEngine.Plan plan1 = new PlanExecuteEngine.Plan(List.of(
+                new PlanExecuteEngine.PlanStep("调用 unknownTool 获取数据")));
+        PlanExecuteEngine.Plan plan2 = new PlanExecuteEngine.Plan(List.of(
+                new PlanExecuteEngine.PlanStep("用本地数据综合回答")));
+        doReturn(planCallResult(plan1, client), planCallResult(plan2, client))
+                .when(executor).executeChat(any(), eq("plan-execute-plan"), any(), anyBoolean(), any());
+
+        // Execute:第1次失败(Action 调未知工具),第2次成功(纯答案)
+        String failThought = "Thought: 调用工具\nAction: unknownTool(query=\"X\")";
+        String successThought = "最终答案: 已用本地数据综合完成。";
+        doReturn(textCallResult(failThought, client), textCallResult(successThought, client))
+                .when(executor).executeChat(any(), startsWith("plan-execute-step"), any(), anyBoolean(), any());
+
+        ChatExecutionResult result = engine.execute(planExecuteCtx(client), (reason, ctx) -> "fallback");
+
+        assertThat(result.modelEnabled()).isTrue();
+        assertThat(result.reflect()).contains("已用本地数据综合完成"); // 第2次 plan 成功步答案
+        // 2 plan + 2 step = 4 次 LLM 调用
+        verify(executor, times(4)).executeChat(any(), anyString(), any(), anyBoolean(), any());
+    }
+
+    /**
+     * 假完成守护:write 任务,LLM 每步直接给"最终答案"文本(无 Action 行)→ tracker 无写证据 →
+     * satisfiesCompletionCondition("write")=false → 拒绝完成 → Replan。max-replan 触达后返回兜底结果。
+     * <p>断言:循环未在第1次 plan 完成,跑到 max-replan=1(2 次 plan + 2 次 step = 4 次 LLM 调用);
+     * reflect 主答案是 max-replan 兜底提示(非 LLM 的假答案)。</p>
+     */
+    @Test
+    void writeTaskFakeCompletionGuardRejects() throws Exception {
+        ModelCallExecutor executor = mock(ModelCallExecutor.class);
+        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
+        ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
+        PlanExecuteEngine engine = newPlanExecuteEngine(executor, toolOrchestrator, guard,
+                new ExplicitToolExecutioner(), 1); // maxReplan=1
+
+        AiProviderService.ActiveChatClient client = planExecuteClient();
+        when(guard.isModelCallEnabled(client)).thenReturn(true);
+        when(toolOrchestrator.selectAutonomousTools(any(), any(), any())).thenReturn(new Object[0]);
+
+        // Plan:始终返回 1 步计划
+        PlanExecuteEngine.Plan plan = new PlanExecuteEngine.Plan(List.of(
+                new PlanExecuteEngine.PlanStep("创建文件 hello.txt")));
+        doReturn(planCallResult(plan, client))
+                .when(executor).executeChat(any(), eq("plan-execute-plan"), any(), anyBoolean(), any());
+
+        // Execute:每步给"最终答案"文本(无 Action 行)→ tracker 无写证据 → 假完成拦截
+        String fakeFinal = "最终答案: 我已经创建了文件 hello.txt。";
+        doReturn(textCallResult(fakeFinal, client))
+                .when(executor).executeChat(any(), startsWith("plan-execute-step"), any(), anyBoolean(), any());
+
+        AgentDecision writeDecision = new AgentDecision(
+                "general", "basic_model", List.of(), "write", false, "test write task");
+        ChatExecutionResult result = engine.execute(
+                planExecuteCtx(client, writeDecision), (reason, ctx) -> "fallback");
+
+        // 假完成被拦截:2 次 plan + 2 次 step = 4 次 LLM 调用(跑到 max-replan=1)
+        verify(executor, times(4)).executeChat(any(), anyString(), any(), anyBoolean(), any());
+        assertThat(result.modelEnabled()).isTrue();
+        // reflect 主答案是 max-replan 兜底提示(非假答案)——假完成守护仍生效
+        assertThat(result.reflect()).startsWith("已达 max-replan");
+    }
+
+    /**
+     * 反向校验:read 任务(riskLevel=read),计划执行完即完成,不校验工具证据 → 不会被假完成守护拦下。
+     */
+    @Test
+    void readTaskCompletesWithoutToolEvidence() throws Exception {
+        ModelCallExecutor executor = mock(ModelCallExecutor.class);
+        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
+        ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
+        PlanExecuteEngine engine = newPlanExecuteEngine(executor, toolOrchestrator, guard,
+                new ExplicitToolExecutioner(), 2);
+
+        AiProviderService.ActiveChatClient client = planExecuteClient();
+        when(guard.isModelCallEnabled(client)).thenReturn(true);
+        when(toolOrchestrator.selectAutonomousTools(any(), any(), any())).thenReturn(new Object[0]);
+
+        PlanExecuteEngine.Plan plan = new PlanExecuteEngine.Plan(List.of(
+                new PlanExecuteEngine.PlanStep("直接分析给出结论")));
+        doReturn(planCallResult(plan, client))
+                .when(executor).executeChat(any(), eq("plan-execute-plan"), any(), anyBoolean(), any());
+
+        String finalAnswer = "最终答案: 这是一个只读分析结论。";
+        doReturn(textCallResult(finalAnswer, client))
+                .when(executor).executeChat(any(), startsWith("plan-execute-step"), any(), anyBoolean(), any());
+
+        // decision=null → riskLevel=read
+        ChatExecutionResult result = engine.execute(planExecuteCtx(client), (reason, ctx) -> "fallback");
+
+        assertThat(result.modelEnabled()).isTrue();
+        assertThat(result.reflect()).contains("只读分析结论"); // 真答案透传
+        // plan(1) + step(1) = 2 次 LLM 调用,第1次 plan 即完成(无 Replan)
+        verify(executor, times(2)).executeChat(any(), anyString(), any(), anyBoolean(), any());
+    }
+
+    /**
+     * 测试用工具 fixture:反射扫 {@link Tool} 的目标(模拟真实 tool pack bean)。
+     * searchCalls 计数器用于断言 Execute 主路径**手动执行**了工具(经 ExplicitToolExecutioner 反射调用)。
+     */
+    static class PlanExecuteToolFixture {
+        final AtomicInteger searchCalls = new AtomicInteger();
+
+        @Tool(name = "search", description = "搜索知识库")
+        public String search(String query) {
+            searchCalls.incrementAndGet();
+            return "搜索结果:" + query;
+        }
+    }
+
     /**
      * 构造 PlanExecuteEngine,注入指定的 ModelCallExecutor mock(其余 10 bean 仍 mock)。
+     * PE-T4 起构造函数新增 ExplicitToolExecutioner(真实实例)。
      */
     private PlanExecuteEngine newPlanExecuteEngineWith(ModelCallExecutor executor) {
         return new PlanExecuteEngine(
@@ -139,13 +330,40 @@ class PlanExecuteEngineTest {
                 mock(ChatResultPersister.class),
                 mock(ChatGuardService.class),
                 mock(RunLifecycleObserver.class),
+                new ExplicitToolExecutioner(),
                 2
         );
     }
 
     /**
-     * 构造 PlanExecuteEngine 骨架:mock 11 bean 依赖 + maxReplan=2。
-     * 依赖签名对齐 ReActEngine(剔除 Task 4 才接入的 ExplicitToolExecutioner)。
+     * PE-T4 循环测试用:注入可 stub 的 ModelCallExecutor / ToolOrchestrator / Guard +
+     * ExplicitToolExecutioner(真实)+ 自定义 maxReplan。
+     */
+    private PlanExecuteEngine newPlanExecuteEngine(ModelCallExecutor executor,
+                                                   ToolOrchestrator toolOrchestrator,
+                                                   ModelTransportGuardService guard,
+                                                   ExplicitToolExecutioner toolExecutioner,
+                                                   int maxReplan) {
+        return new PlanExecuteEngine(
+                mock(AiProviderService.class),
+                toolOrchestrator,
+                guard,
+                executor,
+                mock(ConversationAdvisorSupport.class),
+                mock(LocalExecutionSupport.class),
+                mock(ChatResponsePolicyService.class),
+                mock(SseEventBridge.class),
+                mock(ChatResultPersister.class),
+                mock(ChatGuardService.class),
+                mock(RunLifecycleObserver.class),
+                toolExecutioner,
+                maxReplan
+        );
+    }
+
+    /**
+     * 构造 PlanExecuteEngine 骨架:mock 11 bean 依赖 + 真实 ExplicitToolExecutioner + maxReplan=2。
+     * 依赖签名对齐 ReActEngine(PE-T4 接入 ExplicitToolExecutioner)。
      */
     private PlanExecuteEngine newPlanExecuteEngine() {
         return new PlanExecuteEngine(
@@ -160,12 +378,14 @@ class PlanExecuteEngineTest {
                 mock(ChatResultPersister.class),
                 mock(ChatGuardService.class),
                 mock(RunLifecycleObserver.class),
+                new ExplicitToolExecutioner(),
                 2
         );
     }
 
     /**
-     * 构造测试用 ActiveChatClient(真实 record,无需 mock)。
+     * 构造可用的 ActiveChatClient(真实 record,无需 mock)。chatClient 置 null——
+     * ModelCallExecutor 被 mock,真实调用 lambda 不会执行,无需 ChatClient。
      */
     private AiProviderService.ActiveChatClient planExecuteClient() {
         return new AiProviderService.ActiveChatClient(
@@ -173,10 +393,33 @@ class PlanExecuteEngineTest {
     }
 
     /**
-     * 构造 runPlan 所需的最小 ChatContext——带 assembled(含 question)、channel/userId/requestId。
-     * executeChat 被 mock,故 lambda 不实际执行;renderPlanPrompt 会读取 question/injection。
+     * 构造 ModelCallResult<Plan>(value=结构化 Plan,client=failover 后客户端)。
+     */
+    private ModelCallExecutor.ModelCallResult<PlanExecuteEngine.Plan> planCallResult(
+            PlanExecuteEngine.Plan plan, AiProviderService.ActiveChatClient client) {
+        return new ModelCallExecutor.ModelCallResult<>(plan, client, List.of(), false);
+    }
+
+    /**
+     * 构造 ModelCallResult<String>(value=Execute 每步的 LLM 文本输出,client=failover 后客户端)。
+     */
+    private ModelCallExecutor.ModelCallResult<String> textCallResult(
+            String text, AiProviderService.ActiveChatClient client) {
+        return new ModelCallExecutor.ModelCallResult<>(text, client, List.of(), false);
+    }
+
+    /**
+     * 构造 runPlanExecute 所需的最小 ChatContext——带 assembled(含 question)、channel/userId/requestId、
+     * decision=null(runPlanExecute 兜底 riskLevel=read)、paradigm=PLAN_EXECUTE。
      */
     private ChatContext planExecuteCtx(AiProviderService.ActiveChatClient client) {
+        return planExecuteCtx(client, null);
+    }
+
+    /**
+     * 带 AgentDecision 的 planExecuteCtx 重载:PE-T4 假完成测试用它注入 riskLevel=write 等。
+     */
+    private ChatContext planExecuteCtx(AiProviderService.ActiveChatClient client, AgentDecision decision) {
         AssembledContext assembled = new AssembledContext(
                 "sess-1", "test-channel", "user-1",
                 "请搜索 X 并综合给出回答",
@@ -186,7 +429,7 @@ class PlanExecuteEngineTest {
                 "请搜索 X 并综合给出回答", "请搜索 X 并综合给出回答",
                 "req-1", "SOUL", assembled, client,
                 "plan-execute", null, "agent", "general",
-                null, null, null, AgentParadigm.PLAN_EXECUTE
+                decision, null, null, AgentParadigm.PLAN_EXECUTE
         );
     }
 

@@ -237,159 +237,8 @@ class ReActEngineTest {
         verify(executor, times(2)).executeChat(any(), anyString(), any(), anyBoolean(), any());
     }
 
-    /**
-     * 位置参数格式 Action 也要能解析+执行:Action: search("Spring AI")。
-     * 校验位置参数绑定(无 name=)正确解析并手动执行工具,拿到真实 Observation。
-     */
-    @Test
-    void reactLoopParsesPositionalActionArgs() throws Exception {
-        ModelCallExecutor executor = mock(ModelCallExecutor.class);
-        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
-        ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
-        ReActEngine engine = newReActEngine(executor, toolOrchestrator, guard, 6);
-
-        AiProviderService.ActiveChatClient client = activeClient();
-        when(guard.isModelCallEnabled(client)).thenReturn(true);
-        ReactToolFixture fixture = new ReactToolFixture();
-        when(toolOrchestrator.selectAutonomousTools(any(), any(), any()))
-                .thenReturn(new Object[]{fixture});
-
-        String step1 = "Thought: 搜索\nAction: search(\"Spring AI\")";
-        String step2 = "最终答案: 完成。";
-        when(executor.<String>executeChat(any(), anyString(), any(), anyBoolean(), any()))
-                .thenReturn(callResult(step1, client), callResult(step2, client));
-
-        engine.execute(reactContext(client), (reason, ctx) -> "fallback");
-
-        assertThat(fixture.searchCalls.get()).isEqualTo(1);
-    }
-
-    /**
-     * Markdown 修饰的 Action 行(**Action:** / - Action: 等)也要识别为工具调用。
-     * 校验 hasActionLine / findActionLine 借鉴 normalizeMarkerLine 的容错。
-     */
-    @Test
-    void reactLoopRecognizesMarkdownBoldActionLine() throws Exception {
-        ModelCallExecutor executor = mock(ModelCallExecutor.class);
-        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
-        ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
-        ReActEngine engine = newReActEngine(executor, toolOrchestrator, guard, 6);
-
-        AiProviderService.ActiveChatClient client = activeClient();
-        when(guard.isModelCallEnabled(client)).thenReturn(true);
-        ReactToolFixture fixture = new ReactToolFixture();
-        when(toolOrchestrator.selectAutonomousTools(any(), any(), any()))
-                .thenReturn(new Object[]{fixture});
-
-        // **Action:** bold + list prefix + trailingcolon noise
-        String step1 = "Thought: 需要搜索\n- **Action:** search(query=\"q\").";
-        String step2 = "最终答案: 完成。";
-        when(executor.<String>executeChat(any(), anyString(), any(), anyBoolean(), any()))
-                .thenReturn(callResult(step1, client), callResult(step2, client));
-
-        engine.execute(reactContext(client), (reason, ctx) -> "fallback");
-
-        assertThat(fixture.searchCalls.get())
-                .as("markdown 修饰的 **Action:** 行应被识别并执行")
-                .isEqualTo(1);
-    }
-
-    /**
-     * 回归:含 {@code *}(glob 通配符)与反引号(shell)的 Action 参数不得被 markdown 归一化损坏。
-     * <p>原 bug:{@code findActionLine} 把整行过 {@code stripMarkdownLinePrefix} 再取内容,
-     * 导致 {@code pattern="*.*"} 经 italic 正则 → {@code "."}(参数被静默损坏,工具拿到错误通配符),
-     * {@code cmd="echo `pwd`"} 的反引号被剥 → {@code "echo pwd"}。修复后:归一化只用于"行首 Action:
-     * 前缀"判定,参数从原始行取,通配符/反引号原样到达工具。</p>
-     */
-    @Test
-    void actionParsePreservesGlobAndBacktickArgs() throws Exception {
-        ModelCallExecutor executor = mock(ModelCallExecutor.class);
-        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
-        ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
-        ReActEngine engine = newReActEngine(executor, toolOrchestrator, guard, 6);
-
-        AiProviderService.ActiveChatClient client = activeClient();
-        when(guard.isModelCallEnabled(client)).thenReturn(true);
-        ReactToolFixture fixture = new ReactToolFixture();
-        when(toolOrchestrator.selectAutonomousTools(any(), any(), any()))
-                .thenReturn(new Object[]{fixture});
-
-        // step1: glob 通配符 *.* 不能被归一化损坏为 .;step2: shell 反引号不能被剥;step3: 最终答案
-        String step1 = "Thought: 列出当前目录文件\nAction: glob(pattern=\"*.*\")";
-        String step2 = "Thought: 取当前工作目录\nAction: shell(cmd=\"echo `pwd`\")";
-        String step3 = "最终答案: 完成。";
-        when(executor.<String>executeChat(any(), anyString(), any(), anyBoolean(), any()))
-                .thenReturn(callResult(step1, client),
-                        callResult(step2, client),
-                        callResult(step3, client));
-
-        engine.execute(reactContext(client), (reason, ctx) -> "fallback");
-
-        assertThat(fixture.lastGlobPattern.get())
-                .as("glob 通配符参数 *.* 不应被 markdown 归一化损坏为 .")
-                .isEqualTo("*.*");
-        assertThat(fixture.lastShellCmd.get())
-                .as("shell 反引号参数 echo `pwd` 不应被剥成 echo pwd")
-                .isEqualTo("echo `pwd`");
-    }
-
-    /**
-     * 回归补充:markdown 修饰的 Action 行({@code **Action:**})行首检测仍工作,且参数从原始行取
-     * (参数里的 {@code *} 不被归一化损坏)。校验"行首归一化检测 + 参数 raw 提取"两条路径并存。
-     */
-    @Test
-    void actionParsePreservesGlobArgsUnderMarkdownBoldPrefix() throws Exception {
-        ModelCallExecutor executor = mock(ModelCallExecutor.class);
-        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
-        ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
-        ReActEngine engine = newReActEngine(executor, toolOrchestrator, guard, 6);
-
-        AiProviderService.ActiveChatClient client = activeClient();
-        when(guard.isModelCallEnabled(client)).thenReturn(true);
-        ReactToolFixture fixture = new ReactToolFixture();
-        when(toolOrchestrator.selectAutonomousTools(any(), any(), any()))
-                .thenReturn(new Object[]{fixture});
-
-        // **Action:** bold 前缀 + 参数含 *.*:行首归一化检测命中,参数 raw 保留 *.*
-        String step1 = "Thought: 搜索文件\n- **Action:** glob(pattern=\"*.*\").";
-        String step2 = "最终答案: 完成。";
-        when(executor.<String>executeChat(any(), anyString(), any(), anyBoolean(), any()))
-                .thenReturn(callResult(step1, client), callResult(step2, client));
-
-        engine.execute(reactContext(client), (reason, ctx) -> "fallback");
-
-        assertThat(fixture.lastGlobPattern.get())
-                .as("**Action:** 前缀下 glob 参数 *.* 也应原样保留")
-                .isEqualTo("*.*");
-    }
-
-    /**
-     * 工具找不到时的优雅降级:LLM 输出一个不存在的工具名,
-     * 引擎不抛异常,Observation 记录错误说明,循环继续(下一步 LLM 给最终答案)。
-     */
-    @Test
-    void reactLoopUnknownToolDoesNotCrashLoop() throws Exception {
-        ModelCallExecutor executor = mock(ModelCallExecutor.class);
-        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
-        ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
-        ReActEngine engine = newReActEngine(executor, toolOrchestrator, guard, 6);
-
-        AiProviderService.ActiveChatClient client = activeClient();
-        when(guard.isModelCallEnabled(client)).thenReturn(true);
-        when(toolOrchestrator.selectAutonomousTools(any(), any(), any()))
-                .thenReturn(new Object[]{new ReactToolFixture()});
-
-        String step1 = "Thought: 调用不存在的工具\nAction: nonexistentTool(foo=\"bar\")";
-        String step2 = "最终答案: 已放弃该工具,直接回答。";
-        when(executor.<String>executeChat(any(), anyString(), any(), anyBoolean(), any()))
-                .thenReturn(callResult(step1, client), callResult(step2, client));
-
-        ChatExecutionResult result = engine.execute(reactContext(client), (reason, ctx) -> "fallback");
-
-        // 不崩溃,循环正常推进到第2步终止
-        assertThat(result.plan()).contains("2 步");
-        assertThat(result.reflect()).contains("已放弃该工具");
-    }
+    // 注:位置参数 / markdown bold / glob 与反引号参数保留 / 未知工具降级等手动循环解析细节
+    // 已搬到 ExplicitToolExecutionerTest(直接测共享类 public 入口)。本类只保留循环级行为测试。
 
     // === Task 4: 假完成守护(write/side_effect/dangerous 校验工具证据) ===
 
@@ -461,7 +310,7 @@ class ReActEngineTest {
     /**
      * 测试用工具 fixture:反射扫 {@link Tool} 的目标(模拟真实 tool pack bean)。
      * renderToolList 经 {@code getTargetClass} 取 declaredMethods,命中 search/writeFile。
-     * searchCalls 计数器用于断言手动循环主路径**手动执行**了工具(经 executeExplicitAction 反射调用)。
+     * searchCalls 计数器用于断言手动循环主路径**手动执行**了工具(经 ExplicitToolExecutioner 反射调用)。
      */
     static class ReactToolFixture {
         final java.util.concurrent.atomic.AtomicInteger searchCalls =
@@ -512,6 +361,7 @@ class ReActEngineTest {
                 mock(ChatResultPersister.class),
                 mock(ChatGuardService.class),
                 mock(RunLifecycleObserver.class),
+                new ExplicitToolExecutioner(),
                 6
         );
     }
@@ -536,6 +386,7 @@ class ReActEngineTest {
                 mock(ChatResultPersister.class),
                 mock(ChatGuardService.class),
                 mock(RunLifecycleObserver.class),
+                new ExplicitToolExecutioner(),
                 maxReactSteps
         );
     }

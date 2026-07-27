@@ -115,9 +115,57 @@ class ReActEngineTest {
         verify(executor, times(2)).executeChat(any(), anyString(), any(), anyBoolean(), any());
     }
 
+    // === Task 6: ChatExecutionResult + resolveFinalAnswer + trace 完善 ===
+
     /**
-     * max-steps 守护:LLM 每步都输出 "Action:"(永不自行终止),
-     * 断言达到 maxReactSteps 后返回当前最佳(降级提示),调用次数恰为 maxReactSteps。
+     * 驱动 2 步终止的 ReAct 循环,断言 {@link ChatExecutionResult} 五字段完整且按 ReAct 语境投影:
+     * <ul>
+     *   <li>plan = "ReAct 执行 N 步"</li>
+     *   <li>action = Action 轨迹(每步 Thought/Action 摘要拼接,模仿 AutonomousLoop actionTrace)</li>
+     *   <li>reflect = 最终答案 + "\n步骤概要:\n" + buildReActHistory(steps)(模仿 AutonomousLoop L402-411)</li>
+     *   <li>modelEnabled = true</li>
+     *   <li>observe = observePrompt</li>
+     * </ul>
+     * 当前(Task 3 基础版)reflect 不含步骤概要、action 轨迹不含 Thought 摘要 → 本测试驱动 Task 6 细化。
+     */
+    @Test
+    void buildsChatExecutionResultWithReActTrace() throws Exception {
+        ModelCallExecutor executor = mock(ModelCallExecutor.class);
+        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
+        ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
+        ReActEngine engine = newReActEngine(executor, toolOrchestrator, guard, 6);
+
+        AiProviderService.ActiveChatClient client = activeClient();
+        when(guard.isModelCallEnabled(client)).thenReturn(true);
+        when(toolOrchestrator.selectAutonomousTools(any(), any(), any())).thenReturn(new Object[0]);
+
+        String step1 = "Thought: 需要搜索相关资料\nAction: search(query=\"Spring AI\")";
+        String step2 = "最终答案: Spring AI 是一个 AI 框架。";
+        when(executor.<String>executeChat(any(), anyString(), any(), anyBoolean(), any()))
+                .thenReturn(callResult(step1, client), callResult(step2, client));
+
+        ChatExecutionResult result = engine.execute(reactContext(client), (reason, ctx) -> "fallback");
+
+        // plan = "ReAct 执行 N 步"
+        assertThat(result.plan()).contains("ReAct").contains("2 步");
+        // action = Action 轨迹(每步 Thought/Action 摘要拼接)
+        assertThat(result.action()).contains("Step 1", "Step 2");
+        assertThat(result.action()).contains("search");        // 第1步 Action 进入轨迹
+        assertThat(result.action()).contains("Thought");        // 轨迹含 Thought 摘要(Task 6 细化)
+        // reflect = 最终答案 + 步骤概要(模仿 AutonomousLoop L402-411)
+        assertThat(result.reflect()).contains("Spring AI 是一个 AI 框架"); // 最终答案在前
+        assertThat(result.reflect()).contains("步骤概要");                   // 步骤概要段
+        assertThat(result.reflect()).contains("Step 1", "Thought:", "Action:", "Observation:");
+        // modelEnabled = true
+        assertThat(result.modelEnabled()).isTrue();
+        // observe = observePrompt(取自 assembled)
+        assertThat(result.observe()).isEqualTo("observe");
+        verify(executor, times(2)).executeChat(any(), anyString(), any(), anyBoolean(), any());
+    }
+
+    /**
+     * max-steps 触达降级路径:LLM 每步都输出 "Action:"(永不自行终止),
+     * 断言达到 maxReactSteps 后返回降级提示 + 步骤概要,调用次数恰为 maxReactSteps。
      */
     @Test
     void reactLoopStopsAtMaxReactSteps() throws Exception {
@@ -411,7 +459,10 @@ class ReActEngineTest {
         assertThat(result.modelEnabled()).isTrue();
         assertThat(result.plan()).contains("2 步"); // 跑满 maxReactSteps
         assertThat(result.reflect()).contains("max-react-steps"); // 降级提示
-        assertThat(result.reflect()).doesNotContain("已经创建了文件"); // 假答案未透传给用户
+        // reflect 主答案是降级提示(非假答案)——假完成守护仍生效(循环跑到 max-steps 而非第1步终止);
+        // Task 6 起 reflect 透明投影"步骤概要"(对齐产品愿景 LLM 透明),假答案的 Thought 文本仅作为
+        // 诊断 trace 出现在"步骤概要"段,绝不可能是 reflect 的主答案(主答案恒为降级提示)。
+        assertThat(result.reflect()).startsWith("已达 max-react-steps");
     }
 
     /**

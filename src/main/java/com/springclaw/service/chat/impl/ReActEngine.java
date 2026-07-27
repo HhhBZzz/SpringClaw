@@ -44,15 +44,16 @@ import java.util.concurrent.atomic.AtomicReference;
  *   <li>{@code paradigm()} 声明 {@link AgentParadigm#REACT}(配合
  *       {@link AgentParadigm#isImplemented()} 与 {@code EngineSelector.LEGACY_RANK} 登记);</li>
  *   <li>{@code supports()} 仅在 {@code ctx.paradigm() == REACT} 时为真;</li>
- *   <li>{@code execute} / {@code stream} 跑 {@link #runReActLoop}:每步一次模型调用 +
- *       原生工具调用({@code .tools()})+ Thought/Action/Observation 历史 + "无工具调用即终止" + max-steps。</li>
+ *   <li>{@code execute} / {@code stream} 跑 {@link #runReActLoop}:经典 ReAct 手动循环——
+ *       每步一次模型调用(不挂 {@code .tools()},系统 prompt 让 LLM 文本输出 Thought + Action),
+ *       引擎解析 Action({@link #findActionLine} 容错 markdown 噪声)→ 在 tools 中按名查找 @Tool 方法
+ *       ({@link #findToolMethod})→ 参数绑定({@link #bindArguments},支持命名/位置参数)→ 反射调用
+ *       Spring 代理 bean(经 ToolRuntimeAspect 审计 + tracker 证据上报)→ 结果作为 Observation 回灌,
+ *       进入下一轮 Thought;"无 Action 行即最终答案"终止 + max-steps 兜底。<b>所有模型一致走手动循环</b>
+ *       (ReAct 的多步可见循环依赖引擎手动执行工具,Spring AI {@code .tools()} 在 {@code .call()} 内部
+ *       完成工具往返不可见,不符合 ReAct 语义)。</li>
  *   <li>假完成守护(Task 4):复用 {@link AutonomousExecutionTracker},write/side_effect/dangerous
  *       任务在完成判定处校验工具证据,无证据则拒绝并注入提示继续循环。</li>
- *   <li>DeepSeek V4 显式 prompt 回退(Task 5):{@code !supportsNativeToolCalling} 时不挂 {@code .tools()},
- *       LLM 文本输出 Thought + Action,引擎解析 Action({@link #findActionLine} 容错 markdown 噪声)→
- *       在 tools 中按名查找 @Tool 方法({@link #findToolMethod})→ 参数绑定({@link #bindArguments},
- *       支持命名/位置参数)→ 反射调用 Spring 代理 bean(经 ToolRuntimeAspect 审计 + tracker 证据上报)→
- *       结果作为 Observation 拼入历史,驱动真正的多步 Thought-Action-Observation 循环。</li>
  *   <li>ChatExecutionResult/trace 精细化投影(Task 6):{@link #finalResult} 五字段完整
  *       (observe / plan="ReAct 执行 N 步" / action=每步 Thought-Action 轨迹 /
  *       reflect=最终答案+步骤概要 / modelEnabled);{@link #resolveFinalAnswer} 优先 reflect 兜底;
@@ -177,18 +178,19 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
         return null;
     }
 
-    // === Thought-Action-Observation 循环(Task 3 主路径:原生工具调用) ===
+    // === Thought-Action-Observation 循环(手动循环主路径:所有模型一致) ===
 
     /**
-     * ReAct 核心循环——每步一次模型调用,根据 LLM 输出判定是否发起了工具调用,
-     * 无工具调用即视为最终答案并终止;否则把本轮 Thought/Action/Observation 拼入历史进入下一轮。
+     * ReAct 核心循环——每步一次模型调用(不挂 {@code .tools()}),根据 LLM 输出判定是否含 Action 行,
+     * 无 Action 行即视为最终答案并终止;否则解析 Action、手动执行工具,把本轮 Thought/Action/Observation
+     * 拼入历史进入下一轮。
      * <p>结构对齐 {@link AutonomousLoopEngine#runAutonomousLoop}(L194-411):
      * 模型不可用降级 → 选工具 → 步数受限的阻塞循环 → 每步 sendStatus + 模型调用 + trace → 终止/max-steps。</p>
-     * <p><b>主路径(Task 3)</b>:{@code DeepSeekChatCompatibility.supportsNativeToolCalling} 为真时挂 {@code .tools(tools)},
-     * 由 Spring AI 在 {@code .call()} 内部完成工具往返。
-     * <b>显式 prompt 回退(Task 5)</b>:该判定为假(DeepSeek V4 等)时不挂 {@code .tools()},
-     * LLM 文本输出 Thought + Action,引擎解析 Action 后手动执行工具并回灌 Observation。
-     * 假完成守护已由 Task 4 接入({@link AutonomousExecutionTracker} 在 scope 内 setTracker,
+     * <p><b>手动循环主路径(所有模型)</b>:不挂 {@code .tools()}——LLM 按 ReAct 协议文本输出 Thought + Action,
+     * 引擎用 {@link #hasActionLine}/{@link #executeExplicitAction} 解析并手动执行工具(反射 + 经
+     * ToolRuntimeAspect 审计 + tracker 证据上报),把 Observation 回灌下一轮。这是经典 ReAct 的多步可见循环;
+     * Spring AI {@code .tools()} 在 {@code .call()} 内部完成工具往返不可见,不符合 ReAct 语义,故不采用。
+     * 假完成守护由 Task 4 接入({@link AutonomousExecutionTracker} 在 scope 内 setTracker,
      * 完成判定处校验工具证据);ChatExecutionResult/trace 的精细化投影由 Task 6 完成
      * ({@link #finalResult} 五字段 + 每步 Thought/Action/Observation 三段式 SSE trace)。</p>
      */
@@ -222,7 +224,7 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
         // 任务是否真有工具证据;工具包经 ToolRuntimeAspect 上报到此 tracker。
         AutonomousExecutionTracker tracker = new AutonomousExecutionTracker();
 
-        // 工具执行上下文 scope —— 让 Spring AI 原生工具调用(.tools())经 ToolRuntimeAspect 时
+        // 工具执行上下文 scope —— 让 ReAct 手动循环里反射调用的工具方法经 ToolRuntimeAspect 时
         // 能读到 userId/sessionKey/runId 等做权限检查 + 审计 + emit TOOL_* 事件(对齐
         // AutonomousLoopEngine L223-235)。scope 内 setTracker 让工具包上报证据,finally clearTracker。
         ToolExecutionContext toolContext = new ToolExecutionContext(
@@ -265,13 +267,9 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
                             var req = client.chatClient().prompt()
                                     .system(systemPrompt)
                                     .user(TypedContextPromptRenderer.question(ctx));
-                            // 主路径:原生工具调用(Spring AI 在 .call() 内完成 tool 往返)。
-                            // DeepSeek V4(!supportsNativeToolCalling)不挂 .tools(),改走显式 prompt 回退——
-                            // LLM 文本输出 Action,循环下方 executeExplicitAction 解析+手动执行(Task 5)。
-                            if (DeepSeekChatCompatibility.supportsNativeToolCalling(client)
-                                    && tools != null && tools.length > 0) {
-                                req = req.tools(tools);
-                            }
+                            // 手动循环主路径:不挂 .tools()——LLM 按 ReAct 协议文本输出
+                            // Thought + Action,循环下方 hasActionLine/executeExplicitAction
+                            // 解析并手动执行工具(经典 ReAct 多步可见循环,所有模型一致)。
                             var resp = conversationAdvisorSupport.apply(
                                             req,
                                             assembled == null ? "" : assembled.sessionKey(),
@@ -291,19 +289,12 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
                     break;
                 }
 
-                boolean nativeTools = DeepSeekChatCompatibility.supportsNativeToolCalling(activeClient);
                 boolean hasToolCall = hasActionLine(thought);
                 String action = describeAction(thought, hasToolCall);
-                // DeepSeek V4(!supportsNativeToolCalling)显式 prompt 回退:LLM 在文本里输出
-                // Thought + Action,引擎解析 Action 后手动执行工具(经 Spring AOP 代理 →
-                // ToolRuntimeAspect 审计 + tracker 证据上报),把结果作为 Observation 拼入历史。
-                // 原生路径下工具由 Spring AI 在 .call() 内执行,Observation 不外露,此处只标占位。
-                String observation;
-                if (hasToolCall && !nativeTools) {
-                    observation = executeExplicitAction(thought, tools, requestId);
-                } else {
-                    observation = describeObservation(hasToolCall);
-                }
+                // 手动循环主路径(所有模型):LLM 文本输出 Thought + Action,引擎解析 Action 后
+                // 手动执行工具(经 Spring AOP 代理 → ToolRuntimeAspect 审计 + tracker 证据上报),
+                // 把结果作为 Observation 拼入历史进入下一轮。无 Action 行即最终答案,下方终止循环。
+                String observation = hasToolCall ? executeExplicitAction(thought, tools, requestId) : "";
                 steps.add(new ReActStep(thought, action, observation));
 
                 if (emitter != null) {
@@ -429,18 +420,15 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
     }
 
     /**
-     * 判定本轮模型输出是否发起了工具调用。
+     * 判定本轮模型输出是否发起了工具调用(即是否含 Action 行)。
      * <p>{@link ModelCallExecutor#executeChat} 内部只透出文本(L122 取
      * {@code ChatOperationResult.value()}, {@link org.springframework.ai.chat.model.ChatResponse}
      * 不外露),故无法从响应元数据读 tool call。此处以 ReAct 协议文本契约为信号:
      * 模型本轮输出含以 "Action:" 起首的行(经 markdown 归一化,容忍 {@code **Action:**} /
      * {@code - Action:} / {@code ## Action:} 等噪声)→ 视为发起工具调用。</p>
-     * <ul>
-     *   <li>原生工具调用主路径(Task 3):Spring AI 在 {@code .call()} 内完成 tool 往返,
-     *       返回的是观察后的推理/最终答案,通常不再含 "Action:" 行 → 循环很快终止(多数 1 步)。</li>
-     *   <li>DeepSeek 文本回退(Task 5):不走 {@code .tools()},模型在文本里输出 "Action:",
-     *       引擎解析后手动执行——此判定驱动真正的多步循环。</li>
-     * </ul>
+     * <p>手动循环主路径(所有模型):LLM 在文本里输出 "Action:",引擎解析后手动执行
+     * ({@link #executeExplicitAction})——此判定驱动 ReAct 的多步 Thought-Action-Observation 循环;
+     * 无 Action 行即最终答案,循环终止。</p>
      */
     private boolean hasActionLine(String thought) {
         return findActionLine(thought) != null;
@@ -513,30 +501,17 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
 
     /**
      * 从模型输出提取 Action 描述(取首个 "Action:" 行);无工具调用时标注为最终答案。
-     * 用于 history/trace 投影(Task 6 细化)。
+     * 用于 history/trace 投影。
      */
     private String describeAction(String thought, boolean hasToolCall) {
         if (!hasToolCall) {
             return "(无工具调用,给出最终答案)";
         }
         String content = findActionLine(thought);
-        return content == null ? "(原生工具调用)" : TextUtils.truncate(content.trim(), 400);
+        return TextUtils.truncate(content.trim(), 400);
     }
 
-    /**
-     * 描述本轮 Observation。原生工具调用时 Spring AI 在 {@code .call()} 内部执行工具并回灌结果,
-     * 工具输出不外露(ModelCallExecutor 只返回文本),故此处给占位说明;
-     * DeepSeek 文本回退路径({@link #executeExplicitAction})返回引擎手动执行的真实 Observation。
-     */
-    private String describeObservation(boolean hasToolCall) {
-        if (!hasToolCall) return "";
-        return "(原生工具调用已由 Spring AI 内部执行,Observation 已并入下一轮上下文)";
-    }
-
-    // === DeepSeek V4 显式 prompt 回退(Task 5)===
-    // !supportsNativeToolCalling 路径:LLM 文本输出 Thought + Action,引擎解析 Action →
-    // 在 tools 中按名查 @Tool 方法 → 解析参数 → 反射调用(经 Spring AOP 代理 → ToolRuntimeAspect
-    // 审计 + AutonomousExecutionTracker 证据上报)→ 结果作为 Observation。
+    // === ReAct 手动循环主路径(Thought+Action 文本 → 引擎执行工具 → Observation) ===
 
     /** 解析后的 Action:工具名 + 原始参数串(尚未拆分)。 */
     private record ParsedAction(String toolName, String rawArgs) {
@@ -547,7 +522,7 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
     }
 
     /**
-     * 显式 prompt 回退主逻辑:从模型输出解析 Action 行,在 tools 中按名查找 @Tool 方法,
+     * ReAct 手动循环主逻辑(所有模型):从模型输出解析 Action 行,在 tools 中按名查找 @Tool 方法,
      * 手动调用(经 Spring AOP 代理 → ToolRuntimeAspect 审计 + tracker 证据上报),
      * 把结果作为 Observation 返回。
      * <p>解析失败 / 工具未找到 / 执行异常时返回错误说明字符串(不抛,保持循环推进,让 LLM 下一轮纠错)。</p>
@@ -563,7 +538,7 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
         }
         ToolMethod target = findToolMethod(tools, parsed.toolName());
         if (target == null) {
-            log.warn("ReAct 显式回退未找到工具: tool={}, requestId={}", parsed.toolName(), requestId);
+            log.warn("ReAct 手动循环未找到工具: tool={}, requestId={}", parsed.toolName(), requestId);
             return "(未找到工具: " + parsed.toolName() + ")";
         }
         try {
@@ -573,12 +548,12 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
             // 拦截(权限/限流/审计 + tracker 证据上报 + RunCoordinator TOOL_* emit)。
             Object result = target.method().invoke(target.bean(), args);
             String obs = result == null ? "(工具返回 null)" : String.valueOf(result);
-            log.info("ReAct 显式回退执行工具: tool={}, requestId={}, observationLen={}",
+            log.info("ReAct 手动循环执行工具: tool={}, requestId={}, observationLen={}",
                     parsed.toolName(), requestId, obs.length());
             return TextUtils.truncate(obs, 400);
         } catch (Exception ex) {
             Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
-            log.warn("ReAct 显式回退工具执行失败: tool={}, requestId={}, reason={}",
+            log.warn("ReAct 手动循环工具执行失败: tool={}, requestId={}, reason={}",
                     parsed.toolName(), requestId, cause.getMessage());
             return "(工具执行失败: " + cause.getClass().getSimpleName() + ": "
                     + TextUtils.truncate(String.valueOf(cause.getMessage()), 200) + ")";
@@ -922,9 +897,8 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
     /**
      * 反射扫描工具 bean 上的 {@link Tool} 注解,列成 "- name(param1, param2): description" 清单。
      * <p>与 {@link AutonomousLoopEngine#renderToolList} 等价(含 CGLIB 代理穿透),差异:ReAct
-     * 额外列出形参名(Task 5 显式 prompt 回退需要——DeepSeek V4 不走 .tools(),LLM 据此格式化
-     * {@code Action: toolName(param="value")})。复制于 AutonomousLoopEngine 的同名方法,二者都是
-     * private,暂不抽公共基类以免越出 Task 范围。</p>
+     * 额外列出形参名(手动循环主路径需要——LLM 据此格式化 {@code Action: toolName(param="value")})。
+     * 复制于 AutonomousLoopEngine 的同名方法,二者都是 private,暂不抽公共基类以免越出 Task 范围。</p>
      */
     private String renderToolList(Object[] tools) {
         if (tools == null || tools.length == 0) {
@@ -948,7 +922,7 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
         return builder.toString().trim();
     }
 
-    /** 渲染方法形参名清单(逗号分隔),供显式 prompt 回退时 LLM 格式化 Action 入参。 */
+    /** 渲染方法形参名清单(逗号分隔),供手动循环主路径 LLM 格式化 Action 入参。 */
     private String renderParamSignature(Method method) {
         Parameter[] params = method.getParameters();
         if (params.length == 0) return "";

@@ -52,9 +52,12 @@ import java.util.concurrent.atomic.AtomicReference;
  *   <li>流式 SSE 生命周期(对齐 {@link ReActEngine#stream}):trace(started) → 循环 → answerChunks →
  *       persist(TERMINAL_RESULT) → reportResult → trace(success) → releaseLockOnce → completeEmitter;
  *       异常委托 {@code fallbackHandler}。每步 Thought/Action/Observation 三段式 trace。</li>
- *   <li>{@link ChatExecutionResult}/trace 精细化投影留 PE-T5(当前 {@link #finalResult} 基础版:
- *       observe / plan="Plan-Execute 执行 N 步计划" / action=每步轨迹 / reflect=末步答案+步骤概要 /
- *       modelEnabled)。</li>
+ *   <li>{@link ChatExecutionResult}/trace 精细化投影(<b>PE-T5 完成</b>):{@link #finalResult} 五字段完整——
+ *       observe / plan="Plan-Execute: Plan N 步,Execute M 步"(M&gt;N 透明反映 Replan)/
+ *       action=Plan 轨迹 + Execute 轨迹(每步 stepText+Thought+Observation)/
+ *       reflect=最终答案 + 步骤概要 / modelEnabled;{@link #resolveFinalAnswer} 优先 reflect 兜底;
+ *       <b>M1</b>:空计划("Plan 阶段未生成有效步骤")与 max-replan 兜底("已达 max-replan")消息区分;
+ *       <b>M2</b>:{@code executedSteps} 跨 Replan 累积全保留(全可视化),不裁剪到末轮。</li>
  * </ul>
  * 构造函数复用 {@link ReActEngine} 的 11 bean 依赖 + {@link ExplicitToolExecutioner}(PE-T1 提取)
  * + {@code max-replan} 配置(clamp 到 [0,5])。
@@ -254,8 +257,13 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
                 // (Re-)Plan:每次循环开头产出计划(首次 feedback 为空,重规划带失败/假完成反馈)
                 plan = runPlan(ctx, activeClient, tools, lastFeedback);
                 if (plan.isEmpty()) {
+                    // M1:空计划与 max-replan 兜底消息区分——Plan 阶段未产出有效步骤是 Planner 失败,
+                    // 与"循环跑满 max-replan"语义不同,返回独立的终态消息避免混淆。
                     log.warn("PlanExecute plan 为空,终止循环: requestId={}, replanNo={}", requestId, replanNo);
-                    break;
+                    String emptyPlanMsg = replanNo == 0
+                            ? "Plan 阶段未生成有效步骤"
+                            : "Replan #" + replanNo + " 后仍未生成有效步骤";
+                    return finalResult(ctx, plan, executedSteps, emptyPlanMsg, true);
                 }
                 if (emitter != null) {
                     try {
@@ -538,12 +546,16 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
      * 构造终态 {@link ChatExecutionResult}(PE-T5 细化,模仿 ReActEngine L378-389)。
      * <ul>
      *   <li>observe = {@link #observePrompt}</li>
-     *   <li>plan = "Plan-Execute 执行 N 步计划"</li>
-     *   <li>action = {@link #buildActionTrace}(每步 stepText+Thought 摘要)</li>
-     *   <li>reflect = 最终答案 + "\n步骤概要:\n" + {@link #buildExecutedHistory}(基础版:末步 LLM 输出作答案,
-     *       PE-T5 细化为独立的综合 LLM 调用)</li>
+     *   <li>plan = "Plan-Execute: Plan N 步,Execute M 步"(N=末次 plan 步数,M=累计执行步数——
+     *       M &gt; N 透明反映发生过 Replan)</li>
+     *   <li>action = {@link #buildPlanTrace}(Plan 轨迹)+ "\n" + {@link #buildActionTrace}(Execute 轨迹:
+     *       每步 stepText + Thought + Observation 三段式,对齐产品愿景 "LLM 透明 / 全可视化")</li>
+     *   <li>reflect = 最终答案 + "\n步骤概要:\n" + {@link #buildExecutedHistory}(每步 stepText/Thought/Observation)</li>
      *   <li>modelEnabled = 形参</li>
      * </ul>
+     * <p><b>M2 决策</b>:{@code steps} 跨 Replan 累积全保留(不裁剪到末轮)——"全可视化"优先,
+     * 让 finalResult 透明投影"规划→失败→重规划→成功"的完整轨迹(失败的尝试也是诊断价值)。
+     * Plan 步数(末次 plan)与 Execute 步数(全累计)的差异恰是 Replan 发生过的信号。</p>
      */
     private ChatExecutionResult finalResult(ChatContext ctx, List<PlanStep> plan,
                                             List<ExecuteStep> steps, String finalAnswer, boolean modelEnabled) {
@@ -552,26 +564,49 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
                         : TextUtils.truncate(steps.get(steps.size() - 1).thought(), 600));
         String reflect = answer + "\n步骤概要:\n" + buildExecutedHistory(steps);
         int planSteps = plan == null ? 0 : plan.size();
+        int execSteps = steps == null ? 0 : steps.size();
+        String actionTrace = buildPlanTrace(plan) + "\n" + buildActionTrace(steps);
         return new ChatExecutionResult(
                 observePrompt(ctx),
-                "Plan-Execute 执行 " + planSteps + " 步计划",
-                buildActionTrace(steps),
+                "Plan-Execute: Plan " + planSteps + " 步,Execute " + execSteps + " 步",
+                actionTrace,
                 reflect,
                 modelEnabled
         );
     }
 
     /**
-     * 把已执行步骤拼成 Action 轨迹(每步 stepText + Thought 摘要),作为 {@link ChatExecutionResult#action()}。
-     * <p>模仿 {@link ReActEngine#buildActionTrace} 的 "[Step N] ..." 结构。</p>
+     * 把(末次)plan 的步骤拼成 Plan 轨迹,作为 {@link ChatExecutionResult#action()} 的前半段——
+     * 透明投影 Planner 产出了什么(对比 Execute 实际做了什么)。
+     */
+    private String buildPlanTrace(List<PlanStep> plan) {
+        if (plan == null || plan.isEmpty()) return "[Plan] (空计划)";
+        StringJoiner sj = new StringJoiner("\n");
+        for (int i = 0; i < plan.size(); i++) {
+            sj.add("[Plan] " + (i + 1) + ". " + TextUtils.truncate(plan.get(i).stepText(), 120));
+        }
+        return sj.toString();
+    }
+
+    /**
+     * 把已执行步骤拼成 Execute 轨迹(每步 stepText + Thought + Observation 三段式),
+     * 作为 {@link ChatExecutionResult#action()} 的后半段。
+     * <p>模仿 {@link ReActEngine#buildActionTrace} 的 "[Step N] ..." 结构,差异:Plan-Execute 的 ExecuteStep
+     * 关联 {@link PlanStep#stepText},且显式投影 Observation(工具返回/综合步标记),让"每步干了什么、
+     * 观察到什么"的诊断价值完整呈现(对齐 "LLM 透明 / 全可视化")。综合步 observation 为空时标注
+     * "(本步未调用工具)"避免读起来突兀。</p>
      */
     private String buildActionTrace(List<ExecuteStep> steps) {
-        if (steps == null || steps.isEmpty()) return "";
+        if (steps == null || steps.isEmpty()) return "[Execute] (未执行任何步骤)";
         StringJoiner sj = new StringJoiner("\n");
         for (int i = 0; i < steps.size(); i++) {
             ExecuteStep s = steps.get(i);
+            String observation = StringUtils.hasText(s.observation())
+                    ? TextUtils.truncate(s.observation(), 200)
+                    : "(本步未调用工具)";
             sj.add("[Step " + (i + 1) + "] " + TextUtils.truncate(s.step().stepText(), 120)
-                    + " → Thought: " + TextUtils.truncate(s.thought(), 200));
+                    + " → Thought: " + TextUtils.truncate(s.thought(), 200)
+                    + " → Observation: " + observation);
         }
         return sj.toString();
     }

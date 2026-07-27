@@ -398,7 +398,7 @@ public class OparLoopEngine implements AgentEngine {
                         var requestSpec = client.chatClient().prompt()
                                 .system(systemPrompt)
                                 .user(actionPrompt);
-                        if (DeepSeekChatCompatibility.supportsNativeToolCalling(client) && tools != null && tools.length > 0) {
+                        if (tools != null && tools.length > 0) {
                             requestSpec = requestSpec.tools(tools);
                         }
                         var response = conversationAdvisorSupport.apply(

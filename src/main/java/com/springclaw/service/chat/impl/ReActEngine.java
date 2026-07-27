@@ -39,7 +39,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * 把 Observation 回灌给模型进入下一轮 Thought——直到模型给出 Final Answer。
  * </p>
  * <p>
- * <b>当前状态:Task 1-4 已完成</b>——
+ * <b>当前状态:Task 1-6 全部完成</b>——
  * <ul>
  *   <li>{@code paradigm()} 声明 {@link AgentParadigm#REACT}(配合
  *       {@link AgentParadigm#isImplemented()} 与 {@code EngineSelector.LEGACY_RANK} 登记);</li>
@@ -53,7 +53,10 @@ import java.util.concurrent.atomic.AtomicReference;
  *       在 tools 中按名查找 @Tool 方法({@link #findToolMethod})→ 参数绑定({@link #bindArguments},
  *       支持命名/位置参数)→ 反射调用 Spring 代理 bean(经 ToolRuntimeAspect 审计 + tracker 证据上报)→
  *       结果作为 Observation 拼入历史,驱动真正的多步 Thought-Action-Observation 循环。</li>
- *   <li>待办:Task 6 ChatExecutionResult/trace 精细化投影。</li>
+ *   <li>ChatExecutionResult/trace 精细化投影(Task 6):{@link #finalResult} 五字段完整
+ *       (observe / plan="ReAct 执行 N 步" / action=每步 Thought-Action 轨迹 /
+ *       reflect=最终答案+步骤概要 / modelEnabled);{@link #resolveFinalAnswer} 优先 reflect 兜底;
+ *       每步 SSE 三段式 trace(Thought/Action/Observation)。</li>
  * </ul>
  * 构造函数全量复用 AutonomousLoopEngine 的 11 bean 依赖。
  * </p>
@@ -186,7 +189,8 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
      * <b>显式 prompt 回退(Task 5)</b>:该判定为假(DeepSeek V4 等)时不挂 {@code .tools()},
      * LLM 文本输出 Thought + Action,引擎解析 Action 后手动执行工具并回灌 Observation。
      * 假完成守护已由 Task 4 接入({@link AutonomousExecutionTracker} 在 scope 内 setTracker,
-     * 完成判定处校验工具证据);ChatExecutionResult/trace 的精细化投影留待 Task 6。</p>
+     * 完成判定处校验工具证据);ChatExecutionResult/trace 的精细化投影由 Task 6 完成
+     * ({@link #finalResult} 五字段 + 每步 Thought/Action/Observation 三段式 SSE trace)。</p>
      */
     private ChatExecutionResult runReActLoop(ChatContext ctx, SseEmitter emitter, String requestId) {
         AiProviderService.ActiveChatClient activeClient = ctx.activeClient();
@@ -211,7 +215,6 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
         final Object[] tools = toolOrchestrator.selectAutonomousTools(ctx.channel(), ctx.userId(), decision);
         final boolean allowFailover = isSafeToRetry(tools);
         final List<ReActStep> steps = new ArrayList<>();
-        final StringJoiner actionTrace = new StringJoiner("\n");
         String history = "";
 
         // 执行追踪器 — 每一步关联同一 tracker,累积真实工具调用/副作用证据(对齐
@@ -302,12 +305,19 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
                     observation = describeObservation(hasToolCall);
                 }
                 steps.add(new ReActStep(thought, action, observation));
-                actionTrace.add("[Step " + stepNo + "] " + TextUtils.truncate(action, 400));
 
                 if (emitter != null) {
                     try {
+                        // ReAct 三段式 trace — 每步 Thought/Action/Observation 各发一条(模仿
+                        // AutonomousLoop sendTrace L294;Task 3 只发 Thought,Task 6 补 Action/Observation)。
                         sseEventBridge.sendTrace(emitter, ctx, "ReAct Thought " + stepNo,
                                 "react", "thought", TextUtils.truncate(thought, 200), 0L);
+                        sseEventBridge.sendTrace(emitter, ctx, "ReAct Action " + stepNo,
+                                "react", "action", TextUtils.truncate(action, 200), 0L);
+                        if (StringUtils.hasText(observation)) {
+                            sseEventBridge.sendTrace(emitter, ctx, "ReAct Observation " + stepNo,
+                                    "react", "observation", TextUtils.truncate(observation, 200), 0L);
+                        }
                     } catch (Exception ignored) {}
                 }
 
@@ -320,7 +330,7 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
                         log.info("ReAct 任务完成: requestId={}, steps={}, riskLevel={}, hasWrite={}, hasCmd={}, hasVerified={}",
                                 requestId, stepNo, riskLevel,
                                 tracker.hasWriteToolCall(), tracker.hasRunCommandCall(), tracker.hasVerifiedSideEffect());
-                        return finalResult(ctx, steps, actionTrace, thought);
+                        return finalResult(ctx, steps, thought, true);
                     }
                     // 假完成:写/副作用/高风险任务无真实工具证据 → 拒绝,注入提示,继续循环。
                     String rejection = tracker.renderFakeCompletionRejection(riskLevel);
@@ -342,8 +352,8 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
 
             // 达到 maxReactSteps 仍未终止 → 返回当前最佳(降级提示)
             log.info("ReAct 达到最大步数限制: requestId={}, maxSteps={}", requestId, maxReactSteps);
-            return finalResult(ctx, steps, actionTrace,
-                    "已达 max-react-steps(" + maxReactSteps + "),返回当前最佳答案");
+            return finalResult(ctx, steps,
+                    "已达 max-react-steps(" + maxReactSteps + "),返回当前最佳答案", true);
         } catch (Exception ex) {
             log.warn("ReAct 循环执行失败: requestId={}, reason={}", requestId, ex.getMessage());
             LocalSkillFallbackService.LocalSkillResult fallback =
@@ -351,7 +361,7 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
             return new ChatExecutionResult(
                     observePrompt(ctx),
                     "ReAct 循环异常终止: " + chatResponsePolicyService.simplifyFailureReason(ex.getMessage()),
-                    actionTrace.toString(),
+                    buildActionTrace(steps),
                     fallback != null ? fallback.fallbackAnswer() : "",
                     false
             );
@@ -363,25 +373,51 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
     }
 
     /**
-     * 构造终态 {@link ChatExecutionResult}(Task 6 细化,本 Task 基础版)。
+     * 构造终态 {@link ChatExecutionResult}(Task 6 细化,模仿 AutonomousLoopEngine L402-411)。
      * <ul>
-     *   <li>observe = observePrompt</li>
+     *   <li>observe = {@link #observePrompt}</li>
      *   <li>plan = "ReAct 执行 N 步"(stream success trace 复用)</li>
-     *   <li>action = Action 轨迹(每步一行)</li>
-     *   <li>reflect = 最终答案({@link #resolveFinalAnswer} 直接取此字段回传用户)</li>
+     *   <li>action = {@link #buildActionTrace}(每步 Thought/Action 摘要拼接,模仿 AutonomousLoop actionTrace L287-289)</li>
+     *   <li>reflect = 最终答案 + "\n步骤概要:\n" + {@link #buildReActHistory}(模仿 AutonomousLoop reflectContent L402-403,
+     *       透明投影 Thought/Action/Observation 三段式,对齐产品愿景 "LLM 透明 / 全可视化")</li>
+     *   <li>modelEnabled = 形参(循环正常退出/降级均传 true;模型不可用/异常路径不经过此方法,直接构造 false)</li>
      * </ul>
      */
     private ChatExecutionResult finalResult(ChatContext ctx, List<ReActStep> steps,
-                                            StringJoiner actionTrace, String finalAnswer) {
+                                            String finalAnswer, boolean modelEnabled) {
+        String answer = StringUtils.hasText(finalAnswer) ? finalAnswer : "ReAct 循环未产生最终答案。";
+        String reflect = answer + "\n步骤概要:\n" + buildReActHistory(steps);
         return new ChatExecutionResult(
                 observePrompt(ctx),
                 "ReAct 执行 " + steps.size() + " 步",
-                actionTrace.toString(),
-                StringUtils.hasText(finalAnswer) ? finalAnswer : "ReAct 循环未产生最终答案。",
-                true
+                buildActionTrace(steps),
+                reflect,
+                modelEnabled
         );
     }
 
+    /**
+     * 把已执行步骤拼成 Action 轨迹(每步一行 Thought/Action 摘要),作为 {@link ChatExecutionResult#action()}。
+     * <p>模仿 {@link AutonomousLoopEngine} L287-289 的 {@code actionTrace.add("[Step N]"); actionTrace.add(...)}
+     * 结构,差异:ReAct 步骤已结构化为 Thought/Action/Observation 三段,此处把 Thought 摘要 + Action 摘要
+     * 拼到一行,既保留"每步干了什么"的诊断价值,又让 action 字段读起来是一条清晰轨迹。</p>
+     */
+    private String buildActionTrace(List<ReActStep> steps) {
+        if (steps == null || steps.isEmpty()) return "";
+        StringJoiner sj = new StringJoiner("\n");
+        for (int i = 0; i < steps.size(); i++) {
+            ReActStep s = steps.get(i);
+            sj.add("[Step " + (i + 1) + "] Thought: " + TextUtils.truncate(s.thought(), 200)
+                    + " → Action: " + TextUtils.truncate(s.action(), 400));
+        }
+        return sj.toString();
+    }
+
+    /**
+     * 从 {@link ChatExecutionResult} 取回用户可见的最终答案(模仿 AutonomousLoopEngine L413-421)。
+     * <p>优先 {@code reflect}(Task 6 起含最终答案 + 步骤概要);reflect 空时按 modelEnabled 给兜底语。
+     * 模型不可用/异常路径直接构造 ChatExecutionResult,reflect 留空或仅含 fallback 答案,走兜底分支。</p>
+     */
     private String resolveFinalAnswer(ChatExecutionResult result) {
         if (StringUtils.hasText(result.reflect())) {
             return result.reflect();

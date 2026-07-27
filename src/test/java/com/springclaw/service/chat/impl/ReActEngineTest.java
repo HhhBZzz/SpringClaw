@@ -83,7 +83,7 @@ class ReActEngineTest {
         assertThat(engine.buildReActHistory(List.of())).contains("第一轮"); // 空历史提示
     }
 
-    // === Task 3: runReActLoop 主路径(原生工具调用)循环 ===
+    // === runReActLoop 手动循环主路径 ===
 
     /**
      * 主路径终止:第1步 LLM 输出含 "Action:" 行(发起工具调用)→ 继续;
@@ -190,32 +190,29 @@ class ReActEngineTest {
         verify(executor, times(2)).executeChat(any(), anyString(), any(), anyBoolean(), any());
     }
 
-    // === Task 5: DeepSeek V4 显式 prompt 回退(Action parse + 手动工具执行) ===
+    // === ReAct 手动循环:Action 解析 + 手动工具执行(所有模型一致) ===
 
     /**
-     * DeepSeek V4(!supportsNativeToolCalling)走显式 prompt 回退:不挂 {@code .tools()},
-     * LLM 在文本里输出 Thought + Action,引擎解析 Action 后**手动执行**工具,把结果作为
-     * Observation 拼入历史进入下一轮——直到 LLM 给出无 Action 的最终答案。
-     * <p>断言要点:
+     * 手动循环主路径:不挂 {@code .tools()},LLM 在文本里输出 Thought + Action,引擎解析 Action 后
+     * **手动执行**工具,把结果作为 Observation 拼入历史进入下一轮——直到 LLM 给出无 Action 的最终答案。
+     * <p>所有模型一致走手动循环(经典 ReAct 多步可见)。断言要点:
      * <ul>
      *   <li>search 工具被手动执行恰好 1 次(第1步 Action,第2步最终答案无 Action)——
-     *       这证明回退路径**真正手动调了 @Tool 方法**,而非依赖 .tools() 原生往返
-     *       (原生路径由 Spring AI 内部执行,不经此 fixture 计数);</li>
+     *       证明引擎**真正手动调了 @Tool 方法**,而非依赖 .tools() 原生往返;</li>
      *   <li>循环 2 步(2 次 LLM 调用),最终答案取第2步文本;</li>
      *   <li>Action 轨迹含 search(第1步 Action 进入 trace)。</li>
      * </ul>
      */
     @Test
-    void deepSeekV4FallsBackToExplicitPromptAndParsesAction() throws Exception {
+    void reactLoopManuallyExecutesActionFromText() throws Exception {
         ModelCallExecutor executor = mock(ModelCallExecutor.class);
         ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
         ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
         ReActEngine engine = newReActEngine(executor, toolOrchestrator, guard, 6);
 
-        // DeepSeek V4 client:DeepSeekChatCompatibility.supportsNativeToolCalling 返回 false
-        // (providerId=deepseek + model 含 "deepseekv4")→ 走显式 prompt 回退,不挂 .tools()。
-        AiProviderService.ActiveChatClient deepSeek = deepSeekV4Client();
-        when(guard.isModelCallEnabled(deepSeek)).thenReturn(true);
+        // 任意 client 均走手动循环(不再区分 native/DeepSeek)。
+        AiProviderService.ActiveChatClient client = activeClient();
+        when(guard.isModelCallEnabled(client)).thenReturn(true);
         ReactToolFixture fixture = new ReactToolFixture();
         when(toolOrchestrator.selectAutonomousTools(any(), any(), any()))
                 .thenReturn(new Object[]{fixture});
@@ -224,13 +221,13 @@ class ReActEngineTest {
         String step1 = "Thought: 需要搜索相关资料\nAction: search(query=\"q\")";
         String step2 = "最终答案: 搜索完成,Spring AI 是一个 AI 框架。";
         when(executor.<String>executeChat(any(), anyString(), any(), anyBoolean(), any()))
-                .thenReturn(callResult(step1, deepSeek), callResult(step2, deepSeek));
+                .thenReturn(callResult(step1, client), callResult(step2, client));
 
-        ChatExecutionResult result = engine.execute(reactContext(deepSeek), (reason, ctx) -> "fallback");
+        ChatExecutionResult result = engine.execute(reactContext(client), (reason, ctx) -> "fallback");
 
-        // 工具被手动执行(回退路径核心证据)
+        // 工具被手动执行(手动循环主路径核心证据)
         assertThat(fixture.searchCalls.get())
-                .as("DeepSeek V4 回退路径应手动执行 search 工具恰好 1 次")
+                .as("手动循环主路径应手动执行 search 工具恰好 1 次")
                 .isEqualTo(1);
         // 循环行为
         assertThat(result.modelEnabled()).isTrue();
@@ -245,14 +242,14 @@ class ReActEngineTest {
      * 校验位置参数绑定(无 name=)正确解析并手动执行工具,拿到真实 Observation。
      */
     @Test
-    void deepSeekV4ParsesPositionalActionArgs() throws Exception {
+    void reactLoopParsesPositionalActionArgs() throws Exception {
         ModelCallExecutor executor = mock(ModelCallExecutor.class);
         ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
         ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
         ReActEngine engine = newReActEngine(executor, toolOrchestrator, guard, 6);
 
-        AiProviderService.ActiveChatClient deepSeek = deepSeekV4Client();
-        when(guard.isModelCallEnabled(deepSeek)).thenReturn(true);
+        AiProviderService.ActiveChatClient client = activeClient();
+        when(guard.isModelCallEnabled(client)).thenReturn(true);
         ReactToolFixture fixture = new ReactToolFixture();
         when(toolOrchestrator.selectAutonomousTools(any(), any(), any()))
                 .thenReturn(new Object[]{fixture});
@@ -260,9 +257,9 @@ class ReActEngineTest {
         String step1 = "Thought: 搜索\nAction: search(\"Spring AI\")";
         String step2 = "最终答案: 完成。";
         when(executor.<String>executeChat(any(), anyString(), any(), anyBoolean(), any()))
-                .thenReturn(callResult(step1, deepSeek), callResult(step2, deepSeek));
+                .thenReturn(callResult(step1, client), callResult(step2, client));
 
-        engine.execute(reactContext(deepSeek), (reason, ctx) -> "fallback");
+        engine.execute(reactContext(client), (reason, ctx) -> "fallback");
 
         assertThat(fixture.searchCalls.get()).isEqualTo(1);
     }
@@ -272,14 +269,14 @@ class ReActEngineTest {
      * 校验 hasActionLine / findActionLine 借鉴 normalizeMarkerLine 的容错。
      */
     @Test
-    void deepSeekV4RecognizesMarkdownBoldActionLine() throws Exception {
+    void reactLoopRecognizesMarkdownBoldActionLine() throws Exception {
         ModelCallExecutor executor = mock(ModelCallExecutor.class);
         ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
         ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
         ReActEngine engine = newReActEngine(executor, toolOrchestrator, guard, 6);
 
-        AiProviderService.ActiveChatClient deepSeek = deepSeekV4Client();
-        when(guard.isModelCallEnabled(deepSeek)).thenReturn(true);
+        AiProviderService.ActiveChatClient client = activeClient();
+        when(guard.isModelCallEnabled(client)).thenReturn(true);
         ReactToolFixture fixture = new ReactToolFixture();
         when(toolOrchestrator.selectAutonomousTools(any(), any(), any()))
                 .thenReturn(new Object[]{fixture});
@@ -288,9 +285,9 @@ class ReActEngineTest {
         String step1 = "Thought: 需要搜索\n- **Action:** search(query=\"q\").";
         String step2 = "最终答案: 完成。";
         when(executor.<String>executeChat(any(), anyString(), any(), anyBoolean(), any()))
-                .thenReturn(callResult(step1, deepSeek), callResult(step2, deepSeek));
+                .thenReturn(callResult(step1, client), callResult(step2, client));
 
-        engine.execute(reactContext(deepSeek), (reason, ctx) -> "fallback");
+        engine.execute(reactContext(client), (reason, ctx) -> "fallback");
 
         assertThat(fixture.searchCalls.get())
                 .as("markdown 修饰的 **Action:** 行应被识别并执行")
@@ -311,8 +308,8 @@ class ReActEngineTest {
         ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
         ReActEngine engine = newReActEngine(executor, toolOrchestrator, guard, 6);
 
-        AiProviderService.ActiveChatClient deepSeek = deepSeekV4Client();
-        when(guard.isModelCallEnabled(deepSeek)).thenReturn(true);
+        AiProviderService.ActiveChatClient client = activeClient();
+        when(guard.isModelCallEnabled(client)).thenReturn(true);
         ReactToolFixture fixture = new ReactToolFixture();
         when(toolOrchestrator.selectAutonomousTools(any(), any(), any()))
                 .thenReturn(new Object[]{fixture});
@@ -322,11 +319,11 @@ class ReActEngineTest {
         String step2 = "Thought: 取当前工作目录\nAction: shell(cmd=\"echo `pwd`\")";
         String step3 = "最终答案: 完成。";
         when(executor.<String>executeChat(any(), anyString(), any(), anyBoolean(), any()))
-                .thenReturn(callResult(step1, deepSeek),
-                        callResult(step2, deepSeek),
-                        callResult(step3, deepSeek));
+                .thenReturn(callResult(step1, client),
+                        callResult(step2, client),
+                        callResult(step3, client));
 
-        engine.execute(reactContext(deepSeek), (reason, ctx) -> "fallback");
+        engine.execute(reactContext(client), (reason, ctx) -> "fallback");
 
         assertThat(fixture.lastGlobPattern.get())
                 .as("glob 通配符参数 *.* 不应被 markdown 归一化损坏为 .")
@@ -347,8 +344,8 @@ class ReActEngineTest {
         ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
         ReActEngine engine = newReActEngine(executor, toolOrchestrator, guard, 6);
 
-        AiProviderService.ActiveChatClient deepSeek = deepSeekV4Client();
-        when(guard.isModelCallEnabled(deepSeek)).thenReturn(true);
+        AiProviderService.ActiveChatClient client = activeClient();
+        when(guard.isModelCallEnabled(client)).thenReturn(true);
         ReactToolFixture fixture = new ReactToolFixture();
         when(toolOrchestrator.selectAutonomousTools(any(), any(), any()))
                 .thenReturn(new Object[]{fixture});
@@ -357,9 +354,9 @@ class ReActEngineTest {
         String step1 = "Thought: 搜索文件\n- **Action:** glob(pattern=\"*.*\").";
         String step2 = "最终答案: 完成。";
         when(executor.<String>executeChat(any(), anyString(), any(), anyBoolean(), any()))
-                .thenReturn(callResult(step1, deepSeek), callResult(step2, deepSeek));
+                .thenReturn(callResult(step1, client), callResult(step2, client));
 
-        engine.execute(reactContext(deepSeek), (reason, ctx) -> "fallback");
+        engine.execute(reactContext(client), (reason, ctx) -> "fallback");
 
         assertThat(fixture.lastGlobPattern.get())
                 .as("**Action:** 前缀下 glob 参数 *.* 也应原样保留")
@@ -367,63 +364,31 @@ class ReActEngineTest {
     }
 
     /**
-     * DeepSeek V4 + 工具找不到时的优雅降级:LLM 输出一个不存在的工具名,
+     * 工具找不到时的优雅降级:LLM 输出一个不存在的工具名,
      * 引擎不抛异常,Observation 记录错误说明,循环继续(下一步 LLM 给最终答案)。
      */
     @Test
-    void deepSeekV4UnknownToolDoesNotCrashLoop() throws Exception {
+    void reactLoopUnknownToolDoesNotCrashLoop() throws Exception {
         ModelCallExecutor executor = mock(ModelCallExecutor.class);
         ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
         ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
         ReActEngine engine = newReActEngine(executor, toolOrchestrator, guard, 6);
 
-        AiProviderService.ActiveChatClient deepSeek = deepSeekV4Client();
-        when(guard.isModelCallEnabled(deepSeek)).thenReturn(true);
+        AiProviderService.ActiveChatClient client = activeClient();
+        when(guard.isModelCallEnabled(client)).thenReturn(true);
         when(toolOrchestrator.selectAutonomousTools(any(), any(), any()))
                 .thenReturn(new Object[]{new ReactToolFixture()});
 
         String step1 = "Thought: 调用不存在的工具\nAction: nonexistentTool(foo=\"bar\")";
         String step2 = "最终答案: 已放弃该工具,直接回答。";
         when(executor.<String>executeChat(any(), anyString(), any(), anyBoolean(), any()))
-                .thenReturn(callResult(step1, deepSeek), callResult(step2, deepSeek));
+                .thenReturn(callResult(step1, client), callResult(step2, client));
 
-        ChatExecutionResult result = engine.execute(reactContext(deepSeek), (reason, ctx) -> "fallback");
+        ChatExecutionResult result = engine.execute(reactContext(client), (reason, ctx) -> "fallback");
 
         // 不崩溃,循环正常推进到第2步终止
         assertThat(result.plan()).contains("2 步");
         assertThat(result.reflect()).contains("已放弃该工具");
-    }
-
-    /**
-     * 原生路径回归(supportsNativeToolCalling=true):即便 LLM 文本含 "Action:" 行,
-     * 引擎也**不应**手动执行工具(Spring AI 已在 .call() 内完成往返)。
-     * 校验 fallback 执行仅发生在 !supportsNativeToolCalling 分支。
-     */
-    @Test
-    void nativePathDoesNotManuallyExecuteEvenWhenActionLinePresent() throws Exception {
-        ModelCallExecutor executor = mock(ModelCallExecutor.class);
-        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
-        ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
-        ReActEngine engine = newReActEngine(executor, toolOrchestrator, guard, 6);
-
-        // openai/gpt-4o → supportsNativeToolCalling=true → 原生路径
-        AiProviderService.ActiveChatClient client = activeClient();
-        when(guard.isModelCallEnabled(client)).thenReturn(true);
-        ReactToolFixture fixture = new ReactToolFixture();
-        when(toolOrchestrator.selectAutonomousTools(any(), any(), any()))
-                .thenReturn(new Object[]{fixture});
-
-        // 原生路径下 LLM 仍可能输出 "Action:" 文本 —— 不应触发手动执行
-        String step1 = "Thought: 调用工具\nAction: search(query=\"q\")";
-        String step2 = "最终答案: 完成。";
-        when(executor.<String>executeChat(any(), anyString(), any(), anyBoolean(), any()))
-                .thenReturn(callResult(step1, client), callResult(step2, client));
-
-        engine.execute(reactContext(client), (reason, ctx) -> "fallback");
-
-        assertThat(fixture.searchCalls.get())
-                .as("原生路径下不应手动执行工具(Spring AI 内部处理)")
-                .isEqualTo(0);
     }
 
     // === Task 4: 假完成守护(write/side_effect/dangerous 校验工具证据) ===
@@ -496,8 +461,7 @@ class ReActEngineTest {
     /**
      * 测试用工具 fixture:反射扫 {@link Tool} 的目标(模拟真实 tool pack bean)。
      * renderToolList 经 {@code getTargetClass} 取 declaredMethods,命中 search/writeFile。
-     * Task 5:searchCalls 计数器用于断言 DeepSeek V4 显式回退路径**手动执行**了工具
-     * (而非 .tools() 原生路径——后者由 Spring AI 内部调,不会经过这里的计数)。
+     * searchCalls 计数器用于断言手动循环主路径**手动执行**了工具(经 executeExplicitAction 反射调用)。
      */
     static class ReactToolFixture {
         final java.util.concurrent.atomic.AtomicInteger searchCalls =
@@ -579,21 +543,11 @@ class ReActEngineTest {
     /**
      * 构造可用的 ActiveChatClient(canonical 6 参 record)。chatClient 置 null——
      * ModelCallExecutor 被 mock,真实调用 lambda 不会执行,无需 ChatClient。
+     * 任意 provider/model 均走手动循环主路径(不再区分 native/DeepSeek)。
      */
     private AiProviderService.ActiveChatClient activeClient() {
         return new AiProviderService.ActiveChatClient(
                 "openai", "gpt-4o", "https://example.test", null, true, "");
-    }
-
-    /**
-     * Task 5 用:构造 DeepSeek V4 client——providerId=deepseek + model=deepseek-v4,
-     * DeepSeekChatCompatibility.supportsNativeToolCalling 对此返回 false
-     * (isDeepSeekV4 归一化 "deepseek-v4" → "deepseekv4" 含 "deepseekv4"),
-     * 驱动 runReActLoop 走显式 prompt 回退而非 .tools() 原生路径。无需 static mock。
-     */
-    private AiProviderService.ActiveChatClient deepSeekV4Client() {
-        return new AiProviderService.ActiveChatClient(
-                "deepseek", "deepseek-v4", "https://example.test", null, true, "");
     }
 
     /**

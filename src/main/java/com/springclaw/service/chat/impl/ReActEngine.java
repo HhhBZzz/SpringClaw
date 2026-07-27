@@ -38,14 +38,16 @@ import java.util.concurrent.atomic.AtomicReference;
  * 把 Observation 回灌给模型进入下一轮 Thought——直到模型给出 Final Answer。
  * </p>
  * <p>
- * <b>当前状态:Task 1-3 已完成</b>——
+ * <b>当前状态:Task 1-4 已完成</b>——
  * <ul>
  *   <li>{@code paradigm()} 声明 {@link AgentParadigm#REACT}(配合
  *       {@link AgentParadigm#isImplemented()} 与 {@code EngineSelector.LEGACY_RANK} 登记);</li>
  *   <li>{@code supports()} 仅在 {@code ctx.paradigm() == REACT} 时为真;</li>
  *   <li>{@code execute} / {@code stream} 跑 {@link #runReActLoop}:每步一次模型调用 +
  *       原生工具调用({@code .tools()})+ Thought/Action/Observation 历史 + "无工具调用即终止" + max-steps。</li>
- *   <li>待办:Task 4 假完成守护;Task 5 DeepSeek V4 显式文本回退(!supportsNativeToolCalling 路径);
+ *   <li>假完成守护(Task 4):复用 {@link AutonomousExecutionTracker},write/side_effect/dangerous
+ *       任务在完成判定处校验工具证据,无证据则拒绝并注入提示继续循环。</li>
+ *   <li>待办:Task 5 DeepSeek V4 显式文本回退(!supportsNativeToolCalling 路径);
  *       Task 6 ChatExecutionResult/trace 精细化投影。</li>
  * </ul>
  * 构造函数全量复用 AutonomousLoopEngine 的 11 bean 依赖。
@@ -176,7 +178,8 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
      * 模型不可用降级 → 选工具 → 步数受限的阻塞循环 → 每步 sendStatus + 模型调用 + trace → 终止/max-steps。</p>
      * <p><b>主路径(Task 3)</b>:{@code DeepSeekChatCompatibility.supportsNativeToolCalling} 为真时挂 {@code .tools(tools)},
      * 由 Spring AI 在 {@code .call()} 内部完成工具往返;DeepSeek V4 的显式文本回退留待 Task 5。
-     * 假完成守护留待 Task 4;ChatExecutionResult/trace 的精细化投影留待 Task 6。</p>
+     * 假完成守护已由 Task 4 接入({@link AutonomousExecutionTracker} 在 scope 内 setTracker,
+     * 完成判定处校验工具证据);ChatExecutionResult/trace 的精细化投影留待 Task 6。</p>
      */
     private ChatExecutionResult runReActLoop(ChatContext ctx, SseEmitter emitter, String requestId) {
         AiProviderService.ActiveChatClient activeClient = ctx.activeClient();
@@ -204,10 +207,14 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
         final StringJoiner actionTrace = new StringJoiner("\n");
         String history = "";
 
+        // 执行追踪器 — 每一步关联同一 tracker,累积真实工具调用/副作用证据(对齐
+        // AutonomousLoopEngine L221)。Task 4 假完成守护用它校验 write/side_effect/dangerous
+        // 任务是否真有工具证据;工具包经 ToolRuntimeAspect 上报到此 tracker。
+        AutonomousExecutionTracker tracker = new AutonomousExecutionTracker();
+
         // 工具执行上下文 scope —— 让 Spring AI 原生工具调用(.tools())经 ToolRuntimeAspect 时
         // 能读到 userId/sessionKey/runId 等做权限检查 + 审计 + emit TOOL_* 事件(对齐
-        // AutonomousLoopEngine L223-235)。本 Task 仅 open scope;AutonomousExecutionTracker
-        // 留待 Task 4(届时在 scope 内 setTracker + finally clearTracker)。
+        // AutonomousLoopEngine L223-235)。scope 内 setTracker 让工具包上报证据,finally clearTracker。
         ToolExecutionContext toolContext = new ToolExecutionContext(
                 assembled == null ? null : assembled.sessionKey(),
                 ctx.channel(),
@@ -218,6 +225,9 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
                 ctx.roleCode()
         );
         try (ToolExecutionContextHolder.Scope scope = ToolExecutionContextHolder.open(toolContext)) {
+            // tracker 注册到线程上下文,WorkspaceEditToolPack / ScriptSkillToolPack 的 @Tool
+            // 方法经 ToolRuntimeAspect 时上报到这里(对齐 AutonomousLoopEngine L235)。
+            ToolExecutionContextHolder.setTracker(tracker);
             for (int stepNo = 1; stepNo <= maxReactSteps; stepNo++) {
                 log.info("ReAct 步骤 {}/{}: requestId={}, riskLevel={}, toolsCount={}",
                         stepNo, maxReactSteps, requestId, riskLevel, tools == null ? 0 : tools.length);
@@ -285,10 +295,30 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
 
                 history = buildReActHistory(steps);
 
-                // 终止:本轮无工具调用(纯最终答案)= 完成。Task 4 在此之前加假完成守护。
+                // 终止判定:本轮无工具调用(纯最终答案)。read 直接完成;write/side_effect/
+                // dangerous 必须校验 tracker 工具证据(假完成守护,对齐 AutonomousLoop L309-345)。
                 if (!hasToolCall) {
-                    log.info("ReAct 任务完成: requestId={}, steps={}", requestId, stepNo);
-                    return finalResult(ctx, steps, actionTrace, thought);
+                    if ("read".equals(riskLevel) || tracker.satisfiesCompletionCondition(riskLevel)) {
+                        log.info("ReAct 任务完成: requestId={}, steps={}, riskLevel={}, hasWrite={}, hasCmd={}, hasVerified={}",
+                                requestId, stepNo, riskLevel,
+                                tracker.hasWriteToolCall(), tracker.hasRunCommandCall(), tracker.hasVerifiedSideEffect());
+                        return finalResult(ctx, steps, actionTrace, thought);
+                    }
+                    // 假完成:写/副作用/高风险任务无真实工具证据 → 拒绝,注入提示,继续循环。
+                    String rejection = tracker.renderFakeCompletionRejection(riskLevel);
+                    log.warn("ReAct 假完成拦截: requestId={}, steps={}, riskLevel={}, hasWrite={}, hasCmd={}, hasVerified={}",
+                            requestId, stepNo, riskLevel,
+                            tracker.hasWriteToolCall(), tracker.hasRunCommandCall(), tracker.hasVerifiedSideEffect());
+                    if (emitter != null) {
+                        try {
+                            sseEventBridge.sendTrace(emitter, ctx, "ReAct 假完成拦截",
+                                    "react", "warning",
+                                    "模型声称完成但缺少真实操作证据，继续执行: "
+                                            + TextUtils.truncate(rejection, 200), 0L);
+                        } catch (Exception ignored) {}
+                    }
+                    history = buildReActHistory(steps) + "\n\n" + rejection;
+                    continue; // 不终止,下一步 prompt 含拒绝提示
                 }
             }
 
@@ -307,6 +337,10 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
                     fallback != null ? fallback.fallbackAnswer() : "",
                     false
             );
+        } finally {
+            // scope close 只还原 ToolExecutionContext,不清 tracker ThreadLocal;
+            // 手动 clear(对齐 AutonomousLoopEngine L387/390,ReAct 用 finally 覆盖 return/异常全路径)。
+            ToolExecutionContextHolder.clearTracker();
         }
     }
 

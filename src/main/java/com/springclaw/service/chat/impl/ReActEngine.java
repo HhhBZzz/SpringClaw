@@ -411,11 +411,13 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
     }
 
     /**
-     * 扫描模型输出,返回首个 "Action:" 行的**内容**(去掉 "Action:" 前缀,保留原大小写供参数解析),
-     * 经 markdown 归一化后行首匹配。无 Action 行返回 null。
-     * <p>归一化借鉴 {@link AutonomousLoopEngine#normalizeMarkerLine}:去 {@code `} / 粗体斜体 /
-     * heading / 列表符 / 数字列表前缀,容忍行尾标点。与该类的差异:不 lowercases 全行(参数需保大小写),
-     * 只在比较前缀时局部 lowercase。</p>
+     * 扫描模型输出,返回首个 "Action:" 行**前缀之后的内容(取自原始行,未归一化)**。
+     * <p>归一化({@link #stripMarkdownLinePrefix})仅用于"行首是不是 Action: 前缀"的**判定**
+     * (容忍 {@code **Action:**} / {@code - Action:} / {@code ## Action:} 等噪声);
+     * 内容必须从**原始行**取——{@code stripMarkdownLinePrefix} 会把 {@code *.*} → {@code .}
+     * (italic 正则)、剥掉反引号,损坏 glob 通配符与 shell 反引号参数。
+     * 归一化借鉴 {@link AutonomousLoopEngine#normalizeMarkerLine} 的前缀清洗,差异:
+     * 不 lowercases 全行(参数需保大小写),只在比较前缀时局部 lowercase。</p>
      */
     private String findActionLine(String thought) {
         if (!StringUtils.hasText(thought)) return null;
@@ -423,10 +425,34 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
             String stripped = stripMarkdownLinePrefix(line);
             if (stripped == null) continue;
             if (stripped.toLowerCase(Locale.ROOT).startsWith("action:")) {
-                return stripped.substring("action:".length());
+                return rawActionContent(line);
             }
         }
         return null;
+    }
+
+    /**
+     * 从**原始行**(未归一化)提取 "Action:" 前缀之后的内容,保留参数里的 * / 反引号 / _ 原样。
+     * <p>在原始行里(case-insensitive)找首个 {@code "action:"}——它对应归一化检测命中的前缀位置
+     * (原始行首可能带 {@code **} / {@code -} / {@code #} 等 markdown 噪声,但首个 {@code "action:"}
+     * 必是前缀,因为归一化检测已确认行首非噪声部分即 {@code "action:"})。然后跳过紧随前缀的闭合型
+     * markdown 标记({@code *} / {@code _} / {@code `},如 {@code **Action:**} 右侧的 {@code **})与空白——
+     * 这些是 "Action:" 关键字的格式包装,不是参数;参数必以工具名(标识符)起首,不会以这些字符开头,
+     * 故安全跳过。</p>
+     */
+    private String rawActionContent(String rawLine) {
+        String lower = rawLine.toLowerCase(Locale.ROOT);
+        int idx = lower.indexOf("action:");
+        if (idx < 0) return rawLine.strip();
+        int after = idx + "action:".length();
+        while (after < rawLine.length() && isPrefixMarkdownCloser(rawLine.charAt(after))) {
+            after++;
+        }
+        return rawLine.substring(after);
+    }
+
+    private boolean isPrefixMarkdownCloser(char c) {
+        return c == '*' || c == '_' || c == '`' || Character.isWhitespace(c);
     }
 
     /**

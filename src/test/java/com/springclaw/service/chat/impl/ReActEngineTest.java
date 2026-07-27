@@ -2,6 +2,7 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.runtime.contract.AgentParadigm;
+import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
@@ -141,6 +142,70 @@ class ReActEngineTest {
         verify(executor, times(2)).executeChat(any(), anyString(), any(), anyBoolean(), any());
     }
 
+    // === Task 4: 假完成守护(write/side_effect/dangerous 校验工具证据) ===
+
+    /**
+     * 假完成拦截:写任务(decision.riskLevel=write),LLM 每步直接给"最终答案"文本(无 Action 行),
+     * 但 mock 不触发真实工具 → tracker 无写证据 → satisfiesCompletionCondition=false → 拒绝完成。
+     * 断言:循环未在第1步终止(跑到 max-steps=2,2 次调用),降级提示而非 LLM 的假答案。
+     */
+    @Test
+    void writeTaskRejectsFakeCompletionWithoutToolEvidence() throws Exception {
+        ModelCallExecutor executor = mock(ModelCallExecutor.class);
+        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
+        ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
+        ReActEngine engine = newReActEngine(executor, toolOrchestrator, guard, 2); // maxReactSteps=2
+
+        AiProviderService.ActiveChatClient client = activeClient();
+        when(guard.isModelCallEnabled(client)).thenReturn(true);
+        when(toolOrchestrator.selectAutonomousTools(any(), any(), any())).thenReturn(new Object[0]);
+
+        // 每步都给"最终答案"文本(无 "Action:" 行)→ hasActionLine=false → 进入完成判定
+        String fakeFinal = "最终答案: 我已经创建了文件 hello.txt。";
+        when(executor.<String>executeChat(any(), anyString(), any(), anyBoolean(), any()))
+                .thenReturn(callResult(fakeFinal, client));
+
+        AgentDecision writeDecision = new AgentDecision(
+                "general", "basic_model", List.of(), "write", false, "test write task");
+        ChatExecutionResult result = engine.execute(
+                reactContext(client, writeDecision), (reason, ctx) -> "fallback");
+
+        // 假完成被拦截:循环未在第1步终止,继续到 max-steps=2(2 次调用)
+        verify(executor, times(2)).executeChat(any(), anyString(), any(), anyBoolean(), any());
+        assertThat(result.modelEnabled()).isTrue();
+        assertThat(result.plan()).contains("2 步"); // 跑满 maxReactSteps
+        assertThat(result.reflect()).contains("max-react-steps"); // 降级提示
+        assertThat(result.reflect()).doesNotContain("已经创建了文件"); // 假答案未透传给用户
+    }
+
+    /**
+     * 反向校验:read 任务(riskLevel=read),LLM 第1步直接给最终答案(无 Action 行),
+     * read 不校验工具证据 → 立即完成(第1步终止),不会被假完成守护拦下。
+     */
+    @Test
+    void readTaskCompletesImmediatelyWithoutToolEvidence() throws Exception {
+        ModelCallExecutor executor = mock(ModelCallExecutor.class);
+        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
+        ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
+        ReActEngine engine = newReActEngine(executor, toolOrchestrator, guard, 6);
+
+        AiProviderService.ActiveChatClient client = activeClient();
+        when(guard.isModelCallEnabled(client)).thenReturn(true);
+        when(toolOrchestrator.selectAutonomousTools(any(), any(), any())).thenReturn(new Object[0]);
+
+        String finalAnswer = "最终答案: 这是一个只读分析结论。";
+        when(executor.<String>executeChat(any(), anyString(), any(), anyBoolean(), any()))
+                .thenReturn(callResult(finalAnswer, client));
+
+        // decision=null → runReActLoop 兜底 riskLevel=read
+        ChatExecutionResult result = engine.execute(reactContext(client), (reason, ctx) -> "fallback");
+
+        assertThat(result.modelEnabled()).isTrue();
+        assertThat(result.plan()).contains("1 步"); // 第1步即完成
+        assertThat(result.reflect()).contains("只读分析结论"); // 真答案透传
+        verify(executor, times(1)).executeChat(any(), anyString(), any(), anyBoolean(), any());
+    }
+
     /**
      * 测试用工具 fixture:反射扫 {@link Tool} 的目标(模拟真实 tool pack bean)。
      * renderToolList 经 {@code getTargetClass} 取 declaredMethods,命中 search/writeFile。
@@ -226,6 +291,13 @@ class ReActEngineTest {
      * decision=null(runReActLoop 兜底 riskLevel=read)、paradigm=REACT。
      */
     private ChatContext reactContext(AiProviderService.ActiveChatClient client) {
+        return reactContext(client, null);
+    }
+
+    /**
+     * 带 AgentDecision 的 reactContext 重载:Task 4 假完成测试用它注入 riskLevel=write 等。
+     */
+    private ChatContext reactContext(AiProviderService.ActiveChatClient client, AgentDecision decision) {
         AssembledContext assembled = new AssembledContext(
                 "sess-1", "test", "user-1", "请搜索 X", "", "", "observe");
         return new ChatContext(
@@ -233,7 +305,7 @@ class ReActEngineTest {
                 "请搜索 X", "请搜索 X", "req-1", "system",
                 assembled, client,
                 "react", "react-paradigm", "agent", "general",
-                null, null, null, AgentParadigm.REACT);
+                decision, null, null, AgentParadigm.REACT);
     }
 
     /**

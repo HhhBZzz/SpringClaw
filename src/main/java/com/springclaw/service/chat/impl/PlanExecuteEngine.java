@@ -252,7 +252,7 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
 
             for (int replanNo = 0; replanNo <= maxReplan; replanNo++) {
                 // (Re-)Plan:每次循环开头产出计划(首次 feedback 为空,重规划带失败/假完成反馈)
-                plan = runPlan(ctx, tools, lastFeedback);
+                plan = runPlan(ctx, activeClient, tools, lastFeedback);
                 if (plan.isEmpty()) {
                     log.warn("PlanExecute plan 为空,终止循环: requestId={}, replanNo={}", requestId, replanNo);
                     break;
@@ -527,6 +527,10 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
         if (!StringUtils.hasText(thought)) return true; // 模型无输出 → 步骤失败
         if (!hasAction) return false; // 综合步/答案步,无工具调用不判定失败
         if (!StringUtils.hasText(observation)) return false;
+        // ExplicitToolExecutioner 错误说明以 "(" 起首(如 "(未找到工具: ...)" "(工具执行失败: ...)");
+        // 加 startsWith("(") 前缀判定,避免合法 observation(含"未找到"/"失败"等关键词,如
+        // search 返回"未找到相关文档"、grep 返回"0 失败")被误判为步骤失败,触发无谓 Replan。
+        if (!observation.startsWith("(")) return false;
         return observation.contains("失败") || observation.contains("未找到") || observation.contains("无法解析");
     }
 
@@ -655,12 +659,17 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
      * {@code .responseEntity(Plan.class)} → 取 {@code entity.steps()}。失败降级为空列表
      * (Execute 阶段 PE-T4 自行处理空计划/重规划/兜底,本方法不向调用方抛)。</p>
      * <p>{@code feedback} 非空表示重规划——携带上一次执行失败的反馈注入 prompt(首次为空)。</p>
+     * <p>{@code client} 由调用方({@link #runPlanExecute})传入而非直接读 {@code ctx.activeClient()}——
+     * 这样 Execute 步触发 failover 后更新的 {@code activeClient} local var 能跨 Plan/Execute/Replan
+     * 传播,避免下一次 Replan 又回到原始(可能仍故障的)provider 重新发现 failover(对齐 ReAct 的
+     * activeClient local var 模式)。</p>
      */
-    List<PlanStep> runPlan(ChatContext ctx, Object[] tools, String feedback) {
+    List<PlanStep> runPlan(ChatContext ctx, AiProviderService.ActiveChatClient client,
+                           Object[] tools, String feedback) {
         try {
             String systemPrompt = renderPlanPrompt(ctx, tools, feedback);
             ModelCallExecutor.ModelCallResult<Plan> callResult = modelCallExecutor.executeChat(
-                    ctx.activeClient(),
+                    client,
                     "plan-execute-plan",
                     new ModelCallExecutor.ChatRequestContext(
                             ctx.requestId(),
@@ -669,9 +678,9 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
                             ctx.userId()
                     ),
                     true,
-                    client -> {
+                    c -> {
                         var response = conversationAdvisorSupport.apply(
-                                        client.chatClient().prompt()
+                                        c.chatClient().prompt()
                                                 .system(systemPrompt)
                                                 .user(TypedContextPromptRenderer.question(ctx)),
                                         ctx.assembled() == null ? "" : ctx.assembled().sessionKey(),

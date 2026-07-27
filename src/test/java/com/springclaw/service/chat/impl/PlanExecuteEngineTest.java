@@ -8,6 +8,7 @@ import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
 import com.springclaw.tool.runtime.ToolOrchestrator;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.converter.BeanOutputConverter;
 import org.springframework.ai.tool.annotation.Tool;
 
@@ -84,7 +85,7 @@ class PlanExecuteEngineTest {
                 any(ModelCallExecutor.ChatOperation.class));
 
         PlanExecuteEngine engine = newPlanExecuteEngineWith(executor);
-        List<PlanExecuteEngine.PlanStep> steps = engine.runPlan(planExecuteCtx(client), new Object[0], "");
+        List<PlanExecuteEngine.PlanStep> steps = engine.runPlan(planExecuteCtx(client), client, new Object[0], "");
 
         assertThat(steps).hasSize(2);
         assertThat(steps.get(0).stepText()).contains("搜索");
@@ -107,9 +108,43 @@ class PlanExecuteEngineTest {
                         any(ModelCallExecutor.ChatOperation.class));
 
         PlanExecuteEngine engine = newPlanExecuteEngineWith(executor);
-        List<PlanExecuteEngine.PlanStep> steps = engine.runPlan(planExecuteCtx(client), null, "");
+        List<PlanExecuteEngine.PlanStep> steps = engine.runPlan(planExecuteCtx(client), client, null, "");
 
         assertThat(steps).isEmpty();
+    }
+
+    /**
+     * I1 回归:runPlan 必须用传入的 {@code client} 形参,而非 {@code ctx.activeClient()}。
+     * <p>场景:Execute 步触发 failover 后,runPlanExecute 把更新后的 activeClient 传给下一次 Replan 的
+     * runPlan。若 runPlan 回退读 ctx.activeClient()(原始故障 provider),Replan 又会重新发现 failover。
+     * 本测试用两个不同 client(ctx 携 A,传入 B),断言 executeChat 收到的是 B。</p>
+     */
+    @Test
+    void runPlanUsesPassedClientNotCtxActiveClient() throws Exception {
+        ModelCallExecutor executor = mock(ModelCallExecutor.class);
+        AiProviderService.ActiveChatClient ctxClient = planExecuteClient(); // provider="test"
+        AiProviderService.ActiveChatClient failoverClient = new AiProviderService.ActiveChatClient(
+                "failover", "failover-model", "http://localhost:2", null, true, null);
+        when(executor.executeChat(
+                any(AiProviderService.ActiveChatClient.class),
+                eq("plan-execute-plan"),
+                any(ModelCallExecutor.ChatRequestContext.class),
+                eq(true),
+                any(ModelCallExecutor.ChatOperation.class)))
+                .thenReturn(new ModelCallExecutor.ModelCallResult<>(
+                        new PlanExecuteEngine.Plan(List.of()), failoverClient, List.of(), false));
+
+        PlanExecuteEngine engine = newPlanExecuteEngineWith(executor);
+        // ctx 携 ctxClient,但传 failoverClient 给 runPlan
+        engine.runPlan(planExecuteCtx(ctxClient), failoverClient, new Object[0], "");
+
+        ArgumentCaptor<AiProviderService.ActiveChatClient> captor =
+                ArgumentCaptor.forClass(AiProviderService.ActiveChatClient.class);
+        verify(executor).executeChat(captor.capture(),
+                eq("plan-execute-plan"), any(), eq(true), any());
+        assertThat(captor.getValue())
+                .as("runPlan 应使用传入的 client(failover),而非 ctx.activeClient()(ctxClient)")
+                .isEqualTo(failoverClient);
     }
 
     /**
@@ -297,6 +332,27 @@ class PlanExecuteEngineTest {
         assertThat(result.reflect()).contains("只读分析结论"); // 真答案透传
         // plan(1) + step(1) = 2 次 LLM 调用,第1次 plan 即完成(无 Replan)
         verify(executor, times(2)).executeChat(any(), anyString(), any(), anyBoolean(), any());
+    }
+
+    /**
+     * I2 回归:stepFailed 必须要求错误说明以 "(" 起首才判定工具失败。
+     * <p>ExplicitToolExecutioner 的错误 observation 都以 "(" 起首(如 "(未找到工具: X)");
+     * 合法工具 observation 可能含"未找到"/"失败"关键词(如 search 返回"未找到相关文档"、grep 返回"0 失败"),
+     * 但不以 "(" 起首——加 startsWith("(") 前缀避免这类合法 observation 误判步骤失败、触发无谓 Replan。</p>
+     */
+    @Test
+    void stepFailedRequiresParenPrefixForErrorObservation() {
+        PlanExecuteEngine engine = newPlanExecuteEngine();
+        // 合法 observation 含关键词但不以 "(" 起首 → 不判失败
+        assertThat(engine.stepFailed("搜索完成:未找到相关文档", "Thought: 已搜索", true)).isFalse();
+        assertThat(engine.stepFailed("grep 结果: 0 失败行", "Thought: 已 grep", true)).isFalse();
+        assertThat(engine.stepFailed("解析完成,无无法解析的残留", "Thought: 已解析", true)).isFalse();
+        // 错误说明以 "(" 起首 + 含关键词 → 判失败
+        assertThat(engine.stepFailed("(未找到工具: foo)", "Thought: 调工具", true)).isTrue();
+        assertThat(engine.stepFailed("(工具执行失败: NPE)", "Thought: 调工具", true)).isTrue();
+        assertThat(engine.stepFailed("(Action 格式无法解析: ...)", "Thought: 调工具", true)).isTrue();
+        // 以 "(" 起首但不含失败关键词(如 "(工具返回 null)")→ 不判失败
+        assertThat(engine.stepFailed("(工具返回 null)", "Thought: 调工具", true)).isFalse();
     }
 
     /**

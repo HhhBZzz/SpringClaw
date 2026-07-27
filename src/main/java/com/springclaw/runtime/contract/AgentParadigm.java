@@ -29,10 +29,11 @@ public enum AgentParadigm {
     }
 
     /**
-     * 地基阶段是否已有引擎实现。占位范式(REACT/PLAN_EXECUTE/REFLECTION/MULTI_AGENT)
+     * 地基阶段是否已有引擎实现。占位范式(PLAN_EXECUTE/REFLECTION/MULTI_AGENT)
      * 选择时由 EngineSelector 抛出明确的"未实现"错误,避免静默回退到别的范式。
+     * REACT 自 Task 1 起接入地基(ReActEngine 骨架 + isImplemented + LEGACY_RANK 登记)。
      */
     public boolean isImplemented() {
-        return this == SINGLE_TURN || this == OPAR || this == AUTONOMOUS_LOOP;
+        return this == SINGLE_TURN || this == OPAR || this == AUTONOMOUS_LOOP || this == REACT;
     }
 }

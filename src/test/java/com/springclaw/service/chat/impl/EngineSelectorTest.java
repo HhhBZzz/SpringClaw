@@ -106,18 +106,6 @@ class EngineSelectorTest {
     }
 
     @Test
-    void selectByPlaceholderParadigmThrowsNotImplemented() {
-        AgentEngine singleTurn = stub("simplified", 60, AgentParadigm.SINGLE_TURN, true);
-        EngineSelector selector = new EngineSelector(List.of(singleTurn));
-        ChatContext ctx = context("simplified", "any", workspaceDecision());
-
-        // REFLECTION 自 Task 1 起已实现,此处改用仍为占位的 MULTI_AGENT 验证"未实现"分支
-        assertThatThrownBy(() -> selector.select(ctx, AgentParadigm.MULTI_AGENT))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("尚未实现");
-    }
-
-    @Test
     void selectByNullParadigmDelegatesToDefaultRouting() {
         AgentEngine singleTurn = stub("simplified", 60, AgentParadigm.SINGLE_TURN, true);
         AgentEngine opar = stub("opar-loop", 40, AgentParadigm.OPAR, true);

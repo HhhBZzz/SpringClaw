@@ -37,7 +37,8 @@ public class EngineSelector {
             "model-led-stream", 50,
             "simplified", 60,
             "react-loop", 70,
-            "plan-execute-loop", 80
+            "plan-execute-loop", 80,
+            "reflexion-loop", 90
     );
 
     private final List<AgentEngine> engines;

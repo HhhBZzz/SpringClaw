@@ -111,8 +111,8 @@ class EngineSelectorTest {
         EngineSelector selector = new EngineSelector(List.of(singleTurn));
         ChatContext ctx = context("simplified", "any", workspaceDecision());
 
-        // PLAN_EXECUTE 自 Task 2 起已实现,此处改用仍为占位的 REFLECTION 验证"未实现"分支
-        assertThatThrownBy(() -> selector.select(ctx, AgentParadigm.REFLECTION))
+        // REFLECTION 自 Task 1 起已实现,此处改用仍为占位的 MULTI_AGENT 验证"未实现"分支
+        assertThatThrownBy(() -> selector.select(ctx, AgentParadigm.MULTI_AGENT))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("尚未实现");
     }

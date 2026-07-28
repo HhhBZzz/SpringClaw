@@ -3,8 +3,8 @@ package com.springclaw.runtime.contract;
 /**
  * Agent 思考范式——用户可在每次请求显式选择的一等概念。
  * <p>
- * 地基阶段:前 3 个范式复用现有引擎显式化;后 4 个为占位范式,
- * 选择时返回明确的"范式未实现,待增量"降级,不静默走错引擎。
+ * 全部 7 个范式已有引擎实现:前 3 个复用现有引擎显式化,后 4 个(REACT / PLAN_EXECUTE /
+ * REFLECTION / MULTI_AGENT)分别由各自的范式引擎接入。无占位范式剩余。
  * </p>
  *
  * @see AgentEngine#paradigm()
@@ -29,14 +29,15 @@ public enum AgentParadigm {
     }
 
     /**
-     * 地基阶段是否已有引擎实现。占位范式(MULTI_AGENT)
-     * 选择时由 EngineSelector 抛出明确的"未实现"错误,避免静默回退到别的范式。
-     * REACT 自 Task 1 起接入地基;PLAN_EXECUTE 自 Task 2 起接入地基
-     * (PlanExecuteEngine 骨架 + isImplemented + LEGACY_RANK 登记,Plan/Execute 循环体由 Task 3/4 填充);
-     * REFLECTION 自 Task 1 起接入地基(ReflexionEngine 骨架 + isImplemented + LEGACY_RANK 登记,循环体由 Task 3 填充)。
+     * 是否已有引擎实现。全部 7 个范式均已接入地基:REACT 自其 Task 1 起接入;
+     * PLAN_EXECUTE 自其 Task 2 起接入(PlanExecuteEngine 骨架 + isImplemented + LEGACY_RANK 登记,
+     * Plan/Execute 循环体由后续 Task 填充);REFLECTION 自其 Task 1 起接入(ReflexionEngine 骨架,
+     * 循环体由后续 Task 填充);MULTI_AGENT 自其 Task 1 起接入(MultiAgentEngine 骨架,
+     * 循环体由 MA-T3 填充)。无占位剩余。
      */
     public boolean isImplemented() {
         return this == SINGLE_TURN || this == OPAR || this == AUTONOMOUS_LOOP
-                || this == REACT || this == PLAN_EXECUTE || this == REFLECTION;
+                || this == REACT || this == PLAN_EXECUTE || this == REFLECTION
+                || this == MULTI_AGENT;
     }
 }

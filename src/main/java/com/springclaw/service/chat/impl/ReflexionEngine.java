@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * 把"自我纠错"作为循环骨架,适合需要多轮打磨的质量敏感任务。
  * </p>
  * <p>
- * <b>当前状态:RX-T3 循环(执行+反思+memory+终止+守护)+ 流式 SSE</b>——
+ * <b>当前状态:RX-T4 结果/trace 精细化(在 RX-T3 循环 + 流式 SSE 之上)——</b>
  * <ul>
  *   <li>{@code paradigm()} 声明 {@link AgentParadigm#REFLECTION}(配合
  *       {@link AgentParadigm#isImplemented()} 与 {@code EngineSelector.LEGACY_RANK} 登记);</li>
@@ -53,7 +53,9 @@ import java.util.concurrent.atomic.AtomicReference;
  *       假完成守护复用 AutonomousLoop/ReAct/Plan-Execute 模式;流式 SSE 生命周期(对齐 PlanExecuteEngine):
  *       trace(started) → 循环 → answerChunks → persist(TERMINAL_RESULT) → reportResult → trace(success) →
  *       releaseLockOnce → completeEmitter;异常委托 {@code fallbackHandler}。</li>
- *   <li>{@link #finalResult} <b>基础版</b>(五字段齐整但 trace 较粗)——结果/trace 精细化投影留待 RX-T4。</li>
+ *   <li>{@link #finalResult} <b>RX-T4 五字段精细化版</b>(observe / plan=summary / action=attemptTrace 轨迹 /
+ *       reflect=raw 答案+累积 memory / modelEnabled)+ {@link #resolveFinalAnswer} 优先 reflect 兜底;
+ *       <b>M1 修复</b>:reflect 用 Actor 的 raw 输出(不含 Thought/Action/Observation 标签),attemptTrace 只进 action。</li>
  * </ul>
  * 构造函数复用 {@link ReActEngine}/{@link PlanExecuteEngine} 的 11 bean 依赖 + {@link ExplicitToolExecutioner}
  * (RX-T3 反思循环手动执行工具时复用)+ {@code max-reflections} 配置(clamp 到 [1,5])。
@@ -247,12 +249,11 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
 
         String memory = "";
         String lastAttempt = "";
-        int attempts = 0;
+        String lastAnswer = "";
 
         try (ToolExecutionContextHolder.Scope scope = ToolExecutionContextHolder.open(toolContext)) {
             ToolExecutionContextHolder.setTracker(tracker);
             for (int attempt = 1; attempt <= maxReflections; attempt++) {
-                attempts = attempt;
                 log.info("Reflexion 尝试 {}/{}: requestId={}, riskLevel={}, toolsCount={}",
                         attempt, maxReflections, requestId, riskLevel, tools == null ? 0 : tools.length);
                 if (emitter != null) {
@@ -275,6 +276,10 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
                         + "\nAction: " + explicitToolExecutioner.describeAction(thought, hasAction)
                         + "\nObservation: " + TextUtils.truncate(observation, 400);
                 lastAttempt = attemptTrace;
+                // RX-T4 M1:raw 最终答案(用户可读的 clean 文本,不含 attemptTrace 的 Thought/Action/Observation 标签)。
+                // Actor 调工具 → 用 Observation(工具结果)作本轮答案;Actor 纯文本作答(无 Action)→ 用 thought 原文。
+                // 只进 reflect(resolveFinalAnswer 发给用户);attemptTrace 只进 action(轨迹)。
+                lastAnswer = hasAction ? observation : thought;
 
                 if (emitter != null) {
                     try {
@@ -308,7 +313,7 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
                         log.info("Reflexion 任务完成: requestId={}, attempt={}, riskLevel={}, hasWrite={}, hasCmd={}, hasVerified={}",
                                 requestId, attempt, riskLevel,
                                 tracker.hasWriteToolCall(), tracker.hasRunCommandCall(), tracker.hasVerifiedSideEffect());
-                        return finalResult(ctx, attemptTrace, memory, attempts,
+                        return finalResult(ctx, attemptTrace, lastAnswer, memory,
                                 "Reflexion: " + attempt + " 次尝试后成功", true);
                     }
                     // 假完成:反思 success 但无真实工具证据 → rejection 注入 memory,继续(对齐 ReAct/PlanExecute)
@@ -333,7 +338,7 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
 
             // max-reflections 兜底:返回当前最佳尝试(对齐 PlanExecute max-replan / ReAct max-steps 兜底)
             log.info("Reflexion 达到最大反思次数: requestId={}, maxReflections={}", requestId, maxReflections);
-            return finalResult(ctx, lastAttempt, memory, attempts,
+            return finalResult(ctx, lastAttempt, lastAnswer, memory,
                     "已达 max-reflections(" + maxReflections + "),返回当前最佳尝试", true);
         } catch (Exception ex) {
             log.warn("Reflexion 循环执行失败: requestId={}, reason={}", requestId, ex.getMessage());
@@ -433,26 +438,33 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
     }
 
     /**
-     * 构造终态 {@link ChatExecutionResult}(<b>RX-T3 基础版</b>,模仿 PlanExecute/ReAct finalResult)。
+     * 构造终态 {@link ChatExecutionResult}(<b>RX-T4 精细化版</b>,对齐 PlanExecute/ReAct finalResult 五字段)。
      * <ul>
      *   <li>observe = {@link #observePrompt}</li>
-     *   <li>plan = "Reflexion 执行 N 次尝试"(stream success trace 复用)</li>
-     *   <li>action = 末次尝试 attemptTrace(Thought/Action/Observation 三段)</li>
-     *   <li>reflect = 末次尝试摘要 + summary + 累积 memory(前几轮反思 lesson)</li>
+     *   <li>plan = summary 直进(如 "Reflexion: N 次尝试后成功" / "已达 max-reflections(N),返回当前最佳尝试");
+     *       stream success trace 复用作完成摘要</li>
+     *   <li>action = lastAttempt(末次尝试 attemptTrace,Thought/Action/Observation 轨迹)</li>
+     *   <li>reflect = lastAnswer(raw 最终答案,<b>M1 修复</b>:不含 Thought/Action/Observation 标签)
+     *       + "\n累积反思:\n" + memory(前几轮 Reflector 的 lesson)</li>
      *   <li>modelEnabled = 形参</li>
      * </ul>
-     * <p>结果/trace 的精细化投影(每轮尝试轨迹、success/max-reflections 区分消息等)留待 RX-T4。</p>
+     * <p><b>M1 修复(Task 3 review)</b>:Task 3 把 attemptTrace(Thought/Action/Observation 标签)塞进 reflect,
+     * {@link #resolveFinalAnswer} 又把 reflect 当最终答案发给用户(看到 verbose 标签)。本版拆开:
+     * attemptTrace 只进 action(轨迹),reflect 用 {@code lastAnswer}(Actor 末次输出的 clean 答案——
+     * 调工具时取 Observation,纯文本作答时取 thought 原文)+ 累积 memory。对齐
+     * {@link PlanExecuteEngine#finalResult}(answer + 步骤概要)与 {@link ReActEngine#finalResult}(finalAnswer + 步骤概要)。</p>
      */
-    private ChatExecutionResult finalResult(ChatContext ctx, String lastAttempt, String memory,
-                                            int attempts, String summary, boolean modelEnabled) {
-        String attemptBrief = StringUtils.hasText(lastAttempt)
+    private ChatExecutionResult finalResult(ChatContext ctx, String lastAttempt, String lastAnswer,
+                                            String memory, String summary, boolean modelEnabled) {
+        String action = StringUtils.hasText(lastAttempt)
                 ? TextUtils.truncate(lastAttempt, 600) : "(无尝试输出)";
-        String reflect = summary + "\n最终尝试:\n" + attemptBrief
-                + "\n累积反思:\n" + (StringUtils.hasText(memory) ? TextUtils.truncate(memory, 800) : "（无）");
+        String answer = StringUtils.hasText(lastAnswer) ? TextUtils.truncate(lastAnswer, 800) : "(无最终答案)";
+        String reflect = answer + "\n累积反思:\n"
+                + (StringUtils.hasText(memory) ? TextUtils.truncate(memory, 800) : "（无）");
         return new ChatExecutionResult(
                 observePrompt(ctx),
-                "Reflexion 执行 " + attempts + " 次尝试",
-                attemptBrief,
+                summary,
+                action,
                 reflect,
                 modelEnabled
         );
@@ -460,7 +472,8 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
 
     /**
      * 从 {@link ChatExecutionResult} 取回用户可见的最终答案(模仿 PlanExecute/ReAct resolveFinalAnswer)。
-     * <p>优先 {@code reflect}(含 summary + 末次尝试 + memory);reflect 空时按 modelEnabled 给兜底语。</p>
+     * <p>优先 {@code reflect}(RX-T4 起 = raw 最终答案 + 累积反思 memory);reflect 空时按 modelEnabled 给兜底语。
+     * <b>M1</b>:reflect 是 raw 答案(不含 attemptTrace 的 Thought/Action/Observation 标签),用户不会再看到 verbose 轨迹。</p>
      */
     private String resolveFinalAnswer(ChatExecutionResult result) {
         if (StringUtils.hasText(result.reflect())) {

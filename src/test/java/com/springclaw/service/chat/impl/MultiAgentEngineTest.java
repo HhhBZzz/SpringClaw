@@ -312,6 +312,85 @@ class MultiAgentEngineTest {
                 .contains("假完成拦截");
     }
 
+    // === MA-T4: finalResult 五字段精细化(observe/plan=summary/action=worker 轨迹/reflect=raw 答案)===
+
+    /**
+     * MA-T4: 驱动完整 Multi-Agent 循环(分解 + 2 worker + 聚合),断言 {@link ChatExecutionResult} 五字段
+     * 精细化投影(对齐 {@link PlanExecuteEngineTest} / {@link ReflexionEngineTest} 的结果测试风格)。
+     * <ul>
+     *   <li>observe = observePrompt(ctx)(assembled 的 "# 当前问题...");</li>
+     *   <li>plan = "Multi-Agent: 2 worker 并行后聚合"(read 任务直通,summary 由 finalResult 直进);</li>
+     *   <li>action = {@link MultiAgentEngine#buildWorkerTrace} 轨迹——每 worker 的 task.description
+     *       + Thought + Observation 三段式(参考 PlanExecuteEngine buildActionTrace);</li>
+     *   <li>reflect = raw 聚合答案(<b>MA-T4 M1</b>:不含 "Worker 结果"/"任务:"/"观察:" verbose 标签——
+     *       Worker 结果已由 action 投影,resolveFinalAnswer 发给用户的应是 clean 答案,对齐 ReflexionEngine M1);</li>
+     *   <li>modelEnabled = true。</li>
+     * </ul>
+     * <p><b>驱动 Task 4 实现</b>:Task 3 基础版 reflect = answer + "\nWorker 结果:\n" + renderWorkerResults(results),
+     * 含 verbose 标签;本测试断言 reflect 不含 "Worker 结果" / "任务: " / "观察: " → 迫使 finalResult 改为 raw 答案投影。</p>
+     */
+    @Test
+    void buildsChatExecutionResultWithMultiAgentTrace() throws Exception {
+        ModelCallExecutor executor = mock(ModelCallExecutor.class);
+        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
+        ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
+        MultiAgentEngine engine = newMultiAgentEngineWith(executor, toolOrchestrator, guard,
+                new ExplicitToolExecutioner(), 5);
+
+        AiProviderService.ActiveChatClient client = multiAgentClient();
+        when(guard.isModelCallEnabled(client)).thenReturn(true);
+        when(toolOrchestrator.selectAutonomousTools(any(), any(), any())).thenReturn(new Object[0]);
+
+        // decompose → 2 子任务
+        MultiAgentEngine.TaskDecomposition decomp = new MultiAgentEngine.TaskDecomposition(List.of(
+                new MultiAgentEngine.SubTask("搜索 X 资料"),
+                new MultiAgentEngine.SubTask("分析 X 的特性")
+        ));
+        doReturn(new ModelCallExecutor.ModelCallResult<>(decomp, client, List.of("test:test-model"), false))
+                .when(executor).executeChat(any(), eq("multi-agent-decompose"), any(), eq(true), any());
+
+        // 2 worker 各跑一次(纯文本 Thought,无 Action → observation 空,buildWorkerTrace 标 "(无工具调用)")
+        doReturn(textCallResult("worker1 检索到 X 是 AI 框架", client),
+                textCallResult("worker2 确认 X 支持 RAG", client))
+                .when(executor).executeChat(any(), eq("multi-agent-worker"), any(), anyBoolean(), any());
+
+        // aggregate → raw 综合答案
+        String rawAnswer = "综合答案: X 是支持 RAG/工具的 AI 框架。";
+        doReturn(textCallResult(rawAnswer, client))
+                .when(executor).executeChat(any(), eq("multi-agent-aggregate"), any(), eq(true), any());
+
+        ChatExecutionResult result = engine.execute(
+                multiAgentCtx(client), (reason, ctx) -> "fallback");
+
+        // observe = observePrompt(assembled)
+        assertThat(result.observe()).contains("当前问题");
+        // plan = summary(read 任务直通,无工具证据要求)
+        assertThat(result.plan())
+                .contains("Multi-Agent")
+                .contains("2 worker")
+                .contains("聚合");
+        assertThat(result.modelEnabled()).isTrue();
+        // action = buildWorkerTrace:每 worker 的 task.description + Thought + Observation 轨迹
+        assertThat(result.action())
+                .contains("[Worker 1]")
+                .contains("[Worker 2]")
+                .contains("搜索 X 资料")
+                .contains("分析 X 的特性")
+                .contains("Thought: worker1")
+                .contains("Thought: worker2")
+                .contains("Observation:");
+        // reflect = raw 聚合答案
+        assertThat(result.reflect())
+                .contains("综合答案")
+                .contains("RAG");
+        // MA-T4 M1:reflect 不含 verbose Worker 结果段(Worker 结果已由 action 投影)
+        assertThat(result.reflect())
+                .as("reflect 应是 raw 聚合答案,不含 verbose 'Worker 结果'/'任务:'/'观察:' 标签")
+                .doesNotContain("Worker 结果")
+                .doesNotContain("任务: ")
+                .doesNotContain("观察: ");
+    }
+
     private ModelCallExecutor.ModelCallResult<String> textCallResult(
             String text, AiProviderService.ActiveChatClient client) {
         return new ModelCallExecutor.ModelCallResult<>(text, client, List.of(), false);

@@ -38,7 +38,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * {@code max-agents}——把"分工与汇总"作为循环骨架,适合需要多视角/可拆解的复杂任务。
  * </p>
  * <p>
- * <b>当前状态:MA-T1 骨架(接入地基)+ MA-T2 decompose/aggregate + MA-T3 循环/SSE ——</b>
+ * <b>当前状态:MA-T1 骨架(接入地基)+ MA-T2 decompose/aggregate + MA-T3 循环/SSE + MA-T4 结果/trace 精细化 ——</b>
  * <ul>
  *   <li>{@code paradigm()} 声明 {@link AgentParadigm#MULTI_AGENT}(配合
  *       {@link AgentParadigm#isImplemented()} 与 {@code EngineSelector.LEGACY_RANK} 登记);</li>
@@ -59,8 +59,10 @@ import java.util.concurrent.atomic.AtomicReference;
  *       流式 SSE 生命周期(对齐 Reflexion/PlanExecute):trace(started) → 分解/Worker/聚合 trace →
  *       answerChunks → persist(TERMINAL_RESULT) → reportResult → trace(success) → releaseLockOnce →
  *       completeEmitter;异常委托 {@code fallbackHandler}。</li>
- *   <li>{@link #finalResult} <b>基础版</b>(observe / plan=summary 直进 / action=Worker 轨迹 /
- *       reflect=最终答案 + Worker 结果 / modelEnabled)——五字段精细化投影由 MA-T4 填充。</li>
+ *   <li>{@link #finalResult} <b>MA-T4 五字段精细化版</b>(observe / plan=summary 直进 /
+ *       action={@link #buildWorkerTrace} Worker 轨迹 / reflect=raw 聚合答案 / modelEnabled)
+ *       + {@link #resolveFinalAnswer} 优先 reflect 兜底;<b>M1 修复</b>:reflect 用 aggregate 的 raw 输出
+ *       (不含 "Worker 结果"/"任务:"/"观察:" verbose 标签),Worker 结果只进 action(对齐 ReflexionEngine M1)。</li>
  * </ul>
  * 构造函数复用 {@link ReActEngine}/{@link PlanExecuteEngine}/{@link ReflexionEngine} 的 11 bean 依赖 +
  * {@link ExplicitToolExecutioner}(MA-T3 Worker 手动执行工具时复用)+ {@code max-agents} 配置(clamp 到 [1,8])。
@@ -479,25 +481,33 @@ public class MultiAgentEngine implements AgentEngine.StreamableAgentEngine {
     }
 
     /**
-     * 构造终态 {@link ChatExecutionResult}(<b>MA-T3 基础版</b>,MA-T4 细化五字段投影)。
+     * 构造终态 {@link ChatExecutionResult}(<b>MA-T4 五字段精细化版</b>,对齐 Reflexion/PlanExecute finalResult)。
      * <ul>
      *   <li>observe = {@link #observePrompt}</li>
      *   <li>plan = summary 直进(如 "Multi-Agent: N worker 并行后聚合" /
-     *       "Multi-Agent: 假完成拦截(...)" / "Multi-Agent: decompose 未生成子任务");</li>
-     *   <li>action = {@link #buildWorkerTrace}(每 Worker 的 task.description + Thought + Observation 轨迹);</li>
-     *   <li>reflect = 最终答案 + "\nWorker 结果:\n" + {@link #renderWorkerResults}(每 Worker 的 task/observation);</li>
+     *       "Multi-Agent: 假完成拦截(...)" / "Multi-Agent: decompose 未生成子任务");
+     *       stream success trace 复用作完成摘要</li>
+     *   <li>action = {@link #buildWorkerTrace}(每 Worker 的 task.description + Thought + Observation 三段式轨迹);</li>
+     *   <li>reflect = raw 聚合答案(<b>MA-T4 M1</b>:不含 verbose "Worker 结果"/"任务:"/"观察:" 标签)
+     *       —— Worker 结果已由 action 投影,这里只放 {@code finalAnswer},让 {@link #resolveFinalAnswer}
+     *       发给用户的是 clean 答案(对齐 {@link ReflexionEngine#finalResult} 的 M1 修复);</li>
      *   <li>modelEnabled = 形参</li>
      * </ul>
+     * <p><b>MA-T4 M1</b>:Task 3 基础版 reflect = answer + "\nWorker 结果:\n" + {@link #renderWorkerResults}(results),
+     * 把 Worker 的 task/observation verbose 段也塞进 reflect,而 {@link #resolveFinalAnswer} 又把 reflect 当
+     * 最终答案发给用户(看到 verbose 标签)。本版拆开:Worker 结果只进 action({@link #buildWorkerTrace}),
+     * reflect 用 raw {@code finalAnswer}(aggregate 阶段 LLM 综合的 clean 答案)。对齐
+     * {@link PlanExecuteEngine#finalResult}(answer + 步骤概要)与 {@link ReflexionEngine#finalResult}(raw answer + memory)。</p>
      */
     private ChatExecutionResult finalResult(ChatContext ctx, List<WorkerResult> results,
                                             String finalAnswer, String summary, boolean modelEnabled) {
-        String answer = StringUtils.hasText(finalAnswer) ? finalAnswer : "(无最终答案)";
-        String reflect = answer + "\nWorker 结果:\n" + renderWorkerResults(results);
+        String answer = StringUtils.hasText(finalAnswer)
+                ? TextUtils.truncate(finalAnswer, 800) : "(无最终答案)";
         return new ChatExecutionResult(
                 observePrompt(ctx),
                 summary,
                 buildWorkerTrace(results),
-                reflect,
+                answer,
                 modelEnabled
         );
     }
@@ -525,7 +535,9 @@ public class MultiAgentEngine implements AgentEngine.StreamableAgentEngine {
 
     /**
      * 从 {@link ChatExecutionResult} 取回用户可见的最终答案(模仿 Reflexion/PlanExecute resolveFinalAnswer)。
-     * <p>优先 {@code reflect}(= 最终答案 + Worker 结果);reflect 空时按 modelEnabled 给兜底语。</p>
+     * <p>优先 {@code reflect}(MA-T4 起 = raw 聚合答案);reflect 空时按 modelEnabled 给兜底语。
+     * <b>MA-T4 M1</b>:reflect 是 raw 答案(不含 Worker 结果 verbose 标签),用户不会再看到 verbose 轨迹
+     * (Worker 结果已由 {@link ChatExecutionResult#action()} 投影)。</p>
      */
     private String resolveFinalAnswer(ChatExecutionResult result) {
         if (StringUtils.hasText(result.reflect())) {

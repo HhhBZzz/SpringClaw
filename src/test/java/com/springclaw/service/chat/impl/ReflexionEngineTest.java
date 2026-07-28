@@ -190,7 +190,8 @@ class ReflexionEngineTest {
 
     /**
      * 兜底路径:反思始终 success=false → 跑满 maxReflections=2 → 返回兜底结果。
-     * 断言:2 次尝试 + 2 次反思 = 4 次 LLM 调用;reflect 含 "已达 max-reflections" 兜底提示。
+     * 断言:2 次尝试 + 2 次反思 = 4 次 LLM 调用;plan(summary)含 "已达 max-reflections" 兜底提示
+     * (RX-T4 起 summary 直进 plan,不再塞 reflect)。
      */
     @Test
     void reflexionStopsAtMaxReflections() throws Exception {
@@ -220,7 +221,7 @@ class ReflexionEngineTest {
         verify(executor, times(2)).executeChat(any(), eq("reflexion-attempt"), any(), anyBoolean(), any());
         verify(executor, times(2)).executeChat(any(), eq("reflexion-reflect"), any(), anyBoolean(), any());
         assertThat(result.modelEnabled()).isTrue();
-        assertThat(result.reflect()).contains("已达 max-reflections");
+        assertThat(result.plan()).contains("已达 max-reflections");
     }
 
     /**
@@ -259,8 +260,75 @@ class ReflexionEngineTest {
         verify(executor, times(2)).executeChat(any(), eq("reflexion-attempt"), any(), anyBoolean(), any());
         verify(executor, times(2)).executeChat(any(), eq("reflexion-reflect"), any(), anyBoolean(), any());
         assertThat(result.modelEnabled()).isTrue();
-        // reflect 主摘要为 max-reflections 兜底(非假答案)——假完成守护生效
-        assertThat(result.reflect()).contains("已达 max-reflections");
+        // plan(summary)= max-reflections 兜底(未提前收敛)——假完成守护生效;reflect 走 raw 答案(RX-T4 M1)
+        assertThat(result.plan()).contains("已达 max-reflections");
+    }
+
+    // === RX-T4: ChatExecutionResult 五字段 + M1(reflect raw 答案,不含 Thought/Action/Observation 标签)===
+
+    /**
+     * 验证 {@link ChatExecutionResult} 五字段投影 + M1 修复。驱动 Reflexion 2 次尝试(尝试1 调 search 工具 +
+     * 反思 false → memory 累积 → 尝试2 纯文本最终答案 + 反思 true → 收敛),断言:
+     * <ul>
+     *   <li>plan = summary 直进("Reflexion: 2 次尝试后成功");</li>
+     *   <li>action = 末次 attemptTrace(Thought/Action/Observation 轨迹);</li>
+     *   <li>reflect = raw 最终答案 + "\n累积反思:\n" + memory(<b>M1</b>:不含 Thought/Action/Observation 标签);</li>
+     *   <li>modelEnabled = true。</li>
+     * </ul>
+     * <p>M1 核心:Task 3 把 attemptTrace(Thought/Action/Observation 标签)塞进 reflect,
+     * {@link ReflexionEngine#resolveFinalAnswer} 又把它当最终答案发给用户(看到 verbose 标签)。
+     * 本测试断言 reflect 只含 raw 答案 + memory,attemptTrace 仅进 action(轨迹)。</p>
+     */
+    @Test
+    void buildsChatExecutionResultWithReflexionTrace() throws Exception {
+        ModelCallExecutor executor = mock(ModelCallExecutor.class);
+        ToolOrchestrator toolOrchestrator = mock(ToolOrchestrator.class);
+        ModelTransportGuardService guard = mock(ModelTransportGuardService.class);
+        ReflexionToolFixture fixture = new ReflexionToolFixture();
+        ReflexionEngine engine = newReflexionEngine(executor, toolOrchestrator, guard,
+                new ExplicitToolExecutioner(), 3);
+
+        AiProviderService.ActiveChatClient client = reflexionClient();
+        when(guard.isModelCallEnabled(client)).thenReturn(true);
+        when(toolOrchestrator.selectAutonomousTools(any(), any(), any()))
+                .thenReturn(new Object[]{fixture});
+
+        // Actor:尝试1 调 search(→ Observation),尝试2 给纯文本最终答案(无 Action → 收敛)
+        doReturn(textCallResult("Thought: 需要搜索 X\nAction: search(query=\"X\")", client),
+                textCallResult("最终答案: X 是一个 AI 框架(已综合)。", client))
+                .when(executor).executeChat(any(), eq("reflexion-attempt"), any(), anyBoolean(), any());
+
+        // Reflector:尝试1 false(lesson 注入 memory),尝试2 true → 收敛
+        ReflexionEngine.ReflectionResult r1 =
+                new ReflexionEngine.ReflectionResult(false, "不够完整", "需更精确地搜索");
+        ReflexionEngine.ReflectionResult r2 =
+                new ReflexionEngine.ReflectionResult(true, "已完整回答", "保持策略");
+        doReturn(reflectionCallResult(r1, client), reflectionCallResult(r2, client))
+                .when(executor).executeChat(any(), eq("reflexion-reflect"), any(), anyBoolean(), any());
+
+        ChatExecutionResult result = engine.execute(
+                reflexionCtx(client), (reason, ctx) -> "fallback");
+
+        // plan = summary(直进)
+        assertThat(result.plan())
+                .as("plan 应为 summary 直进")
+                .contains("Reflexion: 2 次尝试后成功");
+        // action = 末次 attemptTrace(Thought/Action/Observation 轨迹)
+        assertThat(result.action())
+                .as("action 应含末次尝试的 Thought/Action/Observation 轨迹")
+                .contains("Thought").contains("Action").contains("Observation");
+        // reflect = raw 最终答案 + 累积反思 memory
+        assertThat(result.reflect())
+                .as("reflect 应含 raw 最终答案 + 累积反思 memory")
+                .contains("X 是一个 AI 框架")        // raw 最终答案(Actor 末次纯文本输出)
+                .contains("累积反思")                  // memory 段标题
+                .contains("需更精确地搜索");            // 尝试1 反思 lesson(累积进 memory)
+        // M1:reflect 不含 attemptTrace 的 Thought/Action/Observation 标签
+        assertThat(result.reflect())
+                .as("M1:reflect 为 raw 答案,不含 attemptTrace 的 Thought/Action/Observation 标签")
+                .doesNotContain("Thought:").doesNotContain("Action:").doesNotContain("Observation:");
+        // modelEnabled
+        assertThat(result.modelEnabled()).isTrue();
     }
 
     /**

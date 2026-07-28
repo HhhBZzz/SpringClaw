@@ -38,7 +38,8 @@ public class EngineSelector {
             "simplified", 60,
             "react-loop", 70,
             "plan-execute-loop", 80,
-            "reflexion-loop", 90
+            "reflexion-loop", 90,
+            "multi-agent-loop", 100
     );
 
     private final List<AgentEngine> engines;

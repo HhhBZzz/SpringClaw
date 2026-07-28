@@ -46,7 +46,8 @@ import {
   updateRuntimeMemoryCandidateStatus
 } from '../services/api';
 import { useAuthStore } from '../stores/auth';
-import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeEvaluationGateReport, RuntimeEvaluationRun, RuntimeEvaluationStatusSummary, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeMemoryCandidateReviewItem, RuntimeMemoryCandidateReviewStatus, RuntimeMemoryEffectivenessRedlineReport, RuntimeMemoryProviderEvaluationReport, RuntimeMemoryUsageTrace, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
+import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentParadigm, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeEvaluationGateReport, RuntimeEvaluationRun, RuntimeEvaluationStatusSummary, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeMemoryCandidateReviewItem, RuntimeMemoryCandidateReviewStatus, RuntimeMemoryEffectivenessRedlineReport, RuntimeMemoryProviderEvaluationReport, RuntimeMemoryUsageTrace, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
+import { AGENT_PARADIGMS } from '../types';
 
 type LearningReviewStatusFilter = 'all' | RuntimeLearningReviewStatus;
 type ToolProposalScopeFilter = 'current-session' | 'all-visible';
@@ -77,6 +78,7 @@ const auth = useAuthStore();
 const SESSION_KEY = 'springclaw.frontend.session';
 const SESSIONS_KEY = 'springclaw.frontend.chat.sessions.v1';
 const RESPONSE_MODE_KEY = 'springclaw.frontend.responseMode';
+const PARADIGM_KEY = 'springclaw.frontend.paradigm';
 const SIDEBAR_PINNED_KEY = 'springclaw.frontend.sidebarPinned';
 const SESSION_TITLES_KEY = 'springclaw.frontend.chat.sessionTitles.v1';
 const input = ref('');
@@ -86,6 +88,8 @@ const historySessions = ref<ChatSessionSummary[]>(readHistorySessions());
 const customSessionTitles = ref<Record<string, string>>(readSessionTitles());
 const busy = ref(false);
 const responseMode = ref<ChatResponseMode>(readResponseMode());
+const paradigm = ref<AgentParadigm>(readParadigm());
+const paradigmMenuOpen = ref(false);
 const sidebarPinned = ref(readSidebarPinned());
 const sidebarHovered = ref(false);
 const sidebarCollapsed = ref(false);
@@ -434,7 +438,8 @@ const visibleRunSteps = computed(() => {
     duration: traceDurationLabel(event) || (event.status === 'started' ? 'running' : '-'),
     tools: event.category || event.type,
     source: event.source,
-    riskLevel: event.riskLevel
+    riskLevel: event.riskLevel,
+    paradigm: event.paradigm
   }));
 });
 
@@ -787,6 +792,10 @@ watch(responseMode, (value) => {
   localStorage.setItem(RESPONSE_MODE_KEY, value);
 });
 
+watch(paradigm, (value) => {
+  localStorage.setItem(PARADIGM_KEY, value);
+});
+
 watch(sidebarPinned, (value) => {
   localStorage.setItem(SIDEBAR_PINNED_KEY, value ? 'true' : 'false');
 });
@@ -871,6 +880,16 @@ function makeSessionKey() {
 function readResponseMode(): ChatResponseMode {
   const raw = localStorage.getItem(RESPONSE_MODE_KEY);
   return raw === 'fast' || raw === 'deep' || raw === 'agent' ? raw : 'agent';
+}
+
+function readParadigm(): AgentParadigm {
+  const raw = localStorage.getItem(PARADIGM_KEY);
+  return (AGENT_PARADIGMS.some((p) => p.value === raw) ? raw : 'SINGLE_TURN') as AgentParadigm;
+}
+
+function paradigmLabel(value: AgentParadigm | string | undefined): string {
+  if (!value) return '自动';
+  return AGENT_PARADIGMS.find((p) => p.value === value)?.label || String(value);
 }
 
 function readSidebarPinned() {
@@ -1530,7 +1549,8 @@ async function send() {
         userId: auth.profile.username,
         message: text,
         channel: 'api',
-        responseMode: responseMode.value
+        responseMode: responseMode.value,
+        paradigm: paradigm.value
       },
       {
         onStatus(status) {
@@ -2274,6 +2294,33 @@ onUnmounted(() => {
                 <em>{{ provider.available ? (provider.active ? '当前' : '可用') : '不可用' }}</em>
               </button>
               <p v-if="modelStatusError" class="runtime-model-error">{{ modelStatusError }}</p>
+            </div>
+          </div>
+
+          <div class="runtime-paradigm-switcher-wrap">
+            <button class="runtime-paradigm-pill" type="button" :aria-expanded="paradigmMenuOpen" :disabled="busy" title="选择 Agent 范式(思考模式)" @click="paradigmMenuOpen = !paradigmMenuOpen">
+              <strong>{{ paradigmLabel(paradigm) }}</strong>
+            </button>
+            <div v-if="paradigmMenuOpen" class="runtime-model-menu" role="menu" aria-label="Agent paradigms">
+              <div class="runtime-model-menu-head">
+                <strong>Agent 范式</strong>
+                <span>思考模式</span>
+              </div>
+              <button
+                v-for="p in AGENT_PARADIGMS"
+                :key="p.value"
+                class="runtime-provider-row"
+                :class="{ active: paradigm === p.value }"
+                type="button"
+                :title="p.description"
+                @click="paradigm = p.value; paradigmMenuOpen = false"
+              >
+                <span>
+                  <strong>{{ p.label }}</strong>
+                  <small>{{ p.description }}</small>
+                </span>
+                <em>{{ paradigm === p.value ? '当前' : '切换' }}</em>
+              </button>
             </div>
           </div>
 
@@ -3030,6 +3077,7 @@ onUnmounted(() => {
                 <div class="run-facts-card">
                   <div class="context-row"><span>Request ID</span><strong>{{ currentRequestId }}</strong></div>
                   <div class="context-row"><span>Mode</span><strong>{{ currentProductModeLabel }}</strong></div>
+                  <div class="context-row"><span>Paradigm</span><strong :class="traceEvents[0]?.paradigm ? `para-${String(traceEvents[0].paradigm).toLowerCase()}` : ''">{{ paradigmLabel(traceEvents[0]?.paradigm || paradigm) }}</strong></div>
                   <div class="context-row"><span>Question</span><strong>{{ resolvedQuestionLabel }}</strong></div>
                   <div class="context-row"><span>Status</span><strong>{{ runStatus }}</strong></div>
                   <div class="context-row"><span>Start Time</span><strong>{{ taskCreatedLabel }}</strong></div>
@@ -3077,7 +3125,7 @@ onUnmounted(() => {
                       v-for="step in visibleRunSteps"
                       :key="`${step.label}-${step.status}`"
                       class="trace-row"
-                      :class="`is-${step.status}`"
+                      :class="[`is-${step.status}`, step.paradigm ? `para-${String(step.paradigm).toLowerCase()}` : '']"
                     >
                       <span class="trace-dot" aria-hidden="true"></span>
                       <div>

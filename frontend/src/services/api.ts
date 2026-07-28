@@ -4,6 +4,7 @@ import type {
   AgentActionProposalResult,
   AgentCapabilityEvent,
   AgentDecisionEvent,
+  AgentParadigm,
   AgentTraceEvent,
   AgentVerificationEvent,
   ApiEnvelope,
@@ -126,7 +127,7 @@ export function logoutRequest() {
   });
 }
 
-export function sendChat(input: { sessionKey: string; userId: string; message: string; channel?: string; responseMode?: ChatResponseMode }) {
+export function sendChat(input: { sessionKey: string; userId: string; message: string; channel?: string; responseMode?: ChatResponseMode; paradigm?: AgentParadigm }) {
   return request<ChatResponse>('/api/chat/send', {
     method: 'POST',
     body: JSON.stringify({ ...input, channel: input.channel || 'api' })
@@ -368,7 +369,7 @@ export interface ChatStreamOptions {
 }
 
 export async function streamChat(
-  input: { sessionKey: string; userId: string; message: string; channel?: string; responseMode?: ChatResponseMode },
+  input: { sessionKey: string; userId: string; message: string; channel?: string; responseMode?: ChatResponseMode; paradigm?: AgentParadigm },
   handlers: ChatStreamHandlers = {},
   options: ChatStreamOptions = {}
 ) {
@@ -397,7 +398,7 @@ export async function streamChat(
       headers,
       signal: controller.signal,
       credentials: 'include',
-      body: JSON.stringify({ ...input, channel: input.channel || 'api', responseMode: input.responseMode || 'agent' })
+      body: JSON.stringify({ ...input, channel: input.channel || 'api', responseMode: input.responseMode || 'agent', paradigm: input.paradigm })
     });
 
     if (!response.ok) {

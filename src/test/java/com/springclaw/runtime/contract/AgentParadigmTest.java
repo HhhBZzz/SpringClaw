@@ -21,13 +21,15 @@ class AgentParadigmTest {
     }
 
     @Test
-    void firstFourAreImplementedRestArePlaceholders() {
+    void implementedParadigmsVsPlaceholders() {
+        // 已实现(地基 4 个 + REACT Task 1 + PLAN_EXECUTE Task 2)
         assertThat(AgentParadigm.SINGLE_TURN.isImplemented()).isTrue();
         assertThat(AgentParadigm.OPAR.isImplemented()).isTrue();
         assertThat(AgentParadigm.AUTONOMOUS_LOOP.isImplemented()).isTrue();
         assertThat(AgentParadigm.REACT.isImplemented()).isTrue();
+        assertThat(AgentParadigm.PLAN_EXECUTE.isImplemented()).isTrue();
 
-        assertThat(AgentParadigm.PLAN_EXECUTE.isImplemented()).isFalse();
+        // 占位(待增量接入)
         assertThat(AgentParadigm.REFLECTION.isImplemented()).isFalse();
         assertThat(AgentParadigm.MULTI_AGENT.isImplemented()).isFalse();
     }

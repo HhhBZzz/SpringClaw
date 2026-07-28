@@ -6352,6 +6352,32 @@ button.runtime-nav-item {
   min-width: 0;
 }
 
+.runtime-paradigm-switcher-wrap {
+  position: relative;
+  justify-self: center;
+  min-width: 0;
+}
+
+.runtime-paradigm-pill {
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  max-width: 220px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  color: #f6f8fb;
+  background: #0f151d;
+}
+
+.runtime-paradigm-pill strong {
+  font-size: 14px;
+  font-weight: 690;
+  white-space: nowrap;
+}
+
 .runtime-model-menu {
   position: absolute;
   left: 50%;
@@ -12052,3 +12078,21 @@ button.runtime-nav-item {
     z-index: 8;
   }
 }
+
+/* ===== Agent paradigm semantic coloring (timeline trace-dot + facts badge) ===== */
+.trace-row.para-single_turn .trace-dot { background: var(--muted); }
+.trace-row.para-opar .trace-dot { background: #9333ea; }
+.trace-row.para-autonomous_loop .trace-dot { background: var(--red); }
+.trace-row.para-react .trace-dot { background: var(--blue); }
+.trace-row.para-plan_execute .trace-dot { background: var(--coral); }
+.trace-row.para-reflection .trace-dot { background: var(--amber); }
+.trace-row.para-multi_agent .trace-dot { background: var(--green); }
+
+/* facts 卡 paradigm badge 色 */
+.para-single_turn { color: var(--muted); }
+.para-opar { color: #9333ea; }
+.para-autonomous_loop { color: var(--red); }
+.para-react { color: var(--blue); }
+.para-plan_execute { color: var(--coral); }
+.para-reflection { color: var(--amber); }
+.para-multi_agent { color: var(--green); }

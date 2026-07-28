@@ -12088,11 +12088,11 @@ button.runtime-nav-item {
 .trace-row.para-reflection .trace-dot { background: var(--amber); }
 .trace-row.para-multi_agent .trace-dot { background: var(--green); }
 
-/* facts 卡 paradigm badge 色 */
-.para-single_turn { color: var(--muted); }
-.para-opar { color: #9333ea; }
-.para-autonomous_loop { color: var(--red); }
-.para-react { color: var(--blue); }
-.para-plan_execute { color: var(--coral); }
-.para-reflection { color: var(--amber); }
-.para-multi_agent { color: var(--green); }
+/* facts 卡 paradigm badge 色(限定 .run-facts-card strong.para-*,优先级 (0,5,1) > nth-child(3) 的 (0,4,1) 绿色覆盖) */
+.runtime-inspector .run-facts-card .context-row strong.para-single_turn { color: var(--muted); }
+.runtime-inspector .run-facts-card .context-row strong.para-opar { color: #9333ea; }
+.runtime-inspector .run-facts-card .context-row strong.para-autonomous_loop { color: var(--red); }
+.runtime-inspector .run-facts-card .context-row strong.para-react { color: var(--blue); }
+.runtime-inspector .run-facts-card .context-row strong.para-plan_execute { color: var(--coral); }
+.runtime-inspector .run-facts-card .context-row strong.para-reflection { color: var(--amber); }
+.runtime-inspector .run-facts-card .context-row strong.para-multi_agent { color: var(--green); }

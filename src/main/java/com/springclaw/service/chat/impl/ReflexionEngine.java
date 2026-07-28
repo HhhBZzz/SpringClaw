@@ -1,12 +1,16 @@
 package com.springclaw.service.chat.impl;
 
+import com.springclaw.common.util.TextUtils;
 import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.runtime.contract.AgentParadigm;
+import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
+import com.springclaw.tool.runtime.ToolExecutionContext;
+import com.springclaw.tool.runtime.ToolExecutionContextHolder;
 import com.springclaw.tool.runtime.ToolOrchestrator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,6 +21,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
 
+import java.time.Instant;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -29,7 +34,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * 把"自我纠错"作为循环骨架,适合需要多轮打磨的质量敏感任务。
  * </p>
  * <p>
- * <b>当前状态:RX-T2 prompt + ReflectionResult</b>——
+ * <b>当前状态:RX-T3 循环(执行+反思+memory+终止+守护)+ 流式 SSE</b>——
  * <ul>
  *   <li>{@code paradigm()} 声明 {@link AgentParadigm#REFLECTION}(配合
  *       {@link AgentParadigm#isImplemented()} 与 {@code EngineSelector.LEGACY_RANK} 登记);</li>
@@ -40,8 +45,15 @@ import java.util.concurrent.atomic.AtomicReference;
  *       历史 memory + {@link BeanOutputConverter} format,要求 LLM 输出 {@link ReflectionResult}
  *       (success/critique/lesson);{@link #reflectionOutputConverter} 复用 PlanExecute/OparLoop 的
  *       BeanOutputConverter 模式,RX-T3 经 {@code .responseEntity(ReflectionResult.class)} 取回实体;</li>
- *   <li>{@code execute()}/{@code stream()} <b>占位</b>——循环体(Actor→Evaluator→Reflector + 假完成守护
- *       + memory 累积)留待 RX-T3 填充。</li>
+ *   <li>{@code execute()}/{@code stream()}(<b>RX-T3 填充</b>)跑 {@link #runReflexionLoop}:Actor→Evaluator/Reflector
+ *       循环——每次尝试 {@link #callLlmForAttempt}(LLM 据 memory → Thought+Action 文本 → 共享
+ *       {@link ExplicitToolExecutioner} 手动执行工具 → Observation)→ {@link #callReflection}(BeanOutputConverter
+ *       结构化自评);success(且 read 或 {@link AutonomousExecutionTracker} 通过工具证据校验)即收敛,
+ *       否则把 lesson/rejection 累积进 memory 注入下一轮;{@code max-reflections} 兜底。
+ *       假完成守护复用 AutonomousLoop/ReAct/Plan-Execute 模式;流式 SSE 生命周期(对齐 PlanExecuteEngine):
+ *       trace(started) → 循环 → answerChunks → persist(TERMINAL_RESULT) → reportResult → trace(success) →
+ *       releaseLockOnce → completeEmitter;异常委托 {@code fallbackHandler}。</li>
+ *   <li>{@link #finalResult} <b>基础版</b>(五字段齐整但 trace 较粗)——结果/trace 精细化投影留待 RX-T4。</li>
  * </ul>
  * 构造函数复用 {@link ReActEngine}/{@link PlanExecuteEngine} 的 11 bean 依赖 + {@link ExplicitToolExecutioner}
  * (RX-T3 反思循环手动执行工具时复用)+ {@code max-reflections} 配置(clamp 到 [1,5])。
@@ -124,29 +136,20 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
     }
 
     /**
-     * 阻塞执行入口——<b>RX-T1 占位</b>:Actor→Evaluator→Reflector 循环体留待 RX-T3 填充。
-     * 当前返回降级 {@link ChatExecutionResult}(本地技能兜底,对齐 {@link ReActEngine}/{@link PlanExecuteEngine}
-     * 模型不可用降级路径),保证占位阶段不炸、不静默走错引擎。
+     * 阻塞执行入口——内部跑 {@link #runReflexionLoop}(无 emitter)。
+     * <p>结构对齐 {@link ReActEngine#execute} / {@link PlanExecuteEngine#execute}:直接进入
+     * Actor→Evaluator/Reflector 循环,返回 {@link ChatExecutionResult}。</p>
      */
     @Override
     public ChatExecutionResult execute(ChatContext ctx, AgentEngine.FallbackResponder fallbackResponder) {
-        log.debug("Reflexion execute 占位(RX-T3 循环未实现): requestId={}", ctx.requestId());
-        AssembledContext assembled = ctx.assembled();
-        LocalSkillFallbackService.LocalSkillResult fallback =
-                localExecutionSupport.tryFallback(assembled == null ? "" : assembled.question(), true);
-        return new ChatExecutionResult(
-                observePrompt(ctx),
-                "Reflexion 循环尚未实现(RX-T3 填充)",
-                fallback != null ? fallback.executionDetails() : "Reflexion 引擎骨架占位",
-                fallback != null ? fallback.fallbackAnswer() : "",
-                false
-        );
+        return runReflexionLoop(ctx, null, ctx.requestId());
     }
 
     /**
-     * 流式执行入口——<b>RX-T1 占位</b>:完整 SSE 生命周期(trace → 反思循环 → persist → complete,
-     * 对齐 {@link ReActEngine}/{@link PlanExecuteEngine})留待 RX-T3 填充。当前直接返回 null,
-     * 不发射任何事件,避免误用占位路径产生半成品流。
+     * 流式执行入口——管理完整 SSE 生命周期,内部跑 {@link #runReflexionLoop}。
+     * <p>结构对齐 {@link PlanExecuteEngine#stream} / {@link ReActEngine#stream}:trace(started) →
+     * Actor→反思循环 → 发送最终答案 → persist(TERMINAL_RESULT) → reportResult → trace(success) →
+     * releaseLockOnce → completeEmitter;异常委托 {@code fallbackHandler}。</p>
      */
     @Override
     public Disposable stream(ChatContext context,
@@ -155,8 +158,349 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
                              AtomicBoolean lockReleased,
                              AtomicReference<Disposable> disposableRef,
                              AgentEngine.OnStreamFailure fallbackHandler) {
-        log.debug("Reflexion stream 占位(RX-T3 循环未实现): requestId={}", context.requestId());
+        try {
+            sseEventBridge.sendTrace(emitter, context, "Reflexion 循环", "reflexion", "started",
+                    "进入 Reflexion 执行→反思→改进重试循环。", 0L);
+            sseEventBridge.sendStatus(emitter, "Reflexion 循环执行中");
+
+            ChatExecutionResult result = runReflexionLoop(context, emitter, context.requestId());
+
+            String finalAnswer = resolveFinalAnswer(result);
+            sseEventBridge.sendAnswerChunks(emitter, finalAnswer);
+            chatResultPersister.persist(context, finalAnswer, result, ChatPersistenceIntent.TERMINAL_RESULT);
+            reportResult(context, result, finalAnswer);
+
+            sseEventBridge.sendTrace(emitter, context, "Reflexion 循环", "reflexion", "success",
+                    "Reflexion 循环执行完成(" + result.plan() + ")。", 0L);
+            sseEventBridge.sendTrace(emitter, context, "完成", "final", "success",
+                    "已生成最终回答。", 0L);
+            releaseLockOnce(context, lockToken, lockReleased);
+            sseEventBridge.completeEmitter(emitter);
+        } catch (Exception ex) {
+            log.warn("Reflexion SSE 执行失败: sessionKey={}, reason={}",
+                    context.assembled() == null ? "?" : context.assembled().sessionKey(), ex.getMessage());
+            try {
+                String simplifiedReason = chatResponsePolicyService.simplifyFailureReason(ex.getMessage());
+                sseEventBridge.sendTrace(emitter, context, "Reflexion 循环", "reflexion", "failed",
+                        simplifiedReason, 0L);
+            } catch (Exception ignored) {}
+            fallbackHandler.handle(context, ex, emitter, lockToken, lockReleased);
+        }
         return null;
+    }
+
+    // === RX-T3: Actor→Evaluator/Reflector 循环(memory 累积 + 假完成守护 + 流式 SSE) ===
+
+    /**
+     * Reflexion 核心循环——Actor 产出一次尝试 → Evaluator/Reflector 自评 → 据 lesson/rejection 累积 memory
+     * → 进入下一轮,直到反思 success(且 read 或 tracker 通过工具证据校验)或达 {@code max-reflections}。
+     * <ul>
+     *   <li>每次尝试:{@link #callLlmForAttempt}(LLM 据 memory → Thought+Action 文本)→ 经共享
+     *       {@link ExplicitToolExecutioner} 手动执行工具得 Observation,拼成 attemptTrace;</li>
+     *   <li>{@link #callReflection}:BeanOutputConverter 结构化自评 → {@link ReflectionResult}(success/lesson);</li>
+     *   <li>success + read 直接收敛;success + write/side_effect/dangerous 必须校验
+     *       {@link AutonomousExecutionTracker} 工具证据,无证据则假完成拦截(rejection 注入 memory,继续);</li>
+     *   <li>未 success → lesson 累积进 memory 注入下一轮 Actor(Reflexion 的"自我纠错"闭环);</li>
+     *   <li>{@code max-reflections} 兜底返回当前最佳尝试。</li>
+     * </ul>
+     * <p>结构对齐 {@link PlanExecuteEngine#runPlanExecute} / {@link ReActEngine#runReActLoop}:模型不可用降级 →
+     * 选工具 → tracker + scope → 循环 → 假完成守护(参考 AutonomousLoop L317-345)。差异:Reflexion 的循环骨架是
+     * "Actor→Reflector 显式反思 + memory 累积",而非 ReAct 的 Thought-Action-Observation 或 Plan-Execute 的
+     * Plan→Execute→Replan;Reflector 的 success + tracker 证据共同决定收敛。</p>
+     */
+    private ChatExecutionResult runReflexionLoop(ChatContext ctx, SseEmitter emitter, String requestId) {
+        AiProviderService.ActiveChatClient activeClient = ctx.activeClient();
+        AssembledContext assembled = ctx.assembled();
+        AgentDecision decision = ctx.decision();
+        if (requestId == null) requestId = ctx.requestId();
+        String riskLevel = decision != null ? decision.riskLevel() : "read";
+
+        // 模型不可用 → 降级(对齐 PlanExecuteEngine.runPlanExecute / ReActEngine.runReActLoop)
+        if (!modelTransportGuardService.isModelCallEnabled(activeClient)) {
+            LocalSkillFallbackService.LocalSkillResult fallback =
+                    localExecutionSupport.tryFallback(assembled == null ? "" : assembled.question(), true);
+            return new ChatExecutionResult(
+                    observePrompt(ctx),
+                    modelTransportGuardService.disabledModelPlanReason(activeClient),
+                    fallback != null ? fallback.executionDetails() : modelTransportGuardService.disabledModelActionReason(activeClient),
+                    fallback != null ? fallback.fallbackAnswer() : "",
+                    false
+            );
+        }
+
+        final Object[] tools = toolOrchestrator.selectAutonomousTools(ctx.channel(), ctx.userId(), decision);
+        final boolean allowFailover = isSafeToRetry(tools);
+        // 执行追踪器 — 复用同一 tracker 累积真实工具证据(对齐 PlanExecute/ReAct)。假完成守护用它校验
+        // write/side_effect/dangerous 任务是否真有工具证据;工具包经 ToolRuntimeAspect 上报到此 tracker。
+        final AutonomousExecutionTracker tracker = new AutonomousExecutionTracker();
+        // 工具执行上下文 scope —— 让 Actor 反射调用的工具方法经 ToolRuntimeAspect 时能读到
+        // userId/sessionKey/runId 等做权限检查 + 审计 + emit TOOL_* 事件(对齐 PlanExecute/ReAct)。
+        ToolExecutionContext toolContext = new ToolExecutionContext(
+                assembled == null ? null : assembled.sessionKey(),
+                ctx.channel(),
+                ctx.userId(),
+                requestId,
+                "REFLECTION",
+                requestId,
+                ctx.roleCode()
+        );
+
+        String memory = "";
+        String lastAttempt = "";
+        int attempts = 0;
+
+        try (ToolExecutionContextHolder.Scope scope = ToolExecutionContextHolder.open(toolContext)) {
+            ToolExecutionContextHolder.setTracker(tracker);
+            for (int attempt = 1; attempt <= maxReflections; attempt++) {
+                attempts = attempt;
+                log.info("Reflexion 尝试 {}/{}: requestId={}, riskLevel={}, toolsCount={}",
+                        attempt, maxReflections, requestId, riskLevel, tools == null ? 0 : tools.length);
+                if (emitter != null) {
+                    try {
+                        sseEventBridge.sendStatus(emitter, "Reflexion 尝试 " + attempt + "/" + maxReflections);
+                    } catch (Exception e) {
+                        log.warn("SSE 进度事件发送失败(可能客户端已断开): attempt={}", attempt);
+                    }
+                }
+
+                // Actor:LLM 据 memory → Thought+Action 文本 → ExplicitToolExecutioner 手动执行工具 → Observation
+                ModelCallExecutor.ModelCallResult<String> attemptResult = callLlmForAttempt(
+                        ctx, memory, tools, activeClient, requestId, allowFailover);
+                activeClient = attemptResult.client(); // failover 后更新
+                String thought = attemptResult.value();
+                boolean hasAction = explicitToolExecutioner.hasActionLine(thought);
+                String observation = hasAction
+                        ? explicitToolExecutioner.execute(thought, tools, requestId) : "";
+                String attemptTrace = "Thought: " + TextUtils.truncate(thought, 400)
+                        + "\nAction: " + explicitToolExecutioner.describeAction(thought, hasAction)
+                        + "\nObservation: " + TextUtils.truncate(observation, 400);
+                lastAttempt = attemptTrace;
+
+                if (emitter != null) {
+                    try {
+                        // Actor 三段式 trace — Thought/Action/Observation(模仿 ReAct/PlanExecute)
+                        sseEventBridge.sendTrace(emitter, ctx, "Reflexion Thought " + attempt,
+                                "reflexion", "thought", TextUtils.truncate(thought, 200), 0L);
+                        sseEventBridge.sendTrace(emitter, ctx, "Reflexion Action " + attempt,
+                                "reflexion", "action",
+                                TextUtils.truncate(explicitToolExecutioner.describeAction(thought, hasAction), 200), 0L);
+                        if (StringUtils.hasText(observation)) {
+                            sseEventBridge.sendTrace(emitter, ctx, "Reflexion Observation " + attempt,
+                                    "reflexion", "observation", TextUtils.truncate(observation, 200), 0L);
+                        }
+                    } catch (Exception ignored) {}
+                }
+
+                // Evaluator/Reflector:自评本次尝试(BeanOutputConverter 结构化输出)
+                ReflectionResult reflection = callReflection(ctx, attemptTrace, memory, activeClient, requestId, allowFailover);
+                if (emitter != null) {
+                    try {
+                        sseEventBridge.sendTrace(emitter, ctx, "Reflexion 反思 " + attempt,
+                                "reflexion", "reflect",
+                                "success=" + reflection.success()
+                                        + " lesson=" + TextUtils.truncate(reflection.lesson(), 200), 0L);
+                    } catch (Exception ignored) {}
+                }
+
+                // 终止判定:read 直接完成;write/side_effect/dangerous 必须校验 tracker 工具证据(假完成守护)
+                if (reflection.success()) {
+                    if ("read".equals(riskLevel) || tracker.satisfiesCompletionCondition(riskLevel)) {
+                        log.info("Reflexion 任务完成: requestId={}, attempt={}, riskLevel={}, hasWrite={}, hasCmd={}, hasVerified={}",
+                                requestId, attempt, riskLevel,
+                                tracker.hasWriteToolCall(), tracker.hasRunCommandCall(), tracker.hasVerifiedSideEffect());
+                        return finalResult(ctx, attemptTrace, memory, attempts,
+                                "Reflexion: " + attempt + " 次尝试后成功", true);
+                    }
+                    // 假完成:反思 success 但无真实工具证据 → rejection 注入 memory,继续(对齐 ReAct/PlanExecute)
+                    String rejection = tracker.renderFakeCompletionRejection(riskLevel);
+                    log.warn("Reflexion 假完成拦截: requestId={}, attempt={}, riskLevel={}, hasWrite={}, hasCmd={}",
+                            requestId, attempt, riskLevel, tracker.hasWriteToolCall(), tracker.hasRunCommandCall());
+                    memory += "\n尝试 " + attempt + " 反思: 声称完成但无工具证据。" + rejection;
+                    if (emitter != null) {
+                        try {
+                            sseEventBridge.sendTrace(emitter, ctx, "Reflexion 假完成拦截",
+                                    "reflexion", "warning",
+                                    "反思声称完成但缺少真实工具证据,继续尝试: "
+                                            + TextUtils.truncate(rejection, 200), 0L);
+                        } catch (Exception ignored) {}
+                    }
+                    continue;
+                }
+
+                // 未完成 → lesson 累积进 memory,注入下一轮 Actor(Reflexion 自我纠错闭环)
+                memory += "\n尝试 " + attempt + " 反思: " + reflection.lesson();
+            }
+
+            // max-reflections 兜底:返回当前最佳尝试(对齐 PlanExecute max-replan / ReAct max-steps 兜底)
+            log.info("Reflexion 达到最大反思次数: requestId={}, maxReflections={}", requestId, maxReflections);
+            return finalResult(ctx, lastAttempt, memory, attempts,
+                    "已达 max-reflections(" + maxReflections + "),返回当前最佳尝试", true);
+        } catch (Exception ex) {
+            log.warn("Reflexion 循环执行失败: requestId={}, reason={}", requestId, ex.getMessage());
+            LocalSkillFallbackService.LocalSkillResult fallback =
+                    localExecutionSupport.tryFallback(assembled == null ? "" : assembled.question(), true);
+            return new ChatExecutionResult(
+                    observePrompt(ctx),
+                    "Reflexion 异常终止: " + chatResponsePolicyService.simplifyFailureReason(ex.getMessage()),
+                    StringUtils.hasText(lastAttempt) ? TextUtils.truncate(lastAttempt, 600) : "(无尝试输出)",
+                    fallback != null ? fallback.fallbackAnswer() : "",
+                    false
+            );
+        } finally {
+            // scope close 只还原 ToolExecutionContext,不清 tracker ThreadLocal;手动 clear(对齐 PlanExecute/ReAct)。
+            ToolExecutionContextHolder.clearTracker();
+        }
+    }
+
+    /**
+     * Actor 阶段的 LLM 调用——不挂 {@code .tools()},系统 prompt({@link #renderAttemptPrompt})要求 LLM
+     * 据当前 memory → 输出 Thought+Action 文本(或直接答案)。返回 {@link ModelCallExecutor.ModelCallResult}
+     * 让调用方更新 failover 后的 client(对齐 PlanExecuteEngine.callLlmForStep / ReActEngine 的 LLM 调用模式)。
+     * 经 {@link ExplicitToolExecutioner} 在循环下方解析 Action 并手动执行工具。
+     */
+    private ModelCallExecutor.ModelCallResult<String> callLlmForAttempt(ChatContext ctx,
+                                                                         String memory,
+                                                                         Object[] tools,
+                                                                         AiProviderService.ActiveChatClient client,
+                                                                         String requestId,
+                                                                         boolean allowFailover) throws Exception {
+        AssembledContext assembled = ctx.assembled();
+        String sessionKey = assembled == null ? "" : assembled.sessionKey();
+        String systemPrompt = renderAttemptPrompt(ctx, tools, memory);
+        return modelCallExecutor.executeChat(
+                client,
+                "reflexion-attempt",
+                new ModelCallExecutor.ChatRequestContext(requestId, sessionKey, ctx.channel(), ctx.userId()),
+                allowFailover,
+                c -> {
+                    // 手动循环主路径:不挂 .tools()——LLM 文本输出 Thought + Action,循环下方
+                    // ExplicitToolExecutioner 解析并手动执行工具(对齐 ReAct/PlanExecute 的 LLM 调用模式)。
+                    var resp = conversationAdvisorSupport.apply(
+                                    c.chatClient().prompt()
+                                            .system(systemPrompt)
+                                            .user(TypedContextPromptRenderer.question(ctx)),
+                                    sessionKey,
+                                    ctx.userId())
+                            .call()
+                            .chatResponse();
+                    return new ModelCallExecutor.ChatOperationResult<>(
+                            ModelCallExecutor.extractText(resp), resp);
+                }
+        );
+    }
+
+    /**
+     * Evaluator/Reflector 阶段的 LLM 调用——经 BeanOutputConverter 结构化产出 {@link ReflectionResult}
+     * (对齐 PlanExecuteEngine.runPlan 的 {@code .responseEntity(Plan.class)} 模式)。异常降级为
+     * {@code ReflectionResult(false, "反思失败: ...", "")}——不向调用方抛,保持循环推进(下一轮 Actor 据新 memory 继续)。
+     */
+    private ReflectionResult callReflection(ChatContext ctx,
+                                             String attempt,
+                                             String memory,
+                                             AiProviderService.ActiveChatClient client,
+                                             String requestId,
+                                             boolean allowFailover) {
+        AssembledContext assembled = ctx.assembled();
+        String sessionKey = assembled == null ? "" : assembled.sessionKey();
+        try {
+            String systemPrompt = renderReflectionPrompt(ctx, attempt, memory);
+            ModelCallExecutor.ModelCallResult<ReflectionResult> result = modelCallExecutor.executeChat(
+                    client,
+                    "reflexion-reflect",
+                    new ModelCallExecutor.ChatRequestContext(requestId, sessionKey, ctx.channel(), ctx.userId()),
+                    allowFailover,
+                    c -> {
+                        var response = conversationAdvisorSupport.apply(
+                                        c.chatClient().prompt()
+                                                .system(systemPrompt)
+                                                .user(TypedContextPromptRenderer.question(ctx)),
+                                        sessionKey,
+                                        ctx.userId())
+                                .call()
+                                .responseEntity(ReflectionResult.class);
+                        return new ModelCallExecutor.ChatOperationResult<>(
+                                response.entity(), response.response());
+                    }
+            );
+            ReflectionResult reflection = result.value();
+            return reflection != null ? reflection
+                    : new ReflectionResult(false, "反思返回空结果", "");
+        } catch (Exception ex) {
+            log.warn("Reflexion 反思失败,降级为未完成继续尝试: requestId={}, reason={}",
+                    requestId, ex.getMessage());
+            return new ReflectionResult(false, "反思失败: " + ex.getMessage(), "");
+        }
+    }
+
+    /**
+     * 构造终态 {@link ChatExecutionResult}(<b>RX-T3 基础版</b>,模仿 PlanExecute/ReAct finalResult)。
+     * <ul>
+     *   <li>observe = {@link #observePrompt}</li>
+     *   <li>plan = "Reflexion 执行 N 次尝试"(stream success trace 复用)</li>
+     *   <li>action = 末次尝试 attemptTrace(Thought/Action/Observation 三段)</li>
+     *   <li>reflect = 末次尝试摘要 + summary + 累积 memory(前几轮反思 lesson)</li>
+     *   <li>modelEnabled = 形参</li>
+     * </ul>
+     * <p>结果/trace 的精细化投影(每轮尝试轨迹、success/max-reflections 区分消息等)留待 RX-T4。</p>
+     */
+    private ChatExecutionResult finalResult(ChatContext ctx, String lastAttempt, String memory,
+                                            int attempts, String summary, boolean modelEnabled) {
+        String attemptBrief = StringUtils.hasText(lastAttempt)
+                ? TextUtils.truncate(lastAttempt, 600) : "(无尝试输出)";
+        String reflect = summary + "\n最终尝试:\n" + attemptBrief
+                + "\n累积反思:\n" + (StringUtils.hasText(memory) ? TextUtils.truncate(memory, 800) : "（无）");
+        return new ChatExecutionResult(
+                observePrompt(ctx),
+                "Reflexion 执行 " + attempts + " 次尝试",
+                attemptBrief,
+                reflect,
+                modelEnabled
+        );
+    }
+
+    /**
+     * 从 {@link ChatExecutionResult} 取回用户可见的最终答案(模仿 PlanExecute/ReAct resolveFinalAnswer)。
+     * <p>优先 {@code reflect}(含 summary + 末次尝试 + memory);reflect 空时按 modelEnabled 给兜底语。</p>
+     */
+    private String resolveFinalAnswer(ChatExecutionResult result) {
+        if (StringUtils.hasText(result.reflect())) {
+            return result.reflect();
+        }
+        if (!result.modelEnabled()) {
+            return "Reflexion 循环执行完成,但模型不可用。";
+        }
+        return "Reflexion 循环执行完成,共 " + result.plan() + "。";
+    }
+
+    private void reportResult(ChatContext context, ChatExecutionResult result, String answer) {
+        if (lifecycleObserver == null) return;
+        try {
+            lifecycleObserver.resultReturned(context, result, answer, Instant.now());
+        } catch (RuntimeException ex) {
+            log.error("canonical lifecycle projection failed after reflexion persistence, requestId={}",
+                    context.requestId(), ex);
+        }
+    }
+
+    private void releaseLockOnce(ChatContext context, String lockToken, AtomicBoolean lockReleased) {
+        if (!lockReleased.compareAndSet(false, true) || lockToken == null) return;
+        String sessionKey = context.assembled() == null ? null : context.assembled().sessionKey();
+        if (sessionKey != null) {
+            chatGuardService.releaseSessionLock(sessionKey, lockToken);
+        }
+    }
+
+    /**
+     * 是否允许同 provider 内 failover——含副作用型工具(写文件/脚本)时禁止重试,避免重复执行。
+     * 复制自 {@link PlanExecuteEngine} / {@link ReActEngine}。
+     */
+    private boolean isSafeToRetry(Object[] tools) {
+        if (tools == null) return true;
+        for (Object tool : tools) {
+            if (tool instanceof com.springclaw.tool.pack.WorkspaceEditToolPack) return false;
+            if (tool instanceof com.springclaw.tool.pack.ScriptSkillToolPack) return false;
+        }
+        return true;
     }
 
     private String observePrompt(ChatContext ctx) {

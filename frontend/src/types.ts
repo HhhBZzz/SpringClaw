@@ -25,6 +25,21 @@ export interface ChatResponse {
 }
 
 export type ChatResponseMode = 'agent' | 'fast' | 'deep' | 'tool';
+
+export type AgentParadigm =
+  | 'SINGLE_TURN' | 'OPAR' | 'AUTONOMOUS_LOOP'
+  | 'REACT' | 'PLAN_EXECUTE' | 'REFLECTION' | 'MULTI_AGENT';
+
+export const AGENT_PARADIGMS: Array<{ value: AgentParadigm; label: string; description: string }> = [
+  { value: 'SINGLE_TURN', label: '单轮', description: 'Function-Calling 单轮问答' },
+  { value: 'OPAR', label: 'OPAR', description: 'Observe-Plan-Act-Reflect 深度链路' },
+  { value: 'AUTONOMOUS_LOOP', label: '自主循环', description: '自主多步循环(写/副作用任务)' },
+  { value: 'REACT', label: 'ReAct', description: 'Thought-Action-Observation 推理' },
+  { value: 'PLAN_EXECUTE', label: '规划执行', description: '先规划全部再逐步执行 + Replan' },
+  { value: 'REFLECTION', label: '反思', description: '执行-反思-改进重试(verbal RL)' },
+  { value: 'MULTI_AGENT', label: '多智能体', description: 'Coordinator-Worker 并行协作' }
+];
+
 export type AgentProductMode = 'quick_answer' | 'agent_analysis' | 'execution_task';
 
 export interface ContextSourceSummary {
@@ -67,6 +82,7 @@ export interface AgentTraceEvent {
   target?: string;
   source?: string;
   riskLevel?: string;
+  paradigm?: AgentParadigm | string;
 }
 
 export interface AgentCapabilityEvent {

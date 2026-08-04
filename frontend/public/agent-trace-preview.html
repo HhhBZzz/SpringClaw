@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent 链路流式 · SpringClaw</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0e14; --surface: #0d1117; --surface-2: #161b22;
+    --ink: #e6edf3; --muted: #7d8590; --line: rgba(255,255,255,.06); --line-2: rgba(255,255,255,.12);
+    --mono: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+    --sans: -apple-system, "PingFang SC", system-ui, sans-serif;
+    --h-model: #a371f7; --h-thought: #58a6ff; --h-action: #3fb950;
+    --h-observation: #d29922; --h-tool: #f85149; --h-plan: #ff7b72;
+    --p-react: #58a6ff; --p-opar: #a371f7; --p-pe: #ff7b72; --p-rx: #d29922; --p-ma: #3fb950;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--sans); min-height: 100vh; padding: 24px 20px 64px; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .top h1 { font-size: 16px; font-weight: 700; }
+  .top h1 .tag { font-family: var(--mono); font-size: 10px; padding: 2px 7px; border-radius: 5px; background: var(--surface-2); color: var(--h-model); border: 1px solid var(--line-2); margin-left: 8px; }
+  .controls { display: flex; gap: 8px; align-items: center; }
+  .pill-group { display: flex; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 3px; }
+  .pill { padding: 5px 11px; border-radius: 6px; font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer; transition: all .15s; border: none; background: transparent; font-family: var(--sans); }
+  .pill:hover { color: var(--ink); }
+  .pill.active { color: var(--ink); background: var(--surface-2); }
+  .play-btn { padding: 6px 14px; border-radius: 7px; font-size: 12px; font-weight: 700; background: var(--h-thought); color: #0a0e14; border: none; cursor: pointer; font-family: var(--sans); }
+  .play-btn:hover { opacity: .9; }
+
+  .run-bar { display: flex; align-items: center; gap: 12px; padding: 11px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 18px; }
+  .run-bar .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex-shrink: 0; transition: background .3s; }
+  .run-bar .dot.running { background: var(--h-action); box-shadow: 0 0 10px var(--h-action); animation: breathe 1.4s ease-in-out infinite; }
+  .run-bar .dot.done { background: var(--h-action); }
+  @keyframes breathe { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  .run-bar .id { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .run-bar .para { margin-left: auto; font-family: var(--mono); font-size: 11px; padding: 3px 9px; border-radius: 5px; background: color-mix(in srgb, var(--p) 16%, transparent); color: var(--p); border: 1px solid color-mix(in srgb, var(--p) 30%, transparent); }
+
+  .stream { position: relative; padding-left: 30px; }
+  .stream::before { content: ""; position: absolute; left: 14px; top: 14px; bottom: 14px; width: 2px; background: var(--line-2); border-radius: 1px; }
+  .stream::after { content: ""; position: absolute; left: 13px; width: 4px; background: var(--p); border-radius: 2px; height: var(--progress, 0%); top: 14px; transition: height .5s ease; box-shadow: 0 0 8px var(--p); }
+
+  .step { position: relative; margin-bottom: 12px; opacity: 0; }
+  .step::before { content: ""; position: absolute; left: -22px; top: 14px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); border: 2px solid var(--h); z-index: 2; transition: all .3s; }
+  .step.live::before { background: var(--h); box-shadow: 0 0 0 3px var(--bg), 0 0 14px var(--h); }
+  .step.done::before { background: var(--h); }
+
+  .step-card { background: var(--surface); border: 1px solid var(--line); border-left: 2px solid var(--h); border-radius: 9px; overflow: hidden; }
+  .step-head { display: flex; align-items: center; gap: 9px; padding: 10px 14px; }
+  .badge { font-family: var(--mono); font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px; background: color-mix(in srgb, var(--h) 16%, transparent); color: var(--h); border: 1px solid color-mix(in srgb, var(--h) 28%, transparent); white-space: nowrap; }
+  .step-title { font-size: 13px; font-weight: 600; flex: 1; }
+  .step-time { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .step-body { padding: 0 14px; font-size: 13px; color: var(--muted); line-height: 1.55; min-height: 18px; opacity: 0; }
+  .step-body .cursor { display: inline-block; width: 6px; height: 14px; background: var(--h); vertical-align: text-bottom; margin-left: 2px; animation: blink 0.8s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .step-code { padding: 8px 14px 12px; font-family: var(--mono); font-size: 11px; color: var(--ink); opacity: 0; }
+  .step-code .loc { color: var(--muted); font-size: 10px; }
+  .step-code .loc::before { content: "↗ "; }
+  .step-code .line { color: #b1bac4; margin-top: 3px; }
+  .step-code .line .kw { color: #ff7b72; } .step-code .line .fn { color: #d2a8ff; } .step-code .line .str { color: #a5d6ff; } .step-code .line .com { color: #6e7681; }
+
+  @media (prefers-reduced-motion: reduce) { .step { opacity: 1; } .run-bar .dot.running { animation: none; } .step-body .cursor { animation: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>Agent 链路流式 <span class="tag">live trace</span></h1>
+    <div class="controls">
+      <div class="pill-group" id="paradigms">
+        <button class="pill active" data-p="react">ReAct</button>
+        <button class="pill" data-p="opar">OPAR</button>
+        <button class="pill" data-p="pe">Plan-Execute</button>
+        <button class="pill" data-p="rx">Reflexion</button>
+        <button class="pill" data-p="ma">Multi-Agent</button>
+      </div>
+      <button class="play-btn" id="play">▶ 重放</button>
+    </div>
+  </div>
+
+  <div class="run-bar" id="runBar">
+    <div class="dot" id="runDot"></div>
+    <div class="id" id="runId">run 3f8a...e2d1</div>
+    <div class="para" id="runPara">paradigm=REACT</div>
+  </div>
+
+  <div class="stream" id="stream"></div>
+</div>
+
+<script>
+const TRACES = {
+  react: { p:'var(--p-react)', label:'REACT', steps:[
+    { h:'var(--h-model)', badge:'MODEL_CALLED', title:'LLM 推理 #1', t:'+0ms',
+      body:'用户要查项目 Agent 链路。需要搜索代码理解结构。',
+      loc:'ReActEngine.java:294', code:'<span class="fn">explicitToolExecutioner</span>.<span class="fn">execute</span>(thought, tools, reqId) <span class="com">// 手动循环</span>' },
+    { h:'var(--h-thought)', badge:'THOUGHT', title:'Thought 推理', t:'+1.2s',
+      body:'定位 Agent 入口 → 决定调 search 搜索 "AgentEngine implements"。',
+      loc:'ExplicitToolExecutioner.java:40', code:'<span class="fn">findActionLine</span>(thought) → <span class="fn">invokeTool</span>(actionLine) <span class="com">// via CGLIB proxy</span>' },
+    { h:'var(--h-tool)', badge:'TOOL', title:'search("AgentEngine implements")', t:'+1.3s',
+      body:'工具调用开始 → WorkspaceSearchToolPack.search',
+      loc:'ToolRuntimeAspect.java:108', code:'<span class="fn">coordinator</span>.<span class="fn">toolStarted</span>(runId, at) <span class="com">// emit TOOL_STARTED</span>' },
+    { h:'var(--h-observation)', badge:'OBSERVATION', title:'6 个 AgentEngine 实现', t:'+1.8s',
+      body:'AgentEngine + 6 实现 + ReAct/Plan-Execute/Reflexion/Multi-Agent。',
+      loc:'ToolRuntimeAspect.java:130', code:'<span class="fn">coordinator</span>.<span class="fn">toolSucceeded</span>(runId, at) <span class="com">// emit TOOL_SUCCEEDED</span>' },
+    { h:'var(--h-model)', badge:'MODEL_CALLED', title:'LLM 推理 #2', t:'+2.0s',
+      body:'已找到引擎清单,无更多 Action → 产出最终答案。',
+      loc:'ReActEngine.java:328', code:'<span class="kw">if</span> (!hasToolCall) <span class="kw">return</span> <span class="fn">finalResult</span>(...) <span class="com">// 终止</span>' },
+    { h:'var(--h-action)', badge:'FINAL', title:'最终答案', t:'+3.1s',
+      body:'Controller → ChatServiceImpl → EngineSelector.select(ctx, paradigm) → 7 引擎。',
+      loc:'ReActEngine.java:492', code:'<span class="kw">return new</span> <span class="fn">ChatExecutionResult</span>(observe, plan, action, reflect, <span class="kw">true</span>)' }
+  ]},
+  opar: { p:'var(--p-opar)', label:'OPAR', steps:[
+    { h:'var(--h-observation)', badge:'OBSERVE', title:'Observe 观察', t:'+0ms', body:'组装上下文 + 记忆召回,观察意图(深度分析)。', loc:'OparLoopEngine.java:298', code:'<span class="fn">commit</span>(current, copy(...), CONTEXT_READY, at)' },
+    { h:'var(--h-plan)', badge:'PLAN', title:'Plan 规划', t:'+0.8s', body:'LLM 生成结构化 PlanResult(CONTINUE/READY + steps)。', loc:'OparLoopEngine.java:320', code:'<span class="fn">executeChat</span>(..., <span class="str">"plan"</span>, ...).<span class="fn">responseEntity</span>(PlanResult.<span class="kw">class</span>)' },
+    { h:'var(--h-action)', badge:'ACT', title:'Act 执行(.tools())', t:'+1.5s', body:'Spring AI .tools() 挂载,LLM 自主调工具。', loc:'OparLoopEngine.java:401', code:'requestSpec = requestSpec.<span class="fn">tools</span>(tools) <span class="com">// 原生 tool-calling</span>' },
+    { h:'var(--h-observation)', badge:'REFLECT', title:'Reflect 反思', t:'+2.2s', body:'评估结果,plan.ready() → 终止。', loc:'OparLoopEngine.java:230', code:'<span class="kw">if</span> (plan.<span class="fn">ready</span>()) <span class="kw">break</span>' }
+  ]},
+  pe: { p:'var(--p-pe)', label:'PLAN_EXECUTE', steps:[
+    { h:'var(--h-plan)', badge:'DECOMPOSE', title:'Plan 分解(3 步)', t:'+0ms', body:'Coordinator 生成 List<PlanStep>(搜索/分析/验证)。', loc:'PlanExecuteEngine.java:198', code:'<span class="fn">beanOutputConverter</span>.<span class="fn">convert</span>(text).<span class="fn">steps</span>()' },
+    { h:'var(--h-action)', badge:'EXECUTE', title:'step 1: search', t:'+0.9s', body:'逐步执行,LLM 据 stepText 选工具。', loc:'ExplicitToolExecutioner.java:40', code:'<span class="fn">explicitToolExecutioner</span>.<span class="fn">execute</span>(thought, tools, reqId)' },
+    { h:'var(--h-observation)', badge:'EXECUTE', title:'step 2: analyze', t:'+1.6s', body:'Observation 反馈进 history,继续下一步。', loc:'PlanExecuteEngine.java:296', code:'history += <span class="fn">buildStepHistory</span>(step, thought, obs)' },
+    { h:'var(--h-plan)', badge:'REPLAN', title:'step 失败 → Replan', t:'+2.1s', body:'带反馈重新 plan(max-replan=2)。', loc:'PlanExecuteEngine.java:361', code:'plan = <span class="fn">runPlan</span>(ctx, client, tools, <span class="str">"上次失败:..."</span>)' },
+    { h:'var(--h-action)', badge:'AGGREGATE', title:'Coordinator 聚合', t:'+3.0s', body:'所有步完成,LLM 综合结果 → 最终答案。', loc:'PlanExecuteEngine.java:320', code:'String answer = <span class="fn">aggregate</span>(ctx, results, client)' }
+  ]},
+  rx: { p:'var(--p-rx)', label:'REFLECTION', steps:[
+    { h:'var(--h-model)', badge:'ATTEMPT 1', title:'尝试 1', t:'+0ms', body:'LLM 据 memory(空)执行单次工具。', loc:'ReflexionEngine.java:267', code:'<span class="fn">callLlmForAttempt</span>(ctx, memory, tools, client, reqId)' },
+    { h:'var(--h-observation)', badge:'REFLECT 1', title:'反思 1(未达成)', t:'+0.9s', body:'lesson:需更精确搜索。memory 累积。', loc:'ReflexionEngine.java:283', code:'memory += <span class="str">"尝试 1 反思: "</span> + reflection.<span class="fn">lesson</span>()' },
+    { h:'var(--h-model)', badge:'ATTEMPT 2', title:'尝试 2(memory)', t:'+1.6s', body:'LLM 据 memory(含 lesson 1)改进执行。', loc:'ReflexionEngine.java:267', code:'<span class="com">// memory 闭环 — verbal RL</span>' },
+    { h:'var(--h-action)', badge:'REFLECT 2', title:'反思 2(达成)', t:'+2.4s', body:'success=true + 守护通过 → 终止。', loc:'ReflexionEngine.java:311', code:'<span class="kw">if</span> (success && tracker.<span class="fn">satisfiesCompletionCondition</span>(risk)) <span class="kw">return</span> <span class="fn">finalResult</span>(...)' }
+  ]},
+  ma: { p:'var(--p-ma)', label:'MULTI_AGENT', steps:[
+    { h:'var(--h-plan)', badge:'DECOMPOSE', title:'Coordinator 分解(3)', t:'+0ms', body:'TaskDecomposition → 3 子任务并行。', loc:'MultiAgentEngine.java:276', code:'List&lt;SubTask&gt; subTasks = <span class="fn">decompose</span>(ctx, tools, client)' },
+    { h:'var(--h-action)', badge:'WORKER-1', title:'搜索子任务(并行)', t:'+0.8s', body:'CompletableFuture + ExplicitToolExecutioner。', loc:'MultiAgentEngine.java:299', code:'CompletableFuture.<span class="fn">supplyAsync</span>(() -> <span class="fn">runWorker</span>(ctx, t, tools, ...))' },
+    { h:'var(--h-action)', badge:'WORKER-2', title:'分析子任务(并行)', t:'+0.8s', body:'共享 AutonomousExecutionTracker(并发安全)。', loc:'MultiAgentEngine.java:387', code:'ToolExecutionContextHolder.<span class="fn">setTracker</span>(sharedTracker) <span class="com">// 各线程</span>' },
+    { h:'var(--h-action)', badge:'WORKER-3', title:'验证子任务(并行)', t:'+0.9s', body:'allOf().join() 等所有完成。', loc:'MultiAgentEngine.java:303', code:'CompletableFuture.<span class="fn">allOf</span>(futures).<span class="fn">join</span>()' },
+    { h:'var(--h-observation)', badge:'AGGREGATE', title:'Coordinator 聚合', t:'+1.8s', body:'LLM 综合 3 worker 结果 → 最终答案。', loc:'MultiAgentEngine.java:320', code:'String answer = <span class="fn">aggregate</span>(ctx, results, client)' }
+  ]}
+};
+
+let current = 'react';
+let timeline = [];
+const streamEl = document.getElementById('stream');
+const runDot = document.getElementById('runDot');
+const runPara = document.getElementById('runPara');
+const runBar = document.getElementById('runBar');
+
+function render() {
+  const data = TRACES[current];
+  runPara.textContent = 'paradigm=' + data.label;
+  runBar.style.setProperty('--p', data.p);
+  streamEl.style.setProperty('--p', data.p);
+  streamEl.innerHTML = data.steps.map((s, i) => `
+    <div class="step" data-i="${i}" style="--h:${s.h}">
+      <div class="step-card">
+        <div class="step-head">
+          <span class="badge">${s.badge}</span>
+          <span class="step-title">${s.title}</span>
+          <span class="step-time">${s.t}</span>
+        </div>
+        <div class="step-body" data-full="${s.body}"></div>
+        <div class="step-code">
+          <div class="loc">${s.loc}</div>
+          <div class="line">${s.code}</div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+  stream();
+}
+
+function stream() {
+  const data = TRACES[current];
+  const steps = streamEl.querySelectorAll('.step');
+  runDot.className = 'dot running';
+  streamEl.style.setProperty('--progress', '0%');
+
+  steps.forEach(function(step, i){
+    var s = data.steps[i];
+    var body = step.querySelector('.step-body');
+    var code = step.querySelector('.step-code');
+    body.textContent = s.body;
+
+    setTimeout(function(){
+      step.style.opacity = '1';
+      step.style.transform = 'translateX(0)';
+      step.classList.add('live');
+      streamEl.style.setProperty('--progress', ((i + 1) / steps.length * 100) + '%');
+      if (i > 0) { steps[i-1].classList.remove('live'); steps[i-1].classList.add('done'); }
+      setTimeout(function(){
+        body.style.opacity = '1';
+        setTimeout(function(){ code.style.opacity = '1'; }, 150);
+      }, 200);
+    }, i * 900 + 100);
+  });
+
+  var total = (steps.length - 1) * 900 + 800;
+  setTimeout(function(){
+    var last = steps[steps.length - 1];
+    if (last) { last.classList.remove('live'); last.classList.add('done'); }
+    runDot.className = 'dot done';
+  }, total);
+}
+
+function typeText(el, text, onDone) {
+  el.textContent = text;
+  if (onDone) onDone();
+}
+
+document.getElementById('paradigms').addEventListener('click', e => {
+  const btn = e.target.closest('.pill');
+  if (!btn || !btn.dataset.p) return;
+  document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  current = btn.dataset.p;
+  render();
+});
+document.getElementById('play').addEventListener('click', render);
+
+render();
+</script>
+</body>
+</html>

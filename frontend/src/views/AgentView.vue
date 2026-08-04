@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import AgentMessage from '../components/AgentMessage.vue';
+import RunFlowCard from '../components/RunFlowCard.vue';
+import AgentCanvas from '../features/blueprint-canvas/components/AgentCanvas.vue';
+import HarnessConveyor from '../features/blueprint-canvas/components/HarnessConveyor.vue';
 import LoginPanel from '../components/LoginPanel.vue';
 import DeveloperDetailsToggle from '../components/task/DeveloperDetailsToggle.vue';
 import TaskApprovalCard from '../components/task/TaskApprovalCard.vue';
@@ -93,6 +96,8 @@ const paradigmMenuOpen = ref(false);
 const sidebarPinned = ref(readSidebarPinned());
 const sidebarHovered = ref(false);
 const sidebarCollapsed = ref(false);
+/** Fork A:执行链路视图三轨——极客日志(chat+回复+内联动态流程,默认) / 动态沙盘 / 外壳流水线(harness) */
+const consoleView = ref<'sandbox' | 'geek' | 'harness'>('geek');
 const streamStatus = ref('');
 const streamMeta = ref<ChatStreamMeta | null>(null);
 const traceEvents = ref<AgentTraceEvent[]>([]);
@@ -2351,12 +2356,38 @@ onUnmounted(() => {
           }"
         >
           <section class="runtime-main-panel" aria-label="Agent conversation">
-            <div class="studio-canvas runtime-chat-canvas">
+            <AgentCanvas v-if="consoleView === 'sandbox'" embedded class="runtime-canvas-embed" />
+            <HarnessConveyor v-else-if="consoleView === 'harness'" embedded class="runtime-canvas-embed" />
+            <div v-show="consoleView === 'geek'" class="studio-canvas runtime-chat-canvas">
               <div class="studio-heading runtime-main-heading task-header">
                 <div class="task-title-block">
                   <div class="task-title-row">
                     <h2>{{ taskTitle }}</h2>
                     <button class="task-icon-button" type="button" title="Rename session" @click="renameCurrentSession">Edit</button>
+                    <!-- Fork A:执行链路三轨拨动 [≡极客日志] / [⚗动态沙盘] / [⚙外壳流水线] -->
+                    <div class="canvas-track-toggle" role="group" aria-label="执行链路视图">
+                      <button
+                        type="button"
+                        :aria-pressed="consoleView === 'geek'"
+                        :class="consoleView === 'geek' && 'is-active'"
+                        title="传统垂直 trace 日志(排错回退)"
+                        @click="consoleView = 'geek'"
+                      ><span aria-hidden="true">≡</span> 极客日志</button>
+                      <button
+                        type="button"
+                        :aria-pressed="consoleView === 'sandbox'"
+                        :class="consoleView === 'sandbox' && 'is-active'"
+                        title="动态节点沙盘(默认)"
+                        @click="consoleView = 'sandbox'"
+                      ><span aria-hidden="true">⚗</span> 动态沙盘</button>
+                      <button
+                        type="button"
+                        :aria-pressed="consoleView === 'harness'"
+                        :class="consoleView === 'harness' && 'is-active'"
+                        title="harness 装配流水线(整个产品外壳截面)"
+                        @click="consoleView = 'harness'"
+                      ><span aria-hidden="true">⚙</span> 外壳流水线</button>
+                    </div>
                   </div>
                   <div class="task-meta-row" aria-label="Current task metadata">
                     <span>Session ID <strong>{{ compactSessionId }}</strong></span>
@@ -2937,6 +2968,9 @@ onUnmounted(() => {
                     {{ streamStatus || '正在连接模型、组织上下文或等待首字...' }}
                   </div>
                 </article>
+
+                <!-- 回复内联动态执行流程:节点由本次 run 的真实 traceEvents 动态生成,非写死 -->
+                <RunFlowCard v-if="traceEvents.length" :events="traceEvents" />
               </section>
 
               <div

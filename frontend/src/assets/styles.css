@@ -1,29 +1,5 @@
-:root {
-  color-scheme: light;
-  --page: #f7f4ed;
-  --page-strong: #efe9dc;
-  --surface: #fffdfa;
-  --surface-soft: rgba(255, 253, 250, 0.72);
-  --ink: #202124;
-  --ink-soft: #3c4043;
-  --muted: #6f746d;
-  --line: rgba(60, 64, 67, 0.14);
-  --line-strong: rgba(60, 64, 67, 0.22);
-  --blue: #1a73e8;
-  --blue-soft: rgba(26, 115, 232, 0.11);
-  --green: #188038;
-  --green-soft: rgba(24, 128, 56, 0.12);
-  --coral: #ff7a59;
-  --amber: #f9ab00;
-  --red: #d93025;
-  --shadow-soft: 0 22px 70px rgba(60, 64, 67, 0.12);
-  --shadow-card: 0 12px 36px rgba(60, 64, 67, 0.1);
-  --radius-xl: 36px;
-  --radius-lg: 28px;
-  --radius-md: 20px;
-  --font: "Google Sans Text", "Google Sans", "Avenir Next", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
-  --mono: "SFMono-Regular", "JetBrains Mono", "Menlo", monospace;
-}
+/* Fork C:历代 :root 已合并为文件中段的唯一 canonical(见 "Agent Command Center refinement")。
+   此处原浅色 :root 已删(变量被覆盖,仅 --coral 已迁入 canonical)。 */
 
 * { box-sizing: border-box; }
 
@@ -2737,33 +2713,9 @@ textarea { font-family: var(--font); }
   }
 }
 
-/* SpringClaw Runtime Console vNext: restrained dark agent workspace. */
-:root {
-  color-scheme: dark;
-  --page: #0b0d10;
-  --page-strong: #111318;
-  --surface: #151821;
-  --surface-soft: #111318;
-  --surface-raised: #181c25;
-  --ink: #edeff3;
-  --ink-soft: #c9ced8;
-  --muted: #8b93a1;
-  --line: #2a2f3a;
-  --line-strong: #353c49;
-  --blue: #f2c94c;
-  --blue-soft: rgba(242, 201, 76, 0.14);
-  --green: #4ade80;
-  --green-soft: rgba(74, 222, 128, 0.12);
-  --amber: #f2c94c;
-  --red: #ff6b6b;
-  --shadow-soft: 0 22px 80px rgba(0, 0, 0, 0.28);
-  --shadow-card: 0 12px 40px rgba(0, 0, 0, 0.22);
-  --radius-xl: 16px;
-  --radius-lg: 12px;
-  --radius-md: 10px;
-  --font: "Avenir Next", "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
-  --mono: "JetBrains Mono", "SFMono-Regular", "Menlo", monospace;
-}
+/* SpringClaw Runtime Console vNext: restrained dark agent workspace.
+   Fork C:此代 :root 已并入文件中段唯一 canonical(独有 --font/--mono/--shadow/--radius 等已迁入)。 */
+
 
 html,
 body,
@@ -4061,8 +4013,10 @@ body::after {
   grid-row: auto;
 }
 
-/* Agent Command Center refinement: closer to Codex / Linear / Raycast. */
+/* Agent Command Center refinement: closer to Codex / Linear / Raycast.
+   Fork C:合并历代 :root 为此唯一 canonical(最后生效值 + 独有变量 --coral/--font 等)。 */
 :root {
+  color-scheme: dark;
   --page: #090b0f;
   --page-strong: #0d1016;
   --surface: #12161d;
@@ -4077,7 +4031,16 @@ body::after {
   --blue-soft: rgba(246, 201, 69, 0.12);
   --amber: #f6c945;
   --green: #38d979;
+  --green-soft: rgba(74, 222, 128, 0.12);
   --red: #ff5c5c;
+  --coral: #ff7a59;
+  --shadow-soft: 0 22px 80px rgba(0, 0, 0, 0.28);
+  --shadow-card: 0 12px 40px rgba(0, 0, 0, 0.22);
+  --radius-xl: 16px;
+  --radius-lg: 12px;
+  --radius-md: 10px;
+  --font: "Avenir Next", "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", sans-serif;
+  --mono: "JetBrains Mono", "SFMono-Regular", "Menlo", monospace;
 }
 
 body {

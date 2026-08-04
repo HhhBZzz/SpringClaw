@@ -46,6 +46,12 @@ import type {
 } from '../types';
 
 const TOKEN_KEY = 'springclaw.frontend.token';
+/**
+ * 后端 API 基址。dev 留空(走 vite proxy 同源 /api);Vercel 生产注入 VITE_API_BASE=https://api.yourdomain.com
+ * 浏览器直连后端(跨域 CORS),不走 Vercel rewrite 代理——因为 Vercel 代理外部后端有 120s 硬超时,
+ * 会掐断 >2 分钟的 agent SSE 流(RUN_DEADLINE 30 分钟)。
+ */
+const API_BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '');
 let memoryToken = '';
 export type ApiErrorKind = 'empty' | 'http' | 'network' | 'non_json';
 
@@ -80,7 +86,7 @@ async function request<T>(url: string, options: RequestInit & { auth?: boolean }
   if (options.auth !== false && token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
-  const response = await fetch(url, { ...options, headers, credentials: 'include' });
+  const response = await fetch(`${API_BASE}${url}`, { ...options, headers, credentials: 'include' });
   const raw = await response.text();
   let payload: ApiEnvelope<T>;
   if (!raw) {
@@ -393,7 +399,7 @@ export async function streamChat(
 
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   try {
-    const response = await fetch('/api/chat/stream', {
+    const response = await fetch(`${API_BASE}/api/chat/stream`, {
       method: 'POST',
       headers,
       signal: controller.signal,

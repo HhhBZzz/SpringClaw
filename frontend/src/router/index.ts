@@ -2,6 +2,8 @@ import { createRouter, createWebHashHistory } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import AdminView from '../views/AdminView.vue';
 import AgentView from '../views/AgentView.vue';
+import BlueprintView from '../views/BlueprintView.vue';
+import HarnessView from '../views/HarnessView.vue';
 import HomeView from '../views/HomeView.vue';
 
 const router = createRouter({
@@ -10,6 +12,8 @@ const router = createRouter({
     { path: '/', name: 'home', component: HomeView },
     { path: '/agent', name: 'agent', component: AgentView },
     { path: '/admin', name: 'admin', component: AdminView },
+    { path: '/blueprint', name: 'blueprint', component: BlueprintView },
+    { path: '/harness', name: 'harness', component: HarnessView },
     { path: '/console', redirect: '/agent' },
     { path: '/:pathMatch(.*)*', redirect: '/' }
   ],

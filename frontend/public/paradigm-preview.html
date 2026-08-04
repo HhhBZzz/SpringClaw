@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>范式切换预览 · SpringClaw</title>
+<style>
+  :root {
+    --bg: #0f151d;
+    --surface: #11161f;
+    --surface-2: #161c27;
+    --ink: #e8eaed;
+    --muted: #9da6b4;
+    --line: rgba(255,255,255,.08);
+    --amber: #f6c945;
+    /* 范式色 */
+    --p-single_turn: #9da6b4;
+    --p-opar: #9333ea;
+    --p-autonomous_loop: #d93025;
+    --p-react: #1a73e8;
+    --p-plan_execute: #ff7a59;
+    --p-reflection: #f9ab00;
+    --p-multi_agent: #188038;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, "PingFang SC", "Google Sans", system-ui, sans-serif;
+    min-height: 100vh; padding: 32px 24px 64px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+
+  /* 范式选择器(顶部 status bar 风格) */
+  .status-bar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 14px; padding: 12px 16px; margin-bottom: 24px;
+  }
+  .status-bar .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-right: 4px; }
+  .paradigm-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 7px 14px; border-radius: 999px;
+    background: var(--surface-2); border: 1px solid var(--line);
+    color: var(--muted); font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: all .15s; user-select: none;
+  }
+  .pill:hover { color: var(--ink); border-color: rgba(255,255,255,.18); }
+  .pill.active { color: var(--ink); border-color: var(--p); background: color-mix(in srgb, var(--p) 14%, transparent); }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--p); flex-shrink: 0; }
+
+  /* 范式描述卡 */
+  .paradigm-header {
+    display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px;
+    padding-bottom: 14px; border-bottom: 1px solid var(--line);
+  }
+  .paradigm-header .name { font-size: 28px; font-weight: 800; color: var(--p); }
+  .paradigm-header .desc { color: var(--muted); font-size: 14px; }
+
+  /* timeline */
+  .timeline { position: relative; padding-left: 28px; }
+  .timeline::before {
+    content: ""; position: absolute; left: 9px; top: 8px; bottom: 8px;
+    width: 2px; background: var(--line);
+  }
+  .step {
+    position: relative; padding: 14px 16px; margin-bottom: 10px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-left: 3px solid var(--p); border-radius: 10px;
+  }
+  .step::before {
+    content: ""; position: absolute; left: -24px; top: 18px;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: var(--p);
+    box-shadow: 0 0 0 4px var(--bg), 0 0 12px color-mix(in srgb, var(--p) 60%, transparent);
+  }
+  .step .stage {
+    display: inline-block; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .06em;
+    color: var(--p); margin-bottom: 6px;
+  }
+  .step .title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .step .detail { font-size: 13px; color: var(--muted); line-height: 1.5; }
+  .step .meta { font-size: 11px; color: var(--muted); margin-top: 6px; font-variant-numeric: tabular-nums; }
+
+  /* 范式色图例 */
+  .legend {
+    display: flex; gap: 14px; flex-wrap: wrap; margin-top: 28px;
+    padding-top: 20px; border-top: 1px solid var(--line);
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .legend-item .dot { width: 10px; height: 10px; border-radius: 50%; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Agent 范式切换</h1>
+  <div class="sub">产品愿景第 1 阶段(范式级)· 7 范式可选,timeline 按范式语义化 + 色编码</div>
+
+  <div class="status-bar">
+    <span class="label">Paradigm</span>
+    <div class="paradigm-pills" id="pills"></div>
+  </div>
+
+  <div id="paradigm-content"></div>
+
+  <div class="legend" id="legend"></div>
+</div>
+
+<script>
+const PARADIGMS = {
+  SINGLE_TURN: { color: '#9da6b4', label: '单轮', desc: 'Function-Calling 单轮问答', stages: [
+    { stage: 'question', title: '接收问题', detail: '用户提问,Function-Calling 单轮处理', meta: '~120ms' },
+    { stage: 'tool', title: '工具调用(可选)', detail: 'LLM 自主调用工具,得结果', meta: '~800ms' },
+    { stage: 'answer', title: '返回答案', detail: '综合工具结果,直接回答', meta: '~200ms' }
+  ]},
+  OPAR: { color: '#9333ea', label: 'OPAR', desc: 'Observe-Plan-Act-Reflect 深度链路', stages: [
+    { stage: 'observe', title: 'Observe 观察', detail: '组装上下文,观察用户意图 + 记忆召回', meta: 'step 1' },
+    { stage: 'plan', title: 'Plan 规划', detail: 'LLM 生成执行计划(结构化 PlanResult)', meta: 'step 2' },
+    { stage: 'act', title: 'Act 执行', detail: '按计划调工具,原生 tool-calling', meta: 'step 3' },
+    { stage: 'reflect', title: 'Reflect 反思', detail: '评估结果,决定是否继续/完成', meta: 'step 4' }
+  ]},
+  AUTONOMOUS_LOOP: { color: '#d93025', label: '自主循环', desc: '自主多步循环(写/副作用任务)', stages: [
+    { stage: 'goal', title: 'Goal 目标', detail: '确定任务目标(riskLevel=write/side_effect)', meta: 'step 1' },
+    { stage: 'step', title: 'Step 自主步', detail: 'LLM + 工具自主执行(workspaceWriteFile/RunCommand)', meta: 'step 2' },
+    { stage: 'observation', title: 'Observation 观察', detail: '工具结果反馈,假完成守护验证证据', meta: 'step 3' },
+    { stage: 'complete', title: 'TASK_COMPLETE', detail: '验证通过(有写/命令证据),标记完成', meta: 'done' }
+  ]},
+  REACT: { color: '#1a73e8', label: 'ReAct', desc: 'Thought-Action-Observation 推理循环', stages: [
+    { stage: 'thought', title: 'Thought 推理', detail: 'LLM 推理当前状态,决定下一步', meta: 'attempt 1' },
+    { stage: 'action', title: 'Action 工具', detail: 'LLM 输出 Action,引擎手动执行(search/writeFile)', meta: 'attempt 1' },
+    { stage: 'observation', title: 'Observation 观察', detail: '工具结果反馈进历史,下一步推理', meta: 'attempt 1' },
+    { stage: 'thought', title: 'Thought 推理', detail: '基于 Observation 再推理,得最终答案', meta: 'attempt 2' },
+    { stage: 'final', title: '最终答案', detail: 'LLM 给出答案(无 Action),循环终止', meta: 'done' }
+  ]},
+  PLAN_EXECUTE: { color: '#ff7a59', label: '规划执行', desc: '先规划全部 + 逐步执行 + Replan', stages: [
+    { stage: 'plan', title: 'Plan 规划', detail: 'LLM 一次生成完整多步 plan(List<PlanStep>)', meta: 'BeanOutputConverter' },
+    { stage: 'execute', title: 'Execute 执行 step 1', detail: '逐步执行,每步 LLM 据 stepText 选工具', meta: 'step 1/3' },
+    { stage: 'execute', title: 'Execute 执行 step 2', detail: 'Observation 反馈,继续下一步', meta: 'step 2/3' },
+    { stage: 'replan', title: 'Replan 重规划', detail: 'step 失败 → 带反馈重新 plan → 重执行', meta: 'replan 1/2' },
+    { stage: 'final', title: '聚合答案', detail: '所有步完成,Coordinator 聚合结果', meta: 'done' }
+  ]},
+  REFLECTION: { color: '#f9ab00', label: '反思', desc: '执行-反思-改进重试(verbal RL)', stages: [
+    { stage: 'attempt', title: 'Attempt 尝试 1', detail: 'LLM 据 memory 执行(单次工具)', meta: 'attempt 1' },
+    { stage: 'reflect', title: 'Reflect 反思 1', detail: '自评:未达成。lesson:需更精确搜索', meta: 'success=false' },
+    { stage: 'attempt', title: 'Attempt 尝试 2', detail: 'LLM 据 memory(含 lesson 1)改进执行', meta: 'attempt 2' },
+    { stage: 'reflect', title: 'Reflect 反思 2', detail: '自评:达成目标。lesson:保持策略', meta: 'success=true' },
+    { stage: 'final', title: '改进后答案', detail: 'memory 累积反思,迭代逼近目标', meta: 'done' }
+  ]},
+  MULTI_AGENT: { color: '#188038', label: '多智能体', desc: 'Coordinator-Worker 并行协作', stages: [
+    { stage: 'decompose', title: 'Decompose 分解', detail: 'Coordinator LLM 分解为 N 子任务(并行)', meta: '3 subtasks' },
+    { stage: 'worker', title: 'Worker 1(并行)', detail: '搜索子任务 → search 工具 → Observation', meta: 'worker-1' },
+    { stage: 'worker', title: 'Worker 2(并行)', detail: '分析子任务 → analyze 工具 → Observation', meta: 'worker-2' },
+    { stage: 'worker', title: 'Worker 3(并行)', detail: '验证子任务 → verify 工具 → Observation', meta: 'worker-3' },
+    { stage: 'aggregate', title: 'Aggregate 聚合', detail: 'Coordinator LLM 综合 3 worker 结果 → 最终答案', meta: 'done' }
+  ]}
+};
+
+let current = 'REACT';
+const pillsEl = document.getElementById('pills');
+const contentEl = document.getElementById('paradigm-content');
+const legendEl = document.getElementById('legend');
+
+function render() {
+  // pills
+  pillsEl.innerHTML = Object.entries(PARADIGMS).map(([key, p]) =>
+    `<div class="pill ${key === current ? 'active' : ''}" style="--p:${p.color}" data-key="${key}">
+       <span class="dot"></span>${p.label}
+     </div>`
+  ).join('');
+  pillsEl.querySelectorAll('.pill').forEach(el => {
+    el.onclick = () => { current = el.dataset.key; render(); };
+  });
+
+  // content
+  const p = PARADIGMS[current];
+  contentEl.innerHTML = `
+    <div class="paradigm-header" style="--p:${p.color}">
+      <div class="name">${p.label}</div>
+      <div class="desc">${p.desc}</div>
+    </div>
+    <div class="timeline" style="--p:${p.color}">
+      ${p.stages.map(s => `
+        <div class="step" style="--p:${p.color}">
+          <div class="stage">${s.stage}</div>
+          <div class="title">${s.title}</div>
+          <div class="detail">${s.detail}</div>
+          <div class="meta">${s.meta}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  // legend
+  legendEl.innerHTML = Object.entries(PARADIGMS).map(([key, p]) =>
+    `<div class="legend-item"><span class="dot" style="background:${p.color}"></span>${p.label}</div>`
+  ).join('');
+}
+
+render();
+</script>
+</body>
+</html>

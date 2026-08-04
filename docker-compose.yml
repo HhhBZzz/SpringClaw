@@ -7,6 +7,11 @@ services:
       - --default-authentication-plugin=mysql_native_password
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
+      # 2C2G 调优:压低 MySQL 占用
+      - --innodb-buffer-pool-size=128M
+      - --max-connections=50
+      - --performance-schema=0
+    mem_limit: 400m
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
       MYSQL_DATABASE: ${MYSQL_DB:-springclaw}
@@ -28,7 +33,8 @@ services:
     environment:
       # Do not override the image entrypoint/command with plain redis-server,
       # otherwise Redis Stack modules (including RediSearch) will not be loaded.
-      REDIS_ARGS: "--appendonly yes"
+      REDIS_ARGS: "--appendonly yes --maxmemory 96mb --maxmemory-policy allkeys-lru"
+    mem_limit: 160m
     ports:
       - "6379:6379"
       - "8001:8001"
@@ -50,6 +56,7 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
+    mem_limit: 320m
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "ping"]
       interval: 10s
@@ -71,6 +78,7 @@ services:
         condition: service_healthy
     environment:
       SERVER_PORT: 18080
+      JAVA_OPTS: "-Xmx512m -Xms256m"
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
@@ -102,8 +110,12 @@ services:
       SPRINGCLAW_CODING_PLAN_API_KEY: ${SPRINGCLAW_CODING_PLAN_API_KEY:-}
       SPRINGCLAW_CODING_PLAN_BASE_URL: ${SPRINGCLAW_CODING_PLAN_BASE_URL:-https://coding.dashscope.aliyuncs.com/v1}
       SPRINGCLAW_CODING_PLAN_MODEL: ${SPRINGCLAW_CODING_PLAN_MODEL:-qwen3.5-plus}
+      # CORS:放行 Vercel 前端域名(跨域直连后端);逗号分隔,不能用 * 因带 credentials
+      SPRINGCLAW_WEB_CORS_ALLOWED_ORIGINS: ${SPRINGCLAW_WEB_CORS_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      SPRINGCLAW_AUTH_COOKIE_SECURE: ${SPRINGCLAW_AUTH_COOKIE_SECURE:-false}
     ports:
-      - "18080:18080"
+      - "127.0.0.1:18080:18080"
+    mem_limit: 900m
     volumes:
       - ./skills:/app/skills
       - ./SOUL.md:/app/SOUL.md:ro

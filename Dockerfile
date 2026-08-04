@@ -21,7 +21,7 @@ ENV SERVER_PORT=18080
 # 运行期堆上限:2C2G 与 MySQL/Redis/RabbitMQ 共存,必须限堆
 ENV JAVA_OPTS="-Xmx512m -Xms256m"
 
-COPY --from=builder /app/target/springclaw-java-0.0.1-SNAPSHOT.jar ./app.jar
+COPY --from=builder /app/target/springclaw-0.0.1-SNAPSHOT.jar ./app.jar
 COPY --from=builder /app/skills ./skills
 COPY --from=builder /app/SOUL.md ./SOUL.md
 

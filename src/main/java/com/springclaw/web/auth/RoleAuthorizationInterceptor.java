@@ -16,6 +16,10 @@ public class RoleAuthorizationInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        // CORS 预检(OPTIONS)放行(同 TokenAuthenticationInterceptor,预检不鉴权)
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            return true;
+        }
         if (!(handler instanceof HandlerMethod handlerMethod)) {
             return true;
         }

@@ -25,6 +25,11 @@ public class TokenAuthenticationInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        // CORS 预检(OPTIONS)直接放行,交给 Spring 的 CORS 处理器返回预检响应;
+        // 预检不带凭证,不能走鉴权,否则浏览器判预检失败→跨域请求被拦。
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            return true;
+        }
         String token = resolveToken(request);
         if (!StringUtils.hasText(token)) {
             throw new BusinessException(40111, "当前接口需要登录后访问");

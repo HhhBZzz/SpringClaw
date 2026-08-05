@@ -16,7 +16,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](./LICENSE)
 [![Tests](https://img.shields.io/badge/tests-1090%20%E2%9C%93-brightgreen)]()
 
-**[中文文档](./README_CN.md)** · **[Live Demo](https://spring-claw.vercel.app)** · **[API Docs](./http/springclaw-api.http)** · **[Runbook](./RUN_REAL_ENVIRONMENT.md)** · **[Changelog](./CHANGELOG.md)**
+**[Live Demo](https://spring-claw.vercel.app)** · **[API Docs](./http/springclaw-api.http)** · **[Runbook](./RUN_REAL_ENVIRONMENT.md)** · **[Changelog](./CHANGELOG.md)**
 
 </div>
 
@@ -254,6 +254,6 @@ Contributions welcome! See [CONTRIBUTING.md](./CONTRIBUTING.md). Security report
 
 **⭐ If SpringClaw helped you understand agents, give it a star.**
 
-Made with ☕ · 🦎 · ⚡
+Made with ☕ · 🦎 · ⚡ by **EdwinHan**
 
 </div>

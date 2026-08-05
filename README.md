@@ -230,13 +230,81 @@ Key environment variables (full list in `application.yml`):
 
 ## 🗺️ Roadmap
 
-- [x] 7 paradigm engines (ReAct → Multi-Agent)
-- [x] Blueprint Canvas + Harness Conveyor + RunFlowCard
-- [x] Production deployment (Vercel + Cloudflare Tunnel)
-- [ ] Framework-level switching (Spring AI / LangGraph4j)
-- [ ] Paradigm × framework matrix
-- [ ] Playwright visual regression for CSS cleanup
-- [ ] Annotated end-to-end pipeline walkthrough
+### ✅ Done
+
+- [x] 7 paradigm engines (ReAct · Plan-Execute · OPAR · Multi-Agent · Reflexion · Autonomous · Single-Turn)
+- [x] Blueprint Canvas (node graph + light-shuttle + X-Ray + Flip + Draggable + Combo Badge)
+- [x] Harness Conveyor (10-layer product shell visualization + per-station X-Ray)
+- [x] RunFlowCard (inline dynamic execution flow per reply)
+- [x] Production deployment (Vercel + Cloudflare Tunnel + DeepSeek)
+
+---
+
+## 🔮 Future Blueprint
+
+> **The goal: SpringClaw becomes the definitive reference platform for understanding, comparing, and deploying agent architectures — not just a tool you use, but one you learn from.**
+
+### Phase 1 — Framework-Level Switching
+
+The same 7 paradigms, runnable on **different agent frameworks**. Switch the engine underneath without changing the visualization:
+
+- Spring AI (current) ↔ LangGraph4j ↔ custom engines
+- The Blueprint Canvas stays identical — only the implementation behind each node changes
+- Developers compare "how does ReAct look in Spring AI vs LangGraph?" **visually**
+
+### Phase 2 — Paradigm × Framework Matrix
+
+The killer feature: a **matrix** where each cell is a runnable, observable combination.
+
+```
+              Spring AI    LangGraph4j    Akka
+ReAct            ✅            ⬜          ⬜
+Plan-Execute     ✅            ⬜          ⬜
+Multi-Agent      ✅            ⬜          ⬜
+...
+```
+
+Click any cell → the Blueprint Canvas renders that combo → run a task → compare token usage, latency, reasoning quality **side by side**.
+
+### Phase 3 — Real-Time A/B Paradigm Comparison
+
+Run the **same task on two paradigms simultaneously** — watch both light-shuttles race, both trace timelines fill, both token meters tick. Then compare: which paradigm solved it faster? Cheaper? More accurately? 
+
+The ultimate tool for **understanding agents by comparison**.
+
+### Phase 4 — Interactive Learning Mode
+
+Every run becomes an **annotated lesson**:
+
+- Each node carries a teaching annotation: "This is where the router chose ReAct over Plan-Execute. Here's why."
+- Hover a harness shell → popover explains what Transport Auth does and why it runs first.
+- A "guided walkthrough" mode traces one run end-to-end with inline commentary — like a debugger, but for agent cognition.
+
+### Phase 5 — Agent Architecture Marketplace
+
+Community-contributed **paradigm blueprints**, **skill packages**, and **governance policies**:
+
+- Share your custom Multi-Agent topology as a Blueprint
+- Import someone's ReAct variant with a different reflect strategy
+- Browse, fork, and study how others architect their agents
+- Every blueprint is **immediately visualizable** in Blueprint Canvas
+
+### Phase 6 — Visualization Protocol Standard
+
+The `CanvasNode / CanvasEdge / CanvasRunFrame` data contract becomes an **open protocol**:
+
+- Any agent framework (LangGraph, CrewAI, AutoGen, Magentic-One) can emit this protocol
+- Get instant Blueprint Canvas visualization — no custom frontend needed
+- SpringClaw becomes the **universal visualizer for agent execution**
+
+### Long-Term Vision
+
+```
+Today:  A self-hosted agent runtime you can observe and learn from
+Tomorrow: The reference platform where the world studies agent architectures
+```
+
+**SpringClaw's soul is paradigm-switching.** Every feature — the canvas, the conveyor, the run card — exists to make agent internals visible and comparable. The future is making that comparison **universal**: any paradigm, any framework, any task, side by side, in real time.
 
 ---
 

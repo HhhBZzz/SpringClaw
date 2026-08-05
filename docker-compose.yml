@@ -76,6 +76,7 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    env_file: .env
     environment:
       SERVER_PORT: 18080
       JAVA_OPTS: "-Xmx512m -Xms256m"

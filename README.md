@@ -1,221 +1,259 @@
-# SpringClaw
+<div align="center">
 
-**A self-hosted, governed AI Agent runtime for Spring Boot — run it, read it, learn from it.**
+# 🦾 SpringClaw
 
-SpringClaw is a self-hosted, governed Java agent runtime built on Spring Boot 3.5 and Spring AI 1.1. It brings multi-model orchestration, memory, tool governance, skill execution, channel adapters, and an operations console into one backend, and exposes the full agent pipeline — decision routing → governed tools → memory loop → reflection — so developers can deploy it for real work, extend it, or use it as a readable reference for learning production-grade agent architecture.
+### The Agent Runtime Where Every Thought Is Visible
 
+**7 paradigms. 10 harness shells. Zero black boxes.**
+
+[![GitHub stars](https://img.shields.io/github/stars/HhhBZzz/SpringClaw?style=social)](https://github.com/HhhBZzz/SpringClaw)
+[![GitHub forks](https://img.shields.io/github/forks/HhhBZzz/SpringClaw?style=social)](https://github.com/HhhBZzz/SpringClaw)
 [![Java 17](https://img.shields.io/badge/Java-17-007396?logo=openjdk&logoColor=white)](https://openjdk.org/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
-[![Spring AI](https://img.shields.io/badge/Spring%20AI-1.1-6DB33F)](https://spring.io/projects/spring-ai)
+[![Spring Boot 3.5](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
+[![Spring AI 1.1](https://img.shields.io/badge/Spring%20AI-1.1-6DB33F)](https://spring.io/projects/spring-ai)
 [![Vue 3](https://img.shields.io/badge/Vue-3-42B883?logo=vuedotjs&logoColor=white)](https://vuejs.org/)
-[![License](https://img.shields.io/github/license/HhhBZzz/SpringClaw)](./LICENSE)
+[![GSAP](https://img.shields.io/badge/GSAP-3.15-88CE02?logo=greensock&logoColor=white)](https://gsap.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](./LICENSE)
+[![Tests](https://img.shields.io/badge/tests-1090%20%E2%9C%93-brightgreen)]()
 
-[中文文档](./README_CN.md) · [Runbook](./RUN_REAL_ENVIRONMENT.md) · [Changelog](./CHANGELOG.md) · [Script Skill Guide](./docs/SCRIPT_SKILL_GUIDE.md)
+**[中文文档](./README_CN.md)** · **[Live Demo](https://spring-claw.vercel.app)** · **[API Docs](./http/springclaw-api.http)** · **[Runbook](./RUN_REAL_ENVIRONMENT.md)** · **[Changelog](./CHANGELOG.md)**
+
+</div>
 
 ---
 
-## Why SpringClaw
+## 🔥 Why SpringClaw Exists
 
-Most agent demos stop at a chat endpoint plus a few hard-coded tools. SpringClaw focuses on the platform layer that a long-running internal agent needs:
+Every agent framework says "powerful." Almost none let you **see** what's happening inside. SpringClaw is different:
 
-- **Model runtime** with provider/model switching, failover, streaming, async execution, and usage accounting.
-- **Memory runtime** with MySQL-backed event history and Redis Vector Store semantic recall.
-- **Tool governance** around Spring AI `@Tool`: permission checks, risk levels, rate limits, confirmation proposals, and audit logs.
-- **Skill runtime** for directory-based `SKILL.md` packages with Python, builtin, and prompt-style skills.
-- **Operations surface** with Vue 3 screens for users, roles, models, memory, cache, audit, sessions, and token usage.
-- **Channel adapters** for REST API and Feishu/Lark, with extension points for Telegram and WeChat.
+> **It's an agent runtime built to be read — not just run.**
 
-The result is a Spring-native agent runtime you can actually observe and learn from — not a black-box demo.
+Watch a ReAct loop think. See a Plan-Execute tree branch. Flip a node to X-Ray and read the actual Java line that fired. Switch from ReAct to Multi-Agent and watch the topology morph in real time. All driven by real execution trace, not hardcoded demos.
 
-### See the full agent pipeline
+This isn't a chat wrapper. It's a **production-grade agent platform** where the full pipeline — from auth to routing to model failover to tool governance to memory recall to meta-guard — is observable, switchable, and deployable.
 
-SpringClaw is built to make the whole agent flow visible, so it doubles as a reference for learning how a production agent works:
+---
 
-- **Decision routing** — rule-based plus model-assisted routing across simplified and OPAR (Observe-Plan-Act-Reflect) engines, with deterministic fallback when no model is available.
-- **Governed tools** — every `@Tool` call passes through one AOP guard: permission, rate limit, risk classification, confirmation proposals, hash-verified execution, and audit. Write actions run inside a fenced workspace with HEAD-baseline rollback.
-- **Memory loop** — a real Write-Manage-Read cycle: MySQL as authority, Redis short-term hot window, Redis Vector Store as a derived index, plus terminal semantic extraction and reflection you can review in the console.
-- **Observability** — the Vue console surfaces sessions, tool proposals, memory candidates, knowledge sources, evaluation redlines, and model usage, so you can watch a run move through the pipeline.
+## ✨ What Makes It Different
 
-Open the Runtime Console at `/#/agent` after a chat to inspect each stage of the last run.
+### 🔄 7 Agent Paradigms, Switchable at Runtime
 
-## Architecture
+The same engine, 7 architectures — pick the right one per task:
 
-```mermaid
-flowchart LR
-    Client["REST / SSE / Feishu"] --> Controller["Spring MVC Controllers"]
-    Controller --> Chat["Chat Runtime"]
-    Chat --> Routing["Simplified / OPAR Engines"]
-    Routing --> Model["Model Provider Layer"]
-    Routing --> Tools["Governed Tool Runtime"]
-    Routing --> Memory["Context + Memory Runtime"]
-    Tools --> Packs["@Tool Packs"]
-    Tools --> Skills["Skill Runtime"]
-    Memory --> MySQL["MySQL Event Stream"]
-    Memory --> Redis["Redis Vector Store"]
-    Chat --> Audit["Trace / Audit / Usage"]
-    Audit --> Console["Vue Admin Console"]
+| Paradigm | Shape | Best For |
+|----------|-------|----------|
+| **ReAct** | Thought → Action → Observation loop | General reasoning with tools |
+| **Plan-Execute** | Plan all → Execute → Replan on failure | Multi-step with dependencies |
+| **OPAR** | Observe → Plan → Act → Reflect | Deep analysis with self-correction |
+| **Multi-Agent** | Coordinator → parallel workers → aggregate | Parallel subtasks |
+| **Reflexion** | Attempt → Reflect → Improve retry | Verbal reinforcement learning |
+| **Autonomous Loop** | Goal → self-directed steps → verify | Write/side-effect tasks |
+| **Single-Turn** | Question → tool → answer | Simple function-calling |
+
+Switch paradigms with one click — the **Blueprint Canvas** morphs the topology with GSAP Flip animation.
+
+### 🎨 Blueprint Canvas — See the Agent Think
+
+A **2D node-graph visualization** where every execution step becomes a glowing node, connected by SVG curves, with a yellow light-shuttle racing along the path as the agent runs:
+
+- **Execution Pulse** — GSAP MotionPath light-shuttle flows along edges, hitting nodes with neon glow + CSS glitch.
+- **X-Ray Mode** — click any node → 3D flip (`rotateY`) reveals the terminal log: actual Java class, line number, execution detail.
+- **Paradigm Flip** — switching architectures morphs nodes from a loop (ReAct) to a tree (Plan-Execute) with GSAP Flip fluid animation.
+- **Assembly Mode** — drag nodes with magnetic snap (`back.out` spring physics) to rearrange the topology.
+- **Combo Badge** — retry loops show `×3` counters that pop with `back.out` and dissipate on breakthrough.
+- **Overflow to X-Ray** — when real trace events exceed the topology frame count, extras don't truncate — they flow into the active node's terminal log (macro stays clean, details on the flip side).
+
+### 🏗️ Harness Conveyor — The Full Product, Unpacked
+
+The agent doesn't run alone. **10 layers of harness shells** wrap every run — and you can see all of them:
+
+```
+01 Transport · Auth     →  06 Tool Governance (AOP)
+02 Route · Decide       →  07 Meta-guard (refusal/leak retry)
+03 Context · Memory     →  08 Local Skill Fallback
+04 Model · Failover     →  09 Verify · Eval Gate
+05 Paradigm Core        →  10 Project · SSE Bridge
 ```
 
-## Feature Matrix
+A light-shuttle flows through all 10 stations. Click any to X-Ray its real trace log. All driven by live SSE trace events — not a static diagram.
 
-| Area | What is included |
-| --- | --- |
-| Chat runtime | Synchronous, streaming SSE, and RabbitMQ-backed async chat APIs |
-| Agent modes | Fast simplified mode plus OPAR-style Observe-Plan-Act-Reflect loop |
-| Model orchestration | Multiple providers, runtime switching, health-aware fallback, token usage records |
-| Memory | MySQL short-term event stream, Redis semantic memory, context assembly |
-| Tool governance | Spring AI `@Tool` discovery, AOP guard, permissions, rate limits, audit logs |
-| Action safety | Risk classification and confirmation proposals for write or side-effect actions |
-| Skill platform | `SKILL.md` catalog, Python/builtin/prompt skills, usage sidecar, controlled script execution |
-| Channels | REST API, Feishu webhook, Feishu long connection, adapter interfaces for more channels |
-| Security | Token auth, HttpOnly cookies, role-based admin access, tool permission policies |
-| Operations | Vue 3 admin console for model status, skills, memory, cache, audit, sessions, and usage |
+### 📊 RunFlowCard — Inline Dynamic Flow
 
-## Quick Start
+Every agent reply includes an **inline execution-flow card** built from that run's real `AgentTraceEvent[]`. Different task → different trace → different nodes. No hardcoded demo modules — the flow changes per question.
 
-### Requirements
+---
 
-- JDK 17+
-- Maven 3.8+
-- Docker Desktop, optional but recommended for MySQL, Redis, and RabbitMQ
+## 🚀 Quick Start
 
-### Run Locally
+### One-Command Local Run
 
 ```bash
 OPENCLAW_PRIMARY_API_KEY=test-key mvn spring-boot:run
 ```
 
-The service starts on `http://127.0.0.1:18080`. A real model key is optional for local exploration; when no usable model is configured, SpringClaw can still exercise local skills and fallback paths.
+No real LLM key needed — falls back to local skills. Health check:
 
 ```bash
 curl http://127.0.0.1:18080/actuator/health
-
-curl -X POST http://127.0.0.1:18080/api/chat/send \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "sessionKey": "demo-1",
-    "userId": "u1",
-    "message": "Introduce SpringClaw in one paragraph",
-    "channel": "api"
-  }'
+# → {"status":"UP"}
 ```
 
-### Run With Docker Compose
+### Docker Compose (Full Stack)
 
 ```bash
-OPENCLAW_PRIMARY_API_KEY=test-key docker compose up -d --build
+OPENCLAW_PRIMARY_API_KEY=your-key docker compose up -d --build
 ```
 
-This starts the application with MySQL 8, Redis Stack, and RabbitMQ. Use this mode when you want persistent chat events, vector memory, distributed locks, and async chat.
+Brings up MySQL 8 + Redis Stack + RabbitMQ + the app. Tuned for 2C2G servers out of the box (`-Xmx512m`, `mem_limit` per container).
 
 ### Frontend Console
 
 ```bash
-cd frontend
-npm install
-npm run dev
+cd frontend && npm install && npm run dev
+# → http://localhost:5173/#/agent
 ```
 
-Open `http://localhost:5173/#/agent`. Vite proxies `/api/*` to the Spring Boot backend on port `18080`.
+### Deploy to Production (Vercel + Cloudflare Tunnel)
 
-## Configuration
+| Component | Where | Cost |
+|-----------|-------|------|
+| Frontend | **Vercel** (free CDN + HTTPS) | $0 |
+| Backend | **Any VPS** (Docker) | ~$5/mo |
+| Tunnel | **Cloudflare** (named tunnel, zero 备案) | $0 |
+| Model | **DeepSeek** / any OpenAI-compatible | pay-per-use |
 
-SpringClaw is configured through environment variables mapped in `src/main/resources/application.yml`.
+```bash
+# Backend: deploy script included
+sudo REPO_URL=https://github.com/YOUR/springclaw.git bash deploy-ali.sh
 
-| Variable | Purpose | Example |
-| --- | --- | --- |
-| `OPENCLAW_PRIMARY_API_KEY` | Primary model provider API key | `sk-...` |
-| `OPENCLAW_CODING_PLAN_API_KEY` | Coding-plan provider key | `sk-...` |
-| `OPENCLAW_DEEPSEEK_API_KEY` | DeepSeek provider key | `sk-...` |
-| `OPENCLAW_EMBEDDING_API_KEY` | Embedding model key | `sk-...` |
-| `OPENCLAW_EMBEDDING_MODEL` | Embedding model name | `text-embedding-v4` |
-| `OPENCLAW_CHAT_AGENT_MODE` | Runtime mode | `simplified` or `opar` |
-| `OPENCLAW_FEISHU_OUTBOUND_ENABLED` | Send replies back to Feishu | `true` |
-| `OPENCLAW_FEISHU_LONG_CONNECTION_ENABLED` | Use Feishu long connection | `true` |
-| `SPRING_PROFILES_ACTIVE` | Spring profile | `dev` or `prod` |
-
-For a full production-style runbook, see [RUN_REAL_ENVIRONMENT.md](./RUN_REAL_ENVIRONMENT.md).
-
-## API Overview
-
-| Endpoint | Method | Description |
-| --- | --- | --- |
-| `/api/chat/send` | `POST` | Blocking chat completion |
-| `/api/chat/stream` | `POST` | SSE streaming chat |
-| `/api/chat/async` | `POST` | Submit async chat job |
-| `/api/auth/register` | `POST` | Register account |
-| `/api/auth/login` | `POST` | Login and issue token/cookie |
-| `/api/auth/me` | `GET` | Current authenticated user |
-| `/api/webhook/feishu` | `POST` | Feishu webhook ingress |
-| `/admin` | `GET` | Vue admin console entry |
-
-Additional examples live in [http/springclaw-api.http](./http/springclaw-api.http).
-
-## Project Layout
-
-```text
-springclaw/
-├── src/main/java/com/springclaw/
-│   ├── controller/          # Chat, auth, admin, runtime, webhook endpoints
-│   ├── service/
-│   │   ├── chat/            # Chat orchestration and runtime engines
-│   │   ├── ai/              # Provider management and model calls
-│   │   ├── memory/          # Semantic memory, indexing, learning, frames
-│   │   ├── context/         # Context assembly
-│   │   ├── skill/           # Skill catalog, runtime, markdown/script support
-│   │   ├── task/            # Scheduled and async task execution
-│   │   └── usage/           # Model usage accounting
-│   ├── runtime/             # Canonical runtime identity, lifecycle, memory contracts
-│   ├── tool/                # Tool packs and guarded tool runtime
-│   ├── strategy/channel/    # Channel adapters
-│   ├── web/auth/            # Authentication and role interceptors
-│   └── config/              # Spring, AI, cache, MQ, Redis, MyBatis config
-├── frontend/                # Vue 3 + Vite operations console
-├── skills/                  # Directory-based skill packages
-├── data/                    # Local runtime data placeholders
-├── docs/                    # Architecture notes, runbooks, skill docs
-├── docker-compose.yml
-├── Dockerfile
-└── pom.xml
+# Frontend: import to Vercel → set Root Directory=frontend → VITE_API_BASE=https://api.yourdomain.com → Deploy
 ```
 
-## Tech Stack
+---
 
-| Layer | Technology |
-| --- | --- |
-| Backend | Java 17, Spring Boot 3.5, Spring MVC, Spring AOP |
-| AI | Spring AI 1.1, OpenAI-compatible providers, Redis Vector Store |
-| Persistence | MySQL 8, MyBatis-Plus |
-| Cache and locks | Redis Stack, Redisson |
-| Messaging | RabbitMQ |
-| Jobs | XXL-JOB |
-| Channel SDK | Lark/Feishu OAPI |
-| Frontend | Vue 3, Vite, TypeScript, Pinia, Vue Router, GSAP |
-| Packaging | Maven, Docker, Docker Compose |
+## 🏛️ Architecture
 
-## Skill System
+```mermaid
+flowchart TB
+    subgraph Client["🌐 Client"]
+        UI["Vue 3 Console\n(Blueprint Canvas + Harness + RunFlowCard)"]
+    end
 
-Skills live under `skills/` and are discovered from `SKILL.md` files. A skill package can be:
+    subgraph Edge["☁️ Cloudflare Edge"]
+        CF["Named Tunnel\n(free HTTPS, zero 备案)"]
+    end
 
-- **Python/script skill** for controlled local execution.
-- **Builtin skill** implemented by the Java runtime.
-- **Prompt skill** used as structured instruction and documentation.
+    subgraph Server["🖥️ Backend (Docker)"]
+        AUTH["Auth · Token + Roles"]
+        ROUTE["Decision Routing\n(7 paradigm engines)"]
+        MODEL["Model Layer\n(multi-provider + failover)"]
+        TOOLS["Tool Governance\n(AOP · permissions · audit)"]
+        MEMORY["Memory Runtime\n(MySQL + Redis Vector)"]
+        GUARD["Meta-guard\n(refusal/leak detection)"]
+        SSE["SSE Bridge\n(real-time trace emit)"]
 
-The catalog exposes skill metadata without eagerly loading every support file. Script execution is opt-in and guarded by allowlists. See [docs/SCRIPT_SKILL_GUIDE.md](./docs/SCRIPT_SKILL_GUIDE.md) for the package format and operating rules.
+        AUTH --> ROUTE
+        ROUTE --> MODEL
+        ROUTE --> TOOLS
+        ROUTE --> MEMORY
+        MODEL --> GUARD
+        TOOLS --> GUARD
+        GUARD --> SSE
+    end
 
-## Roadmap
+    UI -.->|"fetch /api/chat/stream"| CF
+    CF -->|"tunnel → :18080"| AUTH
+    SSE -.->|"event: trace"| UI
+```
 
-- Stabilize canonical run lifecycle storage and replay APIs.
-- Expand runtime trace screens for tool calls, memory reads/writes, and model fallbacks.
-- Harden skill import/export and permission review flows.
-- Add more channel adapters and outbound delivery strategies.
-- Publish deployment presets for small-team internal agent installations.
-- Add an annotated agent-pipeline walkthrough so new developers can learn the runtime by tracing one run end to end.
+---
 
-## Contributing
+## 📋 Feature Matrix
 
-Contributions are welcome. Start with [CONTRIBUTING.md](./CONTRIBUTING.md), open an issue for non-trivial changes, and keep pull requests focused. Security reports should follow [SECURITY.md](./SECURITY.md).
+| Area | Details |
+|------|---------|
+| **7 Paradigm Engines** | ReAct · Plan-Execute · OPAR · Multi-Agent · Reflexion · Autonomous · Single-Turn |
+| **Blueprint Canvas** | Node graph + MotionPath shuttle + X-Ray flip + GSAP Flip paradigm switch + Draggable assembly |
+| **Harness Conveyor** | 10-layer shell visualization + per-station X-Ray + live trace-driven |
+| **RunFlowCard** | Inline dynamic flow per reply (real trace → nodes) |
+| **Model Orchestration** | Multi-provider (DeepSeek/Qwen/Claude) · runtime switching · health-aware failover · token usage |
+| **Memory** | MySQL event stream (authority) + Redis Vector Store (semantic recall) + context assembly |
+| **Tool Governance** | `@Tool` AOP guard · permissions · risk levels · rate limits · confirmation proposals · audit logs |
+| **Skill Platform** | `SKILL.md` catalog · Python/builtin/prompt skills · guarded script execution |
+| **Channels** | REST API · Feishu/Lark webhook + long connection · adapter interface |
+| **Security** | Token auth · HttpOnly cookies · role-based access · tool permission policies |
+| **Frontend** | Vue 3 · Vite · TypeScript · Pinia · GSAP (Flip + MotionPath + Draggable) |
+| **Deployment** | Docker Compose · deploy-ali.sh one-click · Cloudflare Tunnel · Vercel |
 
-## License
+---
 
-SpringClaw is released under the [MIT License](./LICENSE).
+## 🛠️ Tech Stack
+
+| Layer | Tech |
+|-------|------|
+| **Backend** | Java 17 · Spring Boot 3.5 · Spring AI 1.1 · Spring AOP · MyBatis-Plus |
+| **AI** | Spring AI · OpenAI-compatible providers · Redis Vector Store · DeepSeek |
+| **Infra** | MySQL 8 · Redis Stack (RediSearch) · RabbitMQ · Redisson · XXL-JOB |
+| **Frontend** | Vue 3 · Vite 8 · TypeScript · Pinia · Vue Router · GSAP 3.15 |
+| **Deploy** | Docker · Docker Compose · Cloudflare Tunnel · Vercel · deploy-ali.sh |
+
+---
+
+## 📊 By the Numbers
+
+| Metric | Value |
+|--------|-------|
+| Backend code (prod) | 55,500 lines Java |
+| Backend tests | 1,090 tests · 41,300 lines · 0 failures |
+| Frontend code | 22,000 lines (Vue + TS + CSS) |
+| Frontend tests | 55 tests · 0 failures |
+| Agent paradigms | 7 |
+| Harness shells | 10 |
+| Total | **~119,000 lines** |
+
+---
+
+## 🔧 Configuration
+
+Key environment variables (full list in `application.yml`):
+
+| Variable | Purpose |
+|----------|---------|
+| `SPRINGCLAW_PRIMARY_API_KEY` | Primary model (Claude/compatible) |
+| `SPRINGCLAW_DEEPSEEK_API_KEY` | DeepSeek provider |
+| `SPRINGCLAW_QWEN_API_KEY` | Qwen/DashScope provider |
+| `SPRINGCLAW_AI_ACTIVE_PROVIDER` | Active provider: `primary` / `deepseek` / `qwen` |
+| `SPRINGCLAW_CHAT_AGENT_MODE` | Engine mode: `simplified` / `opar` |
+| `SPRINGCLAW_WEB_CORS_ALLOWED_ORIGINS` | CORS origins (exact, no wildcard with credentials) |
+
+---
+
+## 🗺️ Roadmap
+
+- [x] 7 paradigm engines (ReAct → Multi-Agent)
+- [x] Blueprint Canvas + Harness Conveyor + RunFlowCard
+- [x] Production deployment (Vercel + Cloudflare Tunnel)
+- [ ] Framework-level switching (Spring AI / LangGraph4j)
+- [ ] Paradigm × framework matrix
+- [ ] Playwright visual regression for CSS cleanup
+- [ ] Annotated end-to-end pipeline walkthrough
+
+---
+
+## 🤝 Contributing
+
+Contributions welcome! See [CONTRIBUTING.md](./CONTRIBUTING.md). Security reports → [SECURITY.md](./SECURITY.md).
+
+## 📄 License
+
+[MIT License](./LICENSE) — build, deploy, learn, extend.
+
+---
+
+<div align="center">
+
+**⭐ If SpringClaw helped you understand agents, give it a star.**
+
+Made with ☕ · 🦎 · ⚡
+
+</div>

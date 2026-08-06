@@ -87,12 +87,12 @@ public class FileToolPack {
         }
     }
 
-    @Tool(description = "按文件名递归搜索文件，支持通配符，例如 *.java、*Service*.java、application*.yml")
+    @Tool(description = "按文件名 glob 递归搜索项目根目录内文件（按文件名，不是按内容）。支持通配符如 *.java、*Service*.java、application*.yml；要搜代码内容请用 searchInFiles")
     public String searchFiles(String pattern) {
         return stripDefaultRootPrefix(localFilesystemService.searchFilesByGlob("", pattern));
     }
 
-    @Tool(description = "按内容递归搜索文件，支持 filePattern 过滤，类似 grep。示例：keyword=ChatService, filePattern=*.java")
+    @Tool(description = "按文件内容递归搜索（grep，不是按文件名），支持 filePattern 过滤文件名。示例：keyword=ChatService, filePattern=*.java。按文件名搜请用 searchFiles")
     public String searchInFiles(String keyword, String filePattern) {
         if (!StringUtils.hasText(keyword)) {
             throw new BusinessException(40053, "keyword 不能为空");

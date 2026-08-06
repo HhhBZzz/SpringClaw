@@ -55,9 +55,21 @@ public class ToolOrchestrator {
                                 String planText) {
         String merged = mergeText(userMessage, planText);
         Set<String> allowedToolPacks = skillService.resolveAllowedToolPacks(channel, userId);
-        return capabilityRegistry.listAll().stream()
+        Object[] selected = capabilityRegistry.listAll().stream()
                 .filter(entry -> isAllowed(entry, allowedToolPacks))
                 .filter(entry -> entry.matchesKeywords(merged))
+                .map(CapabilityRegistry.CapabilityEntry::toolPackBean)
+                .filter(Objects::nonNull)
+                .toArray();
+        if (selected.length > 0) {
+            return selected;
+        }
+        // 关键词全不命中（改述/英文/自然语言）：回退暴露 fallbackCandidate=true 的只读工具集，
+        // 让模型至少有只读能力可用，而不是空手 —— 子串 triggerKeywords 匹配的本质限制兜底。
+        return capabilityRegistry.listAll().stream()
+                .filter(entry -> isAllowed(entry, allowedToolPacks))
+                .filter(CapabilityRegistry.CapabilityEntry::isFallbackCandidate)
+                .filter(entry -> "read".equalsIgnoreCase(entry.riskLevel()))
                 .map(CapabilityRegistry.CapabilityEntry::toolPackBean)
                 .filter(Objects::nonNull)
                 .toArray();

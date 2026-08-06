@@ -156,16 +156,36 @@ public class WorkspaceEditToolPack {
                     .redirectErrorStream(true);
 
             Process process = pb.start();
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            // 异步消费 stdout：readAllBytes 会阻塞到进程关闭 stdout，对不退出命令（mvn test/dev server/tail -f）
+            // 会永久阻塞、使 waitFor 超时永不触发、agent 线程挂死。独立 daemon 线程读取并限容，超时强杀后取已缓冲字节。
+            StringBuilder collected = new StringBuilder();
+            Thread reader = new Thread(() -> {
+                try (var in = process.getInputStream()) {
+                    byte[] buffer = new byte[4096];
+                    int n;
+                    while ((n = in.read(buffer)) != -1) {
+                        if (collected.length() < maxCommandOutputChars + 4096) {
+                            collected.append(new String(buffer, 0, n, StandardCharsets.UTF_8));
+                        }
+                    }
+                } catch (IOException ignored) {
+                    // 进程被 destroyForcibly 时读取抛 IOException 是正常的，忽略
+                }
+            });
+            reader.setDaemon(true);
+            reader.start();
 
             boolean completed = process.waitFor(maxCommandTimeoutSeconds, TimeUnit.SECONDS);
             if (!completed) {
                 process.destroyForcibly();
-                return "命令超时（" + maxCommandTimeoutSeconds + "秒），已强制终止。\n部分输出:\n" + truncate(output);
+                reader.interrupt();
+                try { reader.join(1000); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+                return "命令超时（" + maxCommandTimeoutSeconds + "秒），已强制终止。\n部分输出:\n" + truncate(collected.toString());
             }
 
+            try { reader.join(2000); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
             int exitCode = process.exitValue();
-            String truncatedOutput = truncate(output);
+            String truncatedOutput = truncate(collected.toString());
 
             // 记录到自主循环执行追踪器
             AutonomousExecutionTracker tracker = ToolExecutionContextHolder.getTracker();

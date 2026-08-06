@@ -75,10 +75,18 @@ public class ToolOrchestrator {
 
     /** Legacy method: select by selectedCapabilities (still used by OparLoopEngine for non-autonomous mode) */
     public Object[] selectAgentTools(String channel, String userId, AgentDecision decision) {
-        if (decision == null || decision.isGeneral()) {
-            return new Object[0];
-        }
         Set<String> allowedToolPacks = skillService.resolveAllowedToolPacks(channel, userId);
+        // decision 为 null/general 时回退暴露只读工具集（天气/汇率/新闻/搜索/系统信息等 riskLevel=read 的 pack），
+        // 而不是空数组——否则默认 simplified 模式下模型看不到任何工具（"很多工具没法用"的主因）。
+        if (decision == null || decision.isGeneral()) {
+            return capabilityRegistry.listAll().stream()
+                    .filter(CapabilityRegistry.CapabilityEntry::includeForAgentMode)
+                    .filter(entry -> isAllowed(entry, allowedToolPacks))
+                    .filter(entry -> "read".equalsIgnoreCase(entry.riskLevel()))
+                    .map(CapabilityRegistry.CapabilityEntry::toolPackBean)
+                    .filter(Objects::nonNull)
+                    .toArray();
+        }
         Set<String> capabilityIds = decision.selectedCapabilities() == null
                 ? Set.of()
                 : decision.selectedCapabilities().stream()
@@ -88,7 +96,10 @@ public class ToolOrchestrator {
         return capabilityRegistry.listAll().stream()
                 .filter(CapabilityRegistry.CapabilityEntry::includeForAgentMode)
                 .filter(entry -> isAllowed(entry, allowedToolPacks))
-                .filter(entry -> capabilityIds.isEmpty() || capabilityIds.contains(normalizeCapability(entry.id())))
+                // id 匹配，并兜底按 toolset 匹配（路由 LLM 可能输出 toolset 名而非 capability id）
+                .filter(entry -> capabilityIds.isEmpty()
+                        || capabilityIds.contains(normalizeCapability(entry.id()))
+                        || capabilityIds.contains(normalizeCapability(entry.toolset())))
                 .map(CapabilityRegistry.CapabilityEntry::toolPackBean)
                 .filter(Objects::nonNull)
                 .toArray();

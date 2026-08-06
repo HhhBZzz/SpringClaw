@@ -305,9 +305,12 @@ springclaw:
       max-file-size-kb: 512
     web:
       enabled: true
-      search-url-template: https://r.jina.ai/http://duckduckgo.com/?q={query}
-      use-proxy-for-fetch: true
-      timeout-seconds: 8
+      # 大陆部署：jina→duckduckgo 双跳常不可达，建议通过 env 换成可达源，或配置 proxy-host/proxy-port
+      search-url-template: ${SPRINGCLAW_TOOLS_WEB_SEARCH_URL_TEMPLATE:https://r.jina.ai/http://duckduckgo.com/?q={query}}
+      use-proxy-for-fetch: ${SPRINGCLAW_TOOLS_WEB_USE_PROXY_FOR_FETCH:false}
+      proxy-host: ${SPRINGCLAW_TOOLS_WEB_PROXY_HOST:}
+      proxy-port: ${SPRINGCLAW_TOOLS_WEB_PROXY_PORT:0}
+      timeout-seconds: ${SPRINGCLAW_TOOLS_WEB_TIMEOUT_SECONDS:20}
       max-response-chars: 5000
     weather:
       enabled: true

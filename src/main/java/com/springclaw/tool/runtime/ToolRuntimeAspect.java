@@ -251,7 +251,7 @@ public class ToolRuntimeAspect {
         }
         String command = args != null && args.length == 1 && args[0] instanceof String value ? value : null;
         if (!ApprovedSystemCommand.isApproved(command)) {
-            throw new BusinessException(40062, "仅允许执行 echo <text>、pwd 或 git status");
+            throw new BusinessException(40062, "命令包含不允许的字符（;|&<>$() 等），或为空");
         }
     }
 

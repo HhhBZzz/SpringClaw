@@ -107,7 +107,7 @@ public class SystemToolPack {
         return joined;
     }
 
-    @Tool(name = "systemRunCommand", description = "执行受控系统命令（仅白名单命令，适用于查看时间、路径、系统信息等只读操作）")
+    @Tool(name = "systemRunCommand", description = "执行 springclaw.tools.system.allowed-commands 白名单内的只读命令（默认 echo/pwd/git，可在配置扩展）。用于查看路径、git 状态等；不含中文输出。")
     public String runCommand(String commandLine) {
         if (!commandEnabled) {
             return "命令执行能力未开启（springclaw.tools.system.command-enabled=false）";
@@ -118,7 +118,7 @@ public class SystemToolPack {
 
         String approvedCommand = ApprovedSystemCommand.normalize(commandLine)
                 .orElseThrow(() -> new BusinessException(40062,
-                        "仅允许执行 echo <text>、pwd 或 git status"));
+                        "命令包含不允许的字符（;|&<>$() 等），或为空"));
         String[] parts = approvedCommand.split("\\s+");
         String command = parts[0].toLowerCase();
         if (!isCommandAllowed(command)) {

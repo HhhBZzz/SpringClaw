@@ -68,7 +68,7 @@ public class NewsToolPack {
                 .build();
     }
 
-    @Tool(description = "按关键词检索新闻摘要（输入关键字，例如 AI、Spring、OpenAI）")
+    @Tool(description = "检索技术新闻摘要（数据源 Hacker News，适合 AI/编程/创业等技术话题；非技术/泛资讯查询可能无结果。输入关键字如 AI、Spring、OpenAI）")
     public String searchNews(String keyword) {
         if (!enabled) {
             return "新闻工具未开启";

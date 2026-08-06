@@ -39,7 +39,19 @@ public class PythonSkillExecutor implements SkillExecutor {
     }
 
     private boolean looksLikeJson(String text) {
-        return StringUtils.hasText(text) && text.trim().startsWith("{") && text.trim().endsWith("}");
+        if (!StringUtils.hasText(text)) {
+            return false;
+        }
+        String trimmed = text.trim();
+        if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+            return false;
+        }
+        try {
+            // 严格解析：只有合法 JSON object 才走 args 路径，避免 "{整理BTC价格}" 等自然语言被误判为 JSON
+            return new com.fasterxml.jackson.databind.ObjectMapper().readTree(trimmed).isObject();
+        } catch (Exception ex) {
+            return false;
+        }
     }
 
 }

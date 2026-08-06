@@ -103,7 +103,7 @@ public class ScriptSkillToolPack {
         return scriptSkillCatalogService.describeForTool();
     }
 
-    @Tool(description = "执行脚本技能。参数：skillName（技能名），args（键值对参数）")
+    @Tool(description = "执行脚本技能。skillName 为技能名，args 为参数键值对。调用前建议先 inspectScriptSkill 查看该 skill 的输入字段（inputHint）与示例，避免传错参数名")
     public String runScriptSkill(String skillName, Map<String, String> args) {
         if (!enabled) {
             return "脚本技能未开启（springclaw.skills.enabled=false）";

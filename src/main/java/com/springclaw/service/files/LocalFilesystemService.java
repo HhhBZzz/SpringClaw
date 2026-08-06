@@ -162,7 +162,12 @@ public class LocalFilesystemService {
     public String searchFilesByGlob(String rootRef, String pattern) {
         String glob = StringUtils.hasText(pattern) ? pattern.trim() : "*";
         AuthorizedRoot root = resolveRoot(rootRef);
-        PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:" + glob);
+        PathMatcher matcher;
+        try {
+            matcher = FileSystems.getDefault().getPathMatcher("glob:" + glob);
+        } catch (IllegalArgumentException ex) {
+            return "filePattern 格式错误: " + glob + "（请用 glob 如 *.java、*Service*.md，不要用正则）";
+        }
         List<String> results = new ArrayList<>();
         WalkReport report = walkFiles(root, file -> {
             if (results.size() >= maxFileResults) {
@@ -186,7 +191,12 @@ public class LocalFilesystemService {
         String key = normalizeKeyword(keyword);
         String lowerKey = key.toLowerCase(Locale.ROOT);
         String glob = StringUtils.hasText(filePattern) ? filePattern.trim() : "*";
-        PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:" + glob);
+        PathMatcher matcher;
+        try {
+            matcher = FileSystems.getDefault().getPathMatcher("glob:" + glob);
+        } catch (IllegalArgumentException ex) {
+            return "filePattern 格式错误: " + glob + "（请用 glob 如 *.java、*Service*.md，不要用正则）";
+        }
         List<String> hits = new ArrayList<>();
         WalkReport report = walkAuthorizedFiles(file -> {
             if (hits.size() >= maxTextHits) {

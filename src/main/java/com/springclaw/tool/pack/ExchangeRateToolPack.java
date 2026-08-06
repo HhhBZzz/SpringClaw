@@ -4,6 +4,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.springclaw.tool.runtime.ToolPackDescriptor;
 import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -62,16 +63,22 @@ public class ExchangeRateToolPack {
                 .build();
     }
 
-    @Tool(description = "查询汇率（例如 base=USD, target=CNY）")
-    public String queryExchangeRate(String baseCurrency, String targetCurrency) {
+    @Tool(description = "查询汇率。baseCurrency/targetCurrency 须为 ISO-4217 三字母代码（如 USD、CNY、EUR、JPY），不要用中文币名")
+    public String queryExchangeRate(
+            @ToolParam(description = "基础币种 ISO-4217 代码，如 USD") String baseCurrency,
+            @ToolParam(description = "目标币种 ISO-4217 代码，如 CNY") String targetCurrency) {
         if (!enabled) {
             return "汇率工具未开启";
         }
         if (!StringUtils.hasText(baseCurrency) || !StringUtils.hasText(targetCurrency)) {
-            return "baseCurrency 和 targetCurrency 不能为空";
+            return "baseCurrency 和 targetCurrency 不能为空（须为 ISO-4217 三字母代码，如 USD/CNY）";
         }
         String base = baseCurrency.trim().toUpperCase(Locale.ROOT);
         String target = targetCurrency.trim().toUpperCase(Locale.ROOT);
+        if (!base.matches("^[A-Z]{3}$") || !target.matches("^[A-Z]{3}$")) {
+            return "币种代码格式错误: base=" + base + ", target=" + target
+                    + "。须为 ISO-4217 三字母代码（如 USD、CNY、EUR、JPY），不要用\"美元/人民币\"等中文";
+        }
         String cacheKey = base + ":" + target;
         String cached = exchangeRateCache.getIfPresent(cacheKey);
         if (StringUtils.hasText(cached)) {

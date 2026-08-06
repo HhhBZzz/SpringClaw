@@ -111,6 +111,9 @@ public class WorkspaceEditToolPack {
                         + "\n建议先用 readTextFile 读取文件获取精确的原始文本，再用精确文本调用 applyPatch。";
             }
 
+            // 统计总命中数：searchText 若在文件中出现多次，applyPatch 只替换第一处，
+            // 必须告知模型 1/N，否则模型会误以为全部替换完成。
+            int totalCount = countOccurrences(content, searchText);
             String newContent = content.substring(0, index) + replaceText + content.substring(index + searchText.length());
             Files.writeString(file, newContent, StandardCharsets.UTF_8);
 
@@ -123,9 +126,14 @@ public class WorkspaceEditToolPack {
                 tracker.recordApplyPatch(relativePath, true);
             }
 
-            return "修改成功: " + rootPath.relativize(file) + "\n"
+            String result = "修改成功: " + rootPath.relativize(file) + "\n"
                     + "替换了 " + originalLines + " → " + newLines + " 行"
                     + "（差异 " + (newLines - originalLines) + " 行）";
+            if (totalCount > 1) {
+                result += "\n⚠️ 注意: searchText 在原文件中共出现 " + totalCount
+                        + " 处，本次仅替换第 1 处。若需全部替换，请补充更长的上下文使匹配唯一后再调用，或逐处确认。";
+            }
+            return result;
         } catch (IOException ex) {
             throw new BusinessException(50060, "文件修改失败: " + ex.getMessage());
         }
@@ -255,5 +263,18 @@ public class WorkspaceEditToolPack {
     private long countLines(String content) {
         if (content == null || content.isEmpty()) return 0;
         return content.split("\n", -1).length;
+    }
+
+    private int countOccurrences(String text, String sub) {
+        if (text == null || sub == null || sub.isEmpty()) {
+            return 0;
+        }
+        int count = 0;
+        int idx = 0;
+        while ((idx = text.indexOf(sub, idx)) >= 0) {
+            count++;
+            idx += sub.length();
+        }
+        return count;
     }
 }

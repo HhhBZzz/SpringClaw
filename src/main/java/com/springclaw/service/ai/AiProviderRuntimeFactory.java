@@ -1,19 +1,26 @@
 package com.springclaw.service.ai;
 
 import io.micrometer.observation.ObservationRegistry;
+import io.netty.channel.ChannelOption;
+import io.netty.handler.timeout.ReadTimeoutHandler;
+import io.netty.handler.timeout.WriteTimeoutHandler;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.retry.support.RetryTemplate;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.netty.http.client.HttpClient;
 
+import java.time.Duration;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 final class AiProviderRuntimeFactory {
 
@@ -77,7 +84,21 @@ final class AiProviderRuntimeFactory {
 
         WebClient.Builder webClientBuilder = webClientBuilderProvider.getIfAvailable();
         if (webClientBuilder != null) {
-            apiBuilder.webClientBuilder(webClientBuilder.clone());
+            // 给 WebClient 配超时：connect + responseTimeout + ReadTimeoutHandler/WriteTimeoutHandler。
+            // 关键在 ReadTimeoutHandler —— responseTimeout 只覆盖"到首字节"的等待，
+            // SSE 流一旦开始、上游中途 stall（已发 header 后不再吐 token）时 responseTimeout 不触发；
+            // ReadTimeoutHandler 按每次读空闲计时，能抓"流式中途卡住"，stall 时抛 ReadTimeoutException，
+            // 被 ModelTransportGuardService.isTransportFailure 识别为传输失败 → 触发同模型重试 / failover。
+            int timeoutSeconds = Math.max(1, requestTimeoutSeconds);
+            int timeoutMs = timeoutSeconds * 1000;
+            HttpClient httpClient = HttpClient.create()
+                    .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, timeoutMs)
+                    .responseTimeout(Duration.ofSeconds(timeoutSeconds))
+                    .doOnConnected(c -> c
+                            .addHandlerLast(new ReadTimeoutHandler(timeoutSeconds, TimeUnit.SECONDS))
+                            .addHandlerLast(new WriteTimeoutHandler(timeoutSeconds, TimeUnit.SECONDS)));
+            apiBuilder.webClientBuilder(
+                    webClientBuilder.clone().clientConnector(new ReactorClientHttpConnector(httpClient)));
         }
 
         return AiProviderRuntime.available(

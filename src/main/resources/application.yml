@@ -239,10 +239,10 @@ springclaw:
   persistence:
     db-enabled: ${SPRINGCLAW_PERSISTENCE_DB_ENABLED:${OPENCLAW_PERSISTENCE_DB_ENABLED:false}}
   guard:
-    enabled: false
+    enabled: ${SPRINGCLAW_GUARD_ENABLED:true}
     redis-enabled: true
     redis-retry-seconds: 30
-    lock-seconds: 30
+    lock-seconds: 120
     rate-limit:
       max-requests: 20
       window-seconds: 60

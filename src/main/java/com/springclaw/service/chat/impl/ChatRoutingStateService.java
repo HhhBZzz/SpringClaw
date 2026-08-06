@@ -2,6 +2,8 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.service.event.MessageEventService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -23,6 +25,8 @@ public class ChatRoutingStateService {
     private static final Pattern MODE_PATTERN = Pattern.compile("defaultMode=([a-z0-9\\-]+)", Pattern.CASE_INSENSITIVE);
     private static final Pattern AUTO_PATTERN = Pattern.compile("autoUpgrade=(true|false)", Pattern.CASE_INSENSITIVE);
 
+    private static final Logger log = LoggerFactory.getLogger(ChatRoutingStateService.class);
+
     private final StringRedisTemplate redisTemplate;
     private final MessageEventService messageEventService;
     private final boolean dbEnabled;
@@ -30,6 +34,8 @@ public class ChatRoutingStateService {
     private final String redisModeKey;
     private final String redisAutoUpgradeKey;
     private final String auditSessionKey;
+    private final int redisRetrySeconds;
+    private volatile long redisRetryAt = 0L;
 
     public ChatRoutingStateService(@Autowired(required = false) StringRedisTemplate redisTemplate,
                                    MessageEventService messageEventService,
@@ -37,7 +43,8 @@ public class ChatRoutingStateService {
                                    @Value("${springclaw.chat.routing.redis-enabled:true}") boolean redisEnabled,
                                    @Value("${springclaw.chat.routing.redis-mode-key:springclaw:chat:routing:mode}") String redisModeKey,
                                    @Value("${springclaw.chat.routing.redis-auto-upgrade-key:springclaw:chat:routing:auto-upgrade}") String redisAutoUpgradeKey,
-                                   @Value("${springclaw.chat.routing.audit-session-key:system:chat:routing}") String auditSessionKey) {
+                                   @Value("${springclaw.chat.routing.audit-session-key:system:chat:routing}") String auditSessionKey,
+                                   @Value("${springclaw.chat.routing.redis-retry-seconds:30}") int redisRetrySeconds) {
         this.redisTemplate = redisTemplate;
         this.messageEventService = messageEventService;
         this.dbEnabled = dbEnabled;
@@ -45,6 +52,20 @@ public class ChatRoutingStateService {
         this.redisModeKey = redisModeKey;
         this.redisAutoUpgradeKey = redisAutoUpgradeKey;
         this.auditSessionKey = auditSessionKey;
+        this.redisRetrySeconds = Math.max(5, redisRetrySeconds);
+    }
+
+    /** Redis 是否可用（含冷却窗口）。每请求都调的读路径用它在 Redis 宕机期间跳过连接尝试，避免刷屏和慢响应。 */
+    private boolean canUseRedis() {
+        return redisEnabled
+                && redisTemplate != null
+                && System.currentTimeMillis() >= redisRetryAt;
+    }
+
+    private void markRedisTemporarilyUnavailable(String operation, Exception ex) {
+        redisRetryAt = System.currentTimeMillis() + (redisRetrySeconds * 1000L);
+        String reason = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
+        log.warn("Redis {}失败，{}s 内降级到 DB 审计/configuredDefault。reason={}", operation, redisRetrySeconds, reason);
     }
 
     public String resolveDefaultMode(String configuredDefault) {
@@ -73,9 +94,13 @@ public class ChatRoutingStateService {
 
     public void persistState(String defaultMode, boolean autoUpgrade, String source) {
         String normalizedMode = normalizeMode(defaultMode);
-        if (redisEnabled && redisTemplate != null) {
-            redisTemplate.opsForValue().set(redisModeKey, normalizedMode);
-            redisTemplate.opsForValue().set(redisAutoUpgradeKey, Boolean.toString(autoUpgrade));
+        if (canUseRedis()) {
+            try {
+                redisTemplate.opsForValue().set(redisModeKey, normalizedMode);
+                redisTemplate.opsForValue().set(redisAutoUpgradeKey, Boolean.toString(autoUpgrade));
+            } catch (Exception ex) {
+                markRedisTemporarilyUnavailable("持久化 routing state", ex);
+            }
         }
         if (dbEnabled) {
             String content = "defaultMode=%s, autoUpgrade=%s, source=%s".formatted(
@@ -120,21 +145,31 @@ public class ChatRoutingStateService {
     }
 
     private String readModeFromRedis() {
-        if (!redisEnabled || redisTemplate == null) {
+        if (!canUseRedis()) {
             return "";
         }
-        return redisTemplate.opsForValue().get(redisModeKey);
+        try {
+            return redisTemplate.opsForValue().get(redisModeKey);
+        } catch (Exception ex) {
+            markRedisTemporarilyUnavailable("读取 routing mode", ex);
+            return "";
+        }
     }
 
     private Boolean readAutoUpgradeFromRedis() {
-        if (!redisEnabled || redisTemplate == null) {
+        if (!canUseRedis()) {
             return null;
         }
-        String value = redisTemplate.opsForValue().get(redisAutoUpgradeKey);
-        if (!StringUtils.hasText(value)) {
+        try {
+            String value = redisTemplate.opsForValue().get(redisAutoUpgradeKey);
+            if (!StringUtils.hasText(value)) {
+                return null;
+            }
+            return Boolean.parseBoolean(value.trim());
+        } catch (Exception ex) {
+            markRedisTemporarilyUnavailable("读取 routing auto-upgrade", ex);
             return null;
         }
-        return Boolean.parseBoolean(value.trim());
     }
 
     private String readModeFromAudit() {

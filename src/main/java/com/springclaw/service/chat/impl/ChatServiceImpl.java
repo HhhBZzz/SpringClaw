@@ -1,5 +1,6 @@
 package com.springclaw.service.chat.impl;
 
+import com.springclaw.common.exception.BusinessException;
 import com.springclaw.common.util.TextUtils;
 import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
@@ -27,6 +28,7 @@ import com.springclaw.tool.runtime.ToolOrchestrator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -36,6 +38,9 @@ import reactor.core.Disposable;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -72,6 +77,7 @@ public class ChatServiceImpl implements ChatService {
     private final boolean basicStreamingEnabled;
     private LocalFileWriteProposalService localFileWriteProposalService;
     private ApprovedCommandProposalService approvedCommandProposalService;
+    private Executor chatStreamExecutor;
 
     @Autowired
     public ChatServiceImpl(AiProviderService aiProviderService,
@@ -128,6 +134,12 @@ public class ChatServiceImpl implements ChatService {
     @Autowired(required = false)
     void setApprovedCommandProposalService(ApprovedCommandProposalService approvedCommandProposalService) {
         this.approvedCommandProposalService = approvedCommandProposalService;
+    }
+
+    @Autowired(required = false)
+    @Qualifier("chatStreamExecutor")
+    void setChatStreamExecutor(Executor chatStreamExecutor) {
+        this.chatStreamExecutor = chatStreamExecutor;
     }
 
     /**
@@ -204,14 +216,20 @@ public class ChatServiceImpl implements ChatService {
             releaseSessionLockOnce(request.sessionKey(), lockToken, lockReleased);
             emitter.complete();
         });
-        CompletableFuture.runAsync(() -> executeStream(
-                request,
-                acceptedRunId,
-                lockToken,
-                lockReleased,
-                emitter,
-                disposableRef
-        ));
+        Executor exec = chatStreamExecutor != null ? chatStreamExecutor : ForkJoinPool.commonPool();
+        try {
+            CompletableFuture.runAsync(() -> executeStream(
+                    request,
+                    acceptedRunId,
+                    lockToken,
+                    lockReleased,
+                    emitter,
+                    disposableRef
+            ), exec);
+        } catch (RejectedExecutionException ex) {
+            releaseSessionLockOnce(request.sessionKey(), lockToken, lockReleased);
+            throw new BusinessException(50301, "当前并发过高，请稍后重试");
+        }
         return emitter;
     }
 

@@ -11,6 +11,8 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import jakarta.annotation.PreDestroy;
+
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Collections;
@@ -18,6 +20,10 @@ import java.util.Deque;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 会话防护实现：
@@ -44,6 +50,11 @@ public class RedisChatGuardService implements ChatGuardService {
     private final Map<String, String> localLockTokenMap = new ConcurrentHashMap<>();
     private volatile long redisRetryAt = 0L;
 
+    /** 锁续约最长寿命：对齐 SSE 30min + buffer，防 release 漏调导致续约永跑。 */
+    private static final long MAX_RENEWAL_MILLIS = 31 * 60 * 1000L;
+    private final ScheduledExecutorService lockRenewalExecutor;
+    private final Map<String, ScheduledFuture<?>> renewalTasks = new ConcurrentHashMap<>();
+
     public RedisChatGuardService(@Autowired(required = false) StringRedisTemplate redisTemplate,
                                  @Value("${springclaw.guard.enabled:true}") boolean guardEnabled,
                                  @Value("${springclaw.guard.redis-enabled:true}") boolean redisEnabled,
@@ -58,6 +69,11 @@ public class RedisChatGuardService implements ChatGuardService {
         this.windowSeconds = Math.max(1, windowSeconds);
         this.lockSeconds = Math.max(3, lockSeconds);
         this.redisRetrySeconds = Math.max(5, redisRetrySeconds);
+        this.lockRenewalExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "guard-lock-renew");
+            t.setDaemon(true);
+            return t;
+        });
     }
 
     @Override
@@ -114,6 +130,7 @@ public class RedisChatGuardService implements ChatGuardService {
                 Boolean success = redisTemplate.opsForValue()
                         .setIfAbsent(redisKey, token, Duration.ofSeconds(lockSeconds));
                 if (Boolean.TRUE.equals(success)) {
+                    scheduleRenewal(redisKey, token);
                     return token;
                 }
                 throw new BusinessException(40901, "当前会话正在处理中，请稍后重试");
@@ -138,6 +155,11 @@ public class RedisChatGuardService implements ChatGuardService {
             return;
         }
 
+        ScheduledFuture<?> renewalTask = renewalTasks.remove(token);
+        if (renewalTask != null) {
+            renewalTask.cancel(false);
+        }
+
         String key = normalizeSessionKey(sessionKey);
 
         if (token.startsWith("local-")) {
@@ -159,6 +181,47 @@ public class RedisChatGuardService implements ChatGuardService {
         }
 
         localLockTokenMap.remove(key);
+    }
+
+    /**
+     * 锁续约：长流式（最长 30min）远超锁 TTL(120s)，需周期续约防止锁过期导致同会话并发执行。
+     * 续约用 token 匹配的 Lua——只给自己的锁续命，不给别的持有者续；带 31min 寿命上限防 release 漏调导致续约永跑。
+     * 本地降级锁（token 前缀 "local-"）不进此流程。
+     */
+    private void scheduleRenewal(String redisKey, String token) {
+        long periodSeconds = Math.max(5, lockSeconds / 2);
+        long startedAt = System.currentTimeMillis();
+        Runnable renewTask = () -> {
+            if (System.currentTimeMillis() - startedAt > MAX_RENEWAL_MILLIS) {
+                renewalTasks.remove(token);
+                return;
+            }
+            if (!canUseRedis()) {
+                return;
+            }
+            try {
+                DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+                script.setResultType(Long.class);
+                script.setScriptText(
+                        "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('expire', KEYS[1], ARGV[2]) else return 0 end");
+                redisTemplate.execute(script, Collections.singletonList(redisKey), token, String.valueOf(lockSeconds));
+            } catch (Exception ex) {
+                markRedisTemporarilyUnavailable("锁续约", ex);
+            }
+        };
+        ScheduledFuture<?> future = lockRenewalExecutor.scheduleAtFixedRate(
+                renewTask, periodSeconds, periodSeconds, TimeUnit.SECONDS);
+        renewalTasks.put(token, future);
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        lockRenewalExecutor.shutdown();
+        try {
+            lockRenewalExecutor.awaitTermination(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private String normalizeSessionKey(String sessionKey) {

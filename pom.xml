@@ -97,6 +97,14 @@
             <artifactId>spring-ai-starter-vector-store-redis</artifactId>
         </dependency>
 
+        <!-- reactor-netty-http：为 Spring AI WebClient（流式 chat completion）提供 HTTP client 实现，
+             并支持在 AiProviderRuntimeFactory 配置连接/响应/读/写超时（ReadTimeoutHandler 抓 SSE 中途 stall）。
+             Spring Boot 3.5 BOM 已管理版本，故不显式声明。 -->
+        <dependency>
+            <groupId>io.projectreactor.netty</groupId>
+            <artifactId>reactor-netty-http</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>com.github.ben-manes.caffeine</groupId>
             <artifactId>caffeine</artifactId>

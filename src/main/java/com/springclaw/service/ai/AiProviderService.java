@@ -162,6 +162,35 @@ public class AiProviderService {
         );
     }
 
+    /**
+     * 请求级 failover 专用：返回绑定指定 model 的只读 client。
+     * 不改全局 activeProviderId、不改 runtime 的 activeModel、不持久化——
+     * 单次请求失败只在本请求内换 client，不污染全系统所有用户。
+     * model 字段传 resolvedModel（非 runtime.currentModel()），保证 usage 记账/冷却标记准确。
+     * 返回 null 表示该 model 不可解析，让 failover 跳到下一候选。
+     */
+    public ActiveChatClient clientForProviderModel(String providerId, String modelHint) {
+        String normalizedProvider = normalizeProviderId(providerId);
+        AiProviderRuntime runtime = requireAvailableProvider(normalizedProvider);
+        String resolvedModel = runtime.resolveModel(modelHint);
+        if (!StringUtils.hasText(resolvedModel)) {
+            return null;
+        }
+        ensureChatCompatibleModel(normalizedProvider, resolvedModel);
+        ChatClient client = runtime.chatClientForModel(resolvedModel);
+        if (client == null) {
+            return null;
+        }
+        return new ActiveChatClient(
+                runtime.providerId(),
+                resolvedModel,
+                runtime.baseUrl(),
+                client,
+                runtime.available(),
+                runtime.availableReason()
+        );
+    }
+
     public synchronized ProviderView switchActiveProvider(String providerId) {
         return switchActiveProvider(providerId, "runtime");
     }
@@ -206,23 +235,6 @@ public class AiProviderService {
             return "";
         }
         return StringUtils.hasText(resolved) ? resolved : "";
-    }
-
-    public synchronized ActiveChatClient activateModel(String providerId, String modelHint, String source) {
-        String normalizedProvider = normalizeProviderId(StringUtils.hasText(providerId) ? providerId : activeProviderId.get());
-        AiProviderRuntime runtime = requireAvailableProvider(normalizedProvider);
-        String resolvedModel = runtime.resolveModel(modelHint);
-        if (!StringUtils.hasText(resolvedModel)) {
-            if (isChatUnsupportedModelHint(normalizedProvider, modelHint)) {
-                throw new BusinessException(40043, unsupportedChatModelMessage(normalizedProvider, modelHint));
-            }
-            throw new BusinessException(40042, "未识别模型或模型未启用: " + TextUtils.safe(modelHint));
-        }
-        ensureChatCompatibleModel(normalizedProvider, resolvedModel);
-        runtime.setActiveModel(resolvedModel);
-        activeProviderId.set(normalizedProvider);
-        aiProviderStateService.persistActiveState(normalizedProvider, resolvedModel, source);
-        return activeClient();
     }
 
     public List<String> listFailoverModels(String providerId, String failedModel) {

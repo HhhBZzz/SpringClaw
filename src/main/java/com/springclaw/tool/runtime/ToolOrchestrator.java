@@ -124,10 +124,15 @@ public class ToolOrchestrator {
         log.info("自主循环工具选择: intent={}, riskLevel={}, scopeToolsets={}",
                 decision.intent(), decision.riskLevel(), scopeToolsets);
 
+        String riskLevel = decision.riskLevel();
         return capabilityRegistry.listAll().stream()
                 .filter(CapabilityRegistry.CapabilityEntry::includeForAgentMode)
                 .filter(entry -> isAllowed(entry, allowedToolPacks))
                 .filter(entry -> scopeToolsets.contains(normalizeCapability(entry.toolset())))
+                // read-only 决策下进一步用 riskLevel 排除写能力：WorkspaceEditToolPack.toolset="workspace"
+                // 但 riskLevel="write"，仅靠 toolset 过滤会在只读任务里暴露 workspaceApplyPatch/workspaceWriteFile/workspaceRunCommand
+                .filter(entry -> !"read".equalsIgnoreCase(riskLevel)
+                        || "read".equalsIgnoreCase(entry.riskLevel()))
                 .map(CapabilityRegistry.CapabilityEntry::toolPackBean)
                 .filter(Objects::nonNull)
                 .toArray();

@@ -361,7 +361,7 @@ springclaw:
     markdown-enabled: ${SPRINGCLAW_MARKDOWN_SKILL_ENABLED:true}
   webhook:
     security:
-      enabled: false
+      enabled: ${SPRINGCLAW_WEBHOOK_SECURITY_ENABLED:false}
       redis-enabled: true
       replay-seconds: 300
       default-secret: ${SPRINGCLAW_WEBHOOK_SECRET:}

@@ -30,6 +30,16 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:guest}
     password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        acknowledge-mode: auto
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          initial-interval: 1s
+          max-attempts: 3
+          multiplier: 2.0
+          max-interval: 10s
   ai:
     # Spring AI 1.1.x 引入了按模型家族自动装配的 provider bean。
     # 本项目的 chat/model/provider 运行时统一走 springclaw.ai.providers.* 自建链路，
@@ -239,10 +249,10 @@ springclaw:
   persistence:
     db-enabled: ${SPRINGCLAW_PERSISTENCE_DB_ENABLED:${OPENCLAW_PERSISTENCE_DB_ENABLED:false}}
   guard:
-    enabled: false
+    enabled: ${SPRINGCLAW_GUARD_ENABLED:true}
     redis-enabled: true
     redis-retry-seconds: 30
-    lock-seconds: 30
+    lock-seconds: 120
     rate-limit:
       max-requests: 20
       window-seconds: 60
@@ -305,9 +315,12 @@ springclaw:
       max-file-size-kb: 512
     web:
       enabled: true
-      search-url-template: https://r.jina.ai/http://duckduckgo.com/?q={query}
-      use-proxy-for-fetch: true
-      timeout-seconds: 8
+      # 大陆部署：jina→duckduckgo 双跳常不可达，建议通过 env 换成可达源，或配置 proxy-host/proxy-port
+      search-url-template: ${SPRINGCLAW_TOOLS_WEB_SEARCH_URL_TEMPLATE:https://r.jina.ai/http://duckduckgo.com/?q={query}}
+      use-proxy-for-fetch: ${SPRINGCLAW_TOOLS_WEB_USE_PROXY_FOR_FETCH:false}
+      proxy-host: ${SPRINGCLAW_TOOLS_WEB_PROXY_HOST:}
+      proxy-port: ${SPRINGCLAW_TOOLS_WEB_PROXY_PORT:0}
+      timeout-seconds: ${SPRINGCLAW_TOOLS_WEB_TIMEOUT_SECONDS:20}
       max-response-chars: 5000
     weather:
       enabled: true
@@ -342,13 +355,13 @@ springclaw:
     external-roots: ${SPRINGCLAW_SKILLS_EXTERNAL_ROOTS:}
     allowed: ${SPRINGCLAW_SKILLS_ALLOWED:*}
     python: ${SPRINGCLAW_SKILLS_PYTHON:python3}
-    timeout-seconds: ${SPRINGCLAW_SKILLS_TIMEOUT_SECONDS:8}
+    timeout-seconds: ${SPRINGCLAW_SKILLS_TIMEOUT_SECONDS:25}
     max-output-chars: ${SPRINGCLAW_SKILLS_MAX_OUTPUT_CHARS:3000}
     scaffold-enabled: ${SPRINGCLAW_SKILLS_SCAFFOLD_ENABLED:true}
     markdown-enabled: ${SPRINGCLAW_MARKDOWN_SKILL_ENABLED:true}
   webhook:
     security:
-      enabled: false
+      enabled: ${SPRINGCLAW_WEBHOOK_SECURITY_ENABLED:false}
       redis-enabled: true
       replay-seconds: 300
       default-secret: ${SPRINGCLAW_WEBHOOK_SECRET:}
@@ -371,7 +384,7 @@ springclaw:
 management:
   endpoint:
     health:
-      show-details: always
+      show-details: ${SPRINGCLAW_HEALTH_SHOW_DETAILS:never}
   health:
     db:
       enabled: true

@@ -9,6 +9,7 @@ public record AsyncChatResultPayload(
         String model,
         long createdAt,
         Long completedAt,
-        String errorMessage
+        String errorMessage,
+        String userId
 ) {
 }

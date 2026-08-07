@@ -147,6 +147,14 @@ public class WorkspaceSearchToolPack {
         }
 
         try {
+            long size = Files.size(target);
+            if (size > maxFileSizeBytes) {
+                return "匹配文件过大（" + (size / 1024) + "KB > " + (maxFileSizeBytes / 1024)
+                        + "KB），请改用 grepProjectText 检索关键行: " + toRelative(target);
+            }
+            if (!isWithinRoot(target)) {
+                return "匹配文件经符号链接解析后超出项目根，已拒绝读取: " + toRelative(target);
+            }
             String content = Files.readString(target, StandardCharsets.UTF_8);
             return "FILE: " + toRelative(target) + "\n" + trimToMaxChars(content);
         } catch (IOException ex) {
@@ -161,7 +169,7 @@ public class WorkspaceSearchToolPack {
 
     private void scanFileForHits(Path file, String lowerKeyword, List<String> hits) {
         try {
-            if (Files.size(file) > maxFileSizeBytes) {
+            if (Files.size(file) > maxFileSizeBytes || !isWithinRoot(file)) {
                 return;
             }
         } catch (IOException ignore) {
@@ -231,6 +239,15 @@ public class WorkspaceSearchToolPack {
             return compact.substring(0, 140) + "...";
         }
         return compact;
+    }
+
+    /** 解析符号链接后校验路径仍在项目根内，防止 node_modules/vendor 软链逃逸读取项目外文件。 */
+    private boolean isWithinRoot(Path path) {
+        try {
+            return path.toRealPath().startsWith(rootPath.toRealPath());
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     private String toRelative(Path path) {

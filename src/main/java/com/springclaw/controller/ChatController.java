@@ -171,7 +171,11 @@ public class ChatController {
 
     @GetMapping("/async/{requestId}")
     public ApiResponse<AsyncChatResultPayload> asyncResult(@PathVariable String requestId) {
-        AsyncChatResultPayload payload = asyncChatResultStore.find(requestId);
+        RequestUserContext context = RequestUserContextHolder.get();
+        if (context == null || !StringUtils.hasText(context.username())) {
+            throw new BusinessException(40101, "请先登录");
+        }
+        AsyncChatResultPayload payload = asyncChatResultStore.find(requestId, context.username());
         if (payload == null) {
             return ApiResponse.fail(40404, "未找到异步结果: " + requestId);
         }

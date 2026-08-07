@@ -160,7 +160,7 @@ class ToolOrchestratorTest {
         WorkspaceReviewToolPack workspaceReviewToolPack = new WorkspaceReviewToolPack(
                 new WorkspaceReviewService(tempDir.toString(), 8, 300, 20, 512)
         );
-        WebSearchToolPack webSearchToolPack = new WebSearchToolPack(false, "https://example.com?q={query}", true, 3, 2000);
+        WebSearchToolPack webSearchToolPack = new WebSearchToolPack(false, "https://example.com?q={query}", true, "", 0, 2000, null);
         WeatherToolPack weatherToolPack = new WeatherToolPack(
                 false,
                 "https://example.com/{city}",

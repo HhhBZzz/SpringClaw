@@ -5,6 +5,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.service.security.WebhookSecurityService;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -68,6 +69,33 @@ public class DefaultWebhookSecurityService implements WebhookSecurityService {
                 .maximumSize(LOCAL_NONCE_CACHE_MAX_SIZE)
                 .expireAfterWrite(2 * this.replaySeconds, TimeUnit.SECONDS)
                 .build();
+    }
+
+    /**
+     * 启动期 fail-fast：enabled=true（opt-in 启用 fail-closed）但未配任何 secret 时直接报错，
+     * 避免上线后第一个 webhook 请求才抛 50011、且期间所有请求被拒绝却无显式启动告警。
+     */
+    @PostConstruct
+    void validateConfiguration() {
+        if (!enabled) {
+            log.info("Webhook 安全校验未启用（springclaw.webhook.security.enabled=false）："
+                    + "webhook 请求不校验签名、默认放行——生产部署应配 secret 并置 "
+                    + "SPRINGCLAW_WEBHOOK_SECURITY_ENABLED=true 启用 fail-closed。");
+            return;
+        }
+        boolean anySecret = StringUtils.hasText(defaultSecret)
+                || StringUtils.hasText(telegramSecret)
+                || StringUtils.hasText(wechatSecret)
+                || StringUtils.hasText(feishuSecret);
+        if (!anySecret) {
+            throw new IllegalStateException(
+                    "springclaw.webhook.security.enabled=true 但未配置任何 webhook secret "
+                            + "(default-secret / channel-secrets.*)；启用 fail-closed 必须先配 secret，"
+                            + "否则所有 webhook 请求会被拒绝。"
+            );
+        }
+        log.info("Webhook 安全校验已启用（fail-closed）：未通过签名校验的 webhook 请求将被拒绝。"
+                + "（飞书走长连接不受影响）");
     }
 
     @Override

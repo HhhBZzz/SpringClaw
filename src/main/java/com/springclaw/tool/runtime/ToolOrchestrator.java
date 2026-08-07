@@ -55,9 +55,21 @@ public class ToolOrchestrator {
                                 String planText) {
         String merged = mergeText(userMessage, planText);
         Set<String> allowedToolPacks = skillService.resolveAllowedToolPacks(channel, userId);
-        return capabilityRegistry.listAll().stream()
+        Object[] selected = capabilityRegistry.listAll().stream()
                 .filter(entry -> isAllowed(entry, allowedToolPacks))
                 .filter(entry -> entry.matchesKeywords(merged))
+                .map(CapabilityRegistry.CapabilityEntry::toolPackBean)
+                .filter(Objects::nonNull)
+                .toArray();
+        if (selected.length > 0) {
+            return selected;
+        }
+        // 关键词全不命中（改述/英文/自然语言）：回退暴露 fallbackCandidate=true 的只读工具集，
+        // 让模型至少有只读能力可用，而不是空手 —— 子串 triggerKeywords 匹配的本质限制兜底。
+        return capabilityRegistry.listAll().stream()
+                .filter(entry -> isAllowed(entry, allowedToolPacks))
+                .filter(CapabilityRegistry.CapabilityEntry::isFallbackCandidate)
+                .filter(entry -> "read".equalsIgnoreCase(entry.riskLevel()))
                 .map(CapabilityRegistry.CapabilityEntry::toolPackBean)
                 .filter(Objects::nonNull)
                 .toArray();
@@ -75,10 +87,18 @@ public class ToolOrchestrator {
 
     /** Legacy method: select by selectedCapabilities (still used by OparLoopEngine for non-autonomous mode) */
     public Object[] selectAgentTools(String channel, String userId, AgentDecision decision) {
-        if (decision == null || decision.isGeneral()) {
-            return new Object[0];
-        }
         Set<String> allowedToolPacks = skillService.resolveAllowedToolPacks(channel, userId);
+        // decision 为 null/general 时回退暴露只读工具集（天气/汇率/新闻/搜索/系统信息等 riskLevel=read 的 pack），
+        // 而不是空数组——否则默认 simplified 模式下模型看不到任何工具（"很多工具没法用"的主因）。
+        if (decision == null || decision.isGeneral()) {
+            return capabilityRegistry.listAll().stream()
+                    .filter(CapabilityRegistry.CapabilityEntry::includeForAgentMode)
+                    .filter(entry -> isAllowed(entry, allowedToolPacks))
+                    .filter(entry -> "read".equalsIgnoreCase(entry.riskLevel()))
+                    .map(CapabilityRegistry.CapabilityEntry::toolPackBean)
+                    .filter(Objects::nonNull)
+                    .toArray();
+        }
         Set<String> capabilityIds = decision.selectedCapabilities() == null
                 ? Set.of()
                 : decision.selectedCapabilities().stream()
@@ -88,7 +108,10 @@ public class ToolOrchestrator {
         return capabilityRegistry.listAll().stream()
                 .filter(CapabilityRegistry.CapabilityEntry::includeForAgentMode)
                 .filter(entry -> isAllowed(entry, allowedToolPacks))
-                .filter(entry -> capabilityIds.isEmpty() || capabilityIds.contains(normalizeCapability(entry.id())))
+                // id 匹配，并兜底按 toolset 匹配（路由 LLM 可能输出 toolset 名而非 capability id）
+                .filter(entry -> capabilityIds.isEmpty()
+                        || capabilityIds.contains(normalizeCapability(entry.id()))
+                        || capabilityIds.contains(normalizeCapability(entry.toolset())))
                 .map(CapabilityRegistry.CapabilityEntry::toolPackBean)
                 .filter(Objects::nonNull)
                 .toArray();
@@ -113,10 +136,15 @@ public class ToolOrchestrator {
         log.info("自主循环工具选择: intent={}, riskLevel={}, scopeToolsets={}",
                 decision.intent(), decision.riskLevel(), scopeToolsets);
 
+        String riskLevel = decision.riskLevel();
         return capabilityRegistry.listAll().stream()
                 .filter(CapabilityRegistry.CapabilityEntry::includeForAgentMode)
                 .filter(entry -> isAllowed(entry, allowedToolPacks))
                 .filter(entry -> scopeToolsets.contains(normalizeCapability(entry.toolset())))
+                // read-only 决策下进一步用 riskLevel 排除写能力：WorkspaceEditToolPack.toolset="workspace"
+                // 但 riskLevel="write"，仅靠 toolset 过滤会在只读任务里暴露 workspaceApplyPatch/workspaceWriteFile/workspaceRunCommand
+                .filter(entry -> !"read".equalsIgnoreCase(riskLevel)
+                        || "read".equalsIgnoreCase(entry.riskLevel()))
                 .map(CapabilityRegistry.CapabilityEntry::toolPackBean)
                 .filter(Objects::nonNull)
                 .toArray();

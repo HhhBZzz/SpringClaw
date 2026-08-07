@@ -244,7 +244,11 @@ public class ModelCallExecutor {
                     || modelTransportGuardService.isModelCoolingDown(currentClient.providerId(), candidateModel)) {
                 continue;
             }
-            return aiProviderService.activateModel(currentClient.providerId(), candidateModel, source);
+            AiProviderService.ActiveChatClient candidate = aiProviderService.clientForProviderModel(currentClient.providerId(), candidateModel);
+            if (candidate == null) {
+                continue;
+            }
+            return candidate;
         }
         for (AiProviderService.ProviderModelTarget target : aiProviderService.listProviderFailoverTargets(currentClient.providerId())) {
             String candidateKey = clientKey(target.providerId(), target.model());
@@ -255,7 +259,11 @@ public class ModelCallExecutor {
                     || modelTransportGuardService.isModelCoolingDown(target.providerId(), target.model())) {
                 continue;
             }
-            return aiProviderService.activateModel(target.providerId(), target.model(), source);
+            AiProviderService.ActiveChatClient candidate = aiProviderService.clientForProviderModel(target.providerId(), target.model());
+            if (candidate == null) {
+                continue;
+            }
+            return candidate;
         }
         return null;
     }

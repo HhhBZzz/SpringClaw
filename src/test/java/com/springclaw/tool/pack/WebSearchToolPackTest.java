@@ -13,6 +13,8 @@ class WebSearchToolPackTest {
                 true,
                 "https://example.com?q={query}",
                 true,
+                "",
+                0,
                 5000,
                 RestClient.builder().build()
         );
@@ -32,6 +34,8 @@ class WebSearchToolPackTest {
                 false,
                 "https://example.com?q={query}",
                 true,
+                "",
+                0,
                 5000,
                 RestClient.builder().build()
         );

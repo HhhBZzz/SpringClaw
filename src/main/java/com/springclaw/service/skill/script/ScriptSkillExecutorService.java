@@ -36,7 +36,7 @@ public class ScriptSkillExecutorService {
     public ScriptSkillExecutorService(@Value("${springclaw.skills.enabled:true}") boolean enabled,
                                       ScriptSkillCatalogService scriptSkillCatalogService,
                                       @Value("${springclaw.skills.python:python3}") String pythonCommand,
-                                      @Value("${springclaw.skills.timeout-seconds:8}") int timeoutSeconds,
+                                      @Value("${springclaw.skills.timeout-seconds:25}") int timeoutSeconds,
                                       @Value("${springclaw.skills.max-output-chars:3000}") int maxOutputChars,
                                       ObjectMapper objectMapper,
                                       SkillUsageService skillUsageService) {
@@ -117,7 +117,9 @@ public class ScriptSkillExecutorService {
             }
             String output = execute(resolveDefinition(skillName), writePayload(payload));
             outputs.add("## " + (i + 1) + ". " + skillName + "\n" + output);
-            previousResult = output;
+            // previousResult 只传 body（去掉首行 header "skill=..., exitCode=..." 与 TRUNCATED 尾注），避免污染下游 prompt
+            int newlineIdx = output.indexOf('\n');
+            previousResult = newlineIdx > 0 ? output.substring(newlineIdx + 1) : output;
         }
         return "skillChain=" + String.join(" -> ", chain) + "\n\n" + String.join("\n\n", outputs);
     }
@@ -168,15 +170,34 @@ public class ScriptSkillExecutorService {
 
         try {
             Process process = pb.start();
+            // 异步消费 stdout：waitFor 超时后仍能取已缓冲字节（如 crypto_price 多符号慢脚本不再返回空超时）
+            StringBuilder collected = new StringBuilder();
+            Thread reader = new Thread(() -> {
+                try (var in = process.getInputStream()) {
+                    byte[] buf = new byte[4096];
+                    int n;
+                    while ((n = in.read(buf)) != -1) {
+                        if (collected.length() < maxOutputChars + 4096) {
+                            collected.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+                        }
+                    }
+                } catch (IOException ignored) {
+                    // destroyForcibly 时读取抛 IOException 是正常的，忽略
+                }
+            });
+            reader.setDaemon(true);
+            reader.start();
+
             boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
-                return "脚本执行超时（" + timeoutSeconds + "s）: " + definition.skillName();
+                reader.interrupt();
+                try { reader.join(1000); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+                return "脚本执行超时（" + timeoutSeconds + "s）: " + definition.skillName()
+                        + "\n部分输出:\n" + truncate(collected.toString());
             }
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            if (output.length() > maxOutputChars) {
-                output = output.substring(0, maxOutputChars) + "\n...<TRUNCATED>";
-            }
+            try { reader.join(2000); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+            String output = truncate(collected.toString());
             String header = "skill=" + definition.skillName() + ", exitCode=" + process.exitValue();
             if (!StringUtils.hasText(output)) {
                 return header + "\n(无输出)";
@@ -224,6 +245,12 @@ public class ScriptSkillExecutorService {
             result.add(normalizeSkillName(token));
         }
         return List.copyOf(result);
+    }
+
+    private String truncate(String text) {
+        if (text == null) return "";
+        if (text.length() <= maxOutputChars) return text;
+        return text.substring(0, maxOutputChars) + "\n...<TRUNCATED>";
     }
 
     private String workspaceRoot() {

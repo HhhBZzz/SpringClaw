@@ -131,7 +131,8 @@ class TransportParityCharacterizationTest {
                         completed.model(),
                         completed.createdAt(),
                         completed.completedAt(),
-                        completed.errorMessage()
+                        completed.errorMessage(),
+                        completed.userId()
                 ));
     }
 
@@ -174,6 +175,7 @@ class TransportParityCharacterizationTest {
                 "projected model",
                 100L,
                 200L,
+                "",
                 ""
         );
         when(bucket.get()).thenReturn(OBJECT_MAPPER.writeValueAsString(projected));
@@ -233,6 +235,7 @@ class TransportParityCharacterizationTest {
                 response.model(),
                 message.createdAt(),
                 456L,
+                "",
                 ""
         );
         when(chatService.chat(expectedCommand)).thenReturn(response);
@@ -284,16 +287,17 @@ class TransportParityCharacterizationTest {
                 "",
                 message.createdAt(),
                 456L,
-                "chat unavailable"
+                "chat unavailable",
+                ""
         );
         when(chatService.chat(expectedCommand))
                 .thenThrow(new IllegalStateException("chat unavailable"));
-        when(resultStore.markFailed(message, "chat unavailable")).thenReturn(payload);
+        when(resultStore.markFailed(message, "处理失败，请联系管理员")).thenReturn(payload);
 
         consumer.consume(message);
 
         verify(chatService).chat(expectedCommand);
-        verify(resultStore).markFailed(message, "chat unavailable");
+        verify(resultStore).markFailed(message, "处理失败，请联系管理员");
         verify(producer).sendResponse(payload);
         verify(messagingTemplate).convertAndSend("/topic/chat/request-failed", payload);
     }

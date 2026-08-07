@@ -104,6 +104,7 @@ class CanonicalTransportIdentityTest {
                         response.model(),
                         message.createdAt(),
                         456L,
+                        "",
                         ""
                 ));
 

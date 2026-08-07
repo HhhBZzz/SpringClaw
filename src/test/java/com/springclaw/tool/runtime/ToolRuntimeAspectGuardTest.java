@@ -212,16 +212,19 @@ class ToolRuntimeAspectGuardTest {
     }
 
     @Test
-    void systemRunCommand_unsupportedShape_neverCreatesProposal() {
+    void systemRunCommand_unsafeCharacters_rejectedBeforeProposal() {
+        // ApprovedSystemCommand 现在是 unsafe 字符护栏（不再硬编码命令 grammar）；
+        // 命令白名单由 allowed-commands 决定。含 ; 等注入字符在 AOP 执行边界被拦，不进入提案/执行。
         SystemToolPack target = new SystemToolPack(true, "whitelist", "echo,pwd,git", "", 5, 2000);
         AspectJProxyFactory proxyFactory = new AspectJProxyFactory(target);
         proxyFactory.addAspect(aspect);
         SystemToolPack systemToolPack = proxyFactory.getProxy();
 
         BusinessException ex = Assertions.assertThrows(BusinessException.class,
-                () -> systemToolPack.runCommand("git config --get user.name"));
+                () -> systemToolPack.runCommand("git status; rm -rf /"));
 
         Assertions.assertEquals(40062, ex.getCode());
+        Assertions.assertTrue(ex.getMessage().contains("不允许的字符"));
         Mockito.verifyNoInteractions(snapshotService, toolGateway);
     }
 

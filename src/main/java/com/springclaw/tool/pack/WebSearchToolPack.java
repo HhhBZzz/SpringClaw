@@ -13,6 +13,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 
+import java.net.InetSocketAddress;
+import java.net.Proxy;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -42,28 +44,46 @@ public class WebSearchToolPack {
     private final RestClient restClient;
     private final boolean enabled;
     private final String searchUrlTemplate;
+    private final boolean useProxyForFetch;
+    private final String proxyHost;
+    private final int proxyPort;
     private final int maxResponseChars;
 
     @Autowired
     public WebSearchToolPack(@Value("${springclaw.tools.web.enabled:true}") boolean enabled,
                              @Value("${springclaw.tools.web.search-url-template:https://r.jina.ai/http://duckduckgo.com/?q={query}}") String searchUrlTemplate,
-                             @Value("${springclaw.tools.web.use-proxy-for-fetch:true}") boolean useProxyForFetch,
-                             @Value("${springclaw.tools.web.timeout-seconds:12}") int timeoutSeconds,
+                             @Value("${springclaw.tools.web.use-proxy-for-fetch:false}") boolean useProxyForFetch,
+                             @Value("${springclaw.tools.web.proxy-host:}") String proxyHost,
+                             @Value("${springclaw.tools.web.proxy-port:0}") int proxyPort,
+                             @Value("${springclaw.tools.web.timeout-seconds:20}") int timeoutSeconds,
                              @Value("${springclaw.tools.web.max-response-chars:5000}") int maxResponseChars) {
-        this(enabled, searchUrlTemplate, useProxyForFetch, maxResponseChars, buildRestClient(timeoutSeconds));
+        this(enabled, searchUrlTemplate, useProxyForFetch, proxyHost, proxyPort, maxResponseChars,
+             buildRestClient(timeoutSeconds, useProxyForFetch, proxyHost, proxyPort));
     }
 
-    WebSearchToolPack(boolean enabled,
+    public WebSearchToolPack(boolean enabled,
                       String searchUrlTemplate,
                       boolean useProxyForFetch,
+                      String proxyHost,
+                      int proxyPort,
                       int maxResponseChars,
                       RestClient restClient) {
         this.enabled = enabled;
         this.searchUrlTemplate = StringUtils.hasText(searchUrlTemplate)
                 ? searchUrlTemplate.trim()
                 : "https://r.jina.ai/http://duckduckgo.com/?q={query}";
+        this.useProxyForFetch = useProxyForFetch;
+        this.proxyHost = proxyHost;
+        this.proxyPort = proxyPort;
         this.maxResponseChars = Math.max(1000, maxResponseChars);
         this.restClient = restClient;
+    }
+
+    /** 测试与轻量装配用：按 timeout/maxChars 自建 RestClient（不配代理）。 */
+    public WebSearchToolPack(boolean enabled, String searchUrlTemplate, boolean useProxyForFetch,
+                            int timeoutSeconds, int maxResponseChars) {
+        this(enabled, searchUrlTemplate, useProxyForFetch, "", 0, maxResponseChars,
+             buildRestClient(timeoutSeconds, useProxyForFetch, "", 0));
     }
 
     @Tool(description = "联网搜索公开网页信息，返回精简后的文本结果")
@@ -73,7 +93,10 @@ public class WebSearchToolPack {
         String encoded = URLEncoder.encode(key, StandardCharsets.UTF_8);
         String url = searchUrlTemplate.replace("{query}", encoded);
         String body = doGet(url);
-        return "WEB_SEARCH query=" + key + "\n" + compact(body);
+        return "WEB_SEARCH query=" + key
+                + "\n<web_search_result source=\"external\" untrusted=\"true\">\n"
+                + compact(body)
+                + "\n</web_search_result>";
     }
 
     public String fetchUrlText(String url) {
@@ -95,15 +118,19 @@ public class WebSearchToolPack {
             }
             return body;
         } catch (Exception ex) {
-            throw new BusinessException(50051, "联网检索失败: " + ex.getMessage());
+            log.warn("联网检索失败: url={}, reason={}", url, ex.getMessage());
+            throw new BusinessException(50051, "联网检索失败，请稍后重试");
         }
     }
 
-    private static RestClient buildRestClient(int timeoutSeconds) {
+    private static RestClient buildRestClient(int timeoutSeconds, boolean useProxy, String proxyHost, int proxyPort) {
         int safeTimeoutMs = Math.max(1, timeoutSeconds) * 1000;
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(safeTimeoutMs);
         requestFactory.setReadTimeout(safeTimeoutMs);
+        if (useProxy && StringUtils.hasText(proxyHost) && proxyPort > 0) {
+            requestFactory.setProxy(new Proxy(Proxy.Type.HTTP, new InetSocketAddress(proxyHost, proxyPort)));
+        }
         return RestClient.builder().requestFactory(requestFactory).build();
     }
 

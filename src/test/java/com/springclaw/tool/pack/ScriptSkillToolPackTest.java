@@ -172,7 +172,9 @@ class ScriptSkillToolPackTest {
 
         Assertions.assertTrue(result.contains("skillChain=first -> second"));
         Assertions.assertTrue(result.contains("first:hello"));
-        Assertions.assertTrue(result.contains("second:skill=first"));
+        // chain 的 previousResult 只传 body（去掉首行 header），second 收到 "first:hello" 而非 "skill=first,..."
+        Assertions.assertTrue(result.contains("second:first:hello"));
+        Assertions.assertFalse(result.contains("second:skill=first"));
     }
 
     private void writePythonSkill(String skillId, String script) throws Exception {

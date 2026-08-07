@@ -233,6 +233,18 @@ final class AiProviderRuntime {
         return chatClientCache.computeIfAbsent(finalModel, this::buildChatClient);
     }
 
+    /** 请求级 failover 专用：为指定 model 返回 ChatClient，不改 activeModel、不污染全局状态。null 表示不可解析或不可用。 */
+    ChatClient chatClientForModel(String modelHint) {
+        if (!available()) {
+            return null;
+        }
+        String resolved = resolveModel(modelHint);
+        if (!StringUtils.hasText(resolved)) {
+            return null;
+        }
+        return chatClientFor(resolved);
+    }
+
     private ChatClient buildChatClient(String model) {
         OpenAiChatOptions.Builder optionsBuilder = OpenAiChatOptions.builder()
                 .model(model)

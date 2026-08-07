@@ -21,13 +21,9 @@ public final class ApprovedSystemCommand {
         if (containsUnsafeCharacter(command)) {
             return Optional.empty();
         }
-        if ("pwd".equals(command) || "git status".equals(command)) {
-            return Optional.of(command);
-        }
-        if (command.startsWith("echo ") && !command.substring("echo ".length()).trim().isEmpty()) {
-            return Optional.of(command);
-        }
-        return Optional.empty();
+        // 仅做 unsafe 字符护栏；具体命令白名单由 SystemToolPack.allowed-commands / 执行边界负责，
+        // 避免硬编码命令列表架空配置的白名单（原实现只认 pwd/git status/echo，导致 allowed-commands 失效）。
+        return Optional.of(command);
     }
 
     public static boolean isApproved(String rawCommand) {

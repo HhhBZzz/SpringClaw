@@ -111,6 +111,9 @@ public class WorkspaceEditToolPack {
                         + "\n建议先用 readTextFile 读取文件获取精确的原始文本，再用精确文本调用 applyPatch。";
             }
 
+            // 统计总命中数：searchText 若在文件中出现多次，applyPatch 只替换第一处，
+            // 必须告知模型 1/N，否则模型会误以为全部替换完成。
+            int totalCount = countOccurrences(content, searchText);
             String newContent = content.substring(0, index) + replaceText + content.substring(index + searchText.length());
             Files.writeString(file, newContent, StandardCharsets.UTF_8);
 
@@ -123,9 +126,14 @@ public class WorkspaceEditToolPack {
                 tracker.recordApplyPatch(relativePath, true);
             }
 
-            return "修改成功: " + rootPath.relativize(file) + "\n"
+            String result = "修改成功: " + rootPath.relativize(file) + "\n"
                     + "替换了 " + originalLines + " → " + newLines + " 行"
                     + "（差异 " + (newLines - originalLines) + " 行）";
+            if (totalCount > 1) {
+                result += "\n⚠️ 注意: searchText 在原文件中共出现 " + totalCount
+                        + " 处，本次仅替换第 1 处。若需全部替换，请补充更长的上下文使匹配唯一后再调用，或逐处确认。";
+            }
+            return result;
         } catch (IOException ex) {
             throw new BusinessException(50060, "文件修改失败: " + ex.getMessage());
         }
@@ -156,16 +164,36 @@ public class WorkspaceEditToolPack {
                     .redirectErrorStream(true);
 
             Process process = pb.start();
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            // 异步消费 stdout：readAllBytes 会阻塞到进程关闭 stdout，对不退出命令（mvn test/dev server/tail -f）
+            // 会永久阻塞、使 waitFor 超时永不触发、agent 线程挂死。独立 daemon 线程读取并限容，超时强杀后取已缓冲字节。
+            StringBuilder collected = new StringBuilder();
+            Thread reader = new Thread(() -> {
+                try (var in = process.getInputStream()) {
+                    byte[] buffer = new byte[4096];
+                    int n;
+                    while ((n = in.read(buffer)) != -1) {
+                        if (collected.length() < maxCommandOutputChars + 4096) {
+                            collected.append(new String(buffer, 0, n, StandardCharsets.UTF_8));
+                        }
+                    }
+                } catch (IOException ignored) {
+                    // 进程被 destroyForcibly 时读取抛 IOException 是正常的，忽略
+                }
+            });
+            reader.setDaemon(true);
+            reader.start();
 
             boolean completed = process.waitFor(maxCommandTimeoutSeconds, TimeUnit.SECONDS);
             if (!completed) {
                 process.destroyForcibly();
-                return "命令超时（" + maxCommandTimeoutSeconds + "秒），已强制终止。\n部分输出:\n" + truncate(output);
+                reader.interrupt();
+                try { reader.join(1000); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+                return "命令超时（" + maxCommandTimeoutSeconds + "秒），已强制终止。\n部分输出:\n" + truncate(collected.toString());
             }
 
+            try { reader.join(2000); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
             int exitCode = process.exitValue();
-            String truncatedOutput = truncate(output);
+            String truncatedOutput = truncate(collected.toString());
 
             // 记录到自主循环执行追踪器
             AutonomousExecutionTracker tracker = ToolExecutionContextHolder.getTracker();
@@ -235,5 +263,18 @@ public class WorkspaceEditToolPack {
     private long countLines(String content) {
         if (content == null || content.isEmpty()) return 0;
         return content.split("\n", -1).length;
+    }
+
+    private int countOccurrences(String text, String sub) {
+        if (text == null || sub == null || sub.isEmpty()) {
+            return 0;
+        }
+        int count = 0;
+        int idx = 0;
+        while ((idx = text.indexOf(sub, idx)) >= 0) {
+            count++;
+            idx += sub.length();
+        }
+        return count;
     }
 }

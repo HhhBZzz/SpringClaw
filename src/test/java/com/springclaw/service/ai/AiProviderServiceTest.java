@@ -109,6 +109,32 @@ class AiProviderServiceTest {
     }
 
     @Test
+    void clientForProviderModelDoesNotSwitchGlobalActiveProvider() {
+        SpringClawAiProperties properties = new SpringClawAiProperties();
+        properties.getProviders().getPrimary().setApiKey("primary-test-key");
+        properties.getProviders().getPrimary().setBaseUrl("https://api.example.com");
+        properties.getProviders().getPrimary().setModel("claude-opus-4-6");
+        properties.getProviders().getCodingPlan().setApiKey("coding-plan-test-key");
+        properties.getProviders().getCodingPlan().setBaseUrl("https://coding.dashscope.aliyuncs.com/v1");
+        properties.getProviders().getCodingPlan().setModel("qwen3.5-plus");
+        properties.getProviders().getCodingPlan().setModels(List.of("qwen3.5-plus", "qwen3-coder-plus"));
+        properties.setActiveProvider("primary");
+        AiProviderService service = newService(properties);
+
+        assertThat(service.activeClient().providerId()).isEqualTo("primary");
+        assertThat(service.activeClient().model()).isEqualTo("claude-opus-4-6");
+
+        // 请求级取 coding-plan 的 qwen3-coder-plus client（模拟 failover 切换）
+        AiProviderService.ActiveChatClient failoverClient = service.clientForProviderModel("coding-plan", "qwen3-coder-plus");
+        assertThat(failoverClient.providerId()).isEqualTo("coding-plan");
+        assertThat(failoverClient.model()).isEqualTo("qwen3-coder-plus");
+
+        // 全局 active 不被改变——failover 请求级解耦的核心契约
+        assertThat(service.activeClient().providerId()).isEqualTo("primary");
+        assertThat(service.activeClient().model()).isEqualTo("claude-opus-4-6");
+    }
+
+    @Test
     void shouldRejectDeepSeekThinkingModelsOnSpringAiChatPath() {
         SpringClawAiProperties properties = new SpringClawAiProperties();
         properties.getProviders().getPrimary().setApiKey("primary-test-key");

@@ -9,6 +9,7 @@ import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.AmqpRejectAndDontRequeueException;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -42,8 +43,16 @@ public class ChatMessageConsumer {
 
     @RabbitListener(queues = "${springclaw.rabbitmq.chat-request-queue:chat.request.queue}")
     public void consume(AsyncChatRequestMessage message) {
-        RunState canonicalRun = runStateRepository.requireByRunId(message.requestId());
-        requireMatchingAcceptance(canonicalRun, message);
+        RunState canonicalRun;
+        try {
+            canonicalRun = runStateRepository.requireByRunId(message.requestId());
+            requireMatchingAcceptance(canonicalRun, message);
+        } catch (RuntimeException ex) {
+            // canonical 校验失败（run 不存在/字段不符）= 永久性毒消息，跳过 retry 直达 DLQ，避免无限重排卡死整条队列
+            log.warn("异步消息 canonical 校验失败，拒绝重排进 DLQ: requestId={}, reason={}",
+                    message.requestId(), ex.getMessage());
+            throw new AmqpRejectAndDontRequeueException("canonical validation failed: " + message.requestId(), ex);
+        }
         try {
             ChatResponse response = chatService.chat(new AcceptedChatCommand(
                     message.requestId(),
@@ -64,10 +73,16 @@ public class ChatMessageConsumer {
             chatMessageProducer.sendResponse(payload);
             messagingTemplate.convertAndSend("/topic/chat/" + payload.requestId(), payload);
         } catch (Exception ex) {
-            log.warn("异步聊天处理失败，requestId={}, reason={}", message.requestId(), ex.getMessage());
-            AsyncChatResultPayload payload = asyncChatResultStore.markFailed(message, ex.getMessage());
-            chatMessageProducer.sendResponse(payload);
-            messagingTemplate.convertAndSend("/topic/chat/" + payload.requestId(), payload);
+            // 处理失败（模型超时等）：记录失败结果给用户后正常 ack，不重排（避免重复处理/重复扣费）；
+            // 错误文案固定化，避免底层异常细节（host/超时）透传给用户
+            log.warn("异步聊天处理失败: requestId={}, reason={}", message.requestId(), ex.getMessage());
+            AsyncChatResultPayload payload = asyncChatResultStore.markFailed(message, "处理失败，请联系管理员");
+            try {
+                chatMessageProducer.sendResponse(payload);
+                messagingTemplate.convertAndSend("/topic/chat/" + payload.requestId(), payload);
+            } catch (Exception sendEx) {
+                log.warn("异步失败结果下发异常: requestId={}, reason={}", message.requestId(), sendEx.getMessage());
+            }
         }
     }
 

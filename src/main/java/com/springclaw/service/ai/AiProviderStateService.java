@@ -3,6 +3,8 @@ package com.springclaw.service.ai;
 import com.springclaw.config.ai.SpringClawAiProperties;
 import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.service.event.MessageEventService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -26,6 +28,8 @@ public class AiProviderStateService {
 
     private static final Pattern PROVIDER_PATTERN = Pattern.compile("provider=([a-z0-9\\-]+)", Pattern.CASE_INSENSITIVE);
     private static final Pattern MODEL_PATTERN = Pattern.compile("model=([^,\\s]+)", Pattern.CASE_INSENSITIVE);
+
+    private static final Logger log = LoggerFactory.getLogger(AiProviderStateService.class);
 
     private final StringRedisTemplate redisTemplate;
     private final MessageEventService messageEventService;
@@ -82,9 +86,14 @@ public class AiProviderStateService {
         }
         String normalizedProvider = providerId.trim().toLowerCase(Locale.ROOT);
         if (redisEnabled && redisTemplate != null) {
-            redisTemplate.opsForValue().set(redisKey, normalizedProvider);
-            if (StringUtils.hasText(modelId)) {
-                redisTemplate.opsForValue().set(redisModelPrefix + normalizedProvider, modelId.trim());
+            try {
+                redisTemplate.opsForValue().set(redisKey, normalizedProvider);
+                if (StringUtils.hasText(modelId)) {
+                    redisTemplate.opsForValue().set(redisModelPrefix + normalizedProvider, modelId.trim());
+                }
+            } catch (Exception ex) {
+                log.warn("Redis 持久化 active provider 失败（provider={}, model={}, source={}），DB 审计仍会记录。reason={}",
+                        normalizedProvider, modelId, source, ex.getMessage());
             }
         }
         if (dbEnabled) {
@@ -123,16 +132,26 @@ public class AiProviderStateService {
         if (!redisEnabled || redisTemplate == null) {
             return "";
         }
-        String value = redisTemplate.opsForValue().get(redisKey);
-        return normalizeProvider(value);
+        try {
+            String value = redisTemplate.opsForValue().get(redisKey);
+            return normalizeProvider(value);
+        } catch (Exception ex) {
+            log.warn("Redis 读取 active provider 失败，降级到 DB 审计/configuredDefault。reason={}", ex.getMessage());
+            return "";
+        }
     }
 
     private String readModelFromRedis(String providerId) {
         if (!redisEnabled || redisTemplate == null || !StringUtils.hasText(providerId)) {
             return "";
         }
-        String value = redisTemplate.opsForValue().get(redisModelPrefix + normalizeProvider(providerId));
-        return StringUtils.hasText(value) ? value.trim() : "";
+        try {
+            String value = redisTemplate.opsForValue().get(redisModelPrefix + normalizeProvider(providerId));
+            return StringUtils.hasText(value) ? value.trim() : "";
+        } catch (Exception ex) {
+            log.warn("Redis 读取 provider {} active model 失败，降级到 DB 审计/configuredDefault。reason={}", providerId, ex.getMessage());
+            return "";
+        }
     }
 
     private String readProviderFromAudit() {

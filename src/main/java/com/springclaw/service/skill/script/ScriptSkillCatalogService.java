@@ -248,8 +248,10 @@ public class ScriptSkillCatalogService {
     }
 
     private boolean isAllowed(String skillName) {
+        // 空配置视为"不限制"（allow all），避免误配 SPRINGCLAW_SKILLS_ALLOWED=空串 静默禁用所有 skill
+        // （与"空=不限制"的直觉一致；显式收窄请用具体 skill 名列表）。
         if (allowedSkills.isEmpty()) {
-            return false;
+            return true;
         }
         if (allowedSkills.contains("*")) {
             return true;

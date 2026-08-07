@@ -24,7 +24,9 @@ import java.util.stream.Collectors;
  *
  * 设计说明：
  * 1. 保留一层轻量上下文摘要，给 OPAR/降级链路提供可读观察视图。
- * 2. 真正的消息记忆由 Spring AI ChatMemory Advisor 管理，这里不再手工承担完整上下文窗口。
+ * 2. 当 springclaw.chat.spring-ai-chat-memory-enabled=true 时消息记忆由 Spring AI ChatMemory Advisor 接管；
+ *    但该开关默认 false——默认部署下 ChatMemory 未启用，本类的 memoryWindow 与 recall 仅作轻量观察/降级视图，
+ *    完整上下文窗口由调用方按需组装（启动时 CoreCapabilityStatusLogger 会 WARN 这一降级状态）。
  */
 @Service
 public class ContextAssembler {

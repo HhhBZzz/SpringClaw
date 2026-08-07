@@ -16,6 +16,11 @@ RUN mvn -q -Dmaven.test.skip=true package
 FROM eclipse-temurin:17-jre
 WORKDIR /app
 
+# 安装 python3：ScriptSkillExecutorService 用 ProcessBuilder("python3",...) 执行 skills，
+# 基础 jre 镜像无 python3 会导致所有 type:python skill 抛 50092（本地 mac 因自带 python3 掩盖）。
+# 需第三方包的 skill 另行 pip install 其 requirements。
+RUN apt-get update && apt-get install -y --no-install-recommends python3 && rm -rf /var/lib/apt/lists/*
+
 ENV TZ=Asia/Shanghai
 ENV SERVER_PORT=18080
 # 运行期堆上限:2C2G 与 MySQL/Redis/RabbitMQ 共存,必须限堆

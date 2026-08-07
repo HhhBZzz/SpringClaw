@@ -56,7 +56,7 @@ class ModelCallExecutorTest {
         assertThat(result.failedOver()).isTrue();
         assertThat(result.value()).isEqualTo("ok:qwen3.5-plus");
         assertThat(result.client().model()).isEqualTo("qwen3.5-plus");
-        assertThat(providerService.activeClient().model()).isEqualTo("qwen3.5-plus");
+        assertThat(providerService.activeClient().model()).isEqualTo("qwen3-coder-plus");
         assertThat(meterRegistry.counter(
                 "springclaw.ai.model.calls",
                 "outcome", "success",

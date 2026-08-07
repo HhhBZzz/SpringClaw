@@ -69,6 +69,7 @@ public class FileToolPack {
     @Tool(description = "写入文本到指定文件。默认覆盖原文件")
     public String writeTextFile(String relativeFilePath, String content, Boolean overwrite) {
         Path file = resolveSafePath(relativeFilePath, false);
+        rejectSensitiveWrite(file);
         boolean canOverwrite = overwrite == null || overwrite;
 
         try {
@@ -86,17 +87,36 @@ public class FileToolPack {
         }
     }
 
-    @Tool(description = "按文件名递归搜索文件，支持通配符，例如 *.java、*Service*.java、application*.yml")
+    @Tool(description = "按文件名 glob 递归搜索项目根目录内文件（按文件名，不是按内容）。支持通配符如 *.java、*Service*.java、application*.yml；要搜代码内容请用 searchInFiles")
     public String searchFiles(String pattern) {
         return stripDefaultRootPrefix(localFilesystemService.searchFilesByGlob("", pattern));
     }
 
-    @Tool(description = "按内容递归搜索文件，支持 filePattern 过滤，类似 grep。示例：keyword=ChatService, filePattern=*.java")
+    @Tool(description = "按文件内容递归搜索（grep，不是按文件名），支持 filePattern 过滤文件名。示例：keyword=ChatService, filePattern=*.java。按文件名搜请用 searchFiles")
     public String searchInFiles(String keyword, String filePattern) {
         if (!StringUtils.hasText(keyword)) {
             throw new BusinessException(40053, "keyword 不能为空");
         }
         return stripDefaultRootPrefix(localFilesystemService.grepText(keyword, filePattern));
+    }
+
+    private static final java.util.Set<String> SENSITIVE_WRITE_SUFFIXES = java.util.Set.of(
+            ".env", ".env.local", ".npmrc", ".pypirc", ".netrc", ".pgpass",
+            "id_rsa", "id_ed25519", "id_ecdsa", "credentials.json"
+    );
+    private static final java.util.Set<String> SENSITIVE_WRITE_SEGMENTS = java.util.Set.of(
+            ".ssh", ".gnupg", ".aws", ".kube", "library/keychains"
+    );
+
+    /** 拦截敏感文件写入（密钥/凭据/.env）：resolveSafePath 只防路径穿越，不防 root 内的敏感文件被覆盖。 */
+    private void rejectSensitiveWrite(Path file) {
+        String rel = rootPath.relativize(file).toString().replace("\\", "/").toLowerCase(java.util.Locale.ROOT);
+        boolean suffixHit = SENSITIVE_WRITE_SUFFIXES.stream().anyMatch(rel::endsWith);
+        boolean segmentHit = SENSITIVE_WRITE_SEGMENTS.stream().anyMatch(s -> rel.contains("/" + s));
+        if (suffixHit || segmentHit) {
+            throw new BusinessException(40055, "拒绝写入敏感文件/目录: " + rel
+                    + "（可能含密钥/凭据），请人工确认后用专用流程修改");
+        }
     }
 
     private Path resolveSafePath(String raw, boolean allowBlankAsRoot) {

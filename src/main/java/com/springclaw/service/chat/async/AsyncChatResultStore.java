@@ -52,7 +52,8 @@ public class AsyncChatResultStore {
                 "",
                 message.createdAt(),
                 null,
-                ""
+                "",
+                message.userId()
         );
         save(payload);
         return payload;
@@ -69,7 +70,8 @@ public class AsyncChatResultStore {
                 model == null ? "" : model,
                 message.createdAt(),
                 System.currentTimeMillis(),
-                ""
+                "",
+                message.userId()
         );
         save(payload);
         return payload;
@@ -91,7 +93,8 @@ public class AsyncChatResultStore {
                 "",
                 message.createdAt(),
                 System.currentTimeMillis(),
-                errorMessage == null ? "未知错误" : errorMessage
+                errorMessage == null ? "未知错误" : errorMessage,
+                message.userId()
         );
         save(payload);
         return payload;
@@ -104,6 +107,30 @@ public class AsyncChatResultStore {
             return cached;
         }
         return localStore.getIfPresent(normalizedRequestId);
+    }
+
+    /**
+     * 归属校验读取（IDOR 防护）：比对结果归属与请求者，不等返回 null。
+     * 归属优先取 payload.userId（持久化，不依赖易失的 RunState）；
+     * 遗留条目（payload.userId 为空，如本次升级前入队）回退 RunState.userId 兜底；
+     * 两者都拿不到归属时 fail-closed 返回 null（不泄漏存在性）。
+     */
+    public AsyncChatResultPayload find(String requestId, String requestingUsername) {
+        AsyncChatResultPayload payload = find(requestId);
+        if (payload == null || !StringUtils.hasText(requestingUsername)) {
+            return null;
+        }
+        String owner = payload.userId();
+        if (StringUtils.hasText(owner)) {
+            return owner.equals(requestingUsername) ? payload : null;
+        }
+        if (runStateRepository != null) {
+            RunState state = runStateRepository.findByRunId(normalizeRequestId(requestId)).orElse(null);
+            if (state != null && StringUtils.hasText(state.userId())) {
+                return state.userId().equals(requestingUsername) ? payload : null;
+            }
+        }
+        return null;
     }
 
     private void requireCanonical(String requestId, boolean allowTerminal) {
@@ -162,7 +189,8 @@ public class AsyncChatResultStore {
                 payload.model(),
                 payload.createdAt(),
                 payload.completedAt(),
-                payload.errorMessage()
+                payload.errorMessage(),
+                payload.userId()
         );
         localStore.put(requestId, normalizedPayload);
         RedissonClient redissonClient = redissonClientProvider.getIfAvailable();

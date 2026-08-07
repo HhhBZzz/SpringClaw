@@ -9,6 +9,7 @@ import com.springclaw.mapper.UserAccountMapper;
 import com.springclaw.service.auth.AuthService;
 import com.springclaw.web.auth.TokenAuthenticationInterceptor;
 import jakarta.servlet.http.Cookie;
+import org.springframework.http.ResponseCookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -142,21 +143,25 @@ public class AuthController {
     }
 
     private void writeAuthCookie(HttpServletResponse response, AuthService.LoginSession session) {
-        Cookie cookie = new Cookie(TokenAuthenticationInterceptor.AUTH_COOKIE_NAME, session.token());
-        cookie.setHttpOnly(true);
-        cookie.setSecure(cookieSecure);
-        cookie.setPath("/");
-        cookie.setMaxAge((int) Math.max(1, (session.expireAt() - System.currentTimeMillis()) / 1000L));
-        response.addCookie(cookie);
+        ResponseCookie cookie = ResponseCookie.from(TokenAuthenticationInterceptor.AUTH_COOKIE_NAME, session.token())
+                .httpOnly(true)
+                .secure(cookieSecure)
+                .path("/")
+                .sameSite("Lax")
+                .maxAge(Math.max(1, (session.expireAt() - System.currentTimeMillis()) / 1000L))
+                .build();
+        response.addHeader("Set-Cookie", cookie.toString());
     }
 
     private void clearAuthCookie(HttpServletResponse response) {
-        Cookie cookie = new Cookie(TokenAuthenticationInterceptor.AUTH_COOKIE_NAME, "");
-        cookie.setHttpOnly(true);
-        cookie.setSecure(cookieSecure);
-        cookie.setPath("/");
-        cookie.setMaxAge(0);
-        response.addCookie(cookie);
+        ResponseCookie cookie = ResponseCookie.from(TokenAuthenticationInterceptor.AUTH_COOKIE_NAME, "")
+                .httpOnly(true)
+                .secure(cookieSecure)
+                .path("/")
+                .sameSite("Lax")
+                .maxAge(0)
+                .build();
+        response.addHeader("Set-Cookie", cookie.toString());
     }
 
     public record BootstrapStatusResponse(boolean authEnabled,

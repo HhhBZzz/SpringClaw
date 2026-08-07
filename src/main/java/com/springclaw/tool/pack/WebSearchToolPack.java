@@ -93,7 +93,10 @@ public class WebSearchToolPack {
         String encoded = URLEncoder.encode(key, StandardCharsets.UTF_8);
         String url = searchUrlTemplate.replace("{query}", encoded);
         String body = doGet(url);
-        return "WEB_SEARCH query=" + key + "\n" + compact(body);
+        return "WEB_SEARCH query=" + key
+                + "\n<web_search_result source=\"external\" untrusted=\"true\">\n"
+                + compact(body)
+                + "\n</web_search_result>";
     }
 
     public String fetchUrlText(String url) {
@@ -115,7 +118,8 @@ public class WebSearchToolPack {
             }
             return body;
         } catch (Exception ex) {
-            throw new BusinessException(50051, "联网检索失败: " + ex.getMessage());
+            log.warn("联网检索失败: url={}, reason={}", url, ex.getMessage());
+            throw new BusinessException(50051, "联网检索失败，请稍后重试");
         }
     }
 

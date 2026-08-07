@@ -9,6 +9,7 @@ import com.springclaw.service.chat.AcceptedChatCommand;
 import com.springclaw.service.chat.ChatService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.amqp.AmqpRejectAndDontRequeueException;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import java.time.Duration;
@@ -43,8 +44,8 @@ class ChatMessageConsumerTest {
         );
 
         assertThatThrownBy(() -> consumer.consume(message))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("run not found");
+                .isInstanceOf(AmqpRejectAndDontRequeueException.class)
+                .hasMessageContaining(message.requestId());
 
         verify(chatService, never()).chat(any(AcceptedChatCommand.class));
         verify(resultStore, never()).markFailed(
@@ -75,7 +76,7 @@ class ChatMessageConsumerTest {
         AsyncChatResultPayload payload = new AsyncChatResultPayload(
                 message.requestId(), "COMPLETED", message.sessionKey(),
                 message.channel(), "answer", "model", message.createdAt(),
-                456L, ""
+                456L, "", message.userId()
         );
         when(resultStore.markCompleted(message, "answer", "model"))
                 .thenReturn(payload);
@@ -128,8 +129,8 @@ class ChatMessageConsumerTest {
         );
 
         assertThatThrownBy(() -> consumer.consume(message))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("does not match canonical run");
+                .isInstanceOf(AmqpRejectAndDontRequeueException.class)
+                .hasMessageContaining(message.requestId());
 
         verify(chatService, never()).chat(any(AcceptedChatCommand.class));
     }
@@ -157,8 +158,8 @@ class ChatMessageConsumerTest {
         );
 
         assertThatThrownBy(() -> consumer.consume(message))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("PERSONAL");
+                .isInstanceOf(AmqpRejectAndDontRequeueException.class)
+                .hasMessageContaining(message.requestId());
 
         verify(chatService, never()).chat(any(AcceptedChatCommand.class));
     }

@@ -78,7 +78,7 @@ public class WebhookController {
             return objectMapper.readValue(rawBody, new TypeReference<>() {
             });
         } catch (IOException ex) {
-            throw new BusinessException(40040, "Webhook JSON 解析失败: " + ex.getMessage());
+            throw new BusinessException(40040, "Webhook 负载解析失败");
         }
     }
 }

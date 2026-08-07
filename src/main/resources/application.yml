@@ -30,6 +30,16 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:guest}
     password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        acknowledge-mode: auto
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          initial-interval: 1s
+          max-attempts: 3
+          multiplier: 2.0
+          max-interval: 10s
   ai:
     # Spring AI 1.1.x 引入了按模型家族自动装配的 provider bean。
     # 本项目的 chat/model/provider 运行时统一走 springclaw.ai.providers.* 自建链路，
@@ -374,7 +384,7 @@ springclaw:
 management:
   endpoint:
     health:
-      show-details: always
+      show-details: ${SPRINGCLAW_HEALTH_SHOW_DETAILS:never}
   health:
     db:
       enabled: true

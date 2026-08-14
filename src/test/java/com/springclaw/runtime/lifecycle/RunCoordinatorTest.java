@@ -310,6 +310,122 @@ class RunCoordinatorTest {
                 .allMatch(p -> p == AgentParadigm.OPAR);
     }
 
+    @Test
+    void modelCalledCarriesProviderAndModelPayload() {
+        coordinator.accept(acceptance());
+        RunEvent emitted = coordinator.modelCalled(
+                RUN_ID, "primary", "deepseek-chat", T0.plusSeconds(1)
+        );
+
+        assertThat(emitted.eventType()).isEqualTo(RunEventType.MODEL_CALLED);
+        assertThat(emitted.payloadSchema())
+                .isEqualTo("springclaw.runtime.observation.v1");
+        assertThat(emitted.payload()).contains("\"providerId\":\"primary\"");
+        assertThat(emitted.payload()).contains("\"model\":\"deepseek-chat\"");
+    }
+
+    @Test
+    void toolObservationsCarryStructuredPayload() {
+        coordinator.accept(acceptance());
+        coordinator.toolStarted(RUN_ID, "SystemToolPack.runCommand", T0.plusSeconds(1));
+        coordinator.toolSucceeded(
+                RUN_ID, "SystemToolPack.runCommand", 42L, T0.plusSeconds(2)
+        );
+        coordinator.toolFailed(RUN_ID, "WebToolPack.fetch", "TIMEOUT", T0.plusSeconds(3));
+
+        List<RunEvent> events = store.findEventsByRunId(RUN_ID);
+        assertThat(events).extracting(RunEvent::eventType).containsExactly(
+                RunEventType.RUN_CREATED,
+                RunEventType.TOOL_STARTED,
+                RunEventType.TOOL_SUCCEEDED,
+                RunEventType.TOOL_FAILED
+        );
+        assertThat(events.get(1).payload())
+                .contains("\"toolName\":\"SystemToolPack.runCommand\"");
+        assertThat(events.get(2).payload())
+                .contains("\"toolName\":\"SystemToolPack.runCommand\"")
+                .contains("\"durationMs\":42");
+        assertThat(events.get(3).payload())
+                .contains("\"toolName\":\"WebToolPack.fetch\"")
+                .contains("\"errorCode\":\"TIMEOUT\"");
+        assertThat(events.get(2).durationMs()).isEqualTo(42L);
+    }
+
+    @Test
+    void turnAndStepBoundariesAreObservationsSurvivingTerminalState() {
+        // 走完整状态机链(CREATED→CONTEXT_READY→DECIDED→RUNNING→VERIFYING→COMPLETED),
+        // turn/step observation 夹在中间与终态之后——它们不参与迁移、不占 revision。
+        coordinator.accept(acceptance());
+        coordinator.contextReady(RUN_ID, snapshot(), T0.plusSeconds(1));
+        coordinator.decided(RUN_ID, decision(), T0.plusSeconds(2));
+        coordinator.running(RUN_ID, "agent-runtime", T0.plusSeconds(3));
+        coordinator.turnStarted(RUN_ID, "blocking", T0.plusSeconds(4));
+        coordinator.stepStarted(RUN_ID, 0, "react", T0.plusSeconds(5));
+        coordinator.stepCompleted(RUN_ID, 0, "react", "ok", 17L, T0.plusSeconds(6));
+        coordinator.verifying(RUN_ID, T0.plusSeconds(7));
+        coordinator.completed(
+                RUN_ID,
+                completion(CompletionDecision.Outcome.COMPLETE, T0.plusSeconds(8)),
+                result(RunStatus.COMPLETED, T0.plusSeconds(8)),
+                T0.plusSeconds(8)
+        );
+        // 终态后追加 turn.completed(observation 允许,不改状态机)
+        coordinator.turnCompleted(RUN_ID, "COMPLETE", 120L, T0.plusSeconds(9));
+
+        assertThat(store.requireByRunId(RUN_ID).status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(store.findEventsByRunId(RUN_ID))
+                .extracting(RunEvent::eventType)
+                .containsSubsequence(
+                        RunEventType.RUN_CREATED,
+                        RunEventType.STRATEGY_STARTED,
+                        RunEventType.TURN_STARTED,
+                        RunEventType.STEP_STARTED,
+                        RunEventType.STEP_COMPLETED,
+                        RunEventType.VERIFICATION_STARTED,
+                        RunEventType.RUN_COMPLETED,
+                        RunEventType.TURN_COMPLETED
+                );
+        List<RunEvent> events = store.findEventsByRunId(RUN_ID);
+        RunEvent turnStarted = events.stream()
+                .filter(e -> e.eventType() == RunEventType.TURN_STARTED).findFirst().orElseThrow();
+        RunEvent stepStarted = events.stream()
+                .filter(e -> e.eventType() == RunEventType.STEP_STARTED).findFirst().orElseThrow();
+        RunEvent stepCompleted = events.stream()
+                .filter(e -> e.eventType() == RunEventType.STEP_COMPLETED).findFirst().orElseThrow();
+        RunEvent turnCompleted = events.stream()
+                .filter(e -> e.eventType() == RunEventType.TURN_COMPLETED).findFirst().orElseThrow();
+        assertThat(turnStarted.payload()).contains("\"responseMode\":\"blocking\"");
+        assertThat(stepStarted.payload())
+                .contains("\"stepIndex\":0")
+                .contains("\"stepKind\":\"react\"");
+        assertThat(stepCompleted.payload())
+                .contains("\"stepIndex\":0")
+                .contains("\"stepKind\":\"react\"")
+                .contains("\"outcome\":\"ok\"")
+                .contains("\"durationMs\":17");
+        assertThat(stepCompleted.durationMs()).isEqualTo(17L);
+        assertThat(turnCompleted.payload())
+                .contains("\"outcome\":\"COMPLETE\"")
+                .contains("\"durationMs\":120");
+        assertThat(turnCompleted.durationMs()).isEqualTo(120L);
+    }
+
+    @Test
+    void legacyNoPayloadOverloadsKeepLifecycleSchema() {
+        coordinator.accept(acceptance());
+        coordinator.modelCalled(RUN_ID, T0.plusSeconds(1));
+        coordinator.toolStarted(RUN_ID, T0.plusSeconds(2));
+        coordinator.toolSucceeded(RUN_ID, T0.plusSeconds(3));
+        coordinator.toolFailed(RUN_ID, T0.plusSeconds(4));
+
+        assertThat(store.findEventsByRunId(RUN_ID))
+                .allSatisfy(event -> {
+                    assertThat(event.payload()).isEqualTo("{}");
+                    assertThat(event.payloadSchema())
+                            .isEqualTo("springclaw.runtime.lifecycle.v1");
+                });
+    }
+
     private void prepareVerifyingRun() {
         coordinator.accept(acceptance());
         coordinator.contextReady(RUN_ID, snapshot(), T0.plusSeconds(1));

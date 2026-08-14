@@ -1,5 +1,6 @@
 package com.springclaw.runtime.lifecycle;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.runtime.contract.CompletionDecision;
 import com.springclaw.runtime.contract.ContextSnapshot;
 import com.springclaw.runtime.contract.ExecutionDecision;
@@ -19,6 +20,8 @@ import java.util.Objects;
 public final class RunCoordinator {
 
     private static final String PAYLOAD_SCHEMA = "springclaw.runtime.lifecycle.v1";
+    private static final String OBSERVATION_SCHEMA = "springclaw.runtime.observation.v1";
+    private static final ObjectMapper PAYLOAD_JSON = new ObjectMapper();
 
     private final RunLifecycleStore store;
 
@@ -165,12 +168,38 @@ public final class RunCoordinator {
         return appendObservation(runId, RunEventType.TOOL_FAILED, at);
     }
 
+    /** 记录工具开始,payload 携带工具名。 */
+    public RunEvent toolStarted(String runId, String toolName, Instant at) {
+        return appendStructuredObservation(runId, RunEventType.TOOL_STARTED, at, 0,
+                Map.of("toolName", nullToEmpty(toolName)));
+    }
+
+    /** 记录工具成功,payload 携带工具名与耗时。 */
+    public RunEvent toolSucceeded(String runId, String toolName, long durationMs, Instant at) {
+        return appendStructuredObservation(runId, RunEventType.TOOL_SUCCEEDED, at, durationMs,
+                Map.of("toolName", nullToEmpty(toolName), "durationMs", durationMs));
+    }
+
+    /** 记录工具失败,payload 携带工具名与错误码。 */
+    public RunEvent toolFailed(String runId, String toolName, String errorCode, Instant at) {
+        return appendStructuredObservation(runId, RunEventType.TOOL_FAILED, at, 0,
+                Map.of("toolName", nullToEmpty(toolName),
+                        "errorCode", nullToEmpty(errorCode)));
+    }
+
     /**
      * 记录一次模型调用（含 failover 的每次尝试），让"模型调用"这步进 run timeline。
      * MVP 版只发事件本身；provider/model 等载荷可后续通过带 payload 的 observation 扩展。
      */
     public RunEvent modelCalled(String runId, Instant at) {
         return appendObservation(runId, RunEventType.MODEL_CALLED, at);
+    }
+
+    /** 记录一次模型调用,payload 携带 provider/model(记录请求的初始 client)。 */
+    public RunEvent modelCalled(String runId, String providerId, String model, Instant at) {
+        return appendStructuredObservation(runId, RunEventType.MODEL_CALLED, at, 0,
+                Map.of("providerId", nullToEmpty(providerId),
+                        "model", nullToEmpty(model)));
     }
 
     /**
@@ -186,6 +215,32 @@ public final class RunCoordinator {
      */
     public RunEvent reflected(String runId, Instant at) {
         return appendObservation(runId, RunEventType.REFLECTED, at);
+    }
+
+    /** turn 边界:一次用户输入→最终回答的完整处理开始。observation,不改状态机。 */
+    public RunEvent turnStarted(String runId, String responseMode, Instant at) {
+        return appendStructuredObservation(runId, RunEventType.TURN_STARTED, at, 0,
+                Map.of("responseMode", nullToEmpty(responseMode)));
+    }
+
+    /** turn 边界:终态后追加(outcome=COMPLETE/DEGRADE/FAILED)。 */
+    public RunEvent turnCompleted(String runId, String outcome, long durationMs, Instant at) {
+        return appendStructuredObservation(runId, RunEventType.TURN_COMPLETED, at, durationMs,
+                Map.of("outcome", nullToEmpty(outcome), "durationMs", durationMs));
+    }
+
+    /** step 边界:引擎循环一步开始(stepIndex 从 0 递增)。 */
+    public RunEvent stepStarted(String runId, int stepIndex, String stepKind, Instant at) {
+        return appendStructuredObservation(runId, RunEventType.STEP_STARTED, at, 0,
+                Map.of("stepIndex", stepIndex, "stepKind", nullToEmpty(stepKind)));
+    }
+
+    /** step 边界:一步结束,outcome 标记 ok/terminal/failed 等边界事实。 */
+    public RunEvent stepCompleted(String runId, int stepIndex, String stepKind,
+                                   String outcome, long durationMs, Instant at) {
+        return appendStructuredObservation(runId, RunEventType.STEP_COMPLETED, at, durationMs,
+                Map.of("stepIndex", stepIndex, "stepKind", nullToEmpty(stepKind),
+                        "outcome", nullToEmpty(outcome), "durationMs", durationMs));
     }
 
     public RunState verifying(String runId, Instant at) {
@@ -303,6 +358,37 @@ public final class RunCoordinator {
 
     private RunState requireForObservation(String runId) {
         return store.requireByRunId(runId);
+    }
+
+    private RunEvent appendStructuredObservation(
+            String runId,
+            RunEventType eventType,
+            Instant at,
+            long durationMs,
+            Map<String, Object> payload
+    ) {
+        // 与无 payload observation 一致:只追加事件日志、不改状态机状态,终态后仍可追加
+        RunState current = requireForObservation(runId);
+        return store.append(
+                current.revision(),
+                new RunEvent.Draft(
+                        runId, eventType, "lifecycle", current.status(), at,
+                        durationMs, OBSERVATION_SCHEMA, writePayload(payload), null,
+                        current.requestId(), current.paradigm()
+                )
+        );
+    }
+
+    private static String writePayload(Map<String, Object> payload) {
+        try {
+            return PAYLOAD_JSON.writeValueAsString(payload);
+        } catch (Exception ex) {
+            return "{}";
+        }
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     private static RunState copy(

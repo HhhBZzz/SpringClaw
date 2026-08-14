@@ -197,7 +197,7 @@ public final class RunCoordinator {
                         current.strategyId(), current.pendingProposalId(),
                         current.completionDecision(), current.result(),
                         current.usage(), current.failure()),
-                RunEventType.VERIFICATION_COMPLETED,
+                RunEventType.VERIFICATION_STARTED,
                 at
         );
     }

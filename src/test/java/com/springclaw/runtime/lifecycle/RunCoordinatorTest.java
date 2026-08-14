@@ -58,7 +58,7 @@ class RunCoordinatorTest {
                         RunEventType.STRATEGY_STARTED,
                         RunEventType.CONFIRMATION_REQUIRED,
                         RunEventType.CONFIRMATION_APPROVED,
-                        RunEventType.VERIFICATION_COMPLETED,
+                        RunEventType.VERIFICATION_STARTED,
                         RunEventType.RUN_COMPLETED
                 );
     }

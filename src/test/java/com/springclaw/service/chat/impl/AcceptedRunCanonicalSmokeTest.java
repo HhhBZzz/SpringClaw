@@ -129,7 +129,7 @@ class AcceptedRunCanonicalSmokeTest {
                         RunEventType.CONTEXT_READY,
                         RunEventType.DECISION_MADE,
                         RunEventType.STRATEGY_STARTED,
-                        RunEventType.VERIFICATION_COMPLETED,
+                        RunEventType.VERIFICATION_STARTED,
                         RunEventType.RUN_DEGRADED
                 );
         ArgumentCaptor<MemoryFrameRequest> requestCaptor =

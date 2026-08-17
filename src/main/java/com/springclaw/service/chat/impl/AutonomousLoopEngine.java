@@ -714,11 +714,6 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
     }
 
     private boolean isSafeToRetry(Object[] tools) {
-        if (tools == null) return true;
-        for (Object tool : tools) {
-            if (tool instanceof com.springclaw.tool.pack.WorkspaceEditToolPack) return false;
-            if (tool instanceof com.springclaw.tool.pack.ScriptSkillToolPack) return false;
-        }
-        return true;
+        return com.springclaw.service.agent.kernel.ModelCallSafety.isSafeToRetry(tools);
     }
 }

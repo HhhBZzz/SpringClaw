@@ -8,9 +8,6 @@ import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
-import com.springclaw.tool.pack.FileToolPack;
-import com.springclaw.tool.pack.LocalFilesystemToolPack;
-import com.springclaw.tool.pack.ScriptSkillToolPack;
 import com.springclaw.tool.runtime.ToolExecutionContext;
 import com.springclaw.tool.runtime.ToolExecutionContextHolder;
 import com.springclaw.tool.runtime.ToolOrchestrator;
@@ -643,15 +640,7 @@ public class OparLoopEngine implements AgentEngine {
     }
 
     private boolean isSafeToRetry(Object[] tools) {
-        if (tools == null || tools.length == 0) {
-            return true;
-        }
-        for (Object tool : tools) {
-            if (tool instanceof FileToolPack || tool instanceof LocalFilesystemToolPack || tool instanceof ScriptSkillToolPack) {
-                return false;
-            }
-        }
-        return true;
+        return com.springclaw.service.agent.kernel.ModelCallSafety.isSafeToRetry(tools);
     }
 
     private record ActionResult(String output, boolean degraded) {

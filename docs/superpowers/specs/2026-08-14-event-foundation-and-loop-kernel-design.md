@@ -308,6 +308,50 @@ public interface LoopSpec<S> {
 1. `mvn test` 全绿（基线 1091 + 新增）。
 2. 端到端：一次成功 chat run 的 canonical 事件序列包含 `run.created → ... → turn.started → (step.started/step.completed)×N → turn.completed → verification.started → run.completed`，model.called payload 含 providerId/model，step.completed 含 stepIndex 与 durationMs。
 3. 成功 run 终态为 `COMPLETED`（非 DEGRADED），fallback run 终态 DEGRADED reason=MODEL_UNVERIFIED_FALLBACK 语义正确。
-4. 5 引擎行数合计下降 ≥40%（3165 → ~1900 含内核）。
+4. 5 引擎行数合计下降 ≥40%（3165 → ~1900 含内核）。**实际未达成，见附录 A.3。**
 5. 兼容性清单 §4 全部满足。
 6. 双开关非法组合启动失败且错误信息可操作。
+
+## 附录 A — 实施结果对照（Phase 2 收尾时点记录）
+
+### A.1 引擎迁移事件序列对照（I3 超集校验）
+
+迁移前（Phase 1 埋点态）：引擎循环体内联 `beginStep(requestId, stepNo-1, kind)`，每步一个 step 边界事件。
+迁移后：step 事件唯一发射点在 `AgentLoopKernel.runLoop`，每步 `step.started → (nextStep: model.called×k) → step.completed`，kind 与 index 语义逐引擎对照：
+
+| 引擎 | stepKind | 每步模型调用 | 终止 reason（新增可观测性） |
+|---|---|---|---|
+| ReAct | `react` | 1（无 .tools，手动执行） | FINAL_ANSWER / 假完成拒绝 continue |
+| Reflexion | `reflexion` | 2（attempt + reflection） | REFLECTED_ENOUGH |
+| PlanExecute | `plan-execute` | 外层 1（replan），内层 Execute 子序列不产生独立 step 事件（与 spec §3.3 第 3 条一致） | PLAN_COMPLETE |
+| AutonomousLoop | `autonomous` | 1（.tools 原生往返） | TASK_COMPLETE_READ / TASK_COMPLETE_VERIFIED / TASK_FAILED / EARLY_STOP_FINAL_ANSWER / 假完成·纯文本拦截 continue |
+| OparLoop | `opar` | 2（Plan + Act） | PLAN_READY / DEGRADED |
+
+I3 不变量保持：canonical 事件序列为迁移前超集（step 边界事件位置/序号/kind 不变，仅发射点移入 kernel）；既有引擎单测断言零修改全绿（1112/1112）即行为不变证明。
+
+### A.2 OparLoop 逃生舱判定
+
+spec §3.6 预留"第 5 步受阻可保留独立实现"。实际：双调用 + 本地短路四件套均顺利参数化——短路四件套留引擎侧 runLoop 前置（不进循环核，它们是"是否进入循环"的判定而非循环语义），Plan+Act 双调用落 nextStep 内两次经 `runPlan/runAction`（各自内部走 ModelCallExecutor）。**未启用逃生舱，5/5 引擎收敛。**
+
+### A.3 行数偏差记录（验收 4 未达成）
+
+| | 迁移前 | 迁移后 |
+|---|---|---|
+| 5 引擎合计 | 3165 行 | 3642 行 |
+| kernel 包 | — | 258 行（6 文件） |
+| 总计 | 3165 | 3900（**+23%**，非预估的 −40%） |
+
+偏差原因（如实记录，非辩解）：
+1. spec 预估假设"引擎内重复骨架删除后只留策略"，实际迁移保留了引擎壳——SSE stream 生命周期、降级三段、prompt 渲染、收尾构造本就属引擎职责（spec §3.2 A 段条目），未随 for 循环体一起消失。
+2. spec 化引入固定样板：内部类构造器捕获 8-10 个协作对象、State 类、evaluate/composeAnswer 方法签名——每引擎约 +100~150 行结构性成本。
+3. 真实收益不在行数而在**骨架唯一源**：step 事件发射、空产出守护、max-steps 兜底、失败传播此后只存在于 kernel 一处；第 6 个引擎（范式可切换路线的下一个范式）接入成本从"复制 600 行改差异"降为"写一个 Spec 内部类"。isSafeToRetry 6 处拷贝漂移（两套工具名单）收敛为 `ModelCallSafety` 单源，即拷贝漂移风险实证。
+4. 后续若做第二遍瘦身（引擎壳再下沉：降级三段/finalize 到 kernel），行数目标方可达，属新决策不入本期。
+
+### A.4 验收清单勾选
+
+1. ✅ `mvn test` 全绿 1112/1112（基线 1091 + 新增 21：AgentLoopKernelTest 4 + 引擎 step 边界断言与 fail-fast 测试）
+2. ✅ 事件序列（A.1 表；smoke 为包含式断言）
+3. ✅ 终态语义（CompletionVerifier/TrustedModelVerifier 既有测试覆盖）
+4. ⚠️ 未达成（A.3，偏差已记录）
+5. ✅ 兼容性清单 §4 零破坏（既有断言不动全绿为证）
+6. ✅ 双开关 fail-fast（RuntimeStoreConsistencyGuard + .env.local 联动验证）

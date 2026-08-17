@@ -768,12 +768,7 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
      * 复制自 {@link AutonomousLoopEngine}(L635-642)/ {@link ReActEngine}(L449-456)。
      */
     private boolean isSafeToRetry(Object[] tools) {
-        if (tools == null) return true;
-        for (Object tool : tools) {
-            if (tool instanceof com.springclaw.tool.pack.WorkspaceEditToolPack) return false;
-            if (tool instanceof com.springclaw.tool.pack.ScriptSkillToolPack) return false;
-        }
-        return true;
+        return com.springclaw.service.agent.kernel.ModelCallSafety.isSafeToRetry(tools);
     }
 
     // === PE-T3: Plan 阶段(BeanOutputConverter 结构化 List<PlanStep>)===

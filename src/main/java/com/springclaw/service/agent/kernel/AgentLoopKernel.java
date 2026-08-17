@@ -14,6 +14,10 @@ import java.util.List;
 /**
  * 共享循环核:步进骨架 + step 边界事件(唯一发射点) + max-steps 兜底 + 假完成守护。
  * 引擎重叠段 A/C/D/G/H/K 的下沉目标(spec §3.2)。
+ *
+ * <p>已迁移引擎(Phase 2):ReAct/Reflexion/PlanExecute/AutonomousLoop/OparLoop,
+ * 各以私有内部类实现 {@link LoopSpec} 表达差异;step 事件的唯一发射点在本类
+ * runLoop(引擎不再内联 beginStep)。</p>
  */
 @Slf4j
 @Component

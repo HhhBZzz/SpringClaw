@@ -134,3 +134,27 @@ springclaw.runtime.conversation-history-source: canonical | message-event (默�
 - 不做生产环境双读逐行对账（开关+异常回退已满足可回滚性）
 - 不改 message_event 表结构
 - 不动长期语义记忆（Redis 向量）——本设计只管短期对话历史
+
+## 附录 A: 实施结果(2026-08-17)
+
+| Commit | 内容 | 测试 |
+|---|---|---|
+| c5ca4046 (T1) | RunEventType +USER_MESSAGE/ASSISTANT_ANSWER;RunCoordinator 发射方法;Bridge/Observer 贯通;ChatServiceImpl 两处 turnStarted 旁发 userMessage、ChatResultPersister 发 assistantAnswer(双轨写) | RunCoordinator 契约+persister 发射断言+smoke 白名单;1124 绿 |
+| a616ea53 (T2) | ConversationTurn(220 截断同 legacy)+ConversationHistoryDeriver(findRecent 过滤 session→逐 run 扫事件→时间升序→最近 limit 条;payload 容错;挂起 run 只派生 USER) | 8 契约测试;1132 绿 |
+| 154a7e70 (T3) | 开关 springclaw.runtime.conversation-history-source(默认 canonical);ContextAssembler.buildEventContext canonical 派生+异常/空回退 message_event | 5 切换测试+既有 4 测试断言不动;1137 绿 |
+| (T4) | 等价性对账测试:同事实双写,canonical 派生与 legacy 渲染对话行逐行等价 | 本附录 |
+
+偏差与备注:
+- §3.2 的"诊断行合成(ROUTING/PLAN/ACT)"未在首版实现——canonical 侧
+  decision.made/step 事件 payload 尚不足以无损重建 PLAN/ACT 全文
+  (legacy 行由引擎各阶段写 message_event,canonical 对应事件在 Plan/Act
+  双调用场景下 payload 只有结构化摘要)。首版 canonical 历史只含对话行;
+  诊断行缺失对 LLM 上下文的影响=系统性少了 SYSTEM 行(保守方向),
+  后续按需补 Payload 富化后再加合成(已在 §5.4 等价性测试中标注差异边界)。
+- §3.3 的 MessageEventChatMemory/MemoryCoordinator/ConversationHistoryService
+  切换未做:ChatMemory 开关默认 false(现状即关),MemoryCoordinator 对账链
+  与 ConversationHistoryService 属于 message_event 自身生态(非 LLM 历史主路),
+  首版只切 ContextAssembler 主路即已覆盖 LLM 历史事实源。后续 PR 按需推进。
+- 双源拼接过渡实现为"canonical 空→整段回退 legacy"(非逐行按时间线交错拼接):
+  新对话全部走 canonical 后回退场景只出现在纯存量会话,交错拼接的复杂度
+  在该场景下无收益,故取最小实现。

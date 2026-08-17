@@ -92,6 +92,42 @@ public class DefaultRunLifecycleBridge implements RunLifecycleBridge {
     }
 
     @Override
+    public void toolStarted(String runId, String toolName, Instant at) {
+        coordinator.toolStarted(runId, toolName, at);
+    }
+
+    @Override
+    public void toolSucceeded(String runId, String toolName, long durationMs, Instant at) {
+        coordinator.toolSucceeded(runId, toolName, durationMs, at);
+    }
+
+    @Override
+    public void toolFailed(String runId, String toolName, String errorCode, Instant at) {
+        coordinator.toolFailed(runId, toolName, errorCode, at);
+    }
+
+    @Override
+    public void turnStarted(String runId, String responseMode, Instant at) {
+        coordinator.turnStarted(runId, responseMode, at);
+    }
+
+    @Override
+    public void turnCompleted(String runId, String outcome, long durationMs, Instant at) {
+        coordinator.turnCompleted(runId, outcome, durationMs, at);
+    }
+
+    @Override
+    public void stepStarted(String runId, int stepIndex, String stepKind, Instant at) {
+        coordinator.stepStarted(runId, stepIndex, stepKind, at);
+    }
+
+    @Override
+    public void stepCompleted(String runId, int stepIndex, String stepKind, String outcome,
+                              long durationMs, Instant at) {
+        coordinator.stepCompleted(runId, stepIndex, stepKind, outcome, durationMs, at);
+    }
+
+    @Override
     public RunState verificationStarted(String runId, Instant at) {
         return coordinator.verifying(runId, at);
     }

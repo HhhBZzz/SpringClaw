@@ -73,7 +73,8 @@ class ChatServiceImplLifecycleProjectionTest {
 
         assertThat(response.answer()).isEqualTo("answer");
         assertThat(response.requestId()).isEqualTo(RUN_ID);
-        assertThat(store.requireByRunId(RUN_ID).status()).isEqualTo(RunStatus.DEGRADED);
+        // 模型回答(modelEnabled=true)→COMPLETED
+        assertThat(store.requireByRunId(RUN_ID).status()).isEqualTo(RunStatus.COMPLETED);
     }
 
     @Test
@@ -102,7 +103,8 @@ class ChatServiceImplLifecycleProjectionTest {
                 f.service.executeTaskMessage(new ChatRequest("s1", "u1", "你好", "api"), false, RUN_ID);
 
         assertThat(outcome.answer()).isEqualTo("answer");
-        assertThat(store.requireByRunId(RUN_ID).status()).isEqualTo(RunStatus.DEGRADED);
+        // 模型回答(modelEnabled=true)→COMPLETED
+        assertThat(store.requireByRunId(RUN_ID).status()).isEqualTo(RunStatus.COMPLETED);
     }
 
     @Test

@@ -28,7 +28,7 @@ class RunLifecycleObserverIntegrationTest {
     private static final Instant T0 = Instant.parse("2026-06-22T00:00:00Z");
 
     @Test
-    void observesLegacyFactsInCanonicalOrderWithoutClaimingCompletion() {
+    void classifiesModelAnswerAsCompletedWithTurnBoundaries() {
         InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
         RunCoordinator coordinator = new RunCoordinator(store);
         coordinator.accept(new RunAcceptance(
@@ -51,12 +51,13 @@ class RunLifecycleObserverIntegrationTest {
 
         observer.contextAndDecisionObserved(context, T0.plusSeconds(1));
         observer.executionStarted(context, "agent-runtime", T0.plusSeconds(2));
+        observer.turnStarted(RUN_ID, "agent", T0.plusSeconds(3));
         observer.resultReturned(
-                context, result, "legacy answer", T0.plusSeconds(3)
+                context, result, "model answer", T0.plusSeconds(4)
         );
 
         assertThat(store.requireByRunId(RUN_ID).status())
-                .isEqualTo(RunStatus.DEGRADED);
+                .isEqualTo(RunStatus.COMPLETED);
         assertThat(store.findEventsByRunId(RUN_ID))
                 .extracting(RunEvent::eventType)
                 .containsExactly(
@@ -64,6 +65,53 @@ class RunLifecycleObserverIntegrationTest {
                         RunEventType.CONTEXT_READY,
                         RunEventType.DECISION_MADE,
                         RunEventType.STRATEGY_STARTED,
+                        RunEventType.TURN_STARTED,
+                        RunEventType.TURN_COMPLETED,
+                        RunEventType.VERIFICATION_STARTED,
+                        RunEventType.RUN_COMPLETED
+                );
+        RunEvent turnCompleted = store.findEventsByRunId(RUN_ID).stream()
+                .filter(e -> e.eventType() == RunEventType.TURN_COMPLETED)
+                .findFirst().orElseThrow();
+        assertThat(turnCompleted.payload())
+                .contains("\"outcome\":\"COMPLETE\"")
+                .contains("\"durationMs\":1000");
+    }
+
+    @Test
+    void classifiesLocalFallbackAsDegraded() {
+        InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+        RunCoordinator coordinator = new RunCoordinator(store);
+        coordinator.accept(new RunAcceptance(
+                RUN_ID, "session-1", "api", "user-1",
+                claim(), "USER", "original",
+                "agent", T0, T0.plusSeconds(300),
+                null
+        ));
+        RunLifecycleObserver observer = new RunLifecycleObserver(
+                new DefaultRunLifecycleBridge(coordinator),
+                new RollbackRunContextAdapter(),
+                new RunExecutionDecisionProjector(),
+                new RunResultProjector(),
+                false
+        );
+        ChatContext context = context();
+        ChatExecutionResult fallback = new ChatExecutionResult(
+                "observe", "plan", "action", "reflect", false
+        );
+
+        observer.contextAndDecisionObserved(context, T0.plusSeconds(1));
+        observer.executionStarted(context, "agent-runtime", T0.plusSeconds(2));
+        observer.resultReturned(
+                context, fallback, "local fallback answer", T0.plusSeconds(3)
+        );
+
+        assertThat(store.requireByRunId(RUN_ID).status())
+                .isEqualTo(RunStatus.DEGRADED);
+        assertThat(store.findEventsByRunId(RUN_ID))
+                .extracting(RunEvent::eventType)
+                .endsWith(
+                        RunEventType.TURN_COMPLETED,
                         RunEventType.VERIFICATION_STARTED,
                         RunEventType.RUN_DEGRADED
                 );

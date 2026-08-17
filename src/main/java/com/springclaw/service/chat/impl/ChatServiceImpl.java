@@ -262,6 +262,8 @@ public class ChatServiceImpl implements ChatService {
             AgentEngine engine = engineSelector.select(context, context.paradigm());
             if (lifecycleObserver != null) {
                 lifecycleObserver.executionStarted(context, engine.name(), Instant.now());
+                lifecycleObserver.turnStarted(
+                        context.requestId(), context.responseMode(), Instant.now());
             }
             if (shouldRequestActionConfirmation(context)) {
                 streamActionRequired(context, lockToken, lockReleased, emitter);
@@ -674,6 +676,8 @@ public class ChatServiceImpl implements ChatService {
             AgentEngine engine = engineSelector.select(context, context.paradigm());
             if (lifecycleObserver != null) {
                 lifecycleObserver.executionStarted(context, engine.name(), Instant.now());
+                lifecycleObserver.turnStarted(
+                        context.requestId(), context.responseMode(), Instant.now());
             }
             ChatExecutionResult executionResult;
             try {

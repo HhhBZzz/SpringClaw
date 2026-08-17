@@ -117,7 +117,8 @@ class ChatControllerCanonicalHttpSmokeTest {
                 .andExpect(jsonPath("$.data.model").value("provider:model"));
 
         RunState state = fixture.store.requireByRunId(RUN_ID);
-        assertThat(state.status()).isEqualTo(RunStatus.DEGRADED);
+        // 模型回答(modelEnabled=true)→COMPLETED,不再是强制 DEGRADED
+        assertThat(state.status()).isEqualTo(RunStatus.COMPLETED);
         assertThat(state.contextSnapshot()).isNotNull();
         assertThat(state.contextSnapshot().shortTermEvents()).contains("short-term turn");
         assertThat(state.contextSnapshot().semanticRecallItems()).contains("semantic fact");
@@ -130,8 +131,10 @@ class ChatControllerCanonicalHttpSmokeTest {
                         RunEventType.CONTEXT_READY,
                         RunEventType.DECISION_MADE,
                         RunEventType.STRATEGY_STARTED,
+                        RunEventType.TURN_STARTED,
+                        RunEventType.TURN_COMPLETED,
                         RunEventType.VERIFICATION_STARTED,
-                        RunEventType.RUN_DEGRADED
+                        RunEventType.RUN_COMPLETED
                 );
         verifyNoInteractions(fixture.contextAssembler);
     }

@@ -35,6 +35,21 @@ public interface RunLifecycleBridge {
 
     void toolFailed(String runId, Instant at);
 
+    void toolStarted(String runId, String toolName, Instant at);
+
+    void toolSucceeded(String runId, String toolName, long durationMs, Instant at);
+
+    void toolFailed(String runId, String toolName, String errorCode, Instant at);
+
+    void turnStarted(String runId, String responseMode, Instant at);
+
+    void turnCompleted(String runId, String outcome, long durationMs, Instant at);
+
+    void stepStarted(String runId, int stepIndex, String stepKind, Instant at);
+
+    void stepCompleted(String runId, int stepIndex, String stepKind, String outcome,
+                       long durationMs, Instant at);
+
     RunState verificationStarted(String runId, Instant at);
 
     RunState completed(

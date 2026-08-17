@@ -37,7 +37,8 @@ public class ModelCallExecutor {
     @Autowired(required = false)
     private ObjectProvider<RunCoordinator> runCoordinatorProvider;
 
-    private void emitModelCalled(ChatRequestContext requestContext) {
+    private void emitModelCalled(ChatRequestContext requestContext,
+                                 AiProviderService.ActiveChatClient client) {
         if (requestContext == null || runCoordinatorProvider == null) {
             return;
         }
@@ -50,7 +51,12 @@ public class ModelCallExecutor {
             return;
         }
         try {
-            coordinator.modelCalled(runId, Instant.now());
+            coordinator.modelCalled(
+                    runId,
+                    client == null ? null : client.providerId(),
+                    client == null ? null : client.model(),
+                    Instant.now()
+            );
         } catch (RuntimeException ignored) {
             // emit 失败不影响模型调用主路径
         }
@@ -98,7 +104,7 @@ public class ModelCallExecutor {
                                               ChatRequestContext requestContext,
                                               boolean allowFailover,
                                               ChatOperation<T> operation) throws Exception {
-        emitModelCalled(requestContext);
+        emitModelCalled(requestContext, activeClient);
         return executeInternal(
                 activeClient,
                 source,

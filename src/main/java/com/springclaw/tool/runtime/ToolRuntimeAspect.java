@@ -114,7 +114,7 @@ public class ToolRuntimeAspect {
                         ? null : runCoordinatorProvider.getIfAvailable();
                 if (coordinator != null) {
                     try {
-                        coordinator.toolStarted(runId, Instant.now());
+                        coordinator.toolStarted(runId, runtimeToolName, Instant.now());
                     } catch (RuntimeException ignored) {
                         // emit 失败不影响工具执行
                     }
@@ -127,9 +127,9 @@ public class ToolRuntimeAspect {
                     if (coordinator != null) {
                         try {
                             if (readOnlySucceeded) {
-                                coordinator.toolSucceeded(runId, Instant.now());
+                                coordinator.toolSucceeded(runId, runtimeToolName, 0L, Instant.now());
                             } else {
-                                coordinator.toolFailed(runId, Instant.now());
+                                coordinator.toolFailed(runId, runtimeToolName, "TOOL_THREW", Instant.now());
                             }
                         } catch (RuntimeException ignored) {
                             // emit 失败不影响工具执行

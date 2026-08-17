@@ -29,14 +29,15 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * 工具运行时切面：统一限流、审计、与写工具的最终风险门禁。
+ * 工具运行时切面：AOP 捕获(签名/参数/上下文)+ 委托 ToolInvocationPipeline 执行策略。
  *
- * <p>P0 改造（Task 6）：
- * <ul>
- *   <li>read/safe 工具：保留旧路径（permission + rate limit + audit + proceed）</li>
- *   <li>write/dangerous 工具：未确认时创建 PENDING proposal 并抛 PendingToolApprovalException；
- *       已确认时 DB 二次校验 + WorkspaceGitGuard 包住 proceed</li>
- * </ul>
+ * <p>管线化(dsh 工具瀑布参照):权限/命令白名单/限流是 guard 段,
+ * proceed(含 write 分支的 proposal 校验+GitGuard 包装)是 execute 段,
+ * 审计与 canonical timeline emit 是 complete 段。切面本身只剩捕获与装配。</p>
+ *
+ * <p>P0 语义保留:write/dangerous/side_effect/execution 工具未确认时创建
+ * PENDING proposal 并抛 PendingToolApprovalException;已确认走 DB 二次校验
+ * + WorkspaceGitGuard 包住 proceed。</p>
  */
 @Aspect
 @Component
@@ -83,7 +84,7 @@ public class ToolRuntimeAspect {
         String runtimeToolName = resolveRuntimeToolName(genericToolName, args);
         ToolExecutionContext context = ToolExecutionContextHolder.get();
 
-        // 既有：权限检查
+        // 权限否决单独审计 DENIED(先于管线,保持既有审计语义)
         try {
             String userId = context == null ? null : context.userId();
             toolPermissionService.checkPermission(userId, genericToolName);
@@ -92,78 +93,104 @@ public class ToolRuntimeAspect {
             throw ex;
         }
 
-        // 既有：限流 + audit START
-        toolGuardService.checkRateLimit(runtimeToolName);
         toolAuditService.recordInvoke(runtimeToolName, "START",
                 renderToolInputDetail(runtimeToolName, args), context);
 
-        // 新增：风险等级反查
         String riskLevel = resolveRiskLevel(simpleClass, signature.getName());
         boolean requiresProposal = "write".equalsIgnoreCase(riskLevel)
                 || "dangerous".equalsIgnoreCase(riskLevel)
                 || "side_effect".equalsIgnoreCase(riskLevel)
                 || "execution".equalsIgnoreCase(riskLevel);
 
-        try {
-            rejectUnsupportedSystemCommand(simpleClass, signature.getName(), args);
-            Object result;
-            if (!requiresProposal) {
-                // read / null → 旧路径 + canonical timeline emit（写工具由 ToolGateway emit，只读工具在这里补）
-                String runId = context == null ? null : context.runId();
-                RunCoordinator coordinator = (runId == null || runCoordinatorProvider == null)
-                        ? null : runCoordinatorProvider.getIfAvailable();
-                if (coordinator != null) {
-                    try {
-                        coordinator.toolStarted(runId, runtimeToolName, Instant.now());
-                    } catch (RuntimeException ignored) {
-                        // emit 失败不影响工具执行
+        ToolInvocationPipeline pipeline = ToolInvocationPipeline.builder()
+                // guard:命令白名单(SystemToolPack.runCommand 专用)
+                .addGuard(inv -> {
+                    rejectUnsupportedSystemCommand(simpleClass, signature.getName(), inv.args());
+                    return ToolInvocationPipeline.GuardDecision.proceed();
+                })
+                // guard:限流
+                .addGuard(inv -> {
+                    toolGuardService.checkRateLimit(inv.toolName());
+                    return ToolInvocationPipeline.GuardDecision.proceed();
+                })
+                // execute:read 旧路径(canonical emit + proceed)/write proposal 分支
+                .onExecute(inv -> requiresProposal
+                        ? executeWriteWithProposal(joinPoint, approvedOrNull(), genericToolName,
+                                simpleClass, inv.args(), riskLevel)
+                        : proceedWithTimeline(joinPoint, context, inv.toolName()))
+                // complete:审计收尾(SUCCESS/FAILED)+ PENDING_APPROVAL 透传
+                .onComplete((inv, outcome) -> {
+                    if ("success".equals(outcome.status())) {
+                        toolAuditService.recordInvoke(inv.toolName(), "SUCCESS",
+                                summarize(outcome.result()), context);
+                    } else if ("failed".equals(outcome.status())
+                            && outcome.error() instanceof PendingToolApprovalException pending) {
+                        toolAuditService.recordInvoke(inv.toolName(), "PENDING_APPROVAL",
+                                "proposalId=" + pending.proposalId(), context);
+                    } else if ("failed".equals(outcome.status())) {
+                        toolAuditService.recordInvoke(inv.toolName(), "FAILED",
+                                summarizeFailure(outcome.error()), context);
                     }
-                }
-                boolean readOnlySucceeded = false;
-                try {
-                    result = joinPoint.proceed();
-                    readOnlySucceeded = true;
-                } finally {
-                    if (coordinator != null) {
-                        try {
-                            if (readOnlySucceeded) {
-                                coordinator.toolSucceeded(runId, runtimeToolName, 0L, Instant.now());
-                            } else {
-                                coordinator.toolFailed(runId, runtimeToolName, "TOOL_THREW", Instant.now());
-                            }
-                        } catch (RuntimeException ignored) {
-                            // emit 失败不影响工具执行
-                        }
-                    }
-                }
-            } else {
-                ApprovedProposalContext approved = ToolExecutionContextHolder.getApprovedProposal();
-                if (approved == null) {
-                    // 未授权：创建 PENDING proposal、抛 PendingToolApprovalException
-                    String toolsetId = capabilityRegistry.findToolsetByClassName(simpleClass);
-                    if (toolsetId == null) {
-                        toolsetId = simpleClass;
-                    }
-                    ToolInvocationSnapshot snapshot = snapshotService.capture(
-                            genericToolName, toolsetId, args, riskLevel);
-                    ToolInvocationProposal proposal = toolGateway.requestApproval(snapshot, context);
-                    throw new PendingToolApprovalException(proposal.proposalId());
-                }
-                // 已授权：DB 二次校验 + GitGuard 包住执行
-                result = executeWithGuard(joinPoint, approved, genericToolName, simpleClass, args);
-            }
+                })
+                .build();
 
-            toolAuditService.recordInvoke(runtimeToolName, "SUCCESS", summarize(result), context);
-            return result;
-        } catch (PendingToolApprovalException pending) {
-            // proposal 已挂起，单独审计——不视为失败
-            toolAuditService.recordInvoke(runtimeToolName, "PENDING_APPROVAL",
-                    "proposalId=" + pending.proposalId(), context);
-            throw pending;
-        } catch (Throwable ex) {
-            toolAuditService.recordInvoke(runtimeToolName, "FAILED", summarizeFailure(ex), context);
-            throw ex;
+        return pipeline.invoke(new ToolRuntimeInvocation(runtimeToolName, args));
+    }
+
+    private ApprovedProposalContext approvedOrNull() {
+        return ToolExecutionContextHolder.getApprovedProposal();
+    }
+
+    private Object proceedWithTimeline(ProceedingJoinPoint joinPoint, ToolExecutionContext context,
+                                       String runtimeToolName) throws Throwable {
+        String runId = context == null ? null : context.runId();
+        RunCoordinator coordinator = (runId == null || runCoordinatorProvider == null)
+                ? null : runCoordinatorProvider.getIfAvailable();
+        if (coordinator != null) {
+            try {
+                coordinator.toolStarted(runId, runtimeToolName, Instant.now());
+            } catch (RuntimeException ignored) {
+                // emit 失败不影响工具执行
+            }
         }
+        boolean succeeded = false;
+        try {
+            Object result = joinPoint.proceed();
+            succeeded = true;
+            return result;
+        } finally {
+            if (coordinator != null) {
+                try {
+                    if (succeeded) {
+                        coordinator.toolSucceeded(runId, runtimeToolName, 0L, Instant.now());
+                    } else {
+                        coordinator.toolFailed(runId, runtimeToolName, "TOOL_THREW", Instant.now());
+                    }
+                } catch (RuntimeException ignored) {
+                    // emit 失败不影响工具执行
+                }
+            }
+        }
+    }
+
+    private Object executeWriteWithProposal(ProceedingJoinPoint joinPoint,
+                                            ApprovedProposalContext approved,
+                                            String genericToolName,
+                                            String simpleClass,
+                                            Object[] args,
+                                            String riskLevel) throws Throwable {
+        if (approved == null) {
+            String toolsetId = capabilityRegistry.findToolsetByClassName(simpleClass);
+            if (toolsetId == null) {
+                toolsetId = simpleClass;
+            }
+            ToolInvocationSnapshot snapshot = snapshotService.capture(
+                    genericToolName, toolsetId, args, riskLevel);
+            ToolInvocationProposal proposal = toolGateway.requestApproval(snapshot,
+                    ToolExecutionContextHolder.get());
+            throw new PendingToolApprovalException(proposal.proposalId());
+        }
+        return executeWithGuard(joinPoint, approved, genericToolName, simpleClass, args);
     }
 
     private Object executeWithGuard(ProceedingJoinPoint joinPoint,
@@ -349,5 +376,9 @@ public class ToolRuntimeAspect {
         } catch (Exception ignored) {
             return "WorkspaceGuardException: " + ex.getMessage();
         }
+    }
+
+    /** 管线调用载体:捕获一次的运行时工具名+原始参数。 */
+    private record ToolRuntimeInvocation(String toolName, Object[] args) implements ToolInvocation {
     }
 }

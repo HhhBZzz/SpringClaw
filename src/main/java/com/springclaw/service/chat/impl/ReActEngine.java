@@ -5,6 +5,11 @@ import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
+import com.springclaw.service.agent.kernel.AgentLoopKernel;
+import com.springclaw.service.agent.kernel.KernelCall;
+import com.springclaw.service.agent.kernel.KernelResult;
+import com.springclaw.service.agent.kernel.LoopContext;
+import com.springclaw.service.agent.kernel.LoopSpec;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
@@ -77,6 +82,7 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
     private final ChatGuardService chatGuardService;
     private final RunLifecycleObserver lifecycleObserver;
     private final ExplicitToolExecutioner explicitToolExecutioner;
+    private final AgentLoopKernel loopKernel;
     private final int maxReactSteps;
 
     public ReActEngine(AiProviderService aiProviderService,
@@ -91,6 +97,7 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
                        ChatGuardService chatGuardService,
                        RunLifecycleObserver lifecycleObserver,
                        ExplicitToolExecutioner explicitToolExecutioner,
+                       AgentLoopKernel loopKernel,
                        @Value("${springclaw.chat.max-react-steps:6}") int maxReactSteps) {
         this.aiProviderService = aiProviderService;
         this.toolOrchestrator = toolOrchestrator;
@@ -104,6 +111,7 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
         this.chatGuardService = chatGuardService;
         this.lifecycleObserver = lifecycleObserver;
         this.explicitToolExecutioner = explicitToolExecutioner;
+        this.loopKernel = loopKernel;
         this.maxReactSteps = Math.max(1, Math.min(maxReactSteps, 15));
     }
 
@@ -218,10 +226,9 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
         final Object[] tools = toolOrchestrator.selectAutonomousTools(ctx.channel(), ctx.userId(), decision);
         final boolean allowFailover = isSafeToRetry(tools);
         final List<ReActStep> steps = new ArrayList<>();
-        String history = "";
 
         // 执行追踪器 — 每一步关联同一 tracker,累积真实工具调用/副作用证据(对齐
-        // AutonomousLoopEngine L221)。Task 4 假完成守护用它校验 write/side_effect/dangerous
+        // AutonomousLoopEngine L221)。假完成守护用它校验 write/side_effect/dangerous
         // 任务是否真有工具证据;工具包经 ToolRuntimeAspect 上报到此 tracker。
         AutonomousExecutionTracker tracker = new AutonomousExecutionTracker();
 
@@ -241,110 +248,25 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
             // tracker 注册到线程上下文,WorkspaceEditToolPack / ScriptSkillToolPack 的 @Tool
             // 方法经 ToolRuntimeAspect 时上报到这里(对齐 AutonomousLoopEngine L235)。
             ToolExecutionContextHolder.setTracker(tracker);
-            for (int stepNo = 1; stepNo <= maxReactSteps; stepNo++) {
-              try (RunLifecycleObserver.StepScope reactStep =
-                           lifecycleObserver.beginStep(requestId, stepNo - 1, "react")) {
-                log.info("ReAct 步骤 {}/{}: requestId={}, riskLevel={}, toolsCount={}",
-                        stepNo, maxReactSteps, requestId, riskLevel, tools == null ? 0 : tools.length);
 
-                if (emitter != null) {
-                    try {
-                        sseEventBridge.sendStatus(emitter, "ReAct 步骤 " + stepNo + "/" + maxReactSteps);
-                    } catch (Exception e) {
-                        log.warn("SSE 进度事件发送失败（可能客户端已断开）: stepNo={}", stepNo);
-                    }
-                }
+            // 循环骨架(步进/step 边界事件/空产出守护/max-steps 兜底)下沉 AgentLoopKernel,
+            // 引擎只表达 ReAct 差异:每步一次模型调用 + Action 解析执行 + 终止判定。
+            AgentLoopKernel.LoopOutcome<String> outcome = loopKernel.runLoop(
+                    new ReActSpec(ctx, emitter, requestId, riskLevel, tools, allowFailover,
+                            activeClient, tracker, steps),
+                    new LoopContext(ctx, loopKernel));
 
-                final String systemPrompt = renderReActPrompt(ctx, tools, history, riskLevel);
-                ModelCallExecutor.ModelCallResult<String> callResult = modelCallExecutor.executeChat(
-                        activeClient,
-                        "react-step-" + stepNo,
-                        new ModelCallExecutor.ChatRequestContext(
-                                requestId,
-                                assembled == null ? "" : assembled.sessionKey(),
-                                ctx.channel(),
-                                ctx.userId()
-                        ),
-                        allowFailover,
-                        client -> {
-                            var req = client.chatClient().prompt()
-                                    .system(systemPrompt)
-                                    .user(TypedContextPromptRenderer.question(ctx));
-                            // 手动循环主路径:不挂 .tools()——LLM 按 ReAct 协议文本输出
-                            // Thought + Action,循环下方 ExplicitToolExecutioner
-                            // 解析并手动执行工具(经典 ReAct 多步可见循环,所有模型一致)。
-                            var resp = conversationAdvisorSupport.apply(
-                                            req,
-                                            assembled == null ? "" : assembled.sessionKey(),
-                                            ctx.userId())
-                                    .call()
-                                    .chatResponse();
-                            return new ModelCallExecutor.ChatOperationResult<>(
-                                    ModelCallExecutor.extractText(resp), resp);
-                        }
-                );
-
-                String thought = callResult.value();
-                activeClient = callResult.client(); // failover 后更新
-
-                if (!StringUtils.hasText(thought)) {
-                    log.warn("ReAct 步骤 {} 模型输出为空,终止循环: requestId={}", stepNo, requestId);
-                    break;
-                }
-
-                boolean hasToolCall = explicitToolExecutioner.hasActionLine(thought);
-                String action = explicitToolExecutioner.describeAction(thought, hasToolCall);
-                // 手动循环主路径(所有模型):LLM 文本输出 Thought + Action,引擎解析 Action 后
-                // 手动执行工具(经 Spring AOP 代理 → ToolRuntimeAspect 审计 + tracker 证据上报),
-                // 把结果作为 Observation 拼入历史进入下一轮。无 Action 行即最终答案,下方终止循环。
-                String observation = hasToolCall ? explicitToolExecutioner.execute(thought, tools, requestId) : "";
-                steps.add(new ReActStep(thought, action, observation));
-
-                if (emitter != null) {
-                    try {
-                        // ReAct 三段式 trace — 每步 Thought/Action/Observation 各发一条(模仿
-                        // AutonomousLoop sendTrace L294;Task 3 只发 Thought,Task 6 补 Action/Observation)。
-                        sseEventBridge.sendTrace(emitter, ctx, "ReAct Thought " + stepNo,
-                                "react", "thought", TextUtils.truncate(thought, 200), 0L);
-                        sseEventBridge.sendTrace(emitter, ctx, "ReAct Action " + stepNo,
-                                "react", "action", TextUtils.truncate(action, 200), 0L);
-                        if (StringUtils.hasText(observation)) {
-                            sseEventBridge.sendTrace(emitter, ctx, "ReAct Observation " + stepNo,
-                                    "react", "observation", TextUtils.truncate(observation, 200), 0L);
-                        }
-                    } catch (Exception ignored) {}
-                }
-
-                history = buildReActHistory(steps);
-
-                // 终止判定:本轮无工具调用(纯最终答案)。read 直接完成;write/side_effect/
-                // dangerous 必须校验 tracker 工具证据(假完成守护,对齐 AutonomousLoop L309-345)。
-                if (!hasToolCall) {
-                    if ("read".equals(riskLevel) || tracker.satisfiesCompletionCondition(riskLevel)) {
-                        log.info("ReAct 任务完成: requestId={}, steps={}, riskLevel={}, hasWrite={}, hasCmd={}, hasVerified={}",
-                                requestId, stepNo, riskLevel,
-                                tracker.hasWriteToolCall(), tracker.hasRunCommandCall(), tracker.hasVerifiedSideEffect());
-                        return finalResult(ctx, steps, thought, true);
-                    }
-                    // 假完成:写/副作用/高风险任务无真实工具证据 → 拒绝,注入提示,继续循环。
-                    String rejection = tracker.renderFakeCompletionRejection(riskLevel);
-                    log.warn("ReAct 假完成拦截: requestId={}, steps={}, riskLevel={}, hasWrite={}, hasCmd={}, hasVerified={}",
-                            requestId, stepNo, riskLevel,
-                            tracker.hasWriteToolCall(), tracker.hasRunCommandCall(), tracker.hasVerifiedSideEffect());
-                    if (emitter != null) {
-                        try {
-                            sseEventBridge.sendTrace(emitter, ctx, "ReAct 假完成拦截",
-                                    "react", "warning",
-                                    "模型声称完成但缺少真实操作证据，继续执行: "
-                                            + TextUtils.truncate(rejection, 200), 0L);
-                        } catch (Exception ignored) {}
-                    }
-                    history = buildReActHistory(steps) + "\n\n" + rejection;
-                    continue; // 不终止,下一步 prompt 含拒绝提示
-                }
-              }
+            if (outcome.degraded() && "EMPTY_MODEL_OUTPUT".equals(outcome.endReason())) {
+                // 空产出守护:与旧实现的 break 后兜底一致,返回当前最佳
+                log.warn("ReAct 模型输出为空,终止循环: requestId={}", requestId);
+                return finalResult(ctx, steps,
+                        "已达 max-react-steps(" + maxReactSteps + "),返回当前最佳答案", true);
             }
-
+            if (outcome.terminalBySpec()) {
+                // 无 Action 行 = 最终答案;finalAnswer 由 spec 终止时写入 steps 的最后 thought
+                String finalAnswer = ((ReActState) outcome.finalState()).finalAnswer;
+                return finalResult(ctx, steps, finalAnswer, true);
+            }
             // 达到 maxReactSteps 仍未终止 → 返回当前最佳(降级提示)
             log.info("ReAct 达到最大步数限制: requestId={}, maxSteps={}", requestId, maxReactSteps);
             return finalResult(ctx, steps,
@@ -362,8 +284,173 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
             );
         } finally {
             // scope close 只还原 ToolExecutionContext,不清 tracker ThreadLocal;
-            // 手动 clear(对齐 AutonomousLoopEngine L387/390,ReAct 用 finally 覆盖 return/异常全路径)。
+            // 手动 clear(对齐 AutonomousLoopEngine L387/390,ReACT 用 finally 覆盖 return/异常全路径)。
             ToolExecutionContextHolder.clearTracker();
+        }
+    }
+
+    /** ReAct 循环的可变步进状态(在 spec 的 nextStep 间演化)。 */
+    private static final class ReActState {
+        AiProviderService.ActiveChatClient activeClient;
+        String history = "";
+        String finalAnswer = "";
+    }
+
+    /**
+     * ReAct 范式策略(Phase 2 Task 10):只表达差异——每步一次模型调用
+     * (不挂 .tools(),LLM 文本输出 Thought + Action,引擎手动执行工具)、
+     * "无 Action 行 = 最终答案"终止、假完成守护(write 无工具证据继续循环)。
+     */
+    private final class ReActSpec implements LoopSpec<ReActState, String> {
+
+        private final ChatContext ctx;
+        private final SseEmitter emitter;
+        private final String requestId;
+        private final String riskLevel;
+        private final Object[] tools;
+        private final boolean allowFailover;
+        private final AiProviderService.ActiveChatClient initialClient;
+        private final AutonomousExecutionTracker tracker;
+        private final List<ReActStep> steps;
+
+        ReActSpec(ChatContext ctx, SseEmitter emitter, String requestId, String riskLevel,
+                  Object[] tools, boolean allowFailover,
+                  AiProviderService.ActiveChatClient initialClient,
+                  AutonomousExecutionTracker tracker, List<ReActStep> steps) {
+            this.ctx = ctx;
+            this.emitter = emitter;
+            this.requestId = requestId;
+            this.riskLevel = riskLevel;
+            this.tools = tools;
+            this.allowFailover = allowFailover;
+            this.initialClient = initialClient;
+            this.tracker = tracker;
+            this.steps = steps;
+        }
+
+        @Override public int maxSteps() { return maxReactSteps; }
+        @Override public String stepKind() { return "react"; }
+        @Override public ReActState initState(ChatContext ctx) {
+            ReActState s = new ReActState();
+            s.activeClient = initialClient;
+            return s;
+        }
+
+        @Override
+        public ReActState nextStep(LoopContext loopCtx, ReActState s, int stepIndex) {
+            int stepNo = stepIndex + 1;
+            log.info("ReAct 步骤 {}/{}: requestId={}, riskLevel={}, toolsCount={}",
+                    stepNo, maxReactSteps, requestId, riskLevel, tools == null ? 0 : tools.length);
+
+            if (emitter != null) {
+                try {
+                    sseEventBridge.sendStatus(emitter, "ReAct 步骤 " + stepNo + "/" + maxReactSteps);
+                } catch (Exception e) {
+                    log.warn("SSE 进度事件发送失败（可能客户端已断开）: stepNo={}", stepNo);
+                }
+            }
+
+            final String systemPrompt = renderReActPrompt(ctx, tools, s.history, riskLevel);
+            final AssembledContext assembled = ctx.assembled();
+            ModelCallExecutor.ModelCallResult<String> callResult;
+            try {
+                callResult = loopCtx.kernel().callModel(new KernelCall<>(
+                        "react-step-" + stepNo,
+                        s.activeClient,
+                        new ModelCallExecutor.ChatRequestContext(
+                                requestId,
+                                assembled == null ? "" : assembled.sessionKey(),
+                                ctx.channel(),
+                                ctx.userId()
+                        ),
+                        allowFailover,
+                        client -> {
+                            var req = client.chatClient().prompt()
+                                    .system(systemPrompt)
+                                    .user(TypedContextPromptRenderer.question(ctx));
+                            // 手动循环主路径:不挂 .tools()——LLM 按 ReAct 协议文本输出
+                            // Thought + Action,下方 ExplicitToolExecutioner 解析并手动执行工具
+                            // (经典 ReAct 多步可见循环,所有模型一致)。
+                            var resp = conversationAdvisorSupport.apply(
+                                            req,
+                                            assembled == null ? "" : assembled.sessionKey(),
+                                            ctx.userId())
+                                    .call()
+                                    .chatResponse();
+                            return new ModelCallExecutor.ChatOperationResult<>(
+                                    ModelCallExecutor.extractText(resp), resp);
+                        }
+                ));
+            } catch (Exception e) {
+                if (e instanceof RuntimeException runtimeEx) throw runtimeEx;
+                throw new IllegalStateException("ReAct 模型调用失败: " + e.getMessage(), e);
+            }
+            s.activeClient = callResult.client(); // failover 后更新
+            s.finalAnswer = callResult.value();
+            return s;
+        }
+
+        @Override
+        public KernelResult<String> evaluate(ReActState s, int stepIndex) {
+            int stepNo = stepIndex + 1;
+            String thought = s.finalAnswer;
+
+            boolean hasToolCall = explicitToolExecutioner.hasActionLine(thought);
+            String action = explicitToolExecutioner.describeAction(thought, hasToolCall);
+            // 手动循环主路径(所有模型):LLM 文本输出 Thought + Action,引擎解析 Action 后
+            // 手动执行工具(经 Spring AOP 代理 → ToolRuntimeAspect 审计 + tracker 证据上报),
+            // 把结果作为 Observation 拼入历史进入下一轮。无 Action 行即最终答案,此处终止。
+            String observation = hasToolCall ? explicitToolExecutioner.execute(thought, tools, requestId) : "";
+            steps.add(new ReActStep(thought, action, observation));
+
+            if (emitter != null) {
+                try {
+                    // ReAct 三段式 trace — 每步 Thought/Action/Observation 各发一条。
+                    sseEventBridge.sendTrace(emitter, ctx, "ReAct Thought " + stepNo,
+                            "react", "thought", TextUtils.truncate(thought, 200), 0L);
+                    sseEventBridge.sendTrace(emitter, ctx, "ReAct Action " + stepNo,
+                            "react", "action", TextUtils.truncate(action, 200), 0L);
+                    if (StringUtils.hasText(observation)) {
+                        sseEventBridge.sendTrace(emitter, ctx, "ReAct Observation " + stepNo,
+                                "react", "observation", TextUtils.truncate(observation, 200), 0L);
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            s.history = buildReActHistory(steps);
+
+            // 终止判定:本轮无工具调用(纯最终答案)。read 直接完成;write/side_effect/
+            // dangerous 必须校验 tracker 工具证据(假完成守护,对齐 AutonomousLoop L309-345)。
+            if (!hasToolCall) {
+                if ("read".equals(riskLevel) || tracker.satisfiesCompletionCondition(riskLevel)) {
+                    log.info("ReAct 任务完成: requestId={}, steps={}, riskLevel={}, hasWrite={}, hasCmd={}, hasVerified={}",
+                            requestId, stepNo, riskLevel,
+                            tracker.hasWriteToolCall(), tracker.hasRunCommandCall(), tracker.hasVerifiedSideEffect());
+                    return KernelResult.terminal(null, "FINAL_ANSWER");
+                }
+                // 假完成:写/副作用/高风险任务无真实工具证据 → 拒绝,注入提示,继续循环。
+                String rejection = tracker.renderFakeCompletionRejection(riskLevel);
+                log.warn("ReAct 假完成拦截: requestId={}, steps={}, riskLevel={}, hasWrite={}, hasCmd={}, hasVerified={}",
+                        requestId, stepNo, riskLevel,
+                        tracker.hasWriteToolCall(), tracker.hasRunCommandCall(), tracker.hasVerifiedSideEffect());
+                if (emitter != null) {
+                    try {
+                        sseEventBridge.sendTrace(emitter, ctx, "ReAct 假完成拦截",
+                                "react", "warning",
+                                "模型声称完成但缺少真实操作证据，继续执行: "
+                                        + TextUtils.truncate(rejection, 200), 0L);
+                    } catch (Exception ignored) {}
+                }
+                s.history = buildReActHistory(steps) + "\n\n" + rejection;
+                return KernelResult.continuing(null);
+            }
+            return KernelResult.continuing(null);
+        }
+
+        @Override
+        public String composeAnswer(ChatContext ctx, ReActState s,
+                                    List<KernelResult<String>> kernelSteps) {
+            return StringUtils.hasText(s.finalAnswer) ? s.finalAnswer : "";
         }
     }
 

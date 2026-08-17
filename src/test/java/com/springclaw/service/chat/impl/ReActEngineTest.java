@@ -354,6 +354,9 @@ class ReActEngineTest {
      * 依赖签名与 AutonomousLoopEngine 一致(见该类构造函数)。
      */
     private final RunLifecycleObserver lifecycleObserver = mock(RunLifecycleObserver.class);
+    private final com.springclaw.service.agent.kernel.AgentLoopKernel loopKernel =
+            new com.springclaw.service.agent.kernel.AgentLoopKernel(
+                    mock(ModelCallExecutor.class), lifecycleObserver);
 
     private ReActEngine newReActEngine() {
         return new ReActEngine(
@@ -369,6 +372,7 @@ class ReActEngineTest {
                 mock(ChatGuardService.class),
                 lifecycleObserver,
                 new ExplicitToolExecutioner(),
+                loopKernel,
                 6
         );
     }
@@ -394,6 +398,7 @@ class ReActEngineTest {
                 mock(ChatGuardService.class),
                 lifecycleObserver,
                 new ExplicitToolExecutioner(),
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(executor, lifecycleObserver),
                 maxReactSteps
         );
     }

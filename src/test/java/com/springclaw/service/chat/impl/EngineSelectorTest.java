@@ -155,6 +155,9 @@ class EngineSelectorTest {
                 mock(ConversationAdvisorSupport.class),
                 mock(LocalExecutionSupport.class),
                 mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class),
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(
+                        mock(ModelCallExecutor.class),
+                        mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class)),
                 true,
                 true,
                 3

@@ -46,6 +46,8 @@ class OparLoopEngineDecisionTest {
                 mock(ConversationAdvisorSupport.class),
                 localExecutionSupport,
                 lifecycleObserver,
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(
+                        modelCallExecutor, lifecycleObserver),
                 true,
                 false,
                 1
@@ -101,6 +103,9 @@ class OparLoopEngineDecisionTest {
                 mock(ConversationAdvisorSupport.class),
                 localExecutionSupport,
                 mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class),
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(
+                        modelCallExecutor,
+                        mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class)),
                 true,
                 false,
                 3

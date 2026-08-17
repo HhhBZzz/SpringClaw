@@ -80,6 +80,7 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
     private final ChatGuardService chatGuardService;
     private final RunLifecycleObserver lifecycleObserver;
     private final ExplicitToolExecutioner explicitToolExecutioner;
+    private final com.springclaw.service.agent.kernel.AgentLoopKernel loopKernel;
     private final int maxReplan;
 
     /**
@@ -104,6 +105,7 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
                              ChatGuardService chatGuardService,
                              RunLifecycleObserver lifecycleObserver,
                              ExplicitToolExecutioner explicitToolExecutioner,
+                             com.springclaw.service.agent.kernel.AgentLoopKernel loopKernel,
                              @Value("${springclaw.chat.max-replan:2}") int maxReplan) {
         this.aiProviderService = aiProviderService;
         this.toolOrchestrator = toolOrchestrator;
@@ -117,6 +119,7 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
         this.chatGuardService = chatGuardService;
         this.lifecycleObserver = lifecycleObserver;
         this.explicitToolExecutioner = explicitToolExecutioner;
+        this.loopKernel = loopKernel;
         this.maxReplan = Math.max(0, Math.min(maxReplan, 5));
     }
 
@@ -248,141 +251,25 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
 
         List<PlanStep> plan = new ArrayList<>();
         List<ExecuteStep> executedSteps = new ArrayList<>();
-        String lastFeedback = "";
 
         try (ToolExecutionContextHolder.Scope scope = ToolExecutionContextHolder.open(toolContext)) {
             ToolExecutionContextHolder.setTracker(tracker);
 
-            for (int replanNo = 0; replanNo <= maxReplan; replanNo++) {
-              try (RunLifecycleObserver.StepScope replanStep =
-                             lifecycleObserver.beginStep(requestId, replanNo, "replan")) {
-                // (Re-)Plan:每次循环开头产出计划(首次 feedback 为空,重规划带失败/假完成反馈)
-                plan = runPlan(ctx, activeClient, tools, lastFeedback);
-                if (plan.isEmpty()) {
-                    // M1:空计划与 max-replan 兜底消息区分——Plan 阶段未产出有效步骤是 Planner 失败,
-                    // 与"循环跑满 max-replan"语义不同,返回独立的终态消息避免混淆。
-                    log.warn("PlanExecute plan 为空,终止循环: requestId={}, replanNo={}", requestId, replanNo);
-                    String emptyPlanMsg = replanNo == 0
-                            ? "Plan 阶段未生成有效步骤"
-                            : "Replan #" + replanNo + " 后仍未生成有效步骤";
-                    return finalResult(ctx, plan, executedSteps, emptyPlanMsg, true);
-                }
-                if (emitter != null) {
-                    try {
-                        sseEventBridge.sendTrace(emitter, ctx,
-                                "Plan-Execute Plan(第 " + (replanNo + 1) + " 次)", "plan-execute", "plan",
-                                "生成 " + plan.size() + " 步计划"
-                                        + (replanNo == 0 ? "" : "(Replan #" + replanNo + ")"), 0L);
-                        sseEventBridge.sendStatus(emitter,
-                                "Plan-Execute 执行中(第 " + (replanNo + 1) + " 次规划)");
-                    } catch (Exception ignored) {}
-                }
+            // 外层 replan 循环骨架(步进/step 边界事件/max-steps 兜底)下沉 AgentLoopKernel;
+            // 内层 Execute 逐步留在 nextStep 内部(一步 replan = 内部子序列,不发独立 step 事件,
+            // 与 Phase 1 埋点语义一致)。
+            com.springclaw.service.agent.kernel.AgentLoopKernel.LoopOutcome<String> outcome =
+                    loopKernel.runLoop(
+                            new ReplanSpec(ctx, emitter, requestId, riskLevel, tools, allowFailover,
+                                    activeClient, tracker, plan, executedSteps),
+                            new com.springclaw.service.agent.kernel.LoopContext(ctx, loopKernel));
 
-                // Execute 逐步:LLM 据 stepText + history → Thought+Action 文本,引擎手动执行工具
-                String history = "";
-                boolean failed = false;
-                int planSize = plan.size();
-                for (int i = 0; i < planSize; i++) {
-                    PlanStep step = plan.get(i);
-                    int stepIndex = i + 1;
-                    log.info("PlanExecute 步骤 {}/{}: requestId={}, replanNo={}, riskLevel={}",
-                            stepIndex, planSize, requestId, replanNo, riskLevel);
-                    if (emitter != null) {
-                        try {
-                            sseEventBridge.sendStatus(emitter, "Execute 步 " + stepIndex + "/" + planSize);
-                        } catch (Exception e) {
-                            log.warn("SSE 进度事件发送失败(可能客户端已断开): stepIndex={}", stepIndex);
-                        }
-                    }
-
-                    ModelCallExecutor.ModelCallResult<String> stepResult = callLlmForStep(
-                            ctx, step, stepIndex, planSize, history, tools, activeClient, requestId, allowFailover);
-                    activeClient = stepResult.client(); // failover 后更新
-                    String thought = stepResult.value();
-
-                    boolean hasAction = explicitToolExecutioner.hasActionLine(thought);
-                    String observation = hasAction
-                            ? explicitToolExecutioner.execute(thought, tools, requestId) : "";
-                    executedSteps.add(new ExecuteStep(step, thought, observation));
-                    history += buildStepHistory(step, thought, observation, stepIndex);
-
-                    if (emitter != null) {
-                        try {
-                            // Execute 三段式 trace — 每步 Thought/Action/Observation(模仿 ReActEngine L305-313)
-                            sseEventBridge.sendTrace(emitter, ctx, "Plan-Execute Thought " + stepIndex,
-                                    "plan-execute", "thought", TextUtils.truncate(thought, 200), 0L);
-                            if (hasAction) {
-                                sseEventBridge.sendTrace(emitter, ctx, "Plan-Execute Action " + stepIndex,
-                                        "plan-execute", "action",
-                                        TextUtils.truncate(explicitToolExecutioner.describeAction(thought, true), 200), 0L);
-                                sseEventBridge.sendTrace(emitter, ctx, "Plan-Execute Observation " + stepIndex,
-                                        "plan-execute", "observation", TextUtils.truncate(observation, 200), 0L);
-                            }
-                        } catch (Exception ignored) {}
-                    }
-
-                    if (stepFailed(observation, thought, hasAction)) {
-                        failed = true;
-                        log.warn("PlanExecute 步骤 {} 失败,触发 Replan: requestId={}, observation={}",
-                                stepIndex, requestId, TextUtils.truncate(observation, 200));
-                        if (emitter != null) {
-                            try {
-                                sseEventBridge.sendTrace(emitter, ctx, "Plan-Execute 步骤失败",
-                                        "plan-execute", "warning",
-                                        "步骤 " + stepIndex + " 执行失败,触发 Replan: "
-                                                + TextUtils.truncate(observation, 200), 0L);
-                            } catch (Exception ignored) {}
-                        }
-                        break;
-                    }
-                }
-
-                if (!failed) {
-                    // 假完成守护(对齐 AutonomousLoopEngine L317-345 + ReActEngine L320-342):
-                    // read 直接完成;write/side_effect/dangerous 必须校验 tracker 工具证据。
-                    if ("read".equals(riskLevel) || tracker.satisfiesCompletionCondition(riskLevel)) {
-                        log.info("PlanExecute 任务完成: requestId={}, replanNo={}, riskLevel={}, planSteps={}, "
-                                        + "hasWrite={}, hasCmd={}, hasVerified={}",
-                                requestId, replanNo, riskLevel, planSize,
-                                tracker.hasWriteToolCall(), tracker.hasRunCommandCall(), tracker.hasVerifiedSideEffect());
-                        String lastAnswer = executedSteps.isEmpty() ? ""
-                                : executedSteps.get(executedSteps.size() - 1).thought();
-                        return finalResult(ctx, plan, executedSteps, lastAnswer, true);
-                    }
-                    // 假完成 → Replan(带 rejection 反馈)
-                    String rejection = tracker.renderFakeCompletionRejection(riskLevel);
-                    log.warn("PlanExecute 假完成拦截: requestId={}, replanNo={}, riskLevel={}, hasWrite={}, hasCmd={}",
-                            requestId, replanNo, riskLevel,
-                            tracker.hasWriteToolCall(), tracker.hasRunCommandCall());
-                    if (emitter != null) {
-                        try {
-                            sseEventBridge.sendTrace(emitter, ctx, "Plan-Execute 假完成拦截",
-                                    "plan-execute", "warning",
-                                    "计划执行完但缺少真实工具证据,Replan: "
-                                            + TextUtils.truncate(rejection, 200), 0L);
-                        } catch (Exception ignored) {}
-                    }
-                    lastFeedback = "上次计划已执行完,但缺少真实工具证据,假完成被拦截:\n"
-                            + buildExecutedHistory(executedSteps) + "\n" + rejection
-                            + "\n请调整 plan,确保步骤实际调用工具产生真实副作用。";
-                    continue; // 下一次 replan(不调失败反馈分支)
-                }
-
-                // 步骤失败 → Replan(带失败反馈)
-                lastFeedback = "上次执行有步骤失败,请调整 plan。上次执行反馈:\n"
-                        + buildExecutedHistory(executedSteps)
-                        + "\n请基于失败信息重新规划,避开导致失败的工具或做法。";
-                if (emitter != null) {
-                    try {
-                        sseEventBridge.sendTrace(emitter, ctx, "Plan-Execute Replan #" + (replanNo + 1),
-                                "plan-execute", "replan",
-                                "步骤失败,带反馈重新规划。", 0L);
-                    } catch (Exception ignored) {}
-                }
-              }
+            PlanExecuteState s = (PlanExecuteState) outcome.finalState();
+            if (outcome.terminalBySpec()) {
+                return s.terminalResult != null ? s.terminalResult : finalResult(
+                        ctx, s.plan, executedSteps, s.lastAnswer, true);
             }
-
-            // max-replan 兜底:返回当前最佳结果(对齐 ReActEngine L346-348 的 max-steps 兜底)
+            // max-replan 兜底:返回当前最佳结果(对齐 ReActEngine 的 max-steps 兜底)
             log.info("PlanExecute 达到 max-replan: requestId={}, maxReplan={}, executedSteps={}",
                     requestId, maxReplan, executedSteps.size());
             return finalResult(ctx, plan, executedSteps,
@@ -402,6 +289,224 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
             // scope close 只还原 ToolExecutionContext,不清 tracker ThreadLocal;
             // 手动 clear(对齐 AutonomousLoopEngine L387/390 / ReActEngine L363)。
             ToolExecutionContextHolder.clearTracker();
+        }
+    }
+
+    /** Plan-Execute 外层 replan 循环的可变步进状态(在 spec 的 nextStep 间演化)。 */
+    private static final class PlanExecuteState {
+        AiProviderService.ActiveChatClient activeClient;
+        List<PlanStep> plan;
+        String lastFeedback = "";
+        String lastAnswer = "";
+        ChatExecutionResult terminalResult;
+        boolean terminated;
+    }
+
+    /**
+     * Plan-Execute 范式策略(Phase 2 Task 12):只迁<b>外层</b> replan 循环——
+     * 一步 replan = (Re-)Plan 产出计划 + 内层 Execute 逐步执行(子序列,不发独立 step 事件)。
+     * 终止:计划空 / 全步执行完且过假完成守护 → terminal(PLAN_COMPLETE);否则 feedback 注入下一次 Plan。
+     */
+    private final class ReplanSpec
+            implements com.springclaw.service.agent.kernel.LoopSpec<PlanExecuteState, String> {
+
+        private final ChatContext ctx;
+        private final SseEmitter emitter;
+        private final String requestId;
+        private final String riskLevel;
+        private final Object[] tools;
+        private final boolean allowFailover;
+        private final AiProviderService.ActiveChatClient initialClient;
+        private final AutonomousExecutionTracker tracker;
+        private final List<PlanStep> plan;
+        private final List<ExecuteStep> executedSteps;
+
+        ReplanSpec(ChatContext ctx, SseEmitter emitter, String requestId, String riskLevel,
+                   Object[] tools, boolean allowFailover,
+                   AiProviderService.ActiveChatClient initialClient,
+                   AutonomousExecutionTracker tracker,
+                   List<PlanStep> plan, List<ExecuteStep> executedSteps) {
+            this.ctx = ctx;
+            this.emitter = emitter;
+            this.requestId = requestId;
+            this.riskLevel = riskLevel;
+            this.tools = tools;
+            this.allowFailover = allowFailover;
+            this.initialClient = initialClient;
+            this.tracker = tracker;
+            this.plan = plan;
+            this.executedSteps = executedSteps;
+        }
+
+        @Override public int maxSteps() { return maxReplan + 1; } // replanNo=0..maxReplan 含端点
+        @Override public String stepKind() { return "replan"; }
+        @Override public PlanExecuteState initState(ChatContext ctx) {
+            PlanExecuteState s = new PlanExecuteState();
+            s.activeClient = initialClient;
+            s.plan = new ArrayList<>();
+            return s;
+        }
+
+        @Override
+        public PlanExecuteState nextStep(com.springclaw.service.agent.kernel.LoopContext loopCtx,
+                                         PlanExecuteState s, int replanNo) {
+            // (Re-)Plan:每次循环开头产出计划(首次 feedback 为空,重规划带失败/假完成反馈)
+            try {
+                s.plan = runPlan(ctx, s.activeClient, tools, s.lastFeedback);
+            } catch (Exception e) {
+                if (e instanceof RuntimeException runtimeEx) throw runtimeEx;
+                throw new IllegalStateException("PlanExecute Plan 调用失败: " + e.getMessage(), e);
+            }
+            if (s.plan.isEmpty()) {
+                // M1:空计划与 max-replan 兜底消息区分——Plan 阶段未产出有效步骤是 Planner 失败。
+                log.warn("PlanExecute plan 为空,终止循环: requestId={}, replanNo={}", requestId, replanNo);
+                String emptyPlanMsg = replanNo == 0
+                        ? "Plan 阶段未生成有效步骤"
+                        : "Replan #" + replanNo + " 后仍未生成有效步骤";
+                s.terminalResult = finalResult(ctx, s.plan, executedSteps, emptyPlanMsg, true);
+                s.terminated = true;
+                plan.clear();
+                plan.addAll(s.plan);
+                return s;
+            }
+            plan.clear();
+            plan.addAll(s.plan);
+            if (emitter != null) {
+                try {
+                    sseEventBridge.sendTrace(emitter, ctx,
+                            "Plan-Execute Plan(第 " + (replanNo + 1) + " 次)", "plan-execute", "plan",
+                            "生成 " + s.plan.size() + " 步计划"
+                                    + (replanNo == 0 ? "" : "(Replan #" + replanNo + ")"), 0L);
+                    sseEventBridge.sendStatus(emitter,
+                            "Plan-Execute 执行中(第 " + (replanNo + 1) + " 次规划)");
+                } catch (Exception ignored) {}
+            }
+
+            // Execute 逐步:LLM 据 stepText + history → Thought+Action 文本,引擎手动执行工具
+            String history = "";
+            boolean failed = false;
+            int planSize = s.plan.size();
+            for (int i = 0; i < planSize; i++) {
+                PlanStep step = s.plan.get(i);
+                int stepIndex = i + 1;
+                log.info("PlanExecute 步骤 {}/{}: requestId={}, replanNo={}, riskLevel={}",
+                        stepIndex, planSize, requestId, replanNo, riskLevel);
+                if (emitter != null) {
+                    try {
+                        sseEventBridge.sendStatus(emitter, "Execute 步 " + stepIndex + "/" + planSize);
+                    } catch (Exception e) {
+                        log.warn("SSE 进度事件发送失败(可能客户端已断开): stepIndex={}", stepIndex);
+                    }
+                }
+
+                ModelCallExecutor.ModelCallResult<String> stepResult;
+                try {
+                    stepResult = callLlmForStep(ctx, step, stepIndex, planSize, history, tools,
+                            s.activeClient, requestId, allowFailover);
+                } catch (Exception e) {
+                    if (e instanceof RuntimeException runtimeEx) throw runtimeEx;
+                    throw new IllegalStateException("PlanExecute Execute 调用失败: " + e.getMessage(), e);
+                }
+                s.activeClient = stepResult.client(); // failover 后更新
+                String thought = stepResult.value();
+
+                boolean hasAction = explicitToolExecutioner.hasActionLine(thought);
+                String observation = hasAction
+                        ? explicitToolExecutioner.execute(thought, tools, requestId) : "";
+                executedSteps.add(new ExecuteStep(step, thought, observation));
+                history += buildStepHistory(step, thought, observation, stepIndex);
+
+                if (emitter != null) {
+                    try {
+                        // Execute 三段式 trace — 每步 Thought/Action/Observation
+                        sseEventBridge.sendTrace(emitter, ctx, "Plan-Execute Thought " + stepIndex,
+                                "plan-execute", "thought", TextUtils.truncate(thought, 200), 0L);
+                        if (hasAction) {
+                            sseEventBridge.sendTrace(emitter, ctx, "Plan-Execute Action " + stepIndex,
+                                    "plan-execute", "action",
+                                    TextUtils.truncate(explicitToolExecutioner.describeAction(thought, true), 200), 0L);
+                            sseEventBridge.sendTrace(emitter, ctx, "Plan-Execute Observation " + stepIndex,
+                                    "plan-execute", "observation", TextUtils.truncate(observation, 200), 0L);
+                        }
+                    } catch (Exception ignored) {}
+                }
+
+                if (stepFailed(observation, thought, hasAction)) {
+                    failed = true;
+                    log.warn("PlanExecute 步骤 {} 失败,触发 Replan: requestId={}, observation={}",
+                            stepIndex, requestId, TextUtils.truncate(observation, 200));
+                    if (emitter != null) {
+                        try {
+                            sseEventBridge.sendTrace(emitter, ctx, "Plan-Execute 步骤失败",
+                                    "plan-execute", "warning",
+                                    "步骤 " + stepIndex + " 执行失败,触发 Replan: "
+                                            + TextUtils.truncate(observation, 200), 0L);
+                        } catch (Exception ignored) {}
+                    }
+                    break;
+                }
+            }
+
+            if (!failed) {
+                // 假完成守护(对齐 AutonomousLoopEngine + ReActEngine):read 直接完成;
+                // write/side_effect/dangerous 必须校验 tracker 工具证据。
+                if ("read".equals(riskLevel) || tracker.satisfiesCompletionCondition(riskLevel)) {
+                    log.info("PlanExecute 任务完成: requestId={}, replanNo={}, riskLevel={}, planSteps={}, "
+                                    + "hasWrite={}, hasCmd={}, hasVerified={}",
+                            requestId, replanNo, riskLevel, planSize,
+                            tracker.hasWriteToolCall(), tracker.hasRunCommandCall(), tracker.hasVerifiedSideEffect());
+                    String lastAnswer = executedSteps.isEmpty() ? ""
+                            : executedSteps.get(executedSteps.size() - 1).thought();
+                    s.lastAnswer = lastAnswer;
+                    s.terminalResult = finalResult(ctx, s.plan, executedSteps, lastAnswer, true);
+                    s.terminated = true;
+                    return s;
+                }
+                // 假完成 → Replan(带 rejection 反馈)
+                String rejection = tracker.renderFakeCompletionRejection(riskLevel);
+                log.warn("PlanExecute 假完成拦截: requestId={}, replanNo={}, riskLevel={}, hasWrite={}, hasCmd={}",
+                        requestId, replanNo, riskLevel,
+                        tracker.hasWriteToolCall(), tracker.hasRunCommandCall());
+                if (emitter != null) {
+                    try {
+                        sseEventBridge.sendTrace(emitter, ctx, "Plan-Execute 假完成拦截",
+                                "plan-execute", "warning",
+                                "计划执行完但缺少真实工具证据,Replan: "
+                                        + TextUtils.truncate(rejection, 200), 0L);
+                    } catch (Exception ignored) {}
+                }
+                s.lastFeedback = "上次计划已执行完,但缺少真实工具证据,假完成被拦截:\n"
+                        + buildExecutedHistory(executedSteps) + "\n" + rejection
+                        + "\n请调整 plan,确保步骤实际调用工具产生真实副作用。";
+                return s; // 下一次 replan(不调失败反馈分支)
+            }
+
+            // 步骤失败 → Replan(带失败反馈)
+            s.lastFeedback = "上次执行有步骤失败,请调整 plan。上次执行反馈:\n"
+                    + buildExecutedHistory(executedSteps)
+                    + "\n请基于失败信息重新规划,避开导致失败的工具或做法。";
+            if (emitter != null) {
+                try {
+                    sseEventBridge.sendTrace(emitter, ctx, "Plan-Execute Replan #" + (replanNo + 1),
+                            "plan-execute", "replan",
+                            "步骤失败,带反馈重新规划。", 0L);
+                } catch (Exception ignored) {}
+            }
+            return s;
+        }
+
+        @Override
+        public com.springclaw.service.agent.kernel.KernelResult<String> evaluate(
+                PlanExecuteState s, int stepIndex) {
+            return s.terminated
+                    ? com.springclaw.service.agent.kernel.KernelResult.terminal(null, "PLAN_COMPLETE")
+                    : com.springclaw.service.agent.kernel.KernelResult.continuing(null);
+        }
+
+        @Override
+        public String composeAnswer(ChatContext ctx, PlanExecuteState s,
+                                    List<com.springclaw.service.agent.kernel.KernelResult<String>> steps) {
+            return s.lastAnswer;
         }
     }
 

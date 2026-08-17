@@ -490,6 +490,7 @@ class PlanExecuteEngineTest {
                 mock(ChatGuardService.class),
                 lifecycleObserver,
                 new ExplicitToolExecutioner(),
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(executor, lifecycleObserver),
                 2
         );
     }
@@ -516,6 +517,7 @@ class PlanExecuteEngineTest {
                 mock(ChatGuardService.class),
                 lifecycleObserver,
                 toolExecutioner,
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(executor, lifecycleObserver),
                 maxReplan
         );
     }
@@ -538,6 +540,8 @@ class PlanExecuteEngineTest {
                 mock(ChatGuardService.class),
                 lifecycleObserver,
                 new ExplicitToolExecutioner(),
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(
+                        mock(ModelCallExecutor.class), lifecycleObserver),
                 2
         );
     }

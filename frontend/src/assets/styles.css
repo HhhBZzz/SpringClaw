@@ -1618,6 +1618,49 @@ textarea { font-family: var(--font); }
 .trace-row.is-success .trace-dot { background: var(--green); box-shadow: 0 0 0 5px var(--green-soft); }
 .trace-row.is-failed .trace-dot { background: var(--red); box-shadow: 0 0 0 5px rgba(217, 48, 37, 0.1); }
 .trace-row.is-started .trace-dot { background: var(--amber); box-shadow: 0 0 0 5px rgba(249, 171, 0, 0.12); }
+.trace-row.is-completed .trace-dot { background: var(--green); box-shadow: 0 0 0 5px var(--green-soft); }
+.trace-row.is-running .trace-dot { background: var(--amber); box-shadow: 0 0 0 5px rgba(249, 171, 0, 0.12); }
+.trace-row.is-pending .trace-dot { background: var(--blue); box-shadow: 0 0 0 5px rgba(26, 115, 232, 0.08); }
+
+.trace-turn {
+  display: grid;
+  gap: 6px;
+  padding: 8px 0 2px;
+  border-top: 1px dashed rgba(60, 64, 67, 0.14);
+}
+
+.trace-turn-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.trace-turn-head strong {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 820;
+}
+
+.trace-turn-head em {
+  font-style: normal;
+  font-weight: 760;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(60, 64, 67, 0.16);
+}
+
+.trace-turn-badge {
+  padding: 1px 6px;
+  border-radius: 8px;
+  border: 1px dashed rgba(60, 64, 67, 0.24);
+  font-size: 9px;
+  font-weight: 820;
+}
 
 .trace-row strong,
 .trace-row small {

@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentTraceEvent } from '../../types';
 import type { CanvasNode } from './types';
-import { advanceFrame, enrichNodeFromTrace, primaryNodeIdOf, routeTraceEvent, traceLoc, traceToLogLine } from './traceDriver';
+import { advanceFrame, drivesFrameAdvance, enrichNodeFromTrace, primaryNodeIdOf, routeTraceEvent, traceLoc, traceToLogLine } from './traceDriver';
 
 const baseNode: CanvasNode = { id: 'a1', kind: 'action', label: 'Attempt 1', x: 10, y: 10, status: 'idle', detail: 'demo 文案', loc: 'demo.java:1' };
+
+function canonical(action: string): AgentTraceEvent {
+  return { stepName: action, type: 'agent', status: 'success', category: 'runtime', action, source: 'canonical' };
+}
 
 describe('traceDriver', () => {
   it('advanceFrame 从 -1 起步,首事件落 frame 0,之后逐帧,封顶', () => {
@@ -60,5 +64,19 @@ describe('traceDriver', () => {
       .toBe('search [tool] (success) — 6 命中');
     expect(traceToLogLine({ stepName: 'plan', type: 'agent', status: 'started' }))
       .toBe('plan [agent] (started)');
+  });
+
+  // === canonical 边界感知帧推进 ===
+
+  it('drivesFrameAdvance: turn/step 边界事件驱动帧推进,内层/legacy 事件不占帧', () => {
+    expect(drivesFrameAdvance(canonical('turn.started'))).toBe(true);
+    expect(drivesFrameAdvance(canonical('step.started'))).toBe(true);
+    expect(drivesFrameAdvance(canonical('step.completed'))).toBe(true);
+    expect(drivesFrameAdvance(canonical('turn.completed'))).toBe(true);
+    // 内层事件不驱动(它们是 step 的内部细节)
+    expect(drivesFrameAdvance(canonical('model.called'))).toBe(false);
+    expect(drivesFrameAdvance(canonical('tool.succeeded'))).toBe(false);
+    // legacy 事件(无 canonical source)保持原语义:占帧
+    expect(drivesFrameAdvance({ stepName: 'search', type: 'tool', status: 'success' })).toBe(true);
   });
 });

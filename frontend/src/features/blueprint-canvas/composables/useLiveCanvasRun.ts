@@ -12,7 +12,7 @@ import { readToken, streamChat } from '../../../services/api';
 import type { AgentParadigm, AgentTraceEvent } from '../../../types';
 import type { CanvasRunFrame, ParadigmBlueprint } from '../types';
 import { cloneBlueprint } from './useParadigmTopology';
-import { routeTraceEvent, traceToLogLine } from '../traceDriver';
+import { routeTraceEvent, drivesFrameAdvance, traceToLogLine } from '../traceDriver';
 
 export type LiveStatus = 'idle' | 'running' | 'done' | 'error';
 
@@ -72,6 +72,14 @@ export function useLiveCanvasRun(opts: UseLiveCanvasRunOptions) {
           onTrace: (ev: AgentTraceEvent) => {
             if (!blueprint) return;
             const total = blueprint.frames.length;
+            // canonical 边界感知:只有 turn/step 边界推进帧;内层事件溢出到当前帧
+            // 主节点 X-Ray(它们是 step 的内部细节,不占拓扑帧)。legacy 每事件一帧不变。
+            if (!drivesFrameAdvance(ev)) {
+              const currentFrame = blueprint.frames[Math.max(frameIndex, 0)];
+              const activeId = currentFrame?.nodeIds[0];
+              if (activeId) opts.onOverflow(activeId, traceToLogLine(ev), ev);
+              return;
+            }
             const route = routeTraceEvent(frameIndex, total);
             frameIndex = route.frameIndex;
             if (route.type === 'advance') {

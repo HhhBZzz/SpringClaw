@@ -63,7 +63,8 @@ class ToolRuntimeAspectGuardTest {
         workspaceGitGuard = Mockito.mock(WorkspaceGitGuard.class);
         aspect = new ToolRuntimeAspect(
                 toolGuardService, toolAuditService, toolPermissionService,
-                capabilityRegistry, snapshotService, proposalService, workspaceGitGuard, toolGateway
+                capabilityRegistry, snapshotService, proposalService, workspaceGitGuard, toolGateway,
+                new com.springclaw.service.context.ToolResultPruner()
         );
         ToolExecutionContextHolder.clearApprovedProposal();
     }

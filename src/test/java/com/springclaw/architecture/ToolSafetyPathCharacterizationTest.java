@@ -189,7 +189,8 @@ class ToolSafetyPathCharacterizationTest {
                     snapshotService,
                     proposalService,
                     workspaceGitGuard,
-                    toolGateway
+                    toolGateway,
+                    new com.springclaw.service.context.ToolResultPruner()
             );
         }
     }

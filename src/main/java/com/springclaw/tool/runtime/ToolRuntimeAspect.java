@@ -53,6 +53,7 @@ public class ToolRuntimeAspect {
     private final ToolInvocationProposalService proposalService;
     private final WorkspaceGitGuard workspaceGitGuard;
     private final ToolGateway toolGateway;
+    private final com.springclaw.service.context.ToolResultPruner toolResultPruner;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private ObjectProvider<RunCoordinator> runCoordinatorProvider;
@@ -64,7 +65,8 @@ public class ToolRuntimeAspect {
                              ToolInvocationSnapshotService snapshotService,
                              ToolInvocationProposalService proposalService,
                              WorkspaceGitGuard workspaceGitGuard,
-                             ToolGateway toolGateway) {
+                             ToolGateway toolGateway,
+                             com.springclaw.service.context.ToolResultPruner toolResultPruner) {
         this.toolGuardService = toolGuardService;
         this.toolAuditService = toolAuditService;
         this.toolPermissionService = toolPermissionService;
@@ -73,6 +75,7 @@ public class ToolRuntimeAspect {
         this.proposalService = proposalService;
         this.workspaceGitGuard = workspaceGitGuard;
         this.toolGateway = toolGateway;
+        this.toolResultPruner = toolResultPruner;
     }
 
     @Around("@annotation(org.springframework.ai.tool.annotation.Tool)")
@@ -113,11 +116,15 @@ public class ToolRuntimeAspect {
                     toolGuardService.checkRateLimit(inv.toolName());
                     return ToolInvocationPipeline.GuardDecision.proceed();
                 })
-                // execute:read 旧路径(canonical emit + proceed)/write proposal 分支
-                .onExecute(inv -> requiresProposal
-                        ? executeWriteWithProposal(joinPoint, approvedOrNull(), genericToolName,
-                                simpleClass, inv.args(), riskLevel)
-                        : proceedWithTimeline(joinPoint, context, inv.toolName()))
+                // execute:read 旧路径(canonical emit + proceed)/write proposal 分支;
+                // String 结果超预算免模型剪枝(头/尾保留+marker,dsh tool-result-pruner)
+                .onExecute(inv -> {
+                    Object result = requiresProposal
+                            ? executeWriteWithProposal(joinPoint, approvedOrNull(), genericToolName,
+                                    simpleClass, inv.args(), riskLevel)
+                            : proceedWithTimeline(joinPoint, context, inv.toolName());
+                    return pruneIfString(result);
+                })
                 // complete:审计收尾(SUCCESS/FAILED)+ PENDING_APPROVAL 透传
                 .onComplete((inv, outcome) -> {
                     if ("success".equals(outcome.status())) {
@@ -139,6 +146,14 @@ public class ToolRuntimeAspect {
 
     private ApprovedProposalContext approvedOrNull() {
         return ToolExecutionContextHolder.getApprovedProposal();
+    }
+
+    /** String 工具结果超预算剪枝;非 String 结果透传。 */
+    private Object pruneIfString(Object result) {
+        if (result instanceof String text) {
+            return toolResultPruner.prune(text);
+        }
+        return result;
     }
 
     private Object proceedWithTimeline(ProceedingJoinPoint joinPoint, ToolExecutionContext context,

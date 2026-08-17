@@ -103,6 +103,8 @@ public class GitOperations {
             ProcessBuilder pb = new ProcessBuilder(cmd)
                     .directory(workspaceRoot.toFile())
                     .redirectErrorStream(true);
+            // 子进程环境清洗:剥离凭证类变量(git config -z / env 输出不外泄)
+            com.springclaw.common.util.SubprocessEnvironmentSanitizer.applyTo(pb);
             Process p = pb.start();
             String out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             if (!p.waitFor(15, TimeUnit.SECONDS)) {

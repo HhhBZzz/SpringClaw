@@ -1,6 +1,7 @@
 package com.springclaw.tool.pack;
 
 import com.springclaw.common.exception.BusinessException;
+import com.springclaw.common.util.SubprocessEnvironmentSanitizer;
 import com.springclaw.tool.runtime.ToolPackDescriptor;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -130,6 +131,8 @@ public class SystemToolPack {
 
         ProcessBuilder processBuilder = new ProcessBuilder(parts);
         processBuilder.redirectErrorStream(true);
+        // 子进程环境清洗:剥离凭证类变量,防 LLM 经 env 输出读取 API key
+        SubprocessEnvironmentSanitizer.applyTo(processBuilder);
 
         try {
             Process process = processBuilder.start();

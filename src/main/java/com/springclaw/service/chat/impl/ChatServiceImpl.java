@@ -264,6 +264,11 @@ public class ChatServiceImpl implements ChatService {
                 lifecycleObserver.executionStarted(context, engine.name(), Instant.now());
                 lifecycleObserver.turnStarted(
                         context.requestId(), context.responseMode(), Instant.now());
+                // 对话语义:用户问题原文进 canonical 事件日志
+                // (spec 2026-08-17-canonical-conversation-history §3.1,双轨写:message_event 照写)
+                lifecycleObserver.userMessage(
+                        context.requestId(), context.effectiveUserMessage(),
+                        context.responseMode(), Instant.now());
             }
             if (shouldRequestActionConfirmation(context)) {
                 streamActionRequired(context, lockToken, lockReleased, emitter);
@@ -678,6 +683,11 @@ public class ChatServiceImpl implements ChatService {
                 lifecycleObserver.executionStarted(context, engine.name(), Instant.now());
                 lifecycleObserver.turnStarted(
                         context.requestId(), context.responseMode(), Instant.now());
+                // 对话语义:用户问题原文进 canonical 事件日志
+                // (spec 2026-08-17-canonical-conversation-history §3.1,双轨写:message_event 照写)
+                lifecycleObserver.userMessage(
+                        context.requestId(), context.effectiveUserMessage(),
+                        context.responseMode(), Instant.now());
             }
             ChatExecutionResult executionResult;
             try {

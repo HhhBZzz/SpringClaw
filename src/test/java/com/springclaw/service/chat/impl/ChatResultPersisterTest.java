@@ -107,6 +107,26 @@ class ChatResultPersisterTest {
     }
 
     @Test
+    void terminalResultEmitsCanonicalAssistantAnswerAlongsideMessageEvents() {
+        // spec 2026-08-17-canonical-conversation-history §3.1:双轨写——
+        // 终端持久化时最终答案同时进 canonical 事件日志(observer 可选,null 时跳过)。
+        com.springclaw.runtime.bridge.RunLifecycleObserver observer =
+                mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class);
+        ChatResultPersister persister = new ChatResultPersister(
+                agentSessionService, messageEventService, soulPromptService,
+                shortTermMemoryWriter, memoryExtractionTrigger,
+                new MemoryUsageTraceEvaluator(), observer);
+        ChatContext context = context();
+        ChatExecutionResult result = new ChatExecutionResult(
+                "observe", "PLAN", "ACT", "answer", true);
+
+        persister.persist(context, "answer", result, ChatPersistenceIntent.TERMINAL_RESULT);
+
+        verify(observer).assistantAnswer(
+                eq("req-1"), eq("answer"), eq("FINAL"), any());
+    }
+
+    @Test
     void terminalResultShadowWritesUserAndAssistantWithStableReceipts() {
         ChatResultPersister persister = persister();
         ChatContext context = context();

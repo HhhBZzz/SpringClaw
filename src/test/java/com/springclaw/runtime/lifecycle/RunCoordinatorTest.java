@@ -411,6 +411,47 @@ class RunCoordinatorTest {
     }
 
     @Test
+    void conversationSemanticsEventsCarryQuestionAndAnswerPayload() {
+        // spec 2026-08-17-canonical-conversation-history §3.1:
+        // user.message/assistant.answer 是 observation(不改状态机),payload 携带对话原文。
+        coordinator.accept(acceptance());
+        coordinator.contextReady(RUN_ID, snapshot(), T0.plusSeconds(1));
+        coordinator.decided(RUN_ID, decision(), T0.plusSeconds(2));
+        coordinator.userMessage(RUN_ID, "分析当前项目架构", "blocking", T0.plusSeconds(3));
+        coordinator.running(RUN_ID, "agent-runtime", T0.plusSeconds(4));
+        coordinator.verifying(RUN_ID, T0.plusSeconds(5));
+        coordinator.completed(
+                RUN_ID,
+                completion(CompletionDecision.Outcome.COMPLETE, T0.plusSeconds(6)),
+                result(RunStatus.COMPLETED, T0.plusSeconds(6)),
+                T0.plusSeconds(6)
+        );
+        coordinator.assistantAnswer(RUN_ID, "项目分层为 controller/service/tool", "FINAL", T0.plusSeconds(7));
+
+        RunState state = store.requireByRunId(RUN_ID);
+        assertThat(state.status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(store.findEventsByRunId(RUN_ID))
+                .extracting(RunEvent::eventType)
+                .containsSubsequence(
+                        RunEventType.RUN_CREATED,
+                        RunEventType.USER_MESSAGE,
+                        RunEventType.RUN_COMPLETED,
+                        RunEventType.ASSISTANT_ANSWER
+                );
+        List<RunEvent> events = store.findEventsByRunId(RUN_ID);
+        RunEvent userMessage = events.stream()
+                .filter(e -> e.eventType() == RunEventType.USER_MESSAGE).findFirst().orElseThrow();
+        RunEvent assistantAnswer = events.stream()
+                .filter(e -> e.eventType() == RunEventType.ASSISTANT_ANSWER).findFirst().orElseThrow();
+        assertThat(userMessage.payload())
+                .contains("\"question\":\"分析当前项目架构\"")
+                .contains("\"responseMode\":\"blocking\"");
+        assertThat(assistantAnswer.payload())
+                .contains("\"answer\":\"项目分层为 controller/service/tool\"")
+                .contains("\"answerKind\":\"FINAL\"");
+    }
+
+    @Test
     void legacyNoPayloadOverloadsKeepLifecycleSchema() {
         coordinator.accept(acceptance());
         coordinator.modelCalled(RUN_ID, T0.plusSeconds(1));

@@ -1,6 +1,7 @@
 package com.springclaw.service.chat.impl;
 
 import com.springclaw.common.util.TextUtils;
+import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.service.event.MessageEventReceipt;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.event.MessageEventWrite;
@@ -30,13 +31,14 @@ public class ChatResultPersister {
     private final ShortTermMemoryWriter shortTermMemoryWriter;
     private final MemoryExtractionTrigger memoryExtractionTrigger;
     private final MemoryUsageTraceEvaluator memoryUsageTraceEvaluator;
+    private final RunLifecycleObserver lifecycleObserver;
 
     public ChatResultPersister(AgentSessionService agentSessionService,
                                MessageEventService messageEventService,
                                SoulPromptService soulPromptService,
                                ShortTermMemoryWriter shortTermMemoryWriter) {
         this(agentSessionService, messageEventService, soulPromptService,
-                shortTermMemoryWriter, null, null);
+                shortTermMemoryWriter, null, null, null);
     }
 
     public ChatResultPersister(AgentSessionService agentSessionService,
@@ -45,7 +47,17 @@ public class ChatResultPersister {
                                ShortTermMemoryWriter shortTermMemoryWriter,
                                MemoryExtractionTrigger memoryExtractionTrigger) {
         this(agentSessionService, messageEventService, soulPromptService,
-                shortTermMemoryWriter, memoryExtractionTrigger, null);
+                shortTermMemoryWriter, memoryExtractionTrigger, null, null);
+    }
+
+    public ChatResultPersister(AgentSessionService agentSessionService,
+                               MessageEventService messageEventService,
+                               SoulPromptService soulPromptService,
+                               ShortTermMemoryWriter shortTermMemoryWriter,
+                               MemoryExtractionTrigger memoryExtractionTrigger,
+                               MemoryUsageTraceEvaluator memoryUsageTraceEvaluator) {
+        this(agentSessionService, messageEventService, soulPromptService,
+                shortTermMemoryWriter, memoryExtractionTrigger, memoryUsageTraceEvaluator, null);
     }
 
     @Autowired
@@ -54,13 +66,15 @@ public class ChatResultPersister {
                                SoulPromptService soulPromptService,
                                ShortTermMemoryWriter shortTermMemoryWriter,
                                MemoryExtractionTrigger memoryExtractionTrigger,
-                               MemoryUsageTraceEvaluator memoryUsageTraceEvaluator) {
+                               MemoryUsageTraceEvaluator memoryUsageTraceEvaluator,
+                               RunLifecycleObserver lifecycleObserver) {
         this.agentSessionService = agentSessionService;
         this.messageEventService = messageEventService;
         this.soulPromptService = soulPromptService;
         this.shortTermMemoryWriter = shortTermMemoryWriter;
         this.memoryExtractionTrigger = memoryExtractionTrigger;
         this.memoryUsageTraceEvaluator = memoryUsageTraceEvaluator;
+        this.lifecycleObserver = lifecycleObserver;
     }
 
     public void persist(ChatContext context,
@@ -89,6 +103,12 @@ public class ChatResultPersister {
         );
         String assistantForMemory = normalizeAssistantForMemory(assistantMessage);
         String assistantEventContent = "[REFLECT] " + TextUtils.truncate(assistantForMemory, 1600);
+        // 对话语义:最终答案进 canonical 事件日志(双轨写:message_event 照写;
+        // spec 2026-08-17-canonical-conversation-history §3.1)
+        if (lifecycleObserver != null) {
+            lifecycleObserver.assistantAnswer(requestId, assistantForMemory,
+                    "FINAL", java.time.Instant.now());
+        }
         MessageEventReceipt userReceipt = messageEventService.append(new MessageEventWrite(
                 "chat:" + requestId + ":user", sessionKey, channel, userId,
                 "USER", "CHAT", context.effectiveUserMessage(), requestId));

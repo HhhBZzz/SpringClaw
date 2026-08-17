@@ -128,6 +128,16 @@ public class DefaultRunLifecycleBridge implements RunLifecycleBridge {
     }
 
     @Override
+    public void userMessage(String runId, String question, String responseMode, Instant at) {
+        coordinator.userMessage(runId, question, responseMode, at);
+    }
+
+    @Override
+    public void assistantAnswer(String runId, String answer, String answerKind, Instant at) {
+        coordinator.assistantAnswer(runId, answer, answerKind, at);
+    }
+
+    @Override
     public RunState verificationStarted(String runId, Instant at) {
         return coordinator.verifying(runId, at);
     }

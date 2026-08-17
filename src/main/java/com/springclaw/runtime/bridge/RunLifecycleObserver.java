@@ -104,6 +104,24 @@ public class RunLifecycleObserver {
         }
     }
 
+    /** 对话语义(spec 2026-08-17-canonical-conversation-history §3.1):用户问题原文进事件日志。 */
+    public void userMessage(String runId, String question, String responseMode, Instant at) {
+        try {
+            bridge.userMessage(runId, question, responseMode, at);
+        } catch (RuntimeException ex) {
+            log.debug("user.message emit 失败, runId={}, reason={}", runId, ex.getMessage());
+        }
+    }
+
+    /** 对话语义:最终答案进事件日志(FINAL/DEGRADED 对齐 RunResult.answerKind)。 */
+    public void assistantAnswer(String runId, String answer, String answerKind, Instant at) {
+        try {
+            bridge.assistantAnswer(runId, answer, answerKind, at);
+        } catch (RuntimeException ex) {
+            log.debug("assistant.answer emit 失败, runId={}, reason={}", runId, ex.getMessage());
+        }
+    }
+
     private void turnCompleted(String runId, String outcome, Instant at) {
         Instant startedAt = turnStartedAt.remove(runId);
         long durationMs = startedAt == null ? 0L

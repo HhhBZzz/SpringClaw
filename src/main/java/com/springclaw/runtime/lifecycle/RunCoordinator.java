@@ -243,6 +243,21 @@ public final class RunCoordinator {
                         "outcome", nullToEmpty(outcome), "durationMs", durationMs));
     }
 
+    /**
+     * 对话语义:用户问题原文。spec 2026-08-17-canonical-conversation-history §3.1——
+     * canonical 成为 LLM 历史事实源的前提是问题原文进事件日志。
+     */
+    public RunEvent userMessage(String runId, String question, String responseMode, Instant at) {
+        return appendStructuredObservation(runId, RunEventType.USER_MESSAGE, at, 0,
+                Map.of("question", nullToEmpty(question), "responseMode", nullToEmpty(responseMode)));
+    }
+
+    /** 对话语义:最终答案(含 DEGRADED 答案;FINAL/DEGRADED 与 RunResult.answerKind 对齐)。 */
+    public RunEvent assistantAnswer(String runId, String answer, String answerKind, Instant at) {
+        return appendStructuredObservation(runId, RunEventType.ASSISTANT_ANSWER, at, 0,
+                Map.of("answer", nullToEmpty(answer), "answerKind", nullToEmpty(answerKind)));
+    }
+
     public RunState verifying(String runId, Instant at) {
         RunState current = require(runId);
         return commit(

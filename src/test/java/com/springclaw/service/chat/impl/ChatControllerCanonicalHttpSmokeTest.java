@@ -132,6 +132,9 @@ class ChatControllerCanonicalHttpSmokeTest {
                         RunEventType.DECISION_MADE,
                         RunEventType.STRATEGY_STARTED,
                         RunEventType.TURN_STARTED,
+                        // 对话语义:turn 开始后用户问题原文入日志
+                        // (spec 2026-08-17-canonical-conversation-history §3.1)
+                        RunEventType.USER_MESSAGE,
                         RunEventType.TURN_COMPLETED,
                         RunEventType.VERIFICATION_STARTED,
                         RunEventType.RUN_COMPLETED

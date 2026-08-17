@@ -50,6 +50,10 @@ public interface RunLifecycleBridge {
     void stepCompleted(String runId, int stepIndex, String stepKind, String outcome,
                        long durationMs, Instant at);
 
+    void userMessage(String runId, String question, String responseMode, Instant at);
+
+    void assistantAnswer(String runId, String answer, String answerKind, Instant at);
+
     RunState verificationStarted(String runId, Instant at);
 
     RunState completed(

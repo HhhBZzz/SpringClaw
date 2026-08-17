@@ -355,6 +355,8 @@ class ReflexionEngineTest {
                 mock(ChatGuardService.class),
                 lifecycleObserver,
                 new ExplicitToolExecutioner(),
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(
+                        mock(ModelCallExecutor.class), lifecycleObserver),
                 3
         );
     }
@@ -381,6 +383,7 @@ class ReflexionEngineTest {
                 mock(ChatGuardService.class),
                 lifecycleObserver,
                 toolExecutioner,
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(executor, lifecycleObserver),
                 maxReflections
         );
     }

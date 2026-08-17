@@ -237,6 +237,8 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
             String initialPrompt = renderAutonomousPrompt(ctx, tools, "", riskLevel);
 
             for (int stepNo = 1; stepNo <= maxAutonomousSteps; stepNo++) {
+              try (RunLifecycleObserver.StepScope autonomousStep =
+                             lifecycleObserver.beginStep(requestId, stepNo - 1, "autonomous")) {
                 log.info("自主循环步骤 {}/{}: requestId={}, riskLevel={}, toolsCount={}, trackerState={}",
                         stepNo, maxAutonomousSteps, requestId, riskLevel, tools.length,
                         tracker.hasWriteToolCall() ? "hasWrite" : "noWrite");
@@ -381,6 +383,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
 
                 initialPrompt = renderAutonomousPrompt(ctx, tools,
                         buildStepHistory(stepSummaries), riskLevel);
+              }
             }
 
             // 清理 tracker

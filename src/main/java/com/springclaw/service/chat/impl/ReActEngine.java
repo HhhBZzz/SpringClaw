@@ -242,6 +242,8 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
             // 方法经 ToolRuntimeAspect 时上报到这里(对齐 AutonomousLoopEngine L235)。
             ToolExecutionContextHolder.setTracker(tracker);
             for (int stepNo = 1; stepNo <= maxReactSteps; stepNo++) {
+              try (RunLifecycleObserver.StepScope reactStep =
+                           lifecycleObserver.beginStep(requestId, stepNo - 1, "react")) {
                 log.info("ReAct 步骤 {}/{}: requestId={}, riskLevel={}, toolsCount={}",
                         stepNo, maxReactSteps, requestId, riskLevel, tools == null ? 0 : tools.length);
 
@@ -340,6 +342,7 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
                     history = buildReActHistory(steps) + "\n\n" + rejection;
                     continue; // 不终止,下一步 prompt 含拒绝提示
                 }
+              }
             }
 
             // 达到 maxReactSteps 仍未终止 → 返回当前最佳(降级提示)

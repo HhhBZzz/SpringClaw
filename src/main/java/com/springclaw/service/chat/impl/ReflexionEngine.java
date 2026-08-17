@@ -254,6 +254,8 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
         try (ToolExecutionContextHolder.Scope scope = ToolExecutionContextHolder.open(toolContext)) {
             ToolExecutionContextHolder.setTracker(tracker);
             for (int attempt = 1; attempt <= maxReflections; attempt++) {
+              try (RunLifecycleObserver.StepScope reflectStep =
+                           lifecycleObserver.beginStep(requestId, attempt - 1, "reflect")) {
                 log.info("Reflexion 尝试 {}/{}: requestId={}, riskLevel={}, toolsCount={}",
                         attempt, maxReflections, requestId, riskLevel, tools == null ? 0 : tools.length);
                 if (emitter != null) {
@@ -334,6 +336,7 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
 
                 // 未完成 → lesson 累积进 memory,注入下一轮 Actor(Reflexion 自我纠错闭环)
                 memory += "\n尝试 " + attempt + " 反思: " + reflection.lesson();
+              }
             }
 
             // max-reflections 兜底:返回当前最佳尝试(对齐 PlanExecute max-replan / ReAct max-steps 兜底)

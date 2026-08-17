@@ -218,6 +218,7 @@ public class OparLoopEngine implements AgentEngine {
         String observePrompt = assembled.observePrompt();
         List<AgentStep> steps = new ArrayList<>();
         for (int stepNo = 1; stepNo <= maxAgentSteps; stepNo++) {
+          try (RunLifecycleObserver.StepScope oparStep = lifecycleObserver.beginStep(requestId, stepNo - 1, "opar")) {
             PlanCallResult planCall = runPlan(currentClient, systemPrompt, assembled, requestId, steps, stepNo, chatContext);
             currentClient = planCall.client();
             PlanResult plan = planCall.plan();
@@ -254,6 +255,7 @@ public class OparLoopEngine implements AgentEngine {
                         fallbackResponder
                 );
             }
+          }
         }
 
         return new ChatExecutionResult(

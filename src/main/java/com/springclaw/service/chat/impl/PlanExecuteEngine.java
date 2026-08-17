@@ -254,6 +254,8 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
             ToolExecutionContextHolder.setTracker(tracker);
 
             for (int replanNo = 0; replanNo <= maxReplan; replanNo++) {
+              try (RunLifecycleObserver.StepScope replanStep =
+                             lifecycleObserver.beginStep(requestId, replanNo, "replan")) {
                 // (Re-)Plan:每次循环开头产出计划(首次 feedback 为空,重规划带失败/假完成反馈)
                 plan = runPlan(ctx, activeClient, tools, lastFeedback);
                 if (plan.isEmpty()) {
@@ -377,6 +379,7 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
                                 "步骤失败,带反馈重新规划。", 0L);
                     } catch (Exception ignored) {}
                 }
+              }
             }
 
             // max-replan 兜底:返回当前最佳结果(对齐 ReActEngine L346-348 的 max-steps 兜底)

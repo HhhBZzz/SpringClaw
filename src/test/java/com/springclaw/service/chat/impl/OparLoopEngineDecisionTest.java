@@ -41,6 +41,7 @@ class OparLoopEngineDecisionTest {
                 promptSupport,
                 mock(ConversationAdvisorSupport.class),
                 localExecutionSupport,
+                mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class),
                 true,
                 false,
                 1
@@ -92,6 +93,7 @@ class OparLoopEngineDecisionTest {
                 new OparPromptSupport(),
                 mock(ConversationAdvisorSupport.class),
                 localExecutionSupport,
+                mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class),
                 true,
                 false,
                 3

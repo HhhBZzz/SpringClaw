@@ -4,6 +4,7 @@ import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
+import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
@@ -41,6 +42,7 @@ public class OparLoopEngine implements AgentEngine {
     private final OparPromptSupport promptSupport;
     private final ConversationAdvisorSupport conversationAdvisorSupport;
     private final LocalExecutionSupport localExecutionSupport;
+    private final RunLifecycleObserver lifecycleObserver;
     private final BeanOutputConverter<PlanResult> planOutputConverter = new BeanOutputConverter<>(PlanResult.class);
     private final boolean localFallbackEnabled;
     private final boolean localFallbackFirst;
@@ -56,6 +58,7 @@ public class OparLoopEngine implements AgentEngine {
                           OparPromptSupport promptSupport,
                           ConversationAdvisorSupport conversationAdvisorSupport,
                           LocalExecutionSupport localExecutionSupport,
+                          RunLifecycleObserver lifecycleObserver,
                           @Value("${springclaw.chat.local-fallback-enabled:true}") boolean localFallbackEnabled,
                           @Value("${springclaw.chat.local-fallback-first:true}") boolean localFallbackFirst,
                           @Value("${springclaw.chat.max-steps:3}") int maxAgentSteps) {
@@ -69,6 +72,7 @@ public class OparLoopEngine implements AgentEngine {
         this.promptSupport = promptSupport;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
         this.localExecutionSupport = localExecutionSupport;
+        this.lifecycleObserver = lifecycleObserver;
         this.localFallbackEnabled = localFallbackEnabled;
         this.localFallbackFirst = localFallbackFirst;
         this.maxAgentSteps = Math.max(1, Math.min(maxAgentSteps, 6));

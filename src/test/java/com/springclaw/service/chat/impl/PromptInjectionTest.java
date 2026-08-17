@@ -234,6 +234,8 @@ class PromptInjectionTest {
                 mock(ChatResultPersister.class),
                 mock(com.springclaw.service.guard.ChatGuardService.class),
                 null,
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(
+                        mock(ModelCallExecutor.class), null),
                 true,
                 5
         );
@@ -256,6 +258,8 @@ class PromptInjectionTest {
                 mock(ChatResultPersister.class),
                 mock(com.springclaw.service.guard.ChatGuardService.class),
                 null,
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(
+                        mock(ModelCallExecutor.class), null),
                 true,
                 5
         );

@@ -2,6 +2,7 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.runtime.contract.AgentParadigm;
+import com.springclaw.service.agent.kernel.AgentLoopKernel;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.guard.ChatGuardService;
@@ -43,6 +44,7 @@ class AutonomousLoopEngineStepBoundaryTest {
                 mock(ChatResultPersister.class),
                 mock(ChatGuardService.class),
                 lifecycleObserver,
+                new AgentLoopKernel(executor, lifecycleObserver),
                 true,
                 5
         );

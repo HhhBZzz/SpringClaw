@@ -234,6 +234,27 @@ class ChatResultPersisterTest {
         verify(memoryExtractionTrigger, never()).afterTerminalPersistence(anyString(), anyString());
     }
 
+    @Test
+    void confirmationSuspensionEmitsCanonicalSuspendedAnswer() {
+        // T5a(spec 2026-08-18 §3.1):挂起提示语也进 canonical 事件日志,
+        // 消除"挂起 run 只有 USER 没有 ASSISTANT"的双源不对称。
+        com.springclaw.runtime.bridge.RunLifecycleObserver observer =
+                mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class);
+        ChatResultPersister persister = new ChatResultPersister(
+                agentSessionService, messageEventService, soulPromptService,
+                shortTermMemoryWriter, memoryExtractionTrigger,
+                new MemoryUsageTraceEvaluator(), observer);
+        ChatContext context = context();
+        ChatExecutionResult result = new ChatExecutionResult(
+                "observe", "ACTION_REQUIRED", "reason", "请确认", false);
+
+        persister.persist(
+                context, "请确认", result, ChatPersistenceIntent.CONFIRMATION_SUSPENSION);
+
+        verify(observer).assistantAnswer(
+                eq("req-1"), eq("请确认"), eq("SUSPENDED"), any());
+    }
+
     private static ContextSnapshot snapshotWithSemanticMemory() {
         MemoryScope scope = MemoryScope.user("api", "s1", "u1");
         MemoryFrame frame = new MemoryFrame(

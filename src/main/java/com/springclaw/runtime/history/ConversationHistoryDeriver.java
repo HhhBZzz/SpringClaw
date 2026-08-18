@@ -36,8 +36,21 @@ public class ConversationHistoryDeriver {
     /**
      * 派生 session 最近 limit 条对话 turn(USER/ASSISTANT)。
      * 取最近 limit 条、按时间正序返回(最旧在前,与 legacy listRecent 语义一致)。
+     * 内容按 legacy renderEventLine 规则截断至 220——LLM 上下文用。
      */
     public List<ConversationTurn> derive(String sessionKey, int limit) {
+        return deriveInternal(sessionKey, limit, true);
+    }
+
+    /**
+     * 不截断变体(spec 2026-08-18 §3.3):展示(/api/chat/history)、
+     * 精确查询(第一条/上一条消息)、帧构建(MemoryCoordinator)用。
+     */
+    public List<ConversationTurn> deriveFull(String sessionKey, int limit) {
+        return deriveInternal(sessionKey, limit, false);
+    }
+
+    private List<ConversationTurn> deriveInternal(String sessionKey, int limit, boolean truncate) {
         if (sessionKey == null || sessionKey.isBlank() || limit <= 0) {
             return List.of();
         }
@@ -49,7 +62,7 @@ public class ConversationHistoryDeriver {
         for (RunState run : runs) {
             List<RunEvent> events = store.findEventsByRunId(run.runId());
             for (RunEvent event : events) {
-                ConversationTurn turn = toTurn(event);
+                ConversationTurn turn = toTurn(event, run, truncate);
                 if (turn != null) {
                     turns.add(turn);
                 }
@@ -76,24 +89,32 @@ public class ConversationHistoryDeriver {
         return bySession;
     }
 
-    private ConversationTurn toTurn(RunEvent event) {
+    private ConversationTurn toTurn(RunEvent event, RunState run, boolean truncate) {
         if (event.eventType() == RunEventType.USER_MESSAGE) {
             String question = payloadField(event, "question");
             if (question == null || question.isBlank()) {
                 return null;
             }
-            return ConversationTurn.canonical(
-                    ConversationTurn.Role.USER, question, event.runId(), event.timestamp());
+            return toTurn(ConversationTurn.Role.USER, question, event, run, truncate);
         }
         if (event.eventType() == RunEventType.ASSISTANT_ANSWER) {
             String answer = payloadField(event, "answer");
             if (answer == null || answer.isBlank()) {
                 return null;
             }
-            return ConversationTurn.canonical(
-                    ConversationTurn.Role.ASSISTANT, answer, event.runId(), event.timestamp());
+            return toTurn(ConversationTurn.Role.ASSISTANT, answer, event, run, truncate);
         }
         return null;
+    }
+
+    /** 归属(channel/userId)取自 RunState——派生纯读,不回写、不需要事件 payload 带归属。 */
+    private ConversationTurn toTurn(
+            ConversationTurn.Role role, String content, RunEvent event, RunState run, boolean truncate) {
+        return truncate
+                ? ConversationTurn.canonical(
+                        role, content, event.runId(), run.channel(), run.userId(), event.timestamp())
+                : ConversationTurn.canonicalUntruncated(
+                        role, content, event.runId(), run.channel(), run.userId(), event.timestamp());
     }
 
     private String payloadField(RunEvent event, String field) {

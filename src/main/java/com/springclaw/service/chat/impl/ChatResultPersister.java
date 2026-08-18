@@ -155,6 +155,13 @@ public class ChatResultPersister {
                 context.effectiveUserMessage(),
                 soulPromptService.soulVersion()
         );
+        // 对话语义:挂起提示语也进 canonical 事件日志(answerKind=SUSPENDED)——
+        // 消除"挂起 run 只有 USER 没有 ASSISTANT"的双源不对称
+        // (spec 2026-08-18-message-event-chat-write-closure §3.1)
+        if (lifecycleObserver != null) {
+            lifecycleObserver.assistantAnswer(requestId, assistantMessage,
+                    "SUSPENDED", java.time.Instant.now());
+        }
         MessageEventReceipt userReceipt = messageEventService.append(new MessageEventWrite(
                 "chat:" + requestId + ":user", sessionKey, channel, userId,
                 "USER", "CHAT", context.effectiveUserMessage(), requestId));

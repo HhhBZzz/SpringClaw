@@ -71,6 +71,48 @@ class ConversationHistoryEquivalenceTest {
                 .containsExactly(runId1, runId1, runId2, runId2);
     }
 
+    @Test
+    void suspendedRunDerivesSameLinesAsLegacySuspensionRows() {
+        // T5a(spec 2026-08-18 §3.1)后的等价性:挂起 run 双写
+        // canonical(user.message + assistant.answer SUSPENDED)与
+        // legacy(USER 行 + suspension ASSISTANT 行)渲染同一组对话行。
+        InMemoryRunLifecycleStore store = new InMemoryRunLifecycleStore();
+        RunCoordinator coordinator = new RunCoordinator(store);
+        String runId = TestRunSupport.newRunId();
+        Instant t = T0;
+        coordinator.accept(TestRunSupport.acceptanceAt(runId, "s1", t));
+        coordinator.userMessage(runId, "删除那个文件", "blocking", t.plusSeconds(1));
+        coordinator.assistantAnswer(runId, "该操作需要确认:删除 report.xlsx?", "SUSPENDED", t.plusSeconds(2));
+
+        ConversationHistoryDeriver deriver = new ConversationHistoryDeriver(store);
+        MessageEventService messageEventService = Mockito.mock(MessageEventService.class);
+        MemoryService memoryService = Mockito.mock(MemoryService.class);
+        Mockito.when(messageEventService.listRecent(Mockito.eq("s1"), Mockito.anyInt()))
+                .thenReturn(List.of(
+                        legacyEvent("USER", "CHAT", "删除那个文件"),
+                        legacyEvent("ASSISTANT", "CHAT", "该操作需要确认:删除 report.xlsx?")
+                ));
+        Mockito.when(memoryService.recallBySession(Mockito.anyString(), Mockito.anyString(), Mockito.anyInt()))
+                .thenReturn(List.of());
+
+        ContextAssembler canonicalAssembler = new ContextAssembler(
+                messageEventService, memoryService, new MemoryBankService(false, "", 400),
+                8, 8, 400, deriver, "canonical");
+        ContextAssembler legacyAssembler = new ContextAssembler(
+                messageEventService, memoryService, new MemoryBankService(false, "", 400),
+                8, 8, 400, null, "message-event");
+
+        String canonicalContext = canonicalAssembler.assemble("s1", "api", "u1", "确认").eventContext();
+        String legacyContext = legacyAssembler.assemble("s1", "api", "u1", "确认").eventContext();
+
+        assertThat(canonicalContext)
+                .contains("- USER: 删除那个文件")
+                .contains("- ASSISTANT: 该操作需要确认:删除 report.xlsx?");
+        assertThat(legacyContext.split("\n"))
+                .as("suspension 场景两路对话行集合一致")
+                .containsExactlyInAnyOrder(canonicalContext.split("\n"));
+    }
+
     private String persistRun(RunCoordinator coordinator, String sessionKey,
                               String question, String answer, int offsetSec) {
         String runId = TestRunSupport.newRunId();

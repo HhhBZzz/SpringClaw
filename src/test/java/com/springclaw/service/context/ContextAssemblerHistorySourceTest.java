@@ -39,8 +39,10 @@ class ContextAssemblerHistorySourceTest {
     void canonicalSourceRendersTurnsFromDeriver() {
         when(deriver.derive("s1", 16)).thenReturn(List.of(
                 new ConversationTurn(ConversationTurn.Role.USER, "canonical 问题", "r1",
+                        "api", "u1",
                         Instant.parse("2026-08-17T00:00:03Z"), ConversationTurn.Source.CANONICAL),
                 new ConversationTurn(ConversationTurn.Role.ASSISTANT, "canonical 回答", "r1",
+                        "api", "u1",
                         Instant.parse("2026-08-17T00:00:07Z"), ConversationTurn.Source.CANONICAL)
         ));
         when(memoryService.recallBySession(anyString(), anyString(), anyInt())).thenReturn(List.of());

@@ -103,6 +103,29 @@ class ConversationHistoryDeriverTest {
     }
 
     @Test
+    void fillsAttributionFromRunState() {
+        // T5b(spec 2026-08-18 §3.2): turn 归属来自 RunState,供下游 scope 过滤/越权校验
+        completeRun("s1", "q", "a");
+
+        List<ConversationTurn> turns = deriver.derive("s1", 8);
+
+        assertThat(turns).allSatisfy(t -> {
+            assertThat(t.channel()).isEqualTo("api");
+            assertThat(t.userId()).isEqualTo("user-1");
+        });
+    }
+
+    @Test
+    void deriveFullKeepsUntruncatedContent() {
+        // T5c(spec 2026-08-18 §3.3): deriveFull 不截断(展示/精确查询用),derive 保持 220
+        String longAnswer = "长".repeat(400);
+        completeRun("s1", "q", longAnswer);
+
+        assertThat(deriver.derive("s1", 8).get(1).content()).hasSize(220);
+        assertThat(deriver.deriveFull("s1", 8).get(1).content()).hasSize(400);
+    }
+
+    @Test
     void questionTruncatedToRenderLimit() {
         String longQuestion = "为".repeat(400);
         completeRun("s1", longQuestion, "a");

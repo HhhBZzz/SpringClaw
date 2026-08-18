@@ -32,6 +32,13 @@ public class ChatResultPersister {
     private final MemoryExtractionTrigger memoryExtractionTrigger;
     private final MemoryUsageTraceEvaluator memoryUsageTraceEvaluator;
     private final RunLifecycleObserver lifecycleObserver;
+    /**
+     * 写侧双轨收口开关(spec 2026-08-18-message-event-chat-write-closure §3.5):
+     * true(默认)=USER/ASSISTANT CHAT 行双写 message_event;false=停写,canonical
+     * 事件日志成为对话语义唯一事实源。SYSTEM/TRACE/TOOL/审计/TASK 行不受影响。
+     * 翻转前置条件见 spec §3.6。
+     */
+    private final boolean messageEventChatWriteEnabled;
 
     public ChatResultPersister(AgentSessionService agentSessionService,
                                MessageEventService messageEventService,
@@ -60,7 +67,6 @@ public class ChatResultPersister {
                 shortTermMemoryWriter, memoryExtractionTrigger, memoryUsageTraceEvaluator, null);
     }
 
-    @Autowired
     public ChatResultPersister(AgentSessionService agentSessionService,
                                MessageEventService messageEventService,
                                SoulPromptService soulPromptService,
@@ -68,6 +74,22 @@ public class ChatResultPersister {
                                MemoryExtractionTrigger memoryExtractionTrigger,
                                MemoryUsageTraceEvaluator memoryUsageTraceEvaluator,
                                RunLifecycleObserver lifecycleObserver) {
+        this(agentSessionService, messageEventService, soulPromptService,
+                shortTermMemoryWriter, memoryExtractionTrigger, memoryUsageTraceEvaluator,
+                lifecycleObserver, true);
+    }
+
+    @Autowired
+    public ChatResultPersister(AgentSessionService agentSessionService,
+                               MessageEventService messageEventService,
+                               SoulPromptService soulPromptService,
+                               ShortTermMemoryWriter shortTermMemoryWriter,
+                               MemoryExtractionTrigger memoryExtractionTrigger,
+                               MemoryUsageTraceEvaluator memoryUsageTraceEvaluator,
+                               RunLifecycleObserver lifecycleObserver,
+                               @org.springframework.beans.factory.annotation.Value(
+                                       "${springclaw.runtime.message-event-chat-write-enabled:true}")
+                               boolean messageEventChatWriteEnabled) {
         this.agentSessionService = agentSessionService;
         this.messageEventService = messageEventService;
         this.soulPromptService = soulPromptService;
@@ -75,6 +97,7 @@ public class ChatResultPersister {
         this.memoryExtractionTrigger = memoryExtractionTrigger;
         this.memoryUsageTraceEvaluator = memoryUsageTraceEvaluator;
         this.lifecycleObserver = lifecycleObserver;
+        this.messageEventChatWriteEnabled = messageEventChatWriteEnabled;
     }
 
     public void persist(ChatContext context,
@@ -109,14 +132,20 @@ public class ChatResultPersister {
             lifecycleObserver.assistantAnswer(requestId, assistantForMemory,
                     "FINAL", java.time.Instant.now());
         }
-        MessageEventReceipt userReceipt = messageEventService.append(new MessageEventWrite(
-                "chat:" + requestId + ":user", sessionKey, channel, userId,
-                "USER", "CHAT", context.effectiveUserMessage(), requestId));
-        MessageEventReceipt assistantReceipt = messageEventService.append(new MessageEventWrite(
-                "chat:" + requestId + ":assistant:terminal", sessionKey, channel, userId,
-                "ASSISTANT", "CHAT",
-                assistantEventContent,
-                requestId));
+        MessageEventReceipt userReceipt = null;
+        MessageEventReceipt assistantReceipt = null;
+        if (messageEventChatWriteEnabled) {
+            userReceipt = messageEventService.append(new MessageEventWrite(
+                    "chat:" + requestId + ":user", sessionKey, channel, userId,
+                    "USER", "CHAT", context.effectiveUserMessage(), requestId));
+            assistantReceipt = messageEventService.append(new MessageEventWrite(
+                    "chat:" + requestId + ":assistant:terminal", sessionKey, channel, userId,
+                    "ASSISTANT", "CHAT",
+                    assistantEventContent,
+                    requestId));
+        }
+        // 开关关闭时 receipt 为 null,shadow 写既有 null 守卫自然跳过
+        // (Redis 短期层由 MemoryCoordinator canonical 对账维持温度)
         shadowTerminal(context, userReceipt, context.effectiveUserMessage(), assistantReceipt, assistantEventContent);
         messageEventService.recordSingle(
                 sessionKey, channel, userId, "SYSTEM", "OPAR",
@@ -162,14 +191,17 @@ public class ChatResultPersister {
             lifecycleObserver.assistantAnswer(requestId, assistantMessage,
                     "SUSPENDED", java.time.Instant.now());
         }
-        MessageEventReceipt userReceipt = messageEventService.append(new MessageEventWrite(
-                "chat:" + requestId + ":user", sessionKey, channel, userId,
-                "USER", "CHAT", context.effectiveUserMessage(), requestId));
-        messageEventService.append(new MessageEventWrite(
-                "chat:" + requestId + ":suspension", sessionKey, channel, userId,
-                "ASSISTANT", "CHAT",
-                TextUtils.truncate(assistantMessage, 1600),
-                requestId));
+        MessageEventReceipt userReceipt = null;
+        if (messageEventChatWriteEnabled) {
+            userReceipt = messageEventService.append(new MessageEventWrite(
+                    "chat:" + requestId + ":user", sessionKey, channel, userId,
+                    "USER", "CHAT", context.effectiveUserMessage(), requestId));
+            messageEventService.append(new MessageEventWrite(
+                    "chat:" + requestId + ":suspension", sessionKey, channel, userId,
+                    "ASSISTANT", "CHAT",
+                    TextUtils.truncate(assistantMessage, 1600),
+                    requestId));
+        }
         shadowSuspension(context, userReceipt, context.effectiveUserMessage());
     }
 

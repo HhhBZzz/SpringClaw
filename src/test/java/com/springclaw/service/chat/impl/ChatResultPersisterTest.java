@@ -255,6 +255,56 @@ class ChatResultPersisterTest {
                 eq("req-1"), eq("请确认"), eq("SUSPENDED"), any());
     }
 
+    @Test
+    void terminalResultSkipsChatRowWritesWhenWriteClosureDisabled() {
+        // T5e(spec 2026-08-18 §3.5): write-enabled=false → 停写 USER/ASSISTANT CHAT 行,
+        // canonical 发射与 SYSTEM 诊断行不受影响,shadow 写随 receipt 为空自然跳过
+        com.springclaw.runtime.bridge.RunLifecycleObserver observer =
+                mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class);
+        when(soulPromptService.soulVersion()).thenReturn("v1");
+        ChatResultPersister persister = new ChatResultPersister(
+                agentSessionService, messageEventService, soulPromptService,
+                shortTermMemoryWriter, memoryExtractionTrigger,
+                new MemoryUsageTraceEvaluator(), observer, false);
+        ChatContext context = context();
+        ChatExecutionResult result = new ChatExecutionResult(
+                "observe", "PLAN", "ACT", "answer", true);
+
+        persister.persist(context, "answer", result, ChatPersistenceIntent.TERMINAL_RESULT);
+
+        verify(messageEventService, never()).append(any());
+        verify(observer).assistantAnswer(eq("req-1"), eq("answer"), eq("FINAL"), any());
+        verify(messageEventService, org.mockito.Mockito.times(3)).recordSingle(
+                eq("s1"), eq("api"), eq("u1"), eq("SYSTEM"), eq("OPAR"), anyString(), eq("req-1"));
+        verify(shortTermMemoryWriter, never()).appendTerminal(
+                any(), any(), anyString(), any(), anyString());
+        verify(agentSessionService).persistConversation(
+                eq(context.session()), eq("你好"), eq("answer"), eq("v1"));
+    }
+
+    @Test
+    void suspensionSkipsChatRowWritesWhenWriteClosureDisabled() {
+        com.springclaw.runtime.bridge.RunLifecycleObserver observer =
+                mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class);
+        when(soulPromptService.soulVersion()).thenReturn("v1");
+        ChatResultPersister persister = new ChatResultPersister(
+                agentSessionService, messageEventService, soulPromptService,
+                shortTermMemoryWriter, memoryExtractionTrigger,
+                new MemoryUsageTraceEvaluator(), observer, false);
+        ChatContext context = context();
+        ChatExecutionResult result = new ChatExecutionResult(
+                "observe", "ACTION_REQUIRED", "reason", "请确认", false);
+
+        persister.persist(
+                context, "请确认", result, ChatPersistenceIntent.CONFIRMATION_SUSPENSION);
+
+        verify(messageEventService, never()).append(any());
+        verify(observer).assistantAnswer(eq("req-1"), eq("请确认"), eq("SUSPENDED"), any());
+        verify(shortTermMemoryWriter, never()).appendSuspension(any(), any(), anyString());
+        verify(agentSessionService).persistUserMessage(
+                eq(context.session()), eq("你好"), anyString());
+    }
+
     private static ContextSnapshot snapshotWithSemanticMemory() {
         MemoryScope scope = MemoryScope.user("api", "s1", "u1");
         MemoryFrame frame = new MemoryFrame(

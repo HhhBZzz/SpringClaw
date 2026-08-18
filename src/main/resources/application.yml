@@ -259,6 +259,11 @@ springclaw:
   runtime:
     lifecycle:
       store: ${SPRINGCLAW_RUNTIME_LIFECYCLE_STORE:memory}
+    # LLM 历史事实源(spec 2026-08-17 §3.3): canonical=事件日志派生+回退 / message-event=纯 legacy
+    conversation-history-source: ${SPRINGCLAW_RUNTIME_CONVERSATION_HISTORY_SOURCE:canonical}
+    # 写侧双轨收口(spec 2026-08-18 §3.5): false=停写 USER/ASSISTANT CHAT 行(canonical 为唯一事实源);
+    # 翻转前置条件见 spec §3.6。SYSTEM/TRACE/TOOL/审计/TASK 行不受此开关影响
+    message-event-chat-write-enabled: ${SPRINGCLAW_RUNTIME_MESSAGE_EVENT_CHAT_WRITE_ENABLED:true}
   context:
     snapshot:
       factory-enabled: ${SPRINGCLAW_CONTEXT_SNAPSHOT_FACTORY_ENABLED:true}

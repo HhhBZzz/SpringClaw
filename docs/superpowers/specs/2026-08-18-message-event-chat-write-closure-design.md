@@ -157,6 +157,25 @@ springclaw.runtime.message-event-chat-write-enabled: ${SPRINGCLAW_RUNTIME_MESSAG
 - 不动审计/管理端消费方;不做生产双读对账。
 - TokenMeter 接线(6e9d20f3 留置的零调用方问题)与本次收口无关,另立。
 
-## 附录 B: 实施结果(实施后填写)
+## 附录 B: 实施结果(2026-08-18)
 
-(待填)
+| Commit | 内容 | 测试 |
+|---|---|---|
+| 2521a7ca (T5a+b+c) | persistSuspension 补发 assistant.answer(SUSPENDED);ConversationTurn 增 channel/userId(取自 RunState);deriver 新增 deriveFull 不截断变体 | deriver+2(归属/deriveFull)、persister+1(SUSPENDED 发射)、等价性+suspension 场景;目标包 25 绿 |
+| d353efc4 (T5d-1) | ConversationHistoryService 切换(canonical 精确查询/窗口计数+回退,OBSERVE 信封两路对齐);OparContextAwareSupport 文件候选 canonical 直解析(无 [REFLECT] 剥离) | ConversationHistoryService+4、OparContextAware+2;16 绿 |
+| 233f5772 (T5d-2) | MessageEventChatMemory 切换(内容提取两路对齐);ChatController /history canonical 渲染(id=runId:role)+turn 归属越权校验+回退;ChatController 10 参历史构造器保留 | ChatMemory+2、history 端点+3;17 绿 |
+| 2d59fa93 (T5d-3) | MemoryCoordinator 短期层 durable 源切换(合成 eventId=epochMilli*4+slot、eventKey=canonical:<runId>:<role>;watermark/mergeRecovery 管线复用;三级回退不变);MemoryFrameSourceKind +CANONICAL_RUN_EVENT;MemoryFrameConfig 装配 | MemoryCoordinator+4(scope 过滤/异常回退/空回退/对账并入);两处 wiring 测试补 deriver bean;34 绿 |
+| (T5e+f) | 写侧开关 springclaw.runtime.message-event-chat-write-enabled(默认 true)接 ChatResultPersister 4 处 CHAT append;application.yml 补登本开关与 conversation-history-source(T3 遗漏);本附录 | persister+2(停写后 canonical/SYSTEM/shadow 行为断言);全量回归 |
+
+偏差与备注:
+- §3.4 ConversationHistoryService 的 canonical "第一条消息"是最近窗口语义(deriver
+  runScanLimit≤200):超过 200 run 的会话,首条退化为窗口内首条。精确全文首条依赖
+  尚未实现的 findEventsBySession(T2 偏差遗留),已在类 javadoc 登记。
+- countRememberedUserQuestions canonical 计数按最近 400 turn 窗口(文档化上界)。
+- MemoryCoordinator canonical 条目经 eventKey "canonical:" 前缀携带来源标记,
+  fromShortTerm 据此区分 sourceKind——未改 fromShortTerm 签名。
+- ChatController 越权校验在 canonical 路径用 turn 归属(任一 turn.userId==当前用户放行),
+  与 legacy 计数语义等价但粒度更细;canonical 空→legacy 计数校验不变。
+- 翻转前置条件(§3.6)不变:TerminalMemoryExtractionService 仍 legacy 单源(默认关闭),
+  诊断行合成未实现——两者是 write-enabled=false 生产翻转前的登记项。
+

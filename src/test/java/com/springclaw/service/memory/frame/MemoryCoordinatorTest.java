@@ -25,6 +25,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class MemoryCoordinatorTest {
@@ -321,6 +322,170 @@ class MemoryCoordinatorTest {
                 "session-1",
                 userId
         );
+    }
+
+    @Test
+    void canonicalSourceBuildsShortTermFromDerivedTurns() {
+        // T5d(spec 2026-08-18 §3.4): canonical durable 源替代 message_event durable 读,
+        // 合成 entry 走同一 watermark/mergeRecovery 管线
+        MemoryScope scope = MemoryScope.from(personalClaim("alice"));
+        InMemoryShortTermMemoryStore shortTermStore = new InMemoryShortTermMemoryStore();
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        com.springclaw.runtime.history.ConversationHistoryDeriver deriver =
+                mock(com.springclaw.runtime.history.ConversationHistoryDeriver.class);
+        when(deriver.deriveFull("session-1", 40)).thenReturn(List.of(
+                canonicalTurn(com.springclaw.runtime.history.ConversationTurn.Role.USER,
+                        "上一轮说我的昵称是小韩", "run-old", "api", "alice", T0.plusSeconds(1)),
+                canonicalTurn(com.springclaw.runtime.history.ConversationTurn.Role.ASSISTANT,
+                        "记住了，你的昵称是小韩。", "run-old", "api", "alice", T0.plusSeconds(2))
+        ));
+        MemoryCoordinator coordinator = new MemoryCoordinator(
+                new InMemoryMemoryRecordStore(),
+                () -> shortTermStore,
+                ignored -> List.of(),
+                messageEventService,
+                CLOCK,
+                6000,
+                20,
+                deriver,
+                "canonical"
+        );
+
+        MemoryFrameResult result = coordinator.retrieve(new MemoryFrameRequest(
+                "run-1", scope, "我刚才说我的昵称是什么？"
+        ));
+
+        assertThat(result.frame().shortTermTurns())
+                .extracting(item -> item.content())
+                .containsExactly("上一轮说我的昵称是小韩", "记住了，你的昵称是小韩。");
+        assertThat(result.frame().shortTermTurns())
+                .extracting(item -> item.sourceId())
+                .containsExactly("canonical:run-old:user", "canonical:run-old:assistant");
+        assertThat(result.frame().shortTermTurns())
+                .allSatisfy(item -> assertThat(item.sourceKind())
+                        .isEqualTo(MemoryFrameSourceKind.CANONICAL_RUN_EVENT));
+        verify(messageEventService, org.mockito.Mockito.never())
+                .readShortTermChatEvents(org.mockito.Mockito.any(), org.mockito.Mockito.anyInt());
+        // 对账修复并入缓存(与 legacy durable 路径同语义)
+        assertThat(shortTermStore.readRecent(scope, 40))
+                .extracting(ShortTermMemoryEntry::content)
+                .containsExactly("上一轮说我的昵称是小韩", "记住了，你的昵称是小韩。");
+    }
+
+    @Test
+    void canonicalSourceDropsTurnsOutsideAuthorizedScope() {
+        MemoryScope scope = MemoryScope.from(personalClaim("alice"));
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        com.springclaw.runtime.history.ConversationHistoryDeriver deriver =
+                mock(com.springclaw.runtime.history.ConversationHistoryDeriver.class);
+        when(deriver.deriveFull("session-1", 40)).thenReturn(List.of(
+                canonicalTurn(com.springclaw.runtime.history.ConversationTurn.Role.USER,
+                        "alice 的问题", "r1", "api", "alice", T0.plusSeconds(1)),
+                canonicalTurn(com.springclaw.runtime.history.ConversationTurn.Role.USER,
+                        "bob 的问题", "r2", "api", "bob", T0.plusSeconds(2)),
+                canonicalTurn(com.springclaw.runtime.history.ConversationTurn.Role.USER,
+                        "别的渠道的问题", "r3", "feishu", "alice", T0.plusSeconds(3))
+        ));
+        MemoryCoordinator coordinator = new MemoryCoordinator(
+                new InMemoryMemoryRecordStore(),
+                () -> new InMemoryShortTermMemoryStore(),
+                ignored -> List.of(),
+                messageEventService,
+                CLOCK,
+                6000,
+                20,
+                deriver,
+                "canonical"
+        );
+
+        MemoryFrameResult result = coordinator.retrieve(new MemoryFrameRequest(
+                "run-1", scope, "question"
+        ));
+
+        assertThat(result.frame().shortTermTurns())
+                .extracting(item -> item.content())
+                .containsExactly("alice 的问题");
+    }
+
+    @Test
+    void canonicalSourceFallsBackToLegacyDurableWhenDeriverThrows() {
+        MemoryScope scope = MemoryScope.from(personalClaim("alice"));
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        com.springclaw.runtime.history.ConversationHistoryDeriver deriver =
+                mock(com.springclaw.runtime.history.ConversationHistoryDeriver.class);
+        when(deriver.deriveFull(org.mockito.Mockito.anyString(), org.mockito.Mockito.anyInt()))
+                .thenThrow(new IllegalStateException("store down"));
+        when(messageEventService.readShortTermChatEvents(scope, 40)).thenReturn(
+                new ShortTermChatEventRead(
+                        List.of(event(10L, "chat:run-old:user", "USER", "legacy 持久行", "run-old")),
+                        ShortTermChatEventRead.Source.DURABLE
+                )
+        );
+        MemoryCoordinator coordinator = new MemoryCoordinator(
+                new InMemoryMemoryRecordStore(),
+                () -> new InMemoryShortTermMemoryStore(),
+                ignored -> List.of(),
+                messageEventService,
+                CLOCK,
+                6000,
+                20,
+                deriver,
+                "canonical"
+        );
+
+        MemoryFrameResult result = coordinator.retrieve(new MemoryFrameRequest(
+                "run-1", scope, "question"
+        ));
+
+        assertThat(result.frame().shortTermTurns())
+                .extracting(item -> item.content())
+                .containsExactly("legacy 持久行");
+    }
+
+    @Test
+    void canonicalSourceFallsBackToLegacyDurableWhenDeriverReturnsEmpty() {
+        // 纯存量会话(canonical 无记录)回退 legacy durable 读
+        MemoryScope scope = MemoryScope.from(personalClaim("alice"));
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        com.springclaw.runtime.history.ConversationHistoryDeriver deriver =
+                mock(com.springclaw.runtime.history.ConversationHistoryDeriver.class);
+        when(deriver.deriveFull("session-1", 40)).thenReturn(List.of());
+        when(messageEventService.readShortTermChatEvents(scope, 40)).thenReturn(
+                new ShortTermChatEventRead(
+                        List.of(event(10L, "chat:run-old:user", "USER", "存量行", "run-old")),
+                        ShortTermChatEventRead.Source.DURABLE
+                )
+        );
+        MemoryCoordinator coordinator = new MemoryCoordinator(
+                new InMemoryMemoryRecordStore(),
+                () -> new InMemoryShortTermMemoryStore(),
+                ignored -> List.of(),
+                messageEventService,
+                CLOCK,
+                6000,
+                20,
+                deriver,
+                "canonical"
+        );
+
+        MemoryFrameResult result = coordinator.retrieve(new MemoryFrameRequest(
+                "run-1", scope, "question"
+        ));
+
+        assertThat(result.frame().shortTermTurns())
+                .extracting(item -> item.content())
+                .containsExactly("存量行");
+    }
+
+    private static com.springclaw.runtime.history.ConversationTurn canonicalTurn(
+            com.springclaw.runtime.history.ConversationTurn.Role role,
+            String content,
+            String runId,
+            String channel,
+            String userId,
+            Instant at) {
+        return com.springclaw.runtime.history.ConversationTurn.canonicalUntruncated(
+                role, content, runId, channel, userId, at);
     }
 
     private static ShortTermMemoryEntry shortTerm(

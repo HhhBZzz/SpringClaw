@@ -49,5 +49,11 @@ class MemoryFrameSpringWiringTest {
         Clock clock() {
             return Clock.systemUTC();
         }
+
+        @Bean
+        com.springclaw.runtime.history.ConversationHistoryDeriver conversationHistoryDeriver() {
+            return new com.springclaw.runtime.history.ConversationHistoryDeriver(
+                    new com.springclaw.runtime.lifecycle.InMemoryRunLifecycleStore());
+        }
     }
 }

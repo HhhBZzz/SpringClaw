@@ -5,6 +5,7 @@ import com.springclaw.config.MemoryFrameConfig;
 import com.springclaw.runtime.bridge.CanonicalContextReadyProjector;
 import com.springclaw.runtime.bridge.LegacyContextViewAdapter;
 import com.springclaw.runtime.bridge.RunStateContextSnapshotRequestFactory;
+import com.springclaw.runtime.history.ConversationHistoryDeriver;
 import com.springclaw.runtime.lifecycle.InMemoryRunLifecycleStore;
 import com.springclaw.runtime.lifecycle.RunCoordinator;
 import com.springclaw.runtime.lifecycle.RunLifecycleStore;
@@ -97,6 +98,11 @@ class ContextSnapshotFactorySpringWiringTest {
         @Bean
         RunLifecycleStore runLifecycleStore() {
             return new InMemoryRunLifecycleStore();
+        }
+
+        @Bean
+        ConversationHistoryDeriver conversationHistoryDeriver(RunLifecycleStore store) {
+            return new ConversationHistoryDeriver(store);
         }
 
         @Bean

@@ -36,8 +36,11 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -61,6 +64,8 @@ class ChatControllerAuthTest {
             context.registerBean(RunIdentityFactory.class, () -> mock(RunIdentityFactory.class));
             context.registerBean(AuthService.class, () -> mock(AuthService.class));
             context.registerBean(RunLifecycleBridge.class, () -> mock(RunLifecycleBridge.class));
+            context.registerBean(com.springclaw.runtime.history.ConversationHistoryDeriver.class,
+                    () -> mock(com.springclaw.runtime.history.ConversationHistoryDeriver.class));
             context.register(ChatController.class);
 
             context.refresh();
@@ -466,6 +471,120 @@ class ChatControllerAuthTest {
                 () -> controller.history("s1", 20));
 
         Assertions.assertEquals(40315, ex.getCode());
+    }
+
+    @Test
+    void shouldReturnCanonicalChatHistoryWhenDeriverHasTurns() {
+        // T5d(spec 2026-08-18 §3.4): canonical 源直读派生器,越权校验用 turn 归属,
+        // 不读 message_event
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        com.springclaw.runtime.history.ConversationHistoryDeriver deriver =
+                mock(com.springclaw.runtime.history.ConversationHistoryDeriver.class);
+        ChatController controller = new ChatController(
+                mock(ChatService.class),
+                mock(ChatMessageProducer.class),
+                mock(AsyncChatResultStore.class),
+                messageEventService,
+                mock(AiProviderService.class),
+                mock(AgentActionProposalService.class),
+                mock(AgentRunTraceService.class),
+                new DefaultRunIdentityFactory(),
+                mock(AuthService.class),
+                mock(RunLifecycleBridge.class),
+                deriver,
+                "canonical"
+        );
+        RequestUserContextHolder.set(new RequestUserContext("user_local", "USER", System.currentTimeMillis() + 60_000));
+        when(deriver.deriveFull(eq("s1"), eq(20))).thenReturn(List.of(
+                com.springclaw.runtime.history.ConversationTurn.canonicalUntruncated(
+                        com.springclaw.runtime.history.ConversationTurn.Role.USER,
+                        "你好", "r1", "api", "user_local",
+                        java.time.Instant.parse("2026-08-18T00:00:01Z")),
+                com.springclaw.runtime.history.ConversationTurn.canonicalUntruncated(
+                        com.springclaw.runtime.history.ConversationTurn.Role.ASSISTANT,
+                        "你好，我在。", "r1", "api", "user_local",
+                        java.time.Instant.parse("2026-08-18T00:00:07Z"))
+        ));
+
+        ApiResponse<ChatHistoryResponse> response = controller.history("s1", 20);
+
+        Assertions.assertEquals(0, response.getCode());
+        Assertions.assertEquals(2, response.getData().messages().size());
+        Assertions.assertEquals("user", response.getData().messages().get(0).role());
+        Assertions.assertEquals("agent", response.getData().messages().get(1).role());
+        Assertions.assertEquals("你好，我在。", response.getData().messages().get(1).content());
+        Assertions.assertEquals("r1:agent", response.getData().messages().get(1).id());
+        verify(messageEventService, never()).countSessionEvents(anyString(), any(), any(), anyString());
+        verify(messageEventService, never()).listSessionEvents(
+                anyString(), any(), any(), anyString(), anyInt(), eq(true));
+    }
+
+    @Test
+    void shouldRejectCanonicalChatHistoryWhenNoTurnOwnedByCurrentUser() {
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        com.springclaw.runtime.history.ConversationHistoryDeriver deriver =
+                mock(com.springclaw.runtime.history.ConversationHistoryDeriver.class);
+        ChatController controller = new ChatController(
+                mock(ChatService.class),
+                mock(ChatMessageProducer.class),
+                mock(AsyncChatResultStore.class),
+                messageEventService,
+                mock(AiProviderService.class),
+                mock(AgentActionProposalService.class),
+                mock(AgentRunTraceService.class),
+                new DefaultRunIdentityFactory(),
+                mock(AuthService.class),
+                mock(RunLifecycleBridge.class),
+                deriver,
+                "canonical"
+        );
+        RequestUserContextHolder.set(new RequestUserContext("user_local", "USER", System.currentTimeMillis() + 60_000));
+        when(deriver.deriveFull(eq("s1"), eq(20))).thenReturn(List.of(
+                com.springclaw.runtime.history.ConversationTurn.canonicalUntruncated(
+                        com.springclaw.runtime.history.ConversationTurn.Role.USER,
+                        "别人的问题", "r9", "api", "someone_else",
+                        java.time.Instant.parse("2026-08-18T00:00:01Z"))
+        ));
+
+        BusinessException ex = Assertions.assertThrows(BusinessException.class,
+                () -> controller.history("s1", 20));
+
+        Assertions.assertEquals(40315, ex.getCode());
+    }
+
+    @Test
+    void shouldFallbackToLegacyChatHistoryWhenDeriverThrows() {
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        com.springclaw.runtime.history.ConversationHistoryDeriver deriver =
+                mock(com.springclaw.runtime.history.ConversationHistoryDeriver.class);
+        ChatController controller = new ChatController(
+                mock(ChatService.class),
+                mock(ChatMessageProducer.class),
+                mock(AsyncChatResultStore.class),
+                messageEventService,
+                mock(AiProviderService.class),
+                mock(AgentActionProposalService.class),
+                mock(AgentRunTraceService.class),
+                new DefaultRunIdentityFactory(),
+                mock(AuthService.class),
+                mock(RunLifecycleBridge.class),
+                deriver,
+                "canonical"
+        );
+        RequestUserContextHolder.set(new RequestUserContext("user_local", "USER", System.currentTimeMillis() + 60_000));
+        when(deriver.deriveFull(anyString(), anyInt())).thenThrow(new IllegalStateException("store down"));
+        when(messageEventService.countSessionEvents(eq("s1"), eq(null), eq(null), eq("CHAT")))
+                .thenReturn(2L);
+        when(messageEventService.countSessionEvents(eq("s1"), eq("user_local"), eq(null), eq("CHAT")))
+                .thenReturn(2L);
+        when(messageEventService.listSessionEvents(eq("s1"), eq("user_local"), eq(null), eq("CHAT"), eq(20), eq(true)))
+                .thenReturn(List.of(event("USER", "user_local", "legacy 问题")));
+
+        ApiResponse<ChatHistoryResponse> response = controller.history("s1", 20);
+
+        Assertions.assertEquals(0, response.getCode());
+        Assertions.assertEquals(1, response.getData().messages().size());
+        Assertions.assertEquals("legacy 问题", response.getData().messages().get(0).content());
     }
 
     private MessageEvent event(String role, String userId, String content) {

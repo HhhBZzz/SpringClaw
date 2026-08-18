@@ -1,8 +1,12 @@
 package com.springclaw.config.ai;
 
 import com.springclaw.domain.entity.MessageEvent;
+import com.springclaw.runtime.history.ConversationHistoryDeriver;
+import com.springclaw.runtime.history.ConversationTurn;
 import com.springclaw.service.chat.ConversationEventTextSupport;
 import com.springclaw.service.event.MessageEventService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -24,9 +28,25 @@ import java.util.List;
 public class ChatMemoryConfig {
 
     @Bean
+    public ChatMemory messageEventChatMemory(
+            MessageEventService messageEventService,
+            @Value("${springclaw.chat.memory-window-size:8}") int memoryWindowSize,
+            ConversationHistoryDeriver conversationHistoryDeriver,
+            @Value("${springclaw.runtime.conversation-history-source:canonical}")
+            String conversationHistorySource) {
+        return new MessageEventChatMemory(
+                messageEventService,
+                Math.max(1, Math.min(memoryWindowSize, 20)),
+                conversationHistoryDeriver,
+                conversationHistorySource);
+    }
+
+    /** legacy 兼容入口(测试/无派生器): message_event 单源。 */
     public ChatMemory messageEventChatMemory(MessageEventService messageEventService,
-                                             @Value("${springclaw.chat.memory-window-size:8}") int memoryWindowSize) {
-        return new MessageEventChatMemory(messageEventService, Math.max(1, Math.min(memoryWindowSize, 20)));
+                                             int memoryWindowSize) {
+        return new MessageEventChatMemory(
+                messageEventService, Math.max(1, Math.min(memoryWindowSize, 20)),
+                null, "message-event");
     }
 
     @Bean
@@ -38,12 +58,21 @@ public class ChatMemoryConfig {
 
     private static final class MessageEventChatMemory implements ChatMemory {
 
+        private static final Logger log = LoggerFactory.getLogger(MessageEventChatMemory.class);
+
         private final MessageEventService messageEventService;
+        private final ConversationHistoryDeriver conversationHistoryDeriver;
+        private final String conversationHistorySource;
         private final int memoryWindowTurns;
         private final int memoryWindowMessages;
 
-        private MessageEventChatMemory(MessageEventService messageEventService, int memoryWindowSize) {
+        private MessageEventChatMemory(MessageEventService messageEventService,
+                                       int memoryWindowSize,
+                                       ConversationHistoryDeriver conversationHistoryDeriver,
+                                       String conversationHistorySource) {
             this.messageEventService = messageEventService;
+            this.conversationHistoryDeriver = conversationHistoryDeriver;
+            this.conversationHistorySource = conversationHistorySource;
             this.memoryWindowTurns = memoryWindowSize;
             this.memoryWindowMessages = Math.max(2, memoryWindowSize * 2);
         }
@@ -57,6 +86,23 @@ public class ChatMemoryConfig {
         public List<Message> get(String conversationId) {
             if (!StringUtils.hasText(conversationId)) {
                 return List.of();
+            }
+            // 历史源切换(spec 2026-08-18 §3.4): canonical → 派生路径,
+            // 异常/空结果回退 message_event;内容提取与 legacy 对齐(剥信封/前缀)
+            if ("canonical".equals(conversationHistorySource) && conversationHistoryDeriver != null) {
+                try {
+                    List<ConversationTurn> turns = conversationHistoryDeriver.deriveFull(
+                            conversationId, memoryWindowMessages);
+                    if (!turns.isEmpty()) {
+                        return turns.stream()
+                                .map(MessageEventChatMemory::toChatMessage)
+                                .filter(java.util.Objects::nonNull)
+                                .toList();
+                    }
+                } catch (Exception ex) {
+                    log.warn("canonical 历史派生失败,回退 message_event: conversationId={}, reason={}",
+                            conversationId, ex.getMessage());
+                }
             }
             List<MessageEvent> events = messageEventService.listSessionEvents(
                     conversationId,
@@ -80,6 +126,23 @@ public class ChatMemoryConfig {
                 return messages;
             }
             return messages.subList(messages.size() - memoryWindowMessages, messages.size());
+        }
+
+        private static Message toChatMessage(ConversationTurn turn) {
+            if (turn == null || !StringUtils.hasText(turn.content())) {
+                return null;
+            }
+            return switch (turn.role()) {
+                case USER -> {
+                    String question = ConversationEventTextSupport.extractUserQuestion(turn.content());
+                    yield StringUtils.hasText(question) ? new UserMessage(question) : null;
+                }
+                case ASSISTANT -> {
+                    String answer = ConversationEventTextSupport.extractAssistantAnswer(turn.content());
+                    yield StringUtils.hasText(answer) ? new AssistantMessage(answer) : null;
+                }
+                default -> null;
+            };
         }
 
         @Override

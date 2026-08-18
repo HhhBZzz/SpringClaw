@@ -10,6 +10,8 @@ import com.springclaw.dto.chat.ChatRequest;
 import com.springclaw.dto.chat.ChatResponse;
 import com.springclaw.runtime.bridge.RunLifecycleBridge;
 import com.springclaw.runtime.contract.SessionAccessClaim;
+import com.springclaw.runtime.history.ConversationHistoryDeriver;
+import com.springclaw.runtime.history.ConversationTurn;
 import com.springclaw.runtime.identity.RunIdentityFactory;
 import com.springclaw.runtime.lifecycle.RunAcceptance;
 import com.springclaw.service.agent.AgentActionProposalResult;
@@ -28,7 +30,10 @@ import com.springclaw.service.event.MessageEventService;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -46,6 +51,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -62,6 +68,8 @@ public class ChatController {
 
     private static final Duration RUN_DEADLINE = Duration.ofMinutes(30);
 
+    private static final Logger log = LoggerFactory.getLogger(ChatController.class);
+
     private final ChatService chatService;
     private final ChatMessageProducer chatMessageProducer;
     private final AsyncChatResultStore asyncChatResultStore;
@@ -72,6 +80,8 @@ public class ChatController {
     private final RunIdentityFactory runIdentityFactory;
     private final AuthService authService;
     private final RunLifecycleBridge runtimeBridge;
+    private final ConversationHistoryDeriver conversationHistoryDeriver;
+    private final String conversationHistorySource;
 
     @Autowired
     public ChatController(ChatService chatService,
@@ -83,7 +93,10 @@ public class ChatController {
                           AgentRunTraceService agentRunTraceService,
                           RunIdentityFactory runIdentityFactory,
                           AuthService authService,
-                          RunLifecycleBridge runtimeBridge) {
+                          RunLifecycleBridge runtimeBridge,
+                          ConversationHistoryDeriver conversationHistoryDeriver,
+                          @Value("${springclaw.runtime.conversation-history-source:canonical}")
+                          String conversationHistorySource) {
         this.chatService = chatService;
         this.chatMessageProducer = chatMessageProducer;
         this.asyncChatResultStore = asyncChatResultStore;
@@ -94,6 +107,35 @@ public class ChatController {
         this.runIdentityFactory = runIdentityFactory;
         this.authService = authService;
         this.runtimeBridge = runtimeBridge;
+        this.conversationHistoryDeriver = conversationHistoryDeriver;
+        this.conversationHistorySource = conversationHistorySource;
+    }
+
+    /** 历史签名(无派生器)——message_event 单源,既有测试/兼容入口。 */
+    public ChatController(ChatService chatService,
+                          ChatMessageProducer chatMessageProducer,
+                          AsyncChatResultStore asyncChatResultStore,
+                          MessageEventService messageEventService,
+                          AiProviderService aiProviderService,
+                          AgentActionProposalService actionProposalService,
+                          AgentRunTraceService agentRunTraceService,
+                          RunIdentityFactory runIdentityFactory,
+                          AuthService authService,
+                          RunLifecycleBridge runtimeBridge) {
+        this(
+                chatService,
+                chatMessageProducer,
+                asyncChatResultStore,
+                messageEventService,
+                aiProviderService,
+                actionProposalService,
+                agentRunTraceService,
+                runIdentityFactory,
+                authService,
+                runtimeBridge,
+                null,
+                "message-event"
+        );
     }
 
     ChatController(ChatService chatService,
@@ -114,7 +156,9 @@ public class ChatController {
                 null,
                 runIdentityFactory,
                 authService,
-                runtimeBridge
+                runtimeBridge,
+                null,
+                "message-event"
         );
     }
 
@@ -195,6 +239,27 @@ public class ChatController {
         int safeLimit = Math.max(1, Math.min(limit, 100));
         String normalizedSessionKey = sessionKey.trim();
         String username = context.username().trim();
+        // 历史源切换(spec 2026-08-18 §3.4): canonical 非空 → 派生渲染+turn 归属越权校验;
+        // 派生异常/空结果(纯存量会话)回退 legacy message_event 路径
+        if ("canonical".equals(conversationHistorySource) && conversationHistoryDeriver != null) {
+            List<ConversationTurn> turns = null;
+            try {
+                turns = conversationHistoryDeriver.deriveFull(normalizedSessionKey, safeLimit);
+            } catch (Exception ex) {
+                log.warn("canonical 历史派生失败,回退 message_event: sessionKey={}, reason={}",
+                        normalizedSessionKey, ex.getMessage());
+            }
+            if (turns != null && !turns.isEmpty()) {
+                boolean owned = turns.stream().anyMatch(turn -> username.equals(turn.userId()));
+                if (!owned) {
+                    throw new BusinessException(40315, "无权查看该会话历史");
+                }
+                List<ChatHistoryMessage> messages = turns.stream()
+                        .map(this::turnToHistoryMessage)
+                        .toList();
+                return ApiResponse.success(new ChatHistoryResponse(normalizedSessionKey, messages));
+            }
+        }
         long sessionChatEvents = messageEventService.countSessionEvents(normalizedSessionKey, null, null, "CHAT");
         long ownedChatEvents = messageEventService.countSessionEvents(normalizedSessionKey, username, null, "CHAT");
         if (sessionChatEvents > 0 && ownedChatEvents == 0) {
@@ -341,6 +406,19 @@ public class ChatController {
                 id,
                 role,
                 normalizeHistoryContent(role, event.getContent()),
+                "",
+                createdAt
+        );
+    }
+
+    /** canonical 派生 turn → 历史消息;id 用 runId+role(单 run 至多一条 user/assistant,稳定唯一)。 */
+    private ChatHistoryMessage turnToHistoryMessage(ConversationTurn turn) {
+        String role = turn.role() == ConversationTurn.Role.USER ? "user" : "agent";
+        long createdAt = turn.at() == null ? 0L : turn.at().toEpochMilli();
+        return new ChatHistoryMessage(
+                turn.runId() + ":" + role,
+                role,
+                normalizeHistoryContent(role, turn.content()),
                 "",
                 createdAt
         );

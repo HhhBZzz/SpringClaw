@@ -2,10 +2,14 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.common.util.TextUtils;
 import com.springclaw.domain.entity.MessageEvent;
+import com.springclaw.runtime.history.ConversationHistoryDeriver;
+import com.springclaw.runtime.history.ConversationTurn;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.files.LocalFilesystemService;
 import com.springclaw.service.context.AssembledContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -19,6 +23,8 @@ import java.util.regex.Pattern;
 
 @Service
 class OparContextAwareSupport {
+
+    private static final Logger log = LoggerFactory.getLogger(OparContextAwareSupport.class);
 
     private static final DateTimeFormatter HISTORY_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm:ss");
     /** 确认性词语：用户回复"好/是的/可以"等表示同意上一轮提议 */
@@ -40,13 +46,30 @@ class OparContextAwareSupport {
     private final ConversationHistoryService conversationHistoryService;
     private final MessageEventService messageEventService;
     private final LocalFilesystemService localFilesystemService;
+    private final ConversationHistoryDeriver conversationHistoryDeriver;
+    private final String conversationHistorySource;
 
     OparContextAwareSupport(ConversationHistoryService conversationHistoryService,
                             MessageEventService messageEventService,
                             LocalFilesystemService localFilesystemService) {
+        this(conversationHistoryService, messageEventService, localFilesystemService,
+                null, "message-event");
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    OparContextAwareSupport(
+            ConversationHistoryService conversationHistoryService,
+            MessageEventService messageEventService,
+            LocalFilesystemService localFilesystemService,
+            ConversationHistoryDeriver conversationHistoryDeriver,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${springclaw.runtime.conversation-history-source:canonical}")
+            String conversationHistorySource) {
         this.conversationHistoryService = conversationHistoryService;
         this.messageEventService = messageEventService;
         this.localFilesystemService = localFilesystemService;
+        this.conversationHistoryDeriver = conversationHistoryDeriver;
+        this.conversationHistorySource = conversationHistorySource;
     }
 
     LocalSkillFallbackService.LocalSkillResult tryContextAwareLocalResult(AssembledContext assembled) {
@@ -396,14 +419,39 @@ class OparContextAwareSupport {
     }
 
     /**
-     * 从最近 1 条 ASSISTANT message_event 中提取文件名候选。
+     * 从最近 1 条 ASSISTANT 记录中提取文件名候选。
      * 只提取最近1次，最多20个文件名，单个文件名过长截断。
      *
-     * 关键：直接读取 event.getContent() 原始内容，手动剥离 [REFLECT] 前缀，
+     * 历史源切换(spec 2026-08-18 §3.4): canonical 源从派生 turn 直取原文
+     * (payload 无 [REFLECT] 前缀,无需剥离);派生异常/空结果回退 legacy。
+     * canonical 有数据但无候选时不回退——canonical 在场即为主(同 ContextAssembler 语义)。
+     *
+     * legacy 关键：直接读取 event.getContent() 原始内容，手动剥离 [REFLECT] 前缀，
      * 不调用 ConversationEventTextSupport.extractAssistantAnswer()（其中 normalize()
      * 会把换行折叠为空格，导致编号列表正则 [^\n]+ 把多个候选粘成一个脏文件名）。
      */
     private List<String> extractFileCandidatesFromRecentAssistant(String sessionKey) {
+        if ("canonical".equals(conversationHistorySource) && conversationHistoryDeriver != null) {
+            try {
+                List<ConversationTurn> turns = conversationHistoryDeriver.deriveFull(sessionKey, 4);
+                if (!turns.isEmpty()) {
+                    for (int i = turns.size() - 1; i >= 0; i--) {
+                        ConversationTurn turn = turns.get(i);
+                        if (turn.role() == ConversationTurn.Role.ASSISTANT
+                                && StringUtils.hasText(turn.content())) {
+                            List<String> candidates = parseFileNamesFromAnswer(turn.content());
+                            if (!candidates.isEmpty()) {
+                                return candidates.stream().limit(20).toList();
+                            }
+                        }
+                    }
+                    return List.of();
+                }
+            } catch (Exception ex) {
+                log.warn("canonical 文件候选派生失败,回退 message_event: sessionKey={}, reason={}",
+                        sessionKey, ex.getMessage());
+            }
+        }
         List<MessageEvent> recentEvents = messageEventService.listSessionEvents(
                 sessionKey, null, "CHAT", 4, false);
         // 从最近的开始找第一条 ASSISTANT 事件

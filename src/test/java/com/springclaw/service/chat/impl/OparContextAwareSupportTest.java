@@ -2,6 +2,7 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
+import com.springclaw.domain.entity.MessageEvent;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.files.LocalFilesystemService;
 import org.junit.jupiter.api.Test;
@@ -111,6 +112,65 @@ class OparContextAwareSupportTest {
         assertThat(result).isNotNull();
         assertThat(result.route()).isEqualTo("RECENT_FAILURE_QUERY");
         assertThat(result.fallbackAnswer()).contains("上游模型超时");
+    }
+
+    @org.junit.jupiter.api.Test
+    void canonicalSourceExtractsFileCandidatesFromDerivedTurns() {
+        // T5d(spec 2026-08-18 §3.4): canonical 源从派生 turn 直解析文件候选
+        // (payload 存原文,无 [REFLECT] 前缀),不读 message_event
+        com.springclaw.runtime.history.ConversationHistoryDeriver deriver =
+                org.mockito.Mockito.mock(com.springclaw.runtime.history.ConversationHistoryDeriver.class);
+        OparContextAwareSupport canonicalSupport = new OparContextAwareSupport(
+                conversationHistoryService, messageEventService, localFilesystemService,
+                deriver, "canonical");
+        org.mockito.Mockito.when(deriver.deriveFull(org.mockito.Mockito.eq("s1"),
+                        org.mockito.Mockito.anyInt()))
+                .thenReturn(java.util.List.of(
+                        com.springclaw.runtime.history.ConversationTurn.canonicalUntruncated(
+                                com.springclaw.runtime.history.ConversationTurn.Role.ASSISTANT,
+                                "找到了这些文件：\n1. report-final.xlsx\n2. summary.docx",
+                                "r1", "feishu", "u1",
+                                java.time.Instant.parse("2026-08-18T00:00:07Z"))
+                ));
+
+        LocalSkillFallbackService.LocalSkillResult result =
+                canonicalSupport.tryContextAwareLocalResult(context("好"));
+
+        assertThat(result).isNotNull();
+        assertThat(result.route()).isEqualTo("FILE_CONFIRMATION_MULTIPLE");
+        assertThat(result.fallbackAnswer()).contains("report-final.xlsx").contains("summary.docx");
+        org.mockito.Mockito.verify(messageEventService, org.mockito.Mockito.never())
+                .listSessionEvents(org.mockito.Mockito.anyString(), org.mockito.Mockito.any(),
+                        org.mockito.Mockito.anyString(), org.mockito.Mockito.anyInt(),
+                        org.mockito.Mockito.anyBoolean());
+    }
+
+    @org.junit.jupiter.api.Test
+    void canonicalSourceFallsBackToLegacyFileCandidatesWhenDeriverThrows() {
+        com.springclaw.runtime.history.ConversationHistoryDeriver deriver =
+                org.mockito.Mockito.mock(com.springclaw.runtime.history.ConversationHistoryDeriver.class);
+        OparContextAwareSupport canonicalSupport = new OparContextAwareSupport(
+                conversationHistoryService, messageEventService, localFilesystemService,
+                deriver, "canonical");
+        org.mockito.Mockito.when(deriver.deriveFull(org.mockito.Mockito.anyString(),
+                        org.mockito.Mockito.anyInt()))
+                .thenThrow(new IllegalStateException("store down"));
+        MessageEvent legacyAssistant = new MessageEvent();
+        legacyAssistant.setRole("ASSISTANT");
+        legacyAssistant.setEventType("CHAT");
+        legacyAssistant.setContent("[REFLECT] 找到了这些文件：\n1. legacy-report.xlsx\n2. legacy-summary.docx");
+        org.mockito.Mockito.when(messageEventService.listSessionEvents(
+                        org.mockito.Mockito.eq("s1"), org.mockito.Mockito.isNull(),
+                        org.mockito.Mockito.eq("CHAT"), org.mockito.Mockito.eq(4),
+                        org.mockito.Mockito.eq(false)))
+                .thenReturn(java.util.List.of(legacyAssistant));
+
+        LocalSkillFallbackService.LocalSkillResult result =
+                canonicalSupport.tryContextAwareLocalResult(context("好"));
+
+        assertThat(result).isNotNull();
+        assertThat(result.route()).isEqualTo("FILE_CONFIRMATION_MULTIPLE");
+        assertThat(result.fallbackAnswer()).contains("legacy-report.xlsx");
     }
 
     private AssembledContext context(String question) {

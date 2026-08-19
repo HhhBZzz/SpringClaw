@@ -29,7 +29,8 @@ class ToolRuntimeAspectTest {
                 mock(ToolInvocationSnapshotService.class),
                 mock(ToolInvocationProposalService.class),
                 mock(WorkspaceGitGuard.class),
-                mock(ToolGateway.class)
+                mock(ToolGateway.class),
+                new com.springclaw.service.context.ToolResultPruner()
         );
     }
 

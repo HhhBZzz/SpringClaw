@@ -34,3 +34,7 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 frontend/.npm-cache/
+.claude/worktrees/
+.claude/launch.json
+.tmp_interview_doc/
+.superpowers/

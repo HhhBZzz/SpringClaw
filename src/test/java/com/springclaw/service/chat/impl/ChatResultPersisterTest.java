@@ -107,6 +107,26 @@ class ChatResultPersisterTest {
     }
 
     @Test
+    void terminalResultEmitsCanonicalAssistantAnswerAlongsideMessageEvents() {
+        // spec 2026-08-17-canonical-conversation-history §3.1:双轨写——
+        // 终端持久化时最终答案同时进 canonical 事件日志(observer 可选,null 时跳过)。
+        com.springclaw.runtime.bridge.RunLifecycleObserver observer =
+                mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class);
+        ChatResultPersister persister = new ChatResultPersister(
+                agentSessionService, messageEventService, soulPromptService,
+                shortTermMemoryWriter, memoryExtractionTrigger,
+                new MemoryUsageTraceEvaluator(), observer);
+        ChatContext context = context();
+        ChatExecutionResult result = new ChatExecutionResult(
+                "observe", "PLAN", "ACT", "answer", true);
+
+        persister.persist(context, "answer", result, ChatPersistenceIntent.TERMINAL_RESULT);
+
+        verify(observer).assistantAnswer(
+                eq("req-1"), eq("answer"), eq("FINAL"), any());
+    }
+
+    @Test
     void terminalResultShadowWritesUserAndAssistantWithStableReceipts() {
         ChatResultPersister persister = persister();
         ChatContext context = context();
@@ -208,10 +228,85 @@ class ChatResultPersisterTest {
         verify(agentSessionService).persistUserMessage(
                 eq(context.session()), eq(context.effectiveUserMessage()), anyString());
         verify(messageEventService).append(argThat((MessageEventWrite write) ->
-                write.eventKey().equals("chat:" + context.requestId() + ":user")));
+                write.eventKey().equals("chat:" + context.requestId() + ":user")
+                        && context.effectiveUserMessage().equals(write.content())));
+        // suspension legacy 行内容钉住: 原文(截断 1600 内),无 [REFLECT] 前缀——
+        // 与 canonical SUSPENDED 载荷(answer=原文)的对账基准
         verify(messageEventService).append(argThat((MessageEventWrite write) ->
-                write.eventKey().equals("chat:" + context.requestId() + ":suspension")));
+                write.eventKey().equals("chat:" + context.requestId() + ":suspension")
+                        && "请确认".equals(write.content())));
         verify(memoryExtractionTrigger, never()).afterTerminalPersistence(anyString(), anyString());
+    }
+
+    @Test
+    void confirmationSuspensionEmitsCanonicalSuspendedAnswer() {
+        // T5a(spec 2026-08-18 §3.1):挂起提示语也进 canonical 事件日志,
+        // 消除"挂起 run 只有 USER 没有 ASSISTANT"的双源不对称。
+        com.springclaw.runtime.bridge.RunLifecycleObserver observer =
+                mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class);
+        ChatResultPersister persister = new ChatResultPersister(
+                agentSessionService, messageEventService, soulPromptService,
+                shortTermMemoryWriter, memoryExtractionTrigger,
+                new MemoryUsageTraceEvaluator(), observer);
+        ChatContext context = context();
+        ChatExecutionResult result = new ChatExecutionResult(
+                "observe", "ACTION_REQUIRED", "reason", "请确认", false);
+
+        persister.persist(
+                context, "请确认", result, ChatPersistenceIntent.CONFIRMATION_SUSPENSION);
+
+        verify(observer).assistantAnswer(
+                eq("req-1"), eq("请确认"), eq("SUSPENDED"), any());
+    }
+
+    @Test
+    void terminalResultSkipsChatRowWritesWhenWriteClosureDisabled() {
+        // T5e(spec 2026-08-18 §3.5): write-enabled=false → 停写 USER/ASSISTANT CHAT 行,
+        // canonical 发射与 SYSTEM 诊断行不受影响,shadow 写随 receipt 为空自然跳过
+        com.springclaw.runtime.bridge.RunLifecycleObserver observer =
+                mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class);
+        when(soulPromptService.soulVersion()).thenReturn("v1");
+        ChatResultPersister persister = new ChatResultPersister(
+                agentSessionService, messageEventService, soulPromptService,
+                shortTermMemoryWriter, memoryExtractionTrigger,
+                new MemoryUsageTraceEvaluator(), observer, false);
+        ChatContext context = context();
+        ChatExecutionResult result = new ChatExecutionResult(
+                "observe", "PLAN", "ACT", "answer", true);
+
+        persister.persist(context, "answer", result, ChatPersistenceIntent.TERMINAL_RESULT);
+
+        verify(messageEventService, never()).append(any());
+        verify(observer).assistantAnswer(eq("req-1"), eq("answer"), eq("FINAL"), any());
+        verify(messageEventService, org.mockito.Mockito.times(3)).recordSingle(
+                eq("s1"), eq("api"), eq("u1"), eq("SYSTEM"), eq("OPAR"), anyString(), eq("req-1"));
+        verify(shortTermMemoryWriter, never()).appendTerminal(
+                any(), any(), anyString(), any(), anyString());
+        verify(agentSessionService).persistConversation(
+                eq(context.session()), eq("你好"), eq("answer"), eq("v1"));
+    }
+
+    @Test
+    void suspensionSkipsChatRowWritesWhenWriteClosureDisabled() {
+        com.springclaw.runtime.bridge.RunLifecycleObserver observer =
+                mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class);
+        when(soulPromptService.soulVersion()).thenReturn("v1");
+        ChatResultPersister persister = new ChatResultPersister(
+                agentSessionService, messageEventService, soulPromptService,
+                shortTermMemoryWriter, memoryExtractionTrigger,
+                new MemoryUsageTraceEvaluator(), observer, false);
+        ChatContext context = context();
+        ChatExecutionResult result = new ChatExecutionResult(
+                "observe", "ACTION_REQUIRED", "reason", "请确认", false);
+
+        persister.persist(
+                context, "请确认", result, ChatPersistenceIntent.CONFIRMATION_SUSPENSION);
+
+        verify(messageEventService, never()).append(any());
+        verify(observer).assistantAnswer(eq("req-1"), eq("请确认"), eq("SUSPENDED"), any());
+        verify(shortTermMemoryWriter, never()).appendSuspension(any(), any(), anyString());
+        verify(agentSessionService).persistUserMessage(
+                eq(context.session()), eq("你好"), anyString());
     }
 
     private static ContextSnapshot snapshotWithSemanticMemory() {

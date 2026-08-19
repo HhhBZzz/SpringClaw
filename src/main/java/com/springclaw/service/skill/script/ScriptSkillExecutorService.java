@@ -137,6 +137,8 @@ public class ScriptSkillExecutorService {
         pb.directory(skillRoot.toFile());
         pb.redirectErrorStream(true);
         Map<String, String> env = pb.environment();
+        // 子进程环境清洗:剥离凭证类变量(脚本技能是任意 python,不得见到 harness 凭证)
+        env.keySet().removeIf(com.springclaw.common.util.SubprocessEnvironmentSanitizer::isCredentialShaped);
         String workspaceRoot = workspaceRoot();
         String scriptRoot = scriptSkillCatalogService.rootPath().toString();
         env.put("SPRINGCLAW_WORKSPACE_ROOT", workspaceRoot);

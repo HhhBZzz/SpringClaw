@@ -106,6 +106,7 @@ class AcceptedRunCanonicalSmokeTest {
         );
         observer.contextAndDecisionObserved(context, T0.plusSeconds(2));
         observer.executionStarted(context, "simplified", T0.plusSeconds(3));
+        observer.turnStarted(RUN_ID, "agent", T0.plusSeconds(4));
         observer.resultReturned(
                 context,
                 new ChatExecutionResult("observe", "plan", "action", "answer", true),
@@ -114,7 +115,8 @@ class AcceptedRunCanonicalSmokeTest {
         );
 
         RunState state = store.requireByRunId(RUN_ID);
-        assertThat(state.status()).isEqualTo(RunStatus.DEGRADED);
+        // 模型产出非空回答(modelEnabled=true)→CompletionVerifier 判 COMPLETE
+        assertThat(state.status()).isEqualTo(RunStatus.COMPLETED);
         assertThat(context.session().getSessionKey()).isEqualTo("session-1");
         assertThat(context.userId()).isEqualTo("user-1");
         assertThat(context.assembled().observePrompt())
@@ -129,8 +131,10 @@ class AcceptedRunCanonicalSmokeTest {
                         RunEventType.CONTEXT_READY,
                         RunEventType.DECISION_MADE,
                         RunEventType.STRATEGY_STARTED,
-                        RunEventType.VERIFICATION_COMPLETED,
-                        RunEventType.RUN_DEGRADED
+                        RunEventType.TURN_STARTED,
+                        RunEventType.TURN_COMPLETED,
+                        RunEventType.VERIFICATION_STARTED,
+                        RunEventType.RUN_COMPLETED
                 );
         ArgumentCaptor<MemoryFrameRequest> requestCaptor =
                 ArgumentCaptor.forClass(MemoryFrameRequest.class);

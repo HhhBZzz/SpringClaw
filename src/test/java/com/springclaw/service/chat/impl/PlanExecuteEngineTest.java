@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
@@ -356,6 +357,8 @@ class PlanExecuteEngineTest {
         assertThat(result.reflect()).contains("已用本地数据综合完成"); // 第2次 plan 成功步答案
         // 2 plan + 2 step = 4 次 LLM 调用
         verify(executor, times(4)).executeChat(any(), anyString(), any(), anyBoolean(), any());
+        // 外层 replan 循环体包 beginStep step 边界(kind="replan",index=replanNo 从 0 起)
+        verify(lifecycleObserver, times(2)).beginStep(anyString(), anyInt(), eq("replan"));
     }
 
     /**
@@ -471,6 +474,8 @@ class PlanExecuteEngineTest {
      * 构造 PlanExecuteEngine,注入指定的 ModelCallExecutor mock(其余 10 bean 仍 mock)。
      * PE-T4 起构造函数新增 ExplicitToolExecutioner(真实实例)。
      */
+    private final RunLifecycleObserver lifecycleObserver = mock(RunLifecycleObserver.class);
+
     private PlanExecuteEngine newPlanExecuteEngineWith(ModelCallExecutor executor) {
         return new PlanExecuteEngine(
                 mock(AiProviderService.class),
@@ -483,8 +488,9 @@ class PlanExecuteEngineTest {
                 mock(SseEventBridge.class),
                 mock(ChatResultPersister.class),
                 mock(ChatGuardService.class),
-                mock(RunLifecycleObserver.class),
+                lifecycleObserver,
                 new ExplicitToolExecutioner(),
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(executor, lifecycleObserver),
                 2
         );
     }
@@ -509,8 +515,9 @@ class PlanExecuteEngineTest {
                 mock(SseEventBridge.class),
                 mock(ChatResultPersister.class),
                 mock(ChatGuardService.class),
-                mock(RunLifecycleObserver.class),
+                lifecycleObserver,
                 toolExecutioner,
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(executor, lifecycleObserver),
                 maxReplan
         );
     }
@@ -531,8 +538,10 @@ class PlanExecuteEngineTest {
                 mock(SseEventBridge.class),
                 mock(ChatResultPersister.class),
                 mock(ChatGuardService.class),
-                mock(RunLifecycleObserver.class),
+                lifecycleObserver,
                 new ExplicitToolExecutioner(),
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(
+                        mock(ModelCallExecutor.class), lifecycleObserver),
                 2
         );
     }

@@ -512,7 +512,7 @@ class VueOnlyFrontendPolicyTest {
         assertThat(agentView)
                 .contains("timelineStepDetail")
                 .contains("event.target || event.stepName")
-                .contains("step.source || step.riskLevel");
+                .contains("groupedRunSteps");
     }
 
     @Test

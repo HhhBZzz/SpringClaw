@@ -572,12 +572,7 @@ public class MultiAgentEngine implements AgentEngine.StreamableAgentEngine {
      * 复制自 {@link ReflexionEngine} / {@link PlanExecuteEngine}。
      */
     private boolean isSafeToRetry(Object[] tools) {
-        if (tools == null) return true;
-        for (Object tool : tools) {
-            if (tool instanceof com.springclaw.tool.pack.WorkspaceEditToolPack) return false;
-            if (tool instanceof com.springclaw.tool.pack.ScriptSkillToolPack) return false;
-        }
-        return true;
+        return com.springclaw.service.agent.kernel.ModelCallSafety.isSafeToRetry(tools);
     }
 
     // === MA-T2: Coordinator decompose / aggregate(BeanOutputConverter<TaskDecomposition>)===

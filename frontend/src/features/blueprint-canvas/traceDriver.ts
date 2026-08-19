@@ -9,6 +9,20 @@
  */
 import type { AgentTraceEvent } from '../../types';
 import type { CanvasNode } from './types';
+import { isBoundaryEvent } from './traceGrouping';
+
+/**
+ * 该事件是否驱动画布帧推进。
+ * canonical 流:turn/step 边界事件(结构骨架)推进帧;内层事件(model/tool 等,
+ * 是 step 的内部细节)不占帧,溢出到当前帧主节点 X-Ray。
+ * legacy 流(无 canonical source):保持原语义,每事件推进一帧。
+ */
+export function drivesFrameAdvance(event: AgentTraceEvent): boolean {
+  if (event.source === 'canonical' && !isBoundaryEvent(event)) {
+    return false;
+  }
+  return true;
+}
 
 /**
  * 用真实 trace 事件丰富节点(X-Ray 背面展示真实日志)。

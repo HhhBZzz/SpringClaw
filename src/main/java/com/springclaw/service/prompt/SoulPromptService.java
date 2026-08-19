@@ -6,7 +6,6 @@ import com.springclaw.service.files.LocalFilesystemService;
 import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.SkillService;
 import com.springclaw.tool.runtime.CapabilityRegistry;
-import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
@@ -18,7 +17,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -27,7 +25,10 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * 设计说明：
  * 1. 通过 ApplicationRunner 在应用启动时加载 SOUL.md 到内存，避免每次请求都走磁盘 IO。
- * 2. 通过 PromptTemplate 统一拼接系统提示词，避免字符串拼接散落在业务代码里。
+ * 2. 系统提示词由 PromptSectionRegistry 组合(dsh PromptSection 参照):
+ *    8 个段落各自注册(name/title/order/动态提供者),不再是一整块固定模板;
+ *    新增段落=注册新 section,不动既有段落。SOUL 正文本身是 soul section 的动态体。
+ * 3. 对外 buildSystemPrompt 签名与产出结构保持不变(调用方零改动)。
  */
 @Service
 public class SoulPromptService implements ApplicationRunner {
@@ -38,6 +39,7 @@ public class SoulPromptService implements ApplicationRunner {
     private final SkillService skillService;
     private final LocalFilesystemService localFilesystemService;
     private final CapabilityRegistry capabilityRegistry;
+    private final PromptSectionRegistry sectionRegistry = new PromptSectionRegistry();
 
     @Value("${springclaw.soul.path:${user.dir}/SOUL.md}")
     private String soulPath;
@@ -53,6 +55,40 @@ public class SoulPromptService implements ApplicationRunner {
         this.skillService = skillService;
         this.localFilesystemService = localFilesystemService;
         this.capabilityRegistry = capabilityRegistry;
+        registerSections();
+    }
+
+    private void registerSections() {
+        sectionRegistry.register(PromptSection.of("soul", "角色设定", 10,
+                ctx -> currentSoul()));
+        sectionRegistry.register(PromptSection.of("runtime-context", "运行上下文", 20, ctx ->
+                "- 当前渠道: %s\n- 当前用户: %s".formatted(
+                        ctx.channel() == null ? "unknown" : ctx.channel(),
+                        ctx.userId() == null ? "anonymous" : ctx.userId())));
+        sectionRegistry.register(PromptSection.of("core-skills", "当前核心 Agent 技能", 30, ctx ->
+                skillService.describeCoreSkills(ctx.channel(), ctx.userId())));
+        sectionRegistry.register(PromptSection.of("matched-skills", "本次命中技能", 40, ctx ->
+                describeMatchedSkills(ctx.matchedSkills())));
+        sectionRegistry.register(PromptSection.of("skills", "当前可用技能", 50, ctx ->
+                skillService.describeAvailableSkills(ctx.channel(), ctx.userId())));
+        sectionRegistry.register(PromptSection.of("runtime-capabilities", "当前后端能力目录", 60, ctx ->
+                describeRuntimeCapabilities(skillService.resolveAllowedToolPacks(ctx.channel(), ctx.userId()))));
+        sectionRegistry.register(PromptSection.of("local-file-boundary", "本地文件访问边界", 70, ctx ->
+                describeLocalFileBoundary(skillService.resolveAllowedToolPacks(ctx.channel(), ctx.userId()))));
+        sectionRegistry.register(PromptSection.of("behavior", "行为约束", 80, ctx -> """
+                - 输出中文
+                - 输出结构清晰
+                - 优先给出可执行建议
+                - 优先使用核心 Agent 技能完成工作区检索、文件分析、联网研究、运行诊断
+                - 如果用户询问“能否读取本机文件/其他项目/授权目录”，不要回答只能读取当前项目；应说明可通过 Local Files 读取已授权根目录内的非敏感文本文件，并优先调用 listAuthorizedRoots 确认边界
+                - 如果本次命中了显式技能，优先遵守该技能的 instructions，再使用通用能力
+                - 只有在用户明确需要详细状态时，才展开内部能力清单
+                """));
+    }
+
+    /** 已注册 section 名(按渲染顺序),供诊断/运维接口展示。 */
+    public List<String> sectionNames() {
+        return sectionRegistry.sectionNames();
     }
 
     @Override
@@ -73,54 +109,7 @@ public class SoulPromptService implements ApplicationRunner {
     }
 
     public String buildSystemPrompt(String channel, String userId, List<SkillDefinition> matchedSkills) {
-        Set<String> allowedToolPacks = skillService.resolveAllowedToolPacks(channel, userId);
-        String coreSkillSummary = skillService.describeCoreSkills(channel, userId);
-        String skillSummary = skillService.describeAvailableSkills(channel, userId);
-        String matchedSkillSummary = describeMatchedSkills(matchedSkills);
-        String localFileBoundary = describeLocalFileBoundary(allowedToolPacks);
-        String runtimeCapabilities = describeRuntimeCapabilities(allowedToolPacks);
-        PromptTemplate template = new PromptTemplate("""
-                # 角色设定
-                {soul}
-
-                # 运行上下文
-                - 当前渠道: {channel}
-                - 当前用户: {userId}
-
-                # 当前核心 Agent 技能
-                {coreSkills}
-
-                # 本次命中技能
-                {matchedSkills}
-
-                # 当前可用技能
-                {skills}
-
-                # 当前后端能力目录
-                {runtimeCapabilities}
-
-                # 本地文件访问边界
-                {localFileBoundary}
-
-                # 行为约束
-                - 输出中文
-                - 输出结构清晰
-                - 优先给出可执行建议
-                - 优先使用核心 Agent 技能完成工作区检索、文件分析、联网研究、运行诊断
-                - 如果用户询问“能否读取本机文件/其他项目/授权目录”，不要回答只能读取当前项目；应说明可通过 Local Files 读取已授权根目录内的非敏感文本文件，并优先调用 listAuthorizedRoots 确认边界
-                - 如果本次命中了显式技能，优先遵守该技能的 instructions，再使用通用能力
-                - 只有在用户明确需要详细状态时，才展开内部能力清单
-                """);
-        return template.render(Map.of(
-                "soul", currentSoul(),
-                "channel", channel == null ? "unknown" : channel,
-                "userId", userId == null ? "anonymous" : userId,
-                "coreSkills", coreSkillSummary,
-                "matchedSkills", matchedSkillSummary,
-                "skills", skillSummary,
-                "runtimeCapabilities", runtimeCapabilities,
-                "localFileBoundary", localFileBoundary
-        ));
+        return sectionRegistry.render(new PromptSectionContext(channel, userId, matchedSkills));
     }
 
     /**

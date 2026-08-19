@@ -120,11 +120,12 @@ class ApprovedCommandProposalServiceTest {
     }
 
     private static Stream<String> unsupportedMessages() {
+        // rm/curl 等不在白名单的命令不再被 normalize 拒绝(98b35d72 放松为仅 unsafe 字符护栏,
+        // 白名单由 SystemToolPack.allowed-commands 执行边界负责),proposal 层照常创建——
+        // 这里只断言 unsafe 字符与格式错误的输入被拒。
         return Stream.of(
-                "请执行命令 rm -rf /",
                 "请执行命令 git status; pwd",
                 "请执行命令 echo $(whoami)",
-                "请执行命令 curl https://example.com",
                 "请执行 pwd",
                 "请执行命令 echo safe\\text",
                 "请执行命令 echo safe\ntext",
@@ -139,6 +140,28 @@ class ApprovedCommandProposalServiceTest {
                 "请执行命令 echo safe}text",
                 "请执行命令 echo safe[text",
                 "请执行命令 echo safe]text"
+        );
+    }
+
+    @ParameterizedTest
+    @MethodSource("commandsOutsideProposalGrammar")
+    void createProposalIfSupported_delegatesNonWhitelistedCommandsToExecutionBoundary(String message) {
+        // rm -rf / 与 curl 含 unsafe 字符集之外的命令,normalize 只做护栏不再筛白名单:
+        // proposal 仍应创建,由执行边界(SystemToolPack.allowed-commands)最终裁决。
+        ToolInvocationSnapshot snapshot = snapshot();
+        when(snapshotService.capture(any(), any(), any(), any())).thenReturn(snapshot);
+        when(proposalService.createPending(any(ToolInvocationSnapshot.class), any(ToolExecutionContext.class)))
+                .thenReturn(proposal("tip-out-of-grammar"));
+
+        Optional<ToolInvocationProposal> result = service.createProposalIfSupported(context(message));
+
+        assertThat(result).isPresent();
+    }
+
+    private static Stream<String> commandsOutsideProposalGrammar() {
+        return Stream.of(
+                "请执行命令 rm -rf /",
+                "请执行命令 curl https://example.com"
         );
     }
 

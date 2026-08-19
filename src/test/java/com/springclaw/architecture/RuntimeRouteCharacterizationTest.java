@@ -340,6 +340,8 @@ class RuntimeRouteCharacterizationTest {
                     mock(ChatResultPersister.class),
                     mock(ChatGuardService.class),
                     null,
+                    new com.springclaw.service.agent.kernel.AgentLoopKernel(
+                            mock(ModelCallExecutor.class), null),
                     true,
                     5
             );

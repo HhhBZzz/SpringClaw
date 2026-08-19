@@ -79,7 +79,7 @@ public class DefaultToolGateway implements ToolGateway {
         }
         try {
             lifecycleObserver.confirmationApproved(proposal.runId(), Instant.now());
-            lifecycleObserver.toolStarted(proposal.runId(), Instant.now());
+            lifecycleObserver.toolStarted(proposal.runId(), proposal.toolName(), Instant.now());
         } catch (RuntimeException ex) {
             log.warn("canonical confirmationApproved/toolStarted projection failed, proposalId={}, reason={}",
                     proposal.proposalId(), ex.getMessage());
@@ -91,7 +91,7 @@ public class DefaultToolGateway implements ToolGateway {
             return;
         }
         try {
-            lifecycleObserver.toolSucceeded(proposal.runId(), Instant.now());
+            lifecycleObserver.toolSucceeded(proposal.runId(), proposal.toolName(), 0L, Instant.now());
         } catch (RuntimeException ex) {
             log.warn("canonical toolSucceeded projection failed, proposalId={}, reason={}",
                     proposal.proposalId(), ex.getMessage());
@@ -103,7 +103,12 @@ public class DefaultToolGateway implements ToolGateway {
             return;
         }
         try {
-            lifecycleObserver.toolFailed(proposal.runId(), Instant.now());
+            lifecycleObserver.toolFailed(
+                    proposal.runId(),
+                    proposal.toolName(),
+                    error == null ? "UNKNOWN" : error.getClass().getSimpleName(),
+                    Instant.now()
+            );
         } catch (RuntimeException ex) {
             log.warn("canonical toolFailed observation failed, proposalId={}, reason={}",
                     proposal.proposalId(), ex.getMessage());

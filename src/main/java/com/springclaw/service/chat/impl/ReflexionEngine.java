@@ -22,6 +22,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.Disposable;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -78,6 +79,7 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
     private final ChatGuardService chatGuardService;
     private final RunLifecycleObserver lifecycleObserver;
     private final ExplicitToolExecutioner explicitToolExecutioner;
+    private final com.springclaw.service.agent.kernel.AgentLoopKernel loopKernel;
     private final int maxReflections;
 
     /**
@@ -101,6 +103,7 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
                            ChatGuardService chatGuardService,
                            RunLifecycleObserver lifecycleObserver,
                            ExplicitToolExecutioner explicitToolExecutioner,
+                           com.springclaw.service.agent.kernel.AgentLoopKernel loopKernel,
                            @Value("${springclaw.chat.max-reflections:3}") int maxReflections) {
         this.aiProviderService = aiProviderService;
         this.toolOrchestrator = toolOrchestrator;
@@ -114,6 +117,7 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
         this.chatGuardService = chatGuardService;
         this.lifecycleObserver = lifecycleObserver;
         this.explicitToolExecutioner = explicitToolExecutioner;
+        this.loopKernel = loopKernel;
         this.maxReflections = Math.max(1, Math.min(maxReflections, 5));
     }
 
@@ -247,98 +251,25 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
                 ctx.roleCode()
         );
 
-        String memory = "";
-        String lastAttempt = "";
-        String lastAnswer = "";
-
         try (ToolExecutionContextHolder.Scope scope = ToolExecutionContextHolder.open(toolContext)) {
             ToolExecutionContextHolder.setTracker(tracker);
-            for (int attempt = 1; attempt <= maxReflections; attempt++) {
-                log.info("Reflexion 尝试 {}/{}: requestId={}, riskLevel={}, toolsCount={}",
-                        attempt, maxReflections, requestId, riskLevel, tools == null ? 0 : tools.length);
-                if (emitter != null) {
-                    try {
-                        sseEventBridge.sendStatus(emitter, "Reflexion 尝试 " + attempt + "/" + maxReflections);
-                    } catch (Exception e) {
-                        log.warn("SSE 进度事件发送失败(可能客户端已断开): attempt={}", attempt);
-                    }
-                }
 
-                // Actor:LLM 据 memory → Thought+Action 文本 → ExplicitToolExecutioner 手动执行工具 → Observation
-                ModelCallExecutor.ModelCallResult<String> attemptResult = callLlmForAttempt(
-                        ctx, memory, tools, activeClient, requestId, allowFailover);
-                activeClient = attemptResult.client(); // failover 后更新
-                String thought = attemptResult.value();
-                boolean hasAction = explicitToolExecutioner.hasActionLine(thought);
-                String observation = hasAction
-                        ? explicitToolExecutioner.execute(thought, tools, requestId) : "";
-                String attemptTrace = "Thought: " + TextUtils.truncate(thought, 400)
-                        + "\nAction: " + explicitToolExecutioner.describeAction(thought, hasAction)
-                        + "\nObservation: " + TextUtils.truncate(observation, 400);
-                lastAttempt = attemptTrace;
-                // RX-T4 M1:raw 最终答案(用户可读的 clean 文本,不含 attemptTrace 的 Thought/Action/Observation 标签)。
-                // Actor 调工具 → 用 Observation(工具结果)作本轮答案;Actor 纯文本作答(无 Action)→ 用 thought 原文。
-                // 只进 reflect(resolveFinalAnswer 发给用户);attemptTrace 只进 action(轨迹)。
-                lastAnswer = hasAction ? observation : thought;
+            // 循环骨架(步进/step 边界事件/空产出守护/max-steps 兜底)下沉 AgentLoopKernel,
+            // 引擎只表达 Reflexion 差异:Actor 尝试 → Reflector 自评 → memory 累积。
+            com.springclaw.service.agent.kernel.AgentLoopKernel.LoopOutcome<String> outcome =
+                    loopKernel.runLoop(
+                    new ReflexionSpec(ctx, emitter, requestId, riskLevel, tools, allowFailover,
+                            activeClient, tracker),
+                    new com.springclaw.service.agent.kernel.LoopContext(ctx, loopKernel));
 
-                if (emitter != null) {
-                    try {
-                        // Actor 三段式 trace — Thought/Action/Observation(模仿 ReAct/PlanExecute)
-                        sseEventBridge.sendTrace(emitter, ctx, "Reflexion Thought " + attempt,
-                                "reflexion", "thought", TextUtils.truncate(thought, 200), 0L);
-                        sseEventBridge.sendTrace(emitter, ctx, "Reflexion Action " + attempt,
-                                "reflexion", "action",
-                                TextUtils.truncate(explicitToolExecutioner.describeAction(thought, hasAction), 200), 0L);
-                        if (StringUtils.hasText(observation)) {
-                            sseEventBridge.sendTrace(emitter, ctx, "Reflexion Observation " + attempt,
-                                    "reflexion", "observation", TextUtils.truncate(observation, 200), 0L);
-                        }
-                    } catch (Exception ignored) {}
-                }
-
-                // Evaluator/Reflector:自评本次尝试(BeanOutputConverter 结构化输出)
-                ReflectionResult reflection = callReflection(ctx, attemptTrace, memory, activeClient, requestId, allowFailover);
-                if (emitter != null) {
-                    try {
-                        sseEventBridge.sendTrace(emitter, ctx, "Reflexion 反思 " + attempt,
-                                "reflexion", "reflect",
-                                "success=" + reflection.success()
-                                        + " lesson=" + TextUtils.truncate(reflection.lesson(), 200), 0L);
-                    } catch (Exception ignored) {}
-                }
-
-                // 终止判定:read 直接完成;write/side_effect/dangerous 必须校验 tracker 工具证据(假完成守护)
-                if (reflection.success()) {
-                    if ("read".equals(riskLevel) || tracker.satisfiesCompletionCondition(riskLevel)) {
-                        log.info("Reflexion 任务完成: requestId={}, attempt={}, riskLevel={}, hasWrite={}, hasCmd={}, hasVerified={}",
-                                requestId, attempt, riskLevel,
-                                tracker.hasWriteToolCall(), tracker.hasRunCommandCall(), tracker.hasVerifiedSideEffect());
-                        return finalResult(ctx, attemptTrace, lastAnswer, memory,
-                                "Reflexion: " + attempt + " 次尝试后成功", true);
-                    }
-                    // 假完成:反思 success 但无真实工具证据 → rejection 注入 memory,继续(对齐 ReAct/PlanExecute)
-                    String rejection = tracker.renderFakeCompletionRejection(riskLevel);
-                    log.warn("Reflexion 假完成拦截: requestId={}, attempt={}, riskLevel={}, hasWrite={}, hasCmd={}",
-                            requestId, attempt, riskLevel, tracker.hasWriteToolCall(), tracker.hasRunCommandCall());
-                    memory += "\n尝试 " + attempt + " 反思: 声称完成但无工具证据。" + rejection;
-                    if (emitter != null) {
-                        try {
-                            sseEventBridge.sendTrace(emitter, ctx, "Reflexion 假完成拦截",
-                                    "reflexion", "warning",
-                                    "反思声称完成但缺少真实工具证据,继续尝试: "
-                                            + TextUtils.truncate(rejection, 200), 0L);
-                        } catch (Exception ignored) {}
-                    }
-                    continue;
-                }
-
-                // 未完成 → lesson 累积进 memory,注入下一轮 Actor(Reflexion 自我纠错闭环)
-                memory += "\n尝试 " + attempt + " 反思: " + reflection.lesson();
+            ReflexionState s = (ReflexionState) outcome.finalState();
+            if (outcome.terminalBySpec()) {
+                return finalResult(ctx, s.lastAttempt, s.lastAnswer, s.memory,
+                        "Reflexion: " + outcome.steps().size() + " 次尝试后成功", true);
             }
-
             // max-reflections 兜底:返回当前最佳尝试(对齐 PlanExecute max-replan / ReAct max-steps 兜底)
             log.info("Reflexion 达到最大反思次数: requestId={}, maxReflections={}", requestId, maxReflections);
-            return finalResult(ctx, lastAttempt, lastAnswer, memory,
+            return finalResult(ctx, s.lastAttempt, s.lastAnswer, s.memory,
                     "已达 max-reflections(" + maxReflections + "),返回当前最佳尝试", true);
         } catch (Exception ex) {
             log.warn("Reflexion 循环执行失败: requestId={}, reason={}", requestId, ex.getMessage());
@@ -347,13 +278,212 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
             return new ChatExecutionResult(
                     observePrompt(ctx),
                     "Reflexion 异常终止: " + chatResponsePolicyService.simplifyFailureReason(ex.getMessage()),
-                    StringUtils.hasText(lastAttempt) ? TextUtils.truncate(lastAttempt, 600) : "(无尝试输出)",
+                    StringUtils.hasText(lastAttemptFor(ex)) ? TextUtils.truncate(lastAttemptFor(ex), 600) : "(无尝试输出)",
                     fallback != null ? fallback.fallbackAnswer() : "",
                     false
             );
         } finally {
             // scope close 只还原 ToolExecutionContext,不清 tracker ThreadLocal;手动 clear(对齐 PlanExecute/ReAct)。
             ToolExecutionContextHolder.clearTracker();
+        }
+    }
+
+    /** 异常壳读终局 state 的 lastAttempt(spec 已随步演化,异常时从 outcome 上下文取)。 */
+    private String lastAttemptFor(Exception ignored) {
+        return lastAttemptRef.get();
+    }
+
+    private final java.util.concurrent.atomic.AtomicReference<String> lastAttemptRef =
+            new java.util.concurrent.atomic.AtomicReference<>("");
+
+    /** Reflexion 循环的可变步进状态(在 spec 的 nextStep 间演化)。 */
+    private static final class ReflexionState {
+        AiProviderService.ActiveChatClient activeClient;
+        String memory = "";
+        String lastAttempt = "";
+        String lastAnswer = "";
+        boolean terminated;
+    }
+
+    /**
+     * Reflexion 范式策略(Phase 2 Task 11):只表达差异——Actor 尝试 + Reflector 自评双模型调用
+     * (均在 nextStep 内经 kernel.callModel)、反思 success(+工具证据)→ terminal、
+     * lesson/rejection 累积进 memory 注入下一轮。
+     */
+    private final class ReflexionSpec
+            implements com.springclaw.service.agent.kernel.LoopSpec<ReflexionState, String> {
+
+        private final ChatContext ctx;
+        private final SseEmitter emitter;
+        private final String requestId;
+        private final String riskLevel;
+        private final Object[] tools;
+        private final boolean allowFailover;
+        private final AiProviderService.ActiveChatClient initialClient;
+        private final AutonomousExecutionTracker tracker;
+
+        ReflexionSpec(ChatContext ctx, SseEmitter emitter, String requestId, String riskLevel,
+                      Object[] tools, boolean allowFailover,
+                      AiProviderService.ActiveChatClient initialClient,
+                      AutonomousExecutionTracker tracker) {
+            this.ctx = ctx;
+            this.emitter = emitter;
+            this.requestId = requestId;
+            this.riskLevel = riskLevel;
+            this.tools = tools;
+            this.allowFailover = allowFailover;
+            this.initialClient = initialClient;
+            this.tracker = tracker;
+        }
+
+        @Override public int maxSteps() { return maxReflections; }
+        @Override public String stepKind() { return "reflect"; }
+        @Override public ReflexionState initState(ChatContext ctx) {
+            ReflexionState s = new ReflexionState();
+            s.activeClient = initialClient;
+            return s;
+        }
+
+        @Override
+        public ReflexionState nextStep(com.springclaw.service.agent.kernel.LoopContext loopCtx,
+                                       ReflexionState s, int stepIndex) {
+            int attempt = stepIndex + 1;
+            log.info("Reflexion 尝试 {}/{}: requestId={}, riskLevel={}, toolsCount={}",
+                    attempt, maxReflections, requestId, riskLevel, tools == null ? 0 : tools.length);
+            if (emitter != null) {
+                try {
+                    sseEventBridge.sendStatus(emitter, "Reflexion 尝试 " + attempt + "/" + maxReflections);
+                } catch (Exception e) {
+                    log.warn("SSE 进度事件发送失败(可能客户端已断开): attempt={}", attempt);
+                }
+            }
+
+            // Actor:LLM 据 memory → Thought+Action 文本 → ExplicitToolExecutioner 手动执行工具 → Observation
+            ModelCallExecutor.ModelCallResult<String> attemptResult;
+            try {
+                attemptResult = loopCtx.kernel().callModel(
+                        new com.springclaw.service.agent.kernel.KernelCall<String>(
+                                "reflexion-attempt",
+                                s.activeClient,
+                                attemptRequestContext(),
+                                allowFailover,
+                                attemptOperation(null, s)
+                        ));
+            } catch (Exception e) {
+                if (e instanceof RuntimeException runtimeEx) throw runtimeEx;
+                throw new IllegalStateException("Reflexion Actor 调用失败: " + e.getMessage(), e);
+            }
+            s.activeClient = attemptResult.client(); // failover 后更新
+            String thought = attemptResult.value();
+            boolean hasAction = explicitToolExecutioner.hasActionLine(thought);
+            String observation = hasAction
+                    ? explicitToolExecutioner.execute(thought, tools, requestId) : "";
+            String attemptTrace = "Thought: " + TextUtils.truncate(thought, 400)
+                    + "\nAction: " + explicitToolExecutioner.describeAction(thought, hasAction)
+                    + "\nObservation: " + TextUtils.truncate(observation, 400);
+            s.lastAttempt = attemptTrace;
+            lastAttemptRef.set(attemptTrace);
+            // RX-T4 M1:raw 最终答案(用户可读的 clean 文本)。Actor 调工具 → 用 Observation 作本轮答案;
+            // 纯文本作答(无 Action)→ 用 thought 原文。只进 reflect;attemptTrace 只进 action(轨迹)。
+            s.lastAnswer = hasAction ? observation : thought;
+
+            if (emitter != null) {
+                try {
+                    // Actor 三段式 trace — Thought/Action/Observation(模仿 ReAct/PlanExecute)
+                    sseEventBridge.sendTrace(emitter, ctx, "Reflexion Thought " + attempt,
+                            "reflexion", "thought", TextUtils.truncate(thought, 200), 0L);
+                    sseEventBridge.sendTrace(emitter, ctx, "Reflexion Action " + attempt,
+                            "reflexion", "action",
+                            TextUtils.truncate(explicitToolExecutioner.describeAction(thought, hasAction), 200), 0L);
+                    if (StringUtils.hasText(observation)) {
+                        sseEventBridge.sendTrace(emitter, ctx, "Reflexion Observation " + attempt,
+                                "reflexion", "observation", TextUtils.truncate(observation, 200), 0L);
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            // Evaluator/Reflector:自评本次尝试(BeanOutputConverter 结构化输出)
+            ReflectionResult reflection = callReflection(
+                    ctx, attemptTrace, s.memory, s.activeClient, requestId, allowFailover);
+            if (emitter != null) {
+                try {
+                    sseEventBridge.sendTrace(emitter, ctx, "Reflexion 反思 " + attempt,
+                            "reflexion", "reflect",
+                            "success=" + reflection.success()
+                                    + " lesson=" + TextUtils.truncate(reflection.lesson(), 200), 0L);
+                } catch (Exception ignored) {}
+            }
+
+            // 终止判定:read 直接完成;write/side_effect/dangerous 必须校验 tracker 工具证据(假完成守护)
+            if (reflection.success()) {
+                if ("read".equals(riskLevel) || tracker.satisfiesCompletionCondition(riskLevel)) {
+                    log.info("Reflexion 任务完成: requestId={}, attempt={}, riskLevel={}, hasWrite={}, hasCmd={}, hasVerified={}",
+                            requestId, attempt, riskLevel,
+                            tracker.hasWriteToolCall(), tracker.hasRunCommandCall(), tracker.hasVerifiedSideEffect());
+                    s.terminated = true;
+                    return s;
+                }
+                // 假完成:反思 success 但无真实工具证据 → rejection 注入 memory,继续(对齐 ReAct/PlanExecute)
+                String rejection = tracker.renderFakeCompletionRejection(riskLevel);
+                log.warn("Reflexion 假完成拦截: requestId={}, attempt={}, riskLevel={}, hasWrite={}, hasCmd={}",
+                        requestId, attempt, riskLevel, tracker.hasWriteToolCall(), tracker.hasRunCommandCall());
+                s.memory += "\n尝试 " + attempt + " 反思: 声称完成但无工具证据。" + rejection;
+                if (emitter != null) {
+                    try {
+                        sseEventBridge.sendTrace(emitter, ctx, "Reflexion 假完成拦截",
+                                "reflexion", "warning",
+                                "反思声称完成但缺少真实工具证据,继续尝试: "
+                                        + TextUtils.truncate(rejection, 200), 0L);
+                    } catch (Exception ignored) {}
+                }
+                return s;
+            }
+
+            // 未完成 → lesson 累积进 memory,注入下一轮 Actor(Reflexion 自我纠错闭环)
+            s.memory += "\n尝试 " + attempt + " 反思: " + reflection.lesson();
+            return s;
+        }
+
+        @Override
+        public com.springclaw.service.agent.kernel.KernelResult<String> evaluate(
+                ReflexionState s, int stepIndex) {
+            return s.terminated
+                    ? com.springclaw.service.agent.kernel.KernelResult.terminal(null, "REFLECTED_ENOUGH")
+                    : com.springclaw.service.agent.kernel.KernelResult.continuing(null);
+        }
+
+        @Override
+        public String composeAnswer(ChatContext ctx, ReflexionState s,
+                                    List<com.springclaw.service.agent.kernel.KernelResult<String>> steps) {
+            return s.lastAnswer;
+        }
+
+        private ModelCallExecutor.ChatRequestContext attemptRequestContext() {
+            AssembledContext assembled = ctx.assembled();
+            return new ModelCallExecutor.ChatRequestContext(
+                    requestId, assembled == null ? "" : assembled.sessionKey(),
+                    ctx.channel(), ctx.userId());
+        }
+
+        private ModelCallExecutor.ChatOperation<String> attemptOperation(
+                AiProviderService.ActiveChatClient ignored, ReflexionState s) {
+            AssembledContext assembled = ctx.assembled();
+            String sessionKey = assembled == null ? "" : assembled.sessionKey();
+            String systemPrompt = renderAttemptPrompt(ctx, tools, s.memory);
+            return client -> {
+                // 手动循环主路径:不挂 .tools()——LLM 文本输出 Thought + Action,
+                // ExplicitToolExecutioner 解析并手动执行工具(对齐 ReAct/PlanExecute)。
+                var resp = conversationAdvisorSupport.apply(
+                                client.chatClient().prompt()
+                                        .system(systemPrompt)
+                                        .user(TypedContextPromptRenderer.question(ctx)),
+                                sessionKey,
+                                ctx.userId())
+                        .call()
+                        .chatResponse();
+                return new ModelCallExecutor.ChatOperationResult<>(
+                        ModelCallExecutor.extractText(resp), resp);
+            };
         }
     }
 
@@ -508,12 +638,7 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
      * 复制自 {@link PlanExecuteEngine} / {@link ReActEngine}。
      */
     private boolean isSafeToRetry(Object[] tools) {
-        if (tools == null) return true;
-        for (Object tool : tools) {
-            if (tool instanceof com.springclaw.tool.pack.WorkspaceEditToolPack) return false;
-            if (tool instanceof com.springclaw.tool.pack.ScriptSkillToolPack) return false;
-        }
-        return true;
+        return com.springclaw.service.agent.kernel.ModelCallSafety.isSafeToRetry(tools);
     }
 
     private String observePrompt(ChatContext ctx) {

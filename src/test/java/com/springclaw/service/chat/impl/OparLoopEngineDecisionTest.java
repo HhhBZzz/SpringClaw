@@ -13,6 +13,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -22,6 +23,9 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class OparLoopEngineDecisionTest {
+
+    private final com.springclaw.runtime.bridge.RunLifecycleObserver lifecycleObserver =
+            mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class);
 
     @Test
     void executeUsesTypedChatContextForPlanPromptRendering() throws Exception {
@@ -41,6 +45,9 @@ class OparLoopEngineDecisionTest {
                 promptSupport,
                 mock(ConversationAdvisorSupport.class),
                 localExecutionSupport,
+                lifecycleObserver,
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(
+                        modelCallExecutor, lifecycleObserver),
                 true,
                 false,
                 1
@@ -73,6 +80,9 @@ class OparLoopEngineDecisionTest {
         verify(promptSupport, org.mockito.Mockito.never())
                 .renderPlanPrompt(any(AssembledContext.class), anyString(), eq(1), anyString());
         verifyNoMoreInteractions(promptSupport);
+        // 每步循环体包 beginStep step 边界(kind="opar",index 从 0 起)
+        verify(lifecycleObserver, org.mockito.Mockito.atLeast(1))
+                .beginStep(anyString(), anyInt(), eq("opar"));
     }
 
     @Test
@@ -92,6 +102,10 @@ class OparLoopEngineDecisionTest {
                 new OparPromptSupport(),
                 mock(ConversationAdvisorSupport.class),
                 localExecutionSupport,
+                mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class),
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(
+                        modelCallExecutor,
+                        mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class)),
                 true,
                 false,
                 3

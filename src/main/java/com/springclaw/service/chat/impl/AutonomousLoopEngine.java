@@ -2,6 +2,11 @@ package com.springclaw.service.chat.impl;
 
 import com.springclaw.common.util.TextUtils;
 import com.springclaw.runtime.bridge.RunLifecycleObserver;
+import com.springclaw.service.agent.kernel.AgentLoopKernel;
+import com.springclaw.service.agent.kernel.KernelCall;
+import com.springclaw.service.agent.kernel.KernelResult;
+import com.springclaw.service.agent.kernel.LoopContext;
+import com.springclaw.service.agent.kernel.LoopSpec;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
@@ -61,6 +66,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
     private final ChatResultPersister chatResultPersister;
     private final ChatGuardService chatGuardService;
     private final RunLifecycleObserver lifecycleObserver;
+    private final AgentLoopKernel loopKernel;
     private final boolean localFallbackEnabled;
     private final int maxAutonomousSteps;
 
@@ -75,6 +81,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
                                 ChatResultPersister chatResultPersister,
                                 ChatGuardService chatGuardService,
                                 RunLifecycleObserver lifecycleObserver,
+                                AgentLoopKernel loopKernel,
                                 @Value("${springclaw.chat.local-fallback-enabled:true}") boolean localFallbackEnabled,
                                 @Value("${springclaw.chat.max-autonomous-steps:5}") int maxAutonomousSteps) {
         this.aiProviderService = aiProviderService;
@@ -88,6 +95,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
         this.chatResultPersister = chatResultPersister;
         this.chatGuardService = chatGuardService;
         this.lifecycleObserver = lifecycleObserver;
+        this.loopKernel = loopKernel;
         this.localFallbackEnabled = localFallbackEnabled;
         this.maxAutonomousSteps = Math.max(1, Math.min(maxAutonomousSteps, 15));
     }
@@ -234,154 +242,12 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
             // 将 tracker 注册到线程上下文，让 WorkspaceEditToolPack 的 @Tool 方法可以记录
             ToolExecutionContextHolder.setTracker(tracker);
 
-            String initialPrompt = renderAutonomousPrompt(ctx, tools, "", riskLevel);
-
-            for (int stepNo = 1; stepNo <= maxAutonomousSteps; stepNo++) {
-                log.info("自主循环步骤 {}/{}: requestId={}, riskLevel={}, toolsCount={}, trackerState={}",
-                        stepNo, maxAutonomousSteps, requestId, riskLevel, tools.length,
-                        tracker.hasWriteToolCall() ? "hasWrite" : "noWrite");
-
-                // SSE 进度事件
-                if (emitter != null) {
-                    try {
-                        sseEventBridge.sendStatus(emitter, "自主循环步骤 " + stepNo + "/" + maxAutonomousSteps);
-                    } catch (Exception e) {
-                        log.warn("SSE 进度事件发送失败（可能客户端已断开）: stepNo={}", stepNo);
-                    }
-                }
-
-                final String promptForStep = initialPrompt;
-                ModelCallExecutor.ModelCallResult<String> callResult = modelCallExecutor.executeChat(
-                        activeClient,
-                        "autonomous-act-" + stepNo,
-                        new ModelCallExecutor.ChatRequestContext(
-                                requestId, assembled.sessionKey(), assembled.channel(), assembled.userId()
-                        ),
-                        allowFailover,
-                        client -> {
-                            var requestSpec = client.chatClient().prompt()
-                                    .system(systemPrompt)
-                                    .user(promptForStep);
-                            if (tools != null && tools.length > 0) {
-                                requestSpec = requestSpec.tools(tools);
-                            }
-                            var response = conversationAdvisorSupport.apply(
-                                            requestSpec,
-                                            assembled.sessionKey(),
-                                            assembled.userId())
-                                    .call()
-                                    .chatResponse();
-                            String text = ModelCallExecutor.extractText(response);
-                            return new ModelCallExecutor.ChatOperationResult<>(text, response);
-                        }
-                );
-
-                String stepOutput = callResult.value();
-                activeClient = callResult.client();
-
-                if (!StringUtils.hasText(stepOutput)) {
-                    log.warn("自主循环步骤 {} 模型输出为空，终止循环: requestId={}", stepNo, requestId);
-                    break;
-                }
-
-                actionTrace.add("[Step " + stepNo + "]");
-                actionTrace.add(TextUtils.truncate(stepOutput, 600));
-                stepSummaries.add(stepOutput);
-
-                // SSE 步骤完成事件
-                if (emitter != null) {
-                    try {
-                        sseEventBridge.sendTrace(emitter, ctx, "自主循环步骤 " + stepNo,
-                                "agent", "success",
-                                "步骤 " + stepNo + " 完成（" + TextUtils.truncate(stepOutput, 80) + "）",
-                                0L);
-                    } catch (Exception ignored) {}
-                }
-
-                // === 完成条件判断（按 riskLevel 区分） ===
-
-                // 1. 检查 TASK_FAILED — 任何级别都可以直接失败
-                if (isTaskFailed(stepOutput)) {
-                    log.info("自主循环任务失败: requestId={}, steps={}, marker found", requestId, stepNo);
-                    break;
-                }
-
-                // 2. 检查 TASK_COMPLETE — read-only 可直接完成，write-needed 必须验证
-                if (isTaskComplete(stepOutput)) {
-                    if ("read".equals(riskLevel)) {
-                        // read-only：TASK_COMPLETE 可以直接完成
-                        log.info("自主循环任务完成(read-only): requestId={}, steps={}", requestId, stepNo);
-                        break;
-                    }
-                    // write-needed / side_effect / dangerous：必须验证真实副作用
-                    if (tracker.satisfiesCompletionCondition(riskLevel)) {
-                        log.info("自主循环任务完成(verified): requestId={}, steps={}, riskLevel={}, " +
-                                "hasWrite={}, createdFiles={}, modifiedFiles={}, hasCmd={}, hasVerified={}",
-                                requestId, stepNo, riskLevel,
-                                tracker.hasWriteToolCall(), tracker.getCreatedFiles(),
-                                tracker.getModifiedFiles(), tracker.hasRunCommandCall(),
-                                tracker.hasVerifiedSideEffect());
-                        break;
-                    }
-                    // 假完成：模型声称完成但缺少真实副作用证据
-                    log.warn("自主循环假完成拦截: requestId={}, steps={}, riskLevel={}, " +
-                            "hasWrite={}, createdFiles={}, hasCmd={}",
-                            requestId, stepNo, riskLevel,
-                            tracker.hasWriteToolCall(), tracker.getCreatedFiles(),
-                            tracker.hasRunCommandCall());
-                    // 不终止循环 — 将拒绝提示加入下一轮 prompt
-                    String rejectionHint = tracker.renderFakeCompletionRejection(riskLevel);
-                    initialPrompt = renderAutonomousPrompt(ctx, tools,
-                            buildStepHistory(stepSummaries) + "\n\n" + rejectionHint, riskLevel);
-                    // SSE 通知前端：假完成被拦截
-                    if (emitter != null) {
-                        try {
-                            sseEventBridge.sendTrace(emitter, ctx, "假完成拦截",
-                                    "guard", "warning",
-                                    "模型声称完成但缺少真实操作证据，继续执行。",
-                                    0L);
-                        } catch (Exception ignored) {}
-                    }
-                    continue; // 继续循环，不终止
-                }
-
-                // 3. 早停机制 — 只允许 read-only 任务使用
-                if ("read".equals(riskLevel) && isLikelyFinalAnswer(stepOutput, stepNo)) {
-                    log.info("自主循环早停(read-only): requestId={}, steps={}, 模型输出看起来是最终回答",
-                            requestId, stepNo);
-                    break;
-                }
-
-                // 4. write-needed/side_effect/dangerous 禁止纯文本早停
-                // 即使模型输出了一段看起来像最终回答的文本，
-                // 如果 tracker 没有记录任何工具调用，说明模型只是在用文字描述操作，
-                // 必须继续循环直到真正调用工具
-                if (!"read".equals(riskLevel) && !tracker.hasAnyToolCall() && stepNo >= 2) {
-                    // 模型已经至少跑了 2 步但没调用任何工具
-                    // 加入提示要求模型必须使用工具
-                    if (isLikelyFinalAnswer(stepOutput, stepNo)) {
-                        log.warn("自主循环纯文本拦截: requestId={}, steps={}, riskLevel={}, " +
-                                "模型输出看起来像最终回答但没有工具调用",
-                                requestId, stepNo, riskLevel);
-                        String toolHint = "你已输出了文字描述，但没有调用任何工具执行实际操作。"
-                                + "请使用 workspaceWriteFile / workspaceApplyPatch / workspaceRunCommand 等工具完成实际修改。"
-                                + "不要只用纯文本描述你做了什么。";
-                        initialPrompt = renderAutonomousPrompt(ctx, tools,
-                                buildStepHistory(stepSummaries) + "\n\n" + toolHint, riskLevel);
-                        continue;
-                    }
-                }
-
-                // 5. 最大步数限制
-                if (stepNo == maxAutonomousSteps) {
-                    log.info("自主循环达到最大步数限制: requestId={}, maxSteps={}, riskLevel={}",
-                            requestId, maxAutonomousSteps, riskLevel);
-                    break;
-                }
-
-                initialPrompt = renderAutonomousPrompt(ctx, tools,
-                        buildStepHistory(stepSummaries), riskLevel);
-            }
+            // 循环骨架(步进/step 边界事件/空产出守护/max-steps 兜底)下沉 AgentLoopKernel,
+            // 引擎只表达 Autonomous 差异:.tools() 原生工具往返 + TASK_COMPLETE/TASK_FAILED 标记判定。
+            loopKernel.runLoop(
+                    new AutonomousSpec(ctx, emitter, requestId, riskLevel, tools, allowFailover,
+                            activeClient, tracker, actionTrace, stepSummaries),
+                    new LoopContext(ctx, loopKernel));
 
             // 清理 tracker
             ToolExecutionContextHolder.clearTracker();
@@ -423,6 +289,221 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
     private void releaseLockOnce(ChatContext context, String lockToken, AtomicBoolean lockReleased) {
         if (lockReleased.compareAndSet(false, true) && lockToken != null) {
             chatGuardService.releaseSessionLock(context.assembled().sessionKey(), lockToken);
+        }
+    }
+
+    /** Autonomous 循环的可变步进状态(在 spec 的 nextStep 间演化)。 */
+    private static final class AutonomousState {
+        AiProviderService.ActiveChatClient activeClient;
+        String prompt = "";
+    }
+
+    /**
+     * Autonomous 范式策略(Phase 2 Task 13):只表达差异——每步一次
+     * {@code .tools()} 原生工具调用往返、TASK_FAILED/TASK_COMPLETE(含假完成
+     * 拦截注入拒绝提示)/read-only 早停/纯文本拦截的终止与继续语义。
+     * 终止后所有路径统一落引擎原有循环外收尾("自主循环执行 N 步完成"),行为不变。
+     */
+    private final class AutonomousSpec implements LoopSpec<AutonomousState, String> {
+
+        private final ChatContext ctx;
+        private final SseEmitter emitter;
+        private final String requestId;
+        private final String riskLevel;
+        private final Object[] tools;
+        private final boolean allowFailover;
+        private final AiProviderService.ActiveChatClient initialClient;
+        private final AutonomousExecutionTracker tracker;
+        private final StringJoiner actionTrace;
+        private final List<String> stepSummaries;
+
+        AutonomousSpec(ChatContext ctx, SseEmitter emitter, String requestId, String riskLevel,
+                       Object[] tools, boolean allowFailover,
+                       AiProviderService.ActiveChatClient initialClient,
+                       AutonomousExecutionTracker tracker,
+                       StringJoiner actionTrace, List<String> stepSummaries) {
+            this.ctx = ctx;
+            this.emitter = emitter;
+            this.requestId = requestId;
+            this.riskLevel = riskLevel;
+            this.tools = tools;
+            this.allowFailover = allowFailover;
+            this.initialClient = initialClient;
+            this.tracker = tracker;
+            this.actionTrace = actionTrace;
+            this.stepSummaries = stepSummaries;
+        }
+
+        @Override public int maxSteps() { return maxAutonomousSteps; }
+        @Override public String stepKind() { return "autonomous"; }
+
+        @Override
+        public AutonomousState initState(ChatContext chatCtx) {
+            AutonomousState s = new AutonomousState();
+            s.activeClient = initialClient;
+            s.prompt = renderAutonomousPrompt(ctx, tools, "", riskLevel);
+            return s;
+        }
+
+        @Override
+        public AutonomousState nextStep(LoopContext loopCtx, AutonomousState s, int stepIndex) {
+            int stepNo = stepIndex + 1;
+            AssembledContext assembled = ctx.assembled();
+            log.info("自主循环步骤 {}/{}: requestId={}, riskLevel={}, toolsCount={}, trackerState={}",
+                    stepNo, maxAutonomousSteps, requestId, riskLevel, tools == null ? 0 : tools.length,
+                    tracker.hasWriteToolCall() ? "hasWrite" : "noWrite");
+
+            // SSE 进度事件
+            if (emitter != null) {
+                try {
+                    sseEventBridge.sendStatus(emitter, "自主循环步骤 " + stepNo + "/" + maxAutonomousSteps);
+                } catch (Exception e) {
+                    log.warn("SSE 进度事件发送失败（可能客户端已断开）: stepNo={}", stepNo);
+                }
+            }
+
+            final String systemPrompt = ctx.systemPrompt();
+            final String promptForStep = s.prompt;
+            ModelCallExecutor.ModelCallResult<String> callResult;
+            try {
+                callResult = loopCtx.kernel().callModel(new KernelCall<>(
+                        "autonomous-act-" + stepNo,
+                        s.activeClient,
+                        new ModelCallExecutor.ChatRequestContext(
+                                requestId,
+                                assembled == null ? "" : assembled.sessionKey(),
+                                ctx.channel(),
+                                ctx.userId()
+                        ),
+                        allowFailover,
+                        client -> {
+                            var requestSpec = client.chatClient().prompt()
+                                    .system(systemPrompt)
+                                    .user(promptForStep);
+                            if (tools != null && tools.length > 0) {
+                                requestSpec = requestSpec.tools(tools);
+                            }
+                            var response = conversationAdvisorSupport.apply(
+                                            requestSpec,
+                                            assembled == null ? "" : assembled.sessionKey(),
+                                            assembled == null ? "" : assembled.userId())
+                                    .call()
+                                    .chatResponse();
+                            String text = ModelCallExecutor.extractText(response);
+                            return new ModelCallExecutor.ChatOperationResult<>(text, response);
+                        }
+                ));
+            } catch (Exception e) {
+                if (e instanceof RuntimeException runtimeEx) throw runtimeEx;
+                throw new IllegalStateException("自主循环模型调用失败: " + e.getMessage(), e);
+            }
+            s.activeClient = callResult.client(); // failover 后更新
+            s.prompt = callResult.value(); // evaluate 若判 continue 会重渲染覆盖
+            return s;
+        }
+
+        @Override
+        public KernelResult<String> evaluate(AutonomousState s, int stepIndex) {
+            int stepNo = stepIndex + 1;
+            String stepOutput = s.prompt;
+
+            // 空输出终止(kernel 会再按 call.value 守护一次,这里按原语义先行判定)
+            if (!StringUtils.hasText(stepOutput)) {
+                log.warn("自主循环步骤 {} 模型输出为空，终止循环: requestId={}", stepNo, requestId);
+                return KernelResult.terminal(null, "EMPTY_OUTPUT");
+            }
+
+            actionTrace.add("[Step " + stepNo + "]");
+            actionTrace.add(TextUtils.truncate(stepOutput, 600));
+            stepSummaries.add(stepOutput);
+
+            // SSE 步骤完成事件
+            if (emitter != null) {
+                try {
+                    sseEventBridge.sendTrace(emitter, ctx, "自主循环步骤 " + stepNo,
+                            "agent", "success",
+                            "步骤 " + stepNo + " 完成（" + TextUtils.truncate(stepOutput, 80) + "）",
+                            0L);
+                } catch (Exception ignored) {}
+            }
+
+            // === 完成条件判断（按 riskLevel 区分） ===
+
+            // 1. TASK_FAILED — 任何级别都可以直接失败
+            if (isTaskFailed(stepOutput)) {
+                log.info("自主循环任务失败: requestId={}, steps={}, marker found", requestId, stepNo);
+                return KernelResult.terminal(null, "TASK_FAILED");
+            }
+
+            // 2. TASK_COMPLETE — read-only 可直接完成，write-needed 必须验证
+            if (isTaskComplete(stepOutput)) {
+                if ("read".equals(riskLevel)) {
+                    log.info("自主循环任务完成(read-only): requestId={}, steps={}", requestId, stepNo);
+                    return KernelResult.terminal(null, "TASK_COMPLETE_READ");
+                }
+                if (tracker.satisfiesCompletionCondition(riskLevel)) {
+                    log.info("自主循环任务完成(verified): requestId={}, steps={}, riskLevel={}, " +
+                                    "hasWrite={}, createdFiles={}, modifiedFiles={}, hasCmd={}, hasVerified={}",
+                            requestId, stepNo, riskLevel,
+                            tracker.hasWriteToolCall(), tracker.getCreatedFiles(),
+                            tracker.getModifiedFiles(), tracker.hasRunCommandCall(),
+                            tracker.hasVerifiedSideEffect());
+                    return KernelResult.terminal(null, "TASK_COMPLETE_VERIFIED");
+                }
+                // 假完成：模型声称完成但缺少真实副作用证据 → 注入拒绝提示,继续循环
+                log.warn("自主循环假完成拦截: requestId={}, steps={}, riskLevel={}, " +
+                                "hasWrite={}, createdFiles={}, hasCmd={}",
+                        requestId, stepNo, riskLevel,
+                        tracker.hasWriteToolCall(), tracker.getCreatedFiles(),
+                        tracker.hasRunCommandCall());
+                String rejectionHint = tracker.renderFakeCompletionRejection(riskLevel);
+                s.prompt = renderAutonomousPrompt(ctx, tools,
+                        buildStepHistory(stepSummaries) + "\n\n" + rejectionHint, riskLevel);
+                if (emitter != null) {
+                    try {
+                        sseEventBridge.sendTrace(emitter, ctx, "假完成拦截",
+                                "guard", "warning",
+                                "模型声称完成但缺少真实操作证据，继续执行。",
+                                0L);
+                    } catch (Exception ignored) {}
+                }
+                return KernelResult.continuing(null);
+            }
+
+            // 3. 早停机制 — 只允许 read-only 任务使用
+            if ("read".equals(riskLevel) && isLikelyFinalAnswer(stepOutput, stepNo)) {
+                log.info("自主循环早停(read-only): requestId={}, steps={}, 模型输出看起来是最终回答",
+                        requestId, stepNo);
+                return KernelResult.terminal(null, "EARLY_STOP_FINAL_ANSWER");
+            }
+
+            // 4. write-needed/side_effect/dangerous 禁止纯文本早停:
+            // 模型输出看起来像最终回答但 tracker 无任何工具调用,说明只是文字描述,
+            // 注入提示要求真实调用工具,继续循环。
+            if (!"read".equals(riskLevel) && !tracker.hasAnyToolCall() && stepNo >= 2
+                    && isLikelyFinalAnswer(stepOutput, stepNo)) {
+                log.warn("自主循环纯文本拦截: requestId={}, steps={}, riskLevel={}, " +
+                                "模型输出看起来像最终回答但没有工具调用",
+                        requestId, stepNo, riskLevel);
+                String toolHint = "你已输出了文字描述，但没有调用任何工具执行实际操作。"
+                        + "请使用 workspaceWriteFile / workspaceApplyPatch / workspaceRunCommand 等工具完成实际修改。"
+                        + "不要只用纯文本描述你做了什么。";
+                s.prompt = renderAutonomousPrompt(ctx, tools,
+                        buildStepHistory(stepSummaries) + "\n\n" + toolHint, riskLevel);
+                return KernelResult.continuing(null);
+            }
+
+            // 5. 普通继续:带历史重渲染下一轮 prompt
+            s.prompt = renderAutonomousPrompt(ctx, tools,
+                    buildStepHistory(stepSummaries), riskLevel);
+            return KernelResult.continuing(null);
+        }
+
+        @Override
+        public String composeAnswer(ChatContext chatCtx, AutonomousState s,
+                                    List<KernelResult<String>> kernelSteps) {
+            // 所有终止路径统一走引擎循环外收尾,这里不承担组装
+            return "";
         }
     }
 
@@ -633,11 +714,6 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
     }
 
     private boolean isSafeToRetry(Object[] tools) {
-        if (tools == null) return true;
-        for (Object tool : tools) {
-            if (tool instanceof com.springclaw.tool.pack.WorkspaceEditToolPack) return false;
-            if (tool instanceof com.springclaw.tool.pack.ScriptSkillToolPack) return false;
-        }
-        return true;
+        return com.springclaw.service.agent.kernel.ModelCallSafety.isSafeToRetry(tools);
     }
 }

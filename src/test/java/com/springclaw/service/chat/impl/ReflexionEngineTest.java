@@ -18,6 +18,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -186,6 +188,8 @@ class ReflexionEngineTest {
         // 收敛终止:reflect 含成功尝试的答案
         assertThat(result.modelEnabled()).isTrue();
         assertThat(result.reflect()).contains("X 是一个 AI 框架");
+        // 每轮尝试循环体包 beginStep step 边界(kind="reflect",index 从 0 起)
+        verify(lifecycleObserver, times(2)).beginStep(anyString(), anyInt(), eq("reflect"));
     }
 
     /**
@@ -335,6 +339,8 @@ class ReflexionEngineTest {
      * 构造 ReflexionEngine 骨架:mock 11 bean 依赖 + 真实 ExplicitToolExecutioner + maxReflections=3。
      * 依赖签名对齐 {@link PlanExecuteEngine}(RX-T1 接入 ExplicitToolExecutioner)。
      */
+    private final RunLifecycleObserver lifecycleObserver = mock(RunLifecycleObserver.class);
+
     private ReflexionEngine newReflexionEngine() {
         return new ReflexionEngine(
                 mock(AiProviderService.class),
@@ -347,8 +353,10 @@ class ReflexionEngineTest {
                 mock(SseEventBridge.class),
                 mock(ChatResultPersister.class),
                 mock(ChatGuardService.class),
-                mock(RunLifecycleObserver.class),
+                lifecycleObserver,
                 new ExplicitToolExecutioner(),
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(
+                        mock(ModelCallExecutor.class), lifecycleObserver),
                 3
         );
     }
@@ -373,8 +381,9 @@ class ReflexionEngineTest {
                 mock(SseEventBridge.class),
                 mock(ChatResultPersister.class),
                 mock(ChatGuardService.class),
-                mock(RunLifecycleObserver.class),
+                lifecycleObserver,
                 toolExecutioner,
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(executor, lifecycleObserver),
                 maxReflections
         );
     }

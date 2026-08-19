@@ -31,7 +31,9 @@ class WebMvcConfigTest {
     }
 
     @Test
-    void shouldDisableCredentialsWhenOnlyOriginPatternsAreConfigured() {
+    void shouldAllowCredentialsWithOriginPatternsForVercelPreviewDomains() {
+        // patterns 支持通配(如 https://springclaw*.vercel.app 覆盖预览/生产域名),
+        // 且前端 fetch 用 credentials:'include',patterns 也必须 allowCredentials(true)。
         WebMvcConfig config = new WebMvcConfig(
                 mock(TokenAuthenticationInterceptor.class),
                 mock(RoleAuthorizationInterceptor.class),
@@ -43,7 +45,7 @@ class WebMvcConfigTest {
         config.addCorsMappings(registry);
 
         CorsConfiguration cors = registry.configs().get("/**");
-        Assertions.assertEquals(Boolean.FALSE, cors.getAllowCredentials());
+        Assertions.assertEquals(Boolean.TRUE, cors.getAllowCredentials());
         Assertions.assertEquals("http://192.168.*:*", cors.getAllowedOriginPatterns().get(0));
     }
 

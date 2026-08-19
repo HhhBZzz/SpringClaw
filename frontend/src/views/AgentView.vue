@@ -49,6 +49,7 @@ import {
   updateRuntimeMemoryCandidateStatus
 } from '../services/api';
 import { useAuthStore } from '../stores/auth';
+import { groupTraceByTurn, type TraceLeadGroup, type TraceStepGroup, type TraceTurnGroup } from '../features/blueprint-canvas/traceGrouping';
 import type { AgentActionProposal, AgentCapabilityEvent, AgentDecisionEvent, AgentParadigm, AgentQualityScore, AgentTraceEvent, AgentVerificationEvent, ChatMessage, ChatResponseMode, ChatSessionSummary, ChatStreamMeta, ModelStatusResponse, RuntimeEvaluationGateReport, RuntimeEvaluationRun, RuntimeEvaluationStatusSummary, RuntimeKnowledgeSourceReviewItem, RuntimeKnowledgeSourceReviewStatus, RuntimeKnowledgeSourceSnapshot, RuntimeLearningReviewItem, RuntimeLearningReviewStatus, RuntimeMemoryCandidateReviewItem, RuntimeMemoryCandidateReviewStatus, RuntimeMemoryEffectivenessRedlineReport, RuntimeMemoryProviderEvaluationReport, RuntimeMemoryUsageTrace, RuntimeModelProviders, RuntimeOverview, RuntimeResourceView, RuntimeSkill, RuntimeTask, RuntimeTool, RuntimeToolProposal, RuntimeUsageSummary, ToolActionRequiredEvent } from '../types';
 import { AGENT_PARADIGMS } from '../types';
 
@@ -447,6 +448,62 @@ const visibleRunSteps = computed(() => {
     paradigm: event.paradigm
   }));
 });
+
+/**
+ * canonical turn/step 分组时间线:turn.started 开 turn 组,step.started/completed
+ * 对聚合为组内 step(内层事件链 + outcome);legacy 流落 lead 组保持平铺。
+ * 结构化纯映射在 traceGrouping.ts,此处只做展示字段派生。
+ */
+const groupedRunSteps = computed(() => {
+  const groups = groupTraceByTurn(traceEvents.value);
+  const lead = groups
+    .filter((g): g is TraceLeadGroup => g.kind === 'lead')
+    .flatMap((g) => g.events.map((event, i) => ({
+      label: event.target || event.stepName || `Step ${i + 1}`,
+      detail: timelineStepDetail(event),
+      status: normalizeStepStatus(event.status),
+      duration: traceDurationLabel(event) || (event.status === 'started' ? 'running' : '-')
+    })));
+  const turns = groups
+    .filter((g): g is TraceTurnGroup => g.kind === 'turn')
+    .map((g, ti) => ({
+      id: `turn-${ti}`,
+      title: `Turn ${ti + 1}`,
+      completed: g.turnCompleted != null,
+      steps: [
+        ...g.steps.map((step) => ({
+          id: `turn-${ti}-step-${step.index}`,
+          label: `${step.kind} · step ${step.index + 1}`,
+          detail: stepSummary(step),
+          status: stepStatusOf(step),
+          duration: step.completedEvent?.durationMs
+            ? formatMs(step.completedEvent.durationMs)
+            : 'running'
+        })),
+        ...g.ungrouped
+          .filter((e) => e.action !== 'turn.started' && e.action !== 'turn.completed')
+          .map((e) => ({
+            id: `turn-${ti}-u-${e.action}`,
+            label: e.action || e.stepName,
+            detail: timelineStepDetail(e),
+            status: normalizeStepStatus(e.status),
+            duration: traceDurationLabel(e) || '-'
+          }))
+      ]
+    }));
+  return { lead, turns };
+});
+
+function stepStatusOf(step: TraceStepGroup): RunStepStatus {
+  if (step.running) return 'running';
+  return step.outcome === 'failed' ? 'failed' : 'completed';
+}
+
+function stepSummary(step: TraceStepGroup): string {
+  const inner = step.innerEvents.map((e) => e.action).filter(Boolean).join(' → ');
+  const outcome = step.outcome ? ` · ${step.outcome}` : '';
+  return `${inner || '(无内层事件)'}${outcome}`;
+}
 
 const currentStep = computed(() => {
   return visibleRunSteps.value.find((step) => step.status === 'running')
@@ -1313,7 +1370,7 @@ async function replayRunTrace(requestId?: string) {
   }
   try {
     const [events, memoryUsage, memoryFrame] = await Promise.all([
-      getRunTrace(requestId, 80),
+      getRunTrace(requestId, 200),
       getRunMemoryUsage(requestId),
       getRunMemoryFrame(requestId)
     ]);
@@ -1435,7 +1492,8 @@ function pushTraceEvent(event: AgentTraceEvent) {
     status: event.status || 'success',
     timestamp: event.timestamp || Date.now()
   };
-  traceEvents.value = [...traceEvents.value.slice(-79), normalized];
+  // 保留最近 199 条(与后端 trace 端点 200 上限对齐,canonical 边界事件量比 legacy 大)
+  traceEvents.value = [...traceEvents.value.slice(-199), normalized];
 }
 
 function pushCapabilityEvent(event: AgentCapabilityEvent) {
@@ -3155,18 +3213,40 @@ onUnmounted(() => {
                 </div>
                 <div class="run-timeline">
                   <template v-if="visibleRunSteps.length">
+                    <!-- lead 段(无 turn 边界/legacy):保持平铺 -->
                     <div
-                      v-for="step in visibleRunSteps"
-                      :key="`${step.label}-${step.status}`"
+                      v-for="(step, i) in groupedRunSteps.lead"
+                      :key="`lead-${i}-${step.label}`"
                       class="trace-row"
-                      :class="[`is-${step.status}`, step.paradigm ? `para-${String(step.paradigm).toLowerCase()}` : '']"
+                      :class="`is-${step.status}`"
                     >
                       <span class="trace-dot" aria-hidden="true"></span>
                       <div>
                         <strong>{{ step.label }}</strong>
                         <small>{{ step.detail }}</small>
                       </div>
-                      <em>{{ step.source || step.riskLevel || step.tools || step.duration }}</em>
+                      <em>{{ step.duration }}</em>
+                    </div>
+                    <!-- turn 段:turn 组头 + 组内 step(内层事件链折叠成摘要) -->
+                    <div v-for="turn in groupedRunSteps.turns" :key="turn.id" class="trace-turn">
+                      <div class="trace-turn-head">
+                        <span class="trace-turn-badge">turn</span>
+                        <strong>{{ turn.title }}</strong>
+                        <em>{{ turn.completed ? 'completed' : 'running' }}</em>
+                      </div>
+                      <div
+                        v-for="step in turn.steps"
+                        :key="step.id"
+                        class="trace-row"
+                        :class="`is-${step.status}`"
+                      >
+                        <span class="trace-dot" aria-hidden="true"></span>
+                        <div>
+                          <strong>{{ step.label }}</strong>
+                          <small>{{ step.detail }}</small>
+                        </div>
+                        <em>{{ step.duration }}</em>
+                      </div>
                     </div>
                   </template>
                   <div v-else class="empty-history">

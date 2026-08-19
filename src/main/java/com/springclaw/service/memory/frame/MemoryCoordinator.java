@@ -16,6 +16,8 @@ import com.springclaw.runtime.memory.port.MemoryRecordStore;
 import com.springclaw.runtime.memory.port.ProjectMemorySource;
 import com.springclaw.runtime.memory.port.ShortTermMemoryStore;
 import com.springclaw.domain.entity.MessageEvent;
+import com.springclaw.runtime.history.ConversationHistoryDeriver;
+import com.springclaw.runtime.history.ConversationTurn;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.event.ShortTermChatEventRead;
 import org.springframework.beans.factory.ObjectProvider;
@@ -49,6 +51,8 @@ public class MemoryCoordinator {
     private final Supplier<ShortTermMemoryStore> shortTermStoreSupplier;
     private final ProjectMemorySource projectMemorySource;
     private final MessageEventService messageEventService;
+    private final ConversationHistoryDeriver conversationHistoryDeriver;
+    private final String conversationHistorySource;
     private final Clock clock;
     private final int maxChars;
     private final int traceMaxWarnings;
@@ -66,6 +70,8 @@ public class MemoryCoordinator {
                 shortTermStoreProvider::getIfAvailable,
                 projectMemorySource,
                 null,
+                null,
+                "message-event",
                 clock,
                 maxChars,
                 traceMaxWarnings
@@ -86,6 +92,37 @@ public class MemoryCoordinator {
                 shortTermStoreProvider::getIfAvailable,
                 projectMemorySource,
                 messageEventService,
+                null,
+                "message-event",
+                clock,
+                maxChars,
+                traceMaxWarnings
+        );
+    }
+
+    /**
+     * 生产装配入口(MemoryFrameConfig): 带历史源切换。
+     * conversationHistorySource=canonical 时短期层 durable 源由派生器接管,
+     * 异常/空回退 message_event(spec 2026-08-18 §3.4)。
+     */
+    public MemoryCoordinator(
+            MemoryRecordStore recordStore,
+            ObjectProvider<ShortTermMemoryStore> shortTermStoreProvider,
+            ProjectMemorySource projectMemorySource,
+            MessageEventService messageEventService,
+            ConversationHistoryDeriver conversationHistoryDeriver,
+            String conversationHistorySource,
+            Clock clock,
+            int maxChars,
+            int traceMaxWarnings
+    ) {
+        this(
+                recordStore,
+                shortTermStoreProvider::getIfAvailable,
+                projectMemorySource,
+                messageEventService,
+                conversationHistoryDeriver,
+                conversationHistorySource,
                 clock,
                 maxChars,
                 traceMaxWarnings
@@ -105,6 +142,8 @@ public class MemoryCoordinator {
                 shortTermStoreSupplier,
                 projectMemorySource,
                 null,
+                null,
+                "message-event",
                 clock,
                 maxChars,
                 traceMaxWarnings
@@ -120,6 +159,55 @@ public class MemoryCoordinator {
             int maxChars,
             int traceMaxWarnings
     ) {
+        this(
+                recordStore,
+                shortTermStoreSupplier,
+                projectMemorySource,
+                messageEventService,
+                null,
+                "message-event",
+                clock,
+                maxChars,
+                traceMaxWarnings
+        );
+    }
+
+    /** 测试入口: 带历史源切换(参数序与既有测试构造器一致,开关殿后)。 */
+    MemoryCoordinator(
+            MemoryRecordStore recordStore,
+            Supplier<ShortTermMemoryStore> shortTermStoreSupplier,
+            ProjectMemorySource projectMemorySource,
+            MessageEventService messageEventService,
+            Clock clock,
+            int maxChars,
+            int traceMaxWarnings,
+            ConversationHistoryDeriver conversationHistoryDeriver,
+            String conversationHistorySource
+    ) {
+        this(
+                recordStore,
+                shortTermStoreSupplier,
+                projectMemorySource,
+                messageEventService,
+                conversationHistoryDeriver,
+                conversationHistorySource,
+                clock,
+                maxChars,
+                traceMaxWarnings
+        );
+    }
+
+    MemoryCoordinator(
+            MemoryRecordStore recordStore,
+            Supplier<ShortTermMemoryStore> shortTermStoreSupplier,
+            ProjectMemorySource projectMemorySource,
+            MessageEventService messageEventService,
+            ConversationHistoryDeriver conversationHistoryDeriver,
+            String conversationHistorySource,
+            Clock clock,
+            int maxChars,
+            int traceMaxWarnings
+    ) {
         this.recordStore = Objects.requireNonNull(recordStore, "recordStore");
         this.shortTermStoreSupplier = Objects.requireNonNull(
                 shortTermStoreSupplier,
@@ -130,6 +218,8 @@ public class MemoryCoordinator {
                 "projectMemorySource"
         );
         this.messageEventService = messageEventService;
+        this.conversationHistoryDeriver = conversationHistoryDeriver;
+        this.conversationHistorySource = conversationHistorySource;
         this.clock = Objects.requireNonNull(clock, "clock");
         this.maxChars = Math.max(1_000, maxChars);
         this.traceMaxWarnings = Math.max(1, traceMaxWarnings);
@@ -258,6 +348,48 @@ public class MemoryCoordinator {
                 scope,
                 SHORT_TERM_ENTRY_LIMIT
         );
+        // 历史源切换(spec 2026-08-18 §3.4): canonical → 派生器为 durable 源,
+        // 异常/空结果回退 message_event durable 读,再失败回退缓存(三级不变)
+        if (conversationHistoryDeriver != null && "canonical".equals(conversationHistorySource)) {
+            try {
+                List<ConversationTurn> turns = conversationHistoryDeriver.deriveFull(
+                        scope.sessionKey(),
+                        SHORT_TERM_ENTRY_LIMIT
+                );
+                if (!turns.isEmpty()) {
+                    List<ShortTermMemoryEntry> entries = new ArrayList<>();
+                    for (ConversationTurn turn : turns) {
+                        ShortTermMemoryEntry entry = toCanonicalShortTermEntry(scope, turn);
+                        if (entry != null) {
+                            entries.add(entry);
+                        }
+                    }
+                    entries.sort(Comparator.comparingLong(ShortTermMemoryEntry::eventId));
+                    if (entries.size() > SHORT_TERM_ENTRY_LIMIT) {
+                        entries = new ArrayList<>(entries.subList(
+                                entries.size() - SHORT_TERM_ENTRY_LIMIT,
+                                entries.size()
+                        ));
+                    }
+                    if (!entries.isEmpty()) {
+                        long watermark = entries.stream()
+                                .mapToLong(ShortTermMemoryEntry::eventId)
+                                .max()
+                                .orElse(Long.MAX_VALUE);
+                        try {
+                            store.mergeRecovery(scope, watermark, entries);
+                        } catch (RuntimeException ex) {
+                            warnings.add("canonical short-term cache repair unavailable: " + ex.getMessage());
+                        }
+                        sourceCounts.add("shortTerm", entries.size());
+                        sourceCounts.add("persistedShortTerm", entries.size());
+                        return toShortTermItems(scope, entries);
+                    }
+                }
+            } catch (RuntimeException ex) {
+                warnings.add("canonical short-term derivation unavailable: " + ex.getMessage());
+            }
+        }
         if (messageEventService == null) {
             sourceCounts.add("shortTerm", cachedEntries.size());
             return toShortTermItems(scope, cachedEntries);
@@ -349,6 +481,52 @@ public class MemoryCoordinator {
                 event.getContent(),
                 occurredAt
         );
+    }
+
+    /**
+     * canonical 派生 turn → 短期记忆条目(spec 2026-08-18 §3.4 合成身份规则)。
+     * scope 过滤与 toShortTermEntry 同构: channel 匹配 + PERSONAL_SESSION 归属。
+     */
+    private static ShortTermMemoryEntry toCanonicalShortTermEntry(
+            MemoryScope scope,
+            ConversationTurn turn
+    ) {
+        if (turn == null
+                || turn.at() == null
+                || turn.role() == ConversationTurn.Role.SYSTEM
+                || !StringUtils.hasText(turn.content())
+                || !StringUtils.hasText(turn.runId())
+                || !StringUtils.hasText(turn.userId())
+                || !scope.channel().equals(turn.channel())) {
+            return null;
+        }
+        if (scope.scopeType() == MemoryScopeType.PERSONAL_SESSION
+                && !scope.authorizationPrincipal().equals(turn.userId())) {
+            return null;
+        }
+        String role = turn.role() == ConversationTurn.Role.USER ? "USER" : "ASSISTANT";
+        String content = turn.content().length() > 4_000
+                ? turn.content().substring(0, 4_000)
+                : turn.content();
+        return new ShortTermMemoryEntry(
+                syntheticEventId(turn),
+                "canonical:" + turn.runId() + ":" + role.toLowerCase(),
+                turn.runId(),
+                role,
+                turn.userId(),
+                content,
+                turn.at()
+        );
+    }
+
+    /**
+     * 合成 eventId: epochMilli*4 + slot(USER=1, ASSISTANT=2)。
+     * 正数、近似单调、同 run 内有序;跨 run 同毫秒同 slot 的理论冲突
+     * 只会造成 Redis zset 同分(字典序兜底),无害。
+     */
+    private static long syntheticEventId(ConversationTurn turn) {
+        return turn.at().toEpochMilli() * 4
+                + (turn.role() == ConversationTurn.Role.USER ? 1 : 2);
     }
 
     private List<MemoryFrameItem> recordItems(
@@ -601,9 +779,13 @@ public class MemoryCoordinator {
             MemoryScope scope,
             ShortTermMemoryEntry entry
     ) {
+        // canonical 合成条目以 "canonical:" 前缀为身份标记(spec 2026-08-18 §3.4)
+        MemoryFrameSourceKind sourceKind = entry.eventKey().startsWith("canonical:")
+                ? MemoryFrameSourceKind.CANONICAL_RUN_EVENT
+                : MemoryFrameSourceKind.MESSAGE_EVENT;
         return new MemoryFrameItem(
                 entry.eventKey(),
-                MemoryFrameSourceKind.MESSAGE_EVENT,
+                sourceKind,
                 MemoryFrameLayer.SHORT_TERM,
                 "",
                 "",

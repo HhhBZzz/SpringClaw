@@ -162,6 +162,8 @@ public class WorkspaceEditToolPack {
             ProcessBuilder pb = new ProcessBuilder("sh", "-c", normalizedCommand)
                     .directory(rootPath.toFile())
                     .redirectErrorStream(true);
+            // 子进程环境清洗:剥离凭证类变量,防 LLM 经 env 输出读取 API key
+            com.springclaw.common.util.SubprocessEnvironmentSanitizer.applyTo(pb);
 
             Process process = pb.start();
             // 异步消费 stdout：readAllBytes 会阻塞到进程关闭 stdout，对不退出命令（mvn test/dev server/tail -f）

@@ -15,7 +15,10 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -113,6 +116,8 @@ class ReActEngineTest {
         assertThat(result.plan()).contains("2 步"); // 循环跑满 2 步
         assertThat(result.action()).contains("search"); // 第1步 Action 进入轨迹
         verify(executor, times(2)).executeChat(any(), anyString(), any(), anyBoolean(), any());
+        // 每步循环体包 beginStep step 边界(kind="react",index 从 0 起)
+        verify(lifecycleObserver, times(2)).beginStep(anyString(), anyInt(), eq("react"));
     }
 
     // === Task 6: ChatExecutionResult + resolveFinalAnswer + trace 完善 ===
@@ -348,6 +353,11 @@ class ReActEngineTest {
      * 构造 ReActEngine 骨架:mock 11 bean 依赖 + maxReactSteps=6。
      * 依赖签名与 AutonomousLoopEngine 一致(见该类构造函数)。
      */
+    private final RunLifecycleObserver lifecycleObserver = mock(RunLifecycleObserver.class);
+    private final com.springclaw.service.agent.kernel.AgentLoopKernel loopKernel =
+            new com.springclaw.service.agent.kernel.AgentLoopKernel(
+                    mock(ModelCallExecutor.class), lifecycleObserver);
+
     private ReActEngine newReActEngine() {
         return new ReActEngine(
                 mock(AiProviderService.class),
@@ -360,8 +370,9 @@ class ReActEngineTest {
                 mock(SseEventBridge.class),
                 mock(ChatResultPersister.class),
                 mock(ChatGuardService.class),
-                mock(RunLifecycleObserver.class),
+                lifecycleObserver,
                 new ExplicitToolExecutioner(),
+                loopKernel,
                 6
         );
     }
@@ -385,8 +396,9 @@ class ReActEngineTest {
                 mock(SseEventBridge.class),
                 mock(ChatResultPersister.class),
                 mock(ChatGuardService.class),
-                mock(RunLifecycleObserver.class),
+                lifecycleObserver,
                 new ExplicitToolExecutioner(),
+                new com.springclaw.service.agent.kernel.AgentLoopKernel(executor, lifecycleObserver),
                 maxReactSteps
         );
     }

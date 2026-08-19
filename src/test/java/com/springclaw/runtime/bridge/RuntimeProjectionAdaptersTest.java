@@ -62,26 +62,55 @@ class RuntimeProjectionAdaptersTest {
     }
 
     @Test
-    void resultAdapterNeverClaimsCanonicalCompletionWithoutVerifier() {
-        RunResultProjector.TerminalObservation observation =
-                new RunResultProjector().adaptDegraded(
+    void resultAdapterProjectsVerdictOutcomeIntoTerminalObservation() {
+        // DEGRADE 判定 → DEGRADED 终态 + missingEvidence 标记
+        RunResultProjector.TerminalObservation degraded =
+                new RunResultProjector().adaptTerminal(
+                        context(),
+                        new ChatExecutionResult(
+                                "observe", "plan", "action", "reflect", false
+                        ),
+                        "fallback answer",
+                        new CompletionVerdict(
+                                CompletionDecision.Outcome.DEGRADE,
+                                "MODEL_UNAVAILABLE_LOCAL_FALLBACK",
+                                "模型不可用"
+                        ),
+                        AT
+                );
+
+        assertThat(degraded.decision().outcome())
+                .isEqualTo(CompletionDecision.Outcome.DEGRADE);
+        assertThat(degraded.decision().reasonCode())
+                .isEqualTo("MODEL_UNAVAILABLE_LOCAL_FALLBACK");
+        assertThat(degraded.decision().missingEvidence())
+                .containsExactly("canonical-completion-verification");
+        assertThat(degraded.result().status()).isEqualTo(RunStatus.DEGRADED);
+        assertThat(degraded.result().answer()).isEqualTo("fallback answer");
+        assertThat(degraded.result().quality()).isZero();
+
+        // COMPLETE 判定 → COMPLETED 终态,不再强制 LEGACY_UNVERIFIED_RESULT
+        RunResultProjector.TerminalObservation completed =
+                new RunResultProjector().adaptTerminal(
                         context(),
                         new ChatExecutionResult(
                                 "observe", "plan", "action", "reflect", true
                         ),
-                        "legacy answer",
+                        "model answer",
+                        new CompletionVerdict(
+                                CompletionDecision.Outcome.COMPLETE,
+                                "MODEL_VERIFIED_ANSWER",
+                                "模型产出非空回答"
+                        ),
                         AT
                 );
 
-        assertThat(observation.decision().outcome())
-                .isEqualTo(CompletionDecision.Outcome.DEGRADE);
-        assertThat(observation.decision().reasonCode())
-                .isEqualTo("LEGACY_UNVERIFIED_RESULT");
-        assertThat(observation.decision().missingEvidence())
-                .containsExactly("canonical-completion-verification");
-        assertThat(observation.result().status()).isEqualTo(RunStatus.DEGRADED);
-        assertThat(observation.result().answer()).isEqualTo("legacy answer");
-        assertThat(observation.result().quality()).isZero();
+        assertThat(completed.decision().outcome())
+                .isEqualTo(CompletionDecision.Outcome.COMPLETE);
+        assertThat(completed.decision().missingEvidence()).isEmpty();
+        assertThat(completed.result().status()).isEqualTo(RunStatus.COMPLETED);
+        assertThat(completed.result().answerKind())
+                .isEqualTo(com.springclaw.runtime.contract.RunResult.AnswerKind.FINAL);
     }
 
     private static ChatContext context() {

@@ -3,10 +3,14 @@ package com.springclaw.service.context;
 import com.springclaw.common.util.TextUtils;
 import com.springclaw.common.support.ConversationScopeSupport;
 import com.springclaw.domain.entity.MessageEvent;
+import com.springclaw.runtime.history.ConversationHistoryDeriver;
+import com.springclaw.runtime.history.ConversationTurn;
 import com.springclaw.service.chat.ConversationEventTextSupport;
 import com.springclaw.service.event.MessageEventService;
 import com.springclaw.service.memory.MemoryBankService;
 import com.springclaw.service.memory.MemoryService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.ai.document.Document;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,9 +35,13 @@ import java.util.stream.Collectors;
 @Service
 public class ContextAssembler {
 
+    private static final Logger log = LoggerFactory.getLogger(ContextAssembler.class);
+
     private final MessageEventService messageEventService;
     private final MemoryService memoryService;
     private final MemoryBankService memoryBankService;
+    private final ConversationHistoryDeriver conversationHistoryDeriver;
+    private final String conversationHistorySource;
     private final int memoryWindowTurns;
     private final int memoryWindowEvents;
     private final int sessionRecallTopK;
@@ -46,10 +54,15 @@ public class ContextAssembler {
                             MemoryBankService memoryBankService,
                             @Value("${springclaw.chat.memory-window-size:8}") int memoryWindowSize,
                             @Value("${springclaw.memory.recall-top-k:8}") int recallTopK,
-                            @Value("${springclaw.memory.recall-max-chars:400}") int recallMaxChars) {
+                            @Value("${springclaw.memory.recall-max-chars:400}") int recallMaxChars,
+                            ConversationHistoryDeriver conversationHistoryDeriver,
+                            @Value("${springclaw.runtime.conversation-history-source:canonical}")
+                            String conversationHistorySource) {
         this.messageEventService = messageEventService;
         this.memoryService = memoryService;
         this.memoryBankService = memoryBankService;
+        this.conversationHistoryDeriver = conversationHistoryDeriver;
+        this.conversationHistorySource = conversationHistorySource;
         this.memoryWindowTurns = Math.max(1, Math.min(memoryWindowSize, 20));
         this.memoryWindowEvents = Math.max(2, this.memoryWindowTurns * 2);
         int safeTopK = Math.max(1, recallTopK);
@@ -60,10 +73,20 @@ public class ContextAssembler {
 
     public ContextAssembler(MessageEventService messageEventService,
                             MemoryService memoryService,
-                            @Value("${springclaw.chat.memory-window-size:8}") int memoryWindowSize,
-                            @Value("${springclaw.memory.recall-top-k:8}") int recallTopK,
-                            @Value("${springclaw.memory.recall-max-chars:400}") int recallMaxChars) {
+                            int memoryWindowSize,
+                            int recallTopK,
+                            int recallMaxChars) {
         this(messageEventService, memoryService, new MemoryBankService(false, "", 400), memoryWindowSize, recallTopK, recallMaxChars);
+    }
+
+    public ContextAssembler(MessageEventService messageEventService,
+                            MemoryService memoryService,
+                            MemoryBankService memoryBankService,
+                            int memoryWindowSize,
+                            int recallTopK,
+                            int recallMaxChars) {
+        this(messageEventService, memoryService, memoryBankService, memoryWindowSize,
+                recallTopK, recallMaxChars, null, "message-event");
     }
 
     public AssembledContext assemble(String sessionKey,
@@ -108,6 +131,23 @@ public class ContextAssembler {
     }
 
     private String buildEventContext(String sessionKey) {
+        // 历史源切换(spec 2026-08-17-canonical-conversation-history §3.3):
+        // canonical → 派生器路径,异常/空结果回退 message_event(双源拼接的最小过渡形态)
+        if ("canonical".equals(conversationHistorySource) && conversationHistoryDeriver != null) {
+            try {
+                List<ConversationTurn> turns =
+                        conversationHistoryDeriver.derive(sessionKey, memoryWindowEvents);
+                if (!turns.isEmpty()) {
+                    return turns.stream()
+                            .map(this::renderTurnLine)
+                            .filter(StringUtils::hasText)
+                            .collect(Collectors.joining("\n"));
+                }
+            } catch (Exception ex) {
+                log.warn("canonical 历史派生失败,回退 message_event: sessionKey={}, reason={}",
+                        sessionKey, ex.getMessage());
+            }
+        }
         List<MessageEvent> events = messageEventService.listRecent(sessionKey, memoryWindowEvents);
         if (events.isEmpty()) {
             return "（暂无短期事件流）";
@@ -116,6 +156,18 @@ public class ContextAssembler {
                 .map(this::renderEventLine)
                 .filter(StringUtils::hasText)
                 .collect(Collectors.joining("\n"));
+    }
+
+    private String renderTurnLine(ConversationTurn turn) {
+        if (turn == null || !StringUtils.hasText(turn.content())) {
+            return "";
+        }
+        String role = switch (turn.role()) {
+            case USER -> "USER";
+            case ASSISTANT -> "ASSISTANT";
+            case SYSTEM -> "SYSTEM";
+        };
+        return "- " + role + ": " + turn.content();
     }
 
     private String buildSemanticContext(String sessionKey, String userId, String question) {

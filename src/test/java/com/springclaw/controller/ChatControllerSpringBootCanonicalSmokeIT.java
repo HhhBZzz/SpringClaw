@@ -211,7 +211,7 @@ class ChatControllerSpringBootCanonicalSmokeIT {
                 .andExpect(jsonPath("$.data.model").value("provider:model"));
 
         RunState state = runStateRepository.requireByRunId(RUN_ID);
-        assertThat(state.status()).isEqualTo(RunStatus.DEGRADED);
+        assertThat(state.status()).isEqualTo(RunStatus.COMPLETED);
         assertThat(state.contextSnapshot()).isNotNull();
         assertThat(state.contextSnapshot().contextSourceSummary())
                 .containsEntry("schema", "springclaw.context-snapshot.v1")
@@ -231,8 +231,10 @@ class ChatControllerSpringBootCanonicalSmokeIT {
                         RunEventType.CONTEXT_READY,
                         RunEventType.DECISION_MADE,
                         RunEventType.STRATEGY_STARTED,
-                        RunEventType.VERIFICATION_COMPLETED,
-                        RunEventType.RUN_DEGRADED
+                        RunEventType.TURN_STARTED,
+                        RunEventType.TURN_COMPLETED,
+                        RunEventType.VERIFICATION_STARTED,
+                        RunEventType.RUN_COMPLETED
                 );
         verify(memoryCoordinator).retrieve(any());
         verifyNoInteractions(contextAssembler);

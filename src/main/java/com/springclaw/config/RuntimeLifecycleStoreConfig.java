@@ -31,4 +31,18 @@ public class RuntimeLifecycleStoreConfig {
     public RunLifecycleStore inMemoryRunLifecycleStore() {
         return new InMemoryRunLifecycleStore();
     }
+
+    /**
+     * db-enabled=true 而 lifecycle.store≠mysql 的半持久组合在启动时 fail-fast
+     * (业务表落库但 run 事件只存内存,重启即失)。
+     */
+    @Bean
+    public RuntimeStoreConsistencyGuard runtimeStoreConsistencyGuard(
+            @org.springframework.beans.factory.annotation.Value(
+                    "${springclaw.persistence.db-enabled:false}") boolean dbEnabled,
+            @org.springframework.beans.factory.annotation.Value(
+                    "${springclaw.runtime.lifecycle.store:memory}") String lifecycleStore
+    ) {
+        return new RuntimeStoreConsistencyGuard(dbEnabled, lifecycleStore);
+    }
 }

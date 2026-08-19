@@ -17,20 +17,26 @@ import java.util.Map;
 @Component
 public final class RunResultProjector {
 
-    public TerminalObservation adaptDegraded(
+    /**
+     * 按 CompletionVerifier 判定投影终态 observation：
+     * COMPLETE→COMPLETED/FINAL；DEGRADE→DEGRADED/DEGRADED；FAIL 由调用方走 bridge.failed。
+     */
+    public TerminalObservation adaptTerminal(
             ChatContext context,
             ChatExecutionResult executionResult,
             String answer,
+            CompletionVerdict verdict,
             Instant completedAt
     ) {
         List<String> evidenceRefs = evidenceRefs(executionResult);
+        boolean complete = verdict.outcome() == CompletionDecision.Outcome.COMPLETE;
         CompletionDecision decision = new CompletionDecision(
                 context.requestId(),
-                CompletionDecision.Outcome.DEGRADE,
-                "LEGACY_UNVERIFIED_RESULT",
-                "Legacy execution returned an answer without canonical completion verification.",
+                verdict.outcome(),
+                verdict.reasonCode(),
+                verdict.summary(),
                 evidenceRefs,
-                List.of("canonical-completion-verification"),
+                complete ? List.of() : List.of("canonical-completion-verification"),
                 false,
                 0,
                 0.0,
@@ -39,9 +45,9 @@ public final class RunResultProjector {
         AiProviderService.ActiveChatClient activeClient = context.activeClient();
         RunResult result = new RunResult(
                 context.requestId(),
-                RunStatus.DEGRADED,
+                complete ? RunStatus.COMPLETED : RunStatus.DEGRADED,
                 answer,
-                RunResult.AnswerKind.DEGRADED,
+                complete ? RunResult.AnswerKind.FINAL : RunResult.AnswerKind.DEGRADED,
                 activeClient == null ? "" : activeClient.providerId(),
                 activeClient == null ? "" : activeClient.model(),
                 evidenceRefs,
@@ -56,6 +62,9 @@ public final class RunResultProjector {
     }
 
     private static List<String> evidenceRefs(ChatExecutionResult result) {
+        if (result == null) {
+            return List.of();
+        }
         List<String> refs = new ArrayList<>();
         if (StringUtils.hasText(result.observe())) {
             refs.add("legacy:observe");

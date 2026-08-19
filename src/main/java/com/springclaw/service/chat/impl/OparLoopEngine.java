@@ -4,12 +4,10 @@ import com.springclaw.common.util.TextUtils;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentEngine;
+import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
-import com.springclaw.tool.pack.FileToolPack;
-import com.springclaw.tool.pack.LocalFilesystemToolPack;
-import com.springclaw.tool.pack.ScriptSkillToolPack;
 import com.springclaw.tool.runtime.ToolExecutionContext;
 import com.springclaw.tool.runtime.ToolExecutionContextHolder;
 import com.springclaw.tool.runtime.ToolOrchestrator;
@@ -41,6 +39,8 @@ public class OparLoopEngine implements AgentEngine {
     private final OparPromptSupport promptSupport;
     private final ConversationAdvisorSupport conversationAdvisorSupport;
     private final LocalExecutionSupport localExecutionSupport;
+    private final RunLifecycleObserver lifecycleObserver;
+    private final com.springclaw.service.agent.kernel.AgentLoopKernel loopKernel;
     private final BeanOutputConverter<PlanResult> planOutputConverter = new BeanOutputConverter<>(PlanResult.class);
     private final boolean localFallbackEnabled;
     private final boolean localFallbackFirst;
@@ -56,6 +56,8 @@ public class OparLoopEngine implements AgentEngine {
                           OparPromptSupport promptSupport,
                           ConversationAdvisorSupport conversationAdvisorSupport,
                           LocalExecutionSupport localExecutionSupport,
+                          RunLifecycleObserver lifecycleObserver,
+                          com.springclaw.service.agent.kernel.AgentLoopKernel loopKernel,
                           @Value("${springclaw.chat.local-fallback-enabled:true}") boolean localFallbackEnabled,
                           @Value("${springclaw.chat.local-fallback-first:true}") boolean localFallbackFirst,
                           @Value("${springclaw.chat.max-steps:3}") int maxAgentSteps) {
@@ -69,6 +71,8 @@ public class OparLoopEngine implements AgentEngine {
         this.promptSupport = promptSupport;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
         this.localExecutionSupport = localExecutionSupport;
+        this.lifecycleObserver = lifecycleObserver;
+        this.loopKernel = loopKernel;
         this.localFallbackEnabled = localFallbackEnabled;
         this.localFallbackFirst = localFallbackFirst;
         this.maxAgentSteps = Math.max(1, Math.min(maxAgentSteps, 6));
@@ -213,43 +217,18 @@ public class OparLoopEngine implements AgentEngine {
 
         String observePrompt = assembled.observePrompt();
         List<AgentStep> steps = new ArrayList<>();
-        for (int stepNo = 1; stepNo <= maxAgentSteps; stepNo++) {
-            PlanCallResult planCall = runPlan(currentClient, systemPrompt, assembled, requestId, steps, stepNo, chatContext);
-            currentClient = planCall.client();
-            PlanResult plan = planCall.plan();
-            if (planCall.degraded()) {
-                return buildDegradedResult(
-                        systemPrompt,
-                        currentClient,
-                        assembled,
-                        buildPlanTrace(List.of(new AgentStep(stepNo, plan, new ActionResult("计划阶段失败，未进入工具执行。", true)))),
-                        "模型计划阶段失败，已切换到本地技能/降级输出。",
-                        fallbackResponder
-                );
-            }
-            if (plan.ready()) {
-                steps.add(new AgentStep(
-                        stepNo,
-                        plan,
-                        new ActionResult("规划判断当前信息已足够，直接进入总结。", false)
-                ));
-                break;
-            }
+        // 循环骨架(步进/step 边界事件/max-steps 兜底)下沉 AgentLoopKernel,
+        // 引擎只表达 OPAR 差异:每步 Plan+Act 双模型调用与 ready/降级终止判定。
+        com.springclaw.service.agent.kernel.AgentLoopKernel.LoopOutcome<String> outcome =
+                loopKernel.runLoop(
+                        new OparSpec(systemPrompt, assembled, requestId, fallbackResponder,
+                                decision, chatContext, activeClient, steps),
+                        new com.springclaw.service.agent.kernel.LoopContext(chatContext, loopKernel));
 
-            ActionCallResult actionCall = runAction(currentClient, systemPrompt, assembled, plan, requestId, steps, stepNo, decision, chatContext);
-            currentClient = actionCall.client();
-            ActionResult action = actionCall.action();
-            steps.add(new AgentStep(stepNo, plan, action));
-            if (action.degraded()) {
-                return buildDegradedResult(
-                        systemPrompt,
-                        currentClient,
-                        assembled,
-                        buildPlanTrace(steps),
-                        buildActionTrace(steps),
-                        fallbackResponder
-                );
-            }
+        // 降级终局(plan/act 失败)由 state 携带取回,保持原 return-in-loop 语义
+        OparState finalState = (OparState) outcome.finalState();
+        if (finalState != null && finalState.degradedResult != null) {
+            return finalState.degradedResult;
         }
 
         return new ChatExecutionResult(
@@ -259,6 +238,123 @@ public class OparLoopEngine implements AgentEngine {
                 "",
                 true
         );
+    }
+
+    /** OPAR 循环的可变步进状态(在 spec 的 nextStep 间演化)。 */
+    private static final class OparState {
+        AiProviderService.ActiveChatClient activeClient;
+        /** 降级终局(plan/act 失败时构造),非 null 即 terminal。 */
+        ChatExecutionResult degradedResult;
+        /** plan.ready() 已满足(信息足够,直接进入总结)。 */
+        boolean planReady;
+    }
+
+    /**
+     * OPAR 范式策略(Phase 2 Task 14):每步 Plan(结构化 PlanResult)+ Act(工具执行)
+     * 双模型调用。plan.ready() → terminal READY;plan/act 降级 → terminal DEGRADED
+     * (终局结果由 state 携带,runLoop 返回后引擎取回);否则继续下一轮(带历史重渲染)。
+     */
+    private final class OparSpec
+            implements com.springclaw.service.agent.kernel.LoopSpec<OparState, String> {
+
+        private final String systemPrompt;
+        private final AssembledContext assembled;
+        private final String requestId;
+        private final AgentEngine.FallbackResponder fallbackResponder;
+        private final AgentDecision decision;
+        private final ChatContext chatContext;
+        private final AiProviderService.ActiveChatClient initialClient;
+        private final List<AgentStep> steps;
+
+        OparSpec(String systemPrompt, AssembledContext assembled, String requestId,
+                 AgentEngine.FallbackResponder fallbackResponder, AgentDecision decision,
+                 ChatContext chatContext, AiProviderService.ActiveChatClient initialClient,
+                 List<AgentStep> steps) {
+            this.systemPrompt = systemPrompt;
+            this.assembled = assembled;
+            this.requestId = requestId;
+            this.fallbackResponder = fallbackResponder;
+            this.decision = decision;
+            this.chatContext = chatContext;
+            this.initialClient = initialClient;
+            this.steps = steps;
+        }
+
+        @Override public int maxSteps() { return maxAgentSteps; }
+        @Override public String stepKind() { return "opar"; }
+
+        @Override
+        public OparState initState(ChatContext ctx) {
+            OparState s = new OparState();
+            s.activeClient = initialClient;
+            return s;
+        }
+
+        @Override
+        public OparState nextStep(com.springclaw.service.agent.kernel.LoopContext loopCtx,
+                                  OparState s, int stepIndex) {
+            int stepNo = stepIndex + 1;
+            PlanCallResult planCall = runPlan(s.activeClient, systemPrompt, assembled,
+                    requestId, steps, stepNo, chatContext);
+            s.activeClient = planCall.client();
+            PlanResult plan = planCall.plan();
+            if (planCall.degraded()) {
+                s.degradedResult = buildDegradedResult(
+                        systemPrompt,
+                        s.activeClient,
+                        assembled,
+                        buildPlanTrace(List.of(new AgentStep(stepNo, plan,
+                                new ActionResult("计划阶段失败，未进入工具执行。", true)))),
+                        "模型计划阶段失败，已切换到本地技能/降级输出。",
+                        fallbackResponder
+                );
+                return s;
+            }
+            if (plan.ready()) {
+                steps.add(new AgentStep(
+                        stepNo,
+                        plan,
+                        new ActionResult("规划判断当前信息已足够，直接进入总结。", false)
+                ));
+                s.planReady = true;
+                return s;
+            }
+
+            ActionCallResult actionCall = runAction(s.activeClient, systemPrompt, assembled,
+                    plan, requestId, steps, stepNo, decision, chatContext);
+            s.activeClient = actionCall.client();
+            steps.add(new AgentStep(stepNo, plan, actionCall.action()));
+            if (actionCall.action().degraded()) {
+                s.degradedResult = buildDegradedResult(
+                        systemPrompt,
+                        s.activeClient,
+                        assembled,
+                        buildPlanTrace(steps),
+                        buildActionTrace(steps),
+                        fallbackResponder
+                );
+            }
+            return s;
+        }
+
+        @Override
+        public com.springclaw.service.agent.kernel.KernelResult<String> evaluate(
+                OparState s, int stepIndex) {
+            if (s.degradedResult != null) {
+                return com.springclaw.service.agent.kernel.KernelResult.terminal(null, "DEGRADED");
+            }
+            if (s.planReady) {
+                return com.springclaw.service.agent.kernel.KernelResult.terminal(null, "PLAN_READY");
+            }
+            return com.springclaw.service.agent.kernel.KernelResult.continuing(null);
+        }
+
+        @Override
+        public String composeAnswer(ChatContext ctx, OparState s,
+                                    List<com.springclaw.service.agent.kernel.KernelResult<String>> kernelSteps) {
+            // 终局结果由引擎 runLoop 后统一构造,spec 不承担组装
+            return "";
+        }
     }
 
     public String renderReflectPrompt(AssembledContext context, String plan, String action) {
@@ -544,15 +640,7 @@ public class OparLoopEngine implements AgentEngine {
     }
 
     private boolean isSafeToRetry(Object[] tools) {
-        if (tools == null || tools.length == 0) {
-            return true;
-        }
-        for (Object tool : tools) {
-            if (tool instanceof FileToolPack || tool instanceof LocalFilesystemToolPack || tool instanceof ScriptSkillToolPack) {
-                return false;
-            }
-        }
-        return true;
+        return com.springclaw.service.agent.kernel.ModelCallSafety.isSafeToRetry(tools);
     }
 
     private record ActionResult(String output, boolean degraded) {

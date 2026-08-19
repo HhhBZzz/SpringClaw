@@ -45,10 +45,11 @@ public class WebMvcConfig implements WebMvcConfigurer {
             registration.allowedOrigins(allowedOrigins)
                     .allowCredentials(true);
         } else {
-            // Origin patterns are development-only escape hatches. Keep credentials off
-            // unless the deployment lists exact trusted origins above.
+            // Origin patterns 支持通配(如 https://springclaw*.vercel.app 覆盖所有 Vercel 预览/生产域名,
+            // 避免每次部署追精确域名)。前端 fetch 用 credentials:'include',
+            // patterns 也必须 allowCredentials(true),否则浏览器拒读带 credentials 的响应。
             registration.allowedOriginPatterns(splitCsv(corsAllowedOriginPatterns))
-                    .allowCredentials(false);
+                    .allowCredentials(true);
         }
     }
 

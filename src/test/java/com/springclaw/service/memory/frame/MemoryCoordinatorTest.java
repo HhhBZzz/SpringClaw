@@ -488,6 +488,85 @@ class MemoryCoordinatorTest {
                 role, content, runId, channel, userId, at);
     }
 
+    @Test
+    void canonicalEntryTruncatesContentToShortTermLimit() {
+        // 合成 entry 不变式(spec §5.3): ShortTermMemoryEntry content 上限 4000,
+        // canonical 原文超长时截断而非整路回退
+        MemoryScope scope = MemoryScope.from(personalClaim("alice"));
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        com.springclaw.runtime.history.ConversationHistoryDeriver deriver =
+                mock(com.springclaw.runtime.history.ConversationHistoryDeriver.class);
+        when(deriver.deriveFull("session-1", 40)).thenReturn(List.of(
+                canonicalTurn(com.springclaw.runtime.history.ConversationTurn.Role.ASSISTANT,
+                        "长".repeat(5000), "run-long", "api", "alice", T0.plusSeconds(1))
+        ));
+        InMemoryShortTermMemoryStore shortTermStore = new InMemoryShortTermMemoryStore();
+        MemoryCoordinator coordinator = new MemoryCoordinator(
+                new InMemoryMemoryRecordStore(),
+                () -> shortTermStore,
+                ignored -> List.of(),
+                messageEventService,
+                CLOCK,
+                // 大预算:防止 4000 字符条目被层预算裁掉,测不到截断本身
+                20000,
+                20,
+                deriver,
+                "canonical"
+        );
+
+        MemoryFrameResult result = coordinator.retrieve(new MemoryFrameRequest(
+                "run-1", scope, "question"
+        ));
+
+        // 直接钉合成 entry 不变式: 入缓存的内容被截到 4000(ShortTermMemoryEntry 契约上限)
+        assertThat(shortTermStore.readRecent(scope, 40))
+                .hasSize(1)
+                .allSatisfy(e -> assertThat(e.content()).hasSize(4000));
+        assertThat(result.frame().shortTermTurns()).hasSize(1);
+        assertThat(result.frame().shortTermTurns().get(0).content()).hasSize(4000);
+    }
+
+    @Test
+    void canonicalEntriesOrderUserBeforeAssistantWithinSameMillisecond() {
+        // 合成 eventId = epochMilli*4 + slot(USER=1, ASSISTANT=2): 同毫秒时
+        // slot 保证 USER 在前——排序证明不能依赖毫秒差
+        MemoryScope scope = MemoryScope.from(personalClaim("alice"));
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        com.springclaw.runtime.history.ConversationHistoryDeriver deriver =
+                mock(com.springclaw.runtime.history.ConversationHistoryDeriver.class);
+        Instant sameInstant = T0.plusSeconds(1);
+        when(deriver.deriveFull("session-1", 40)).thenReturn(List.of(
+                canonicalTurn(com.springclaw.runtime.history.ConversationTurn.Role.USER,
+                        "同毫秒问题", "run-same", "api", "alice", sameInstant),
+                canonicalTurn(com.springclaw.runtime.history.ConversationTurn.Role.ASSISTANT,
+                        "同毫秒回答", "run-same", "api", "alice", sameInstant)
+        ));
+        InMemoryShortTermMemoryStore shortTermStore = new InMemoryShortTermMemoryStore();
+        MemoryCoordinator coordinator = new MemoryCoordinator(
+                new InMemoryMemoryRecordStore(),
+                () -> shortTermStore,
+                ignored -> List.of(),
+                messageEventService,
+                CLOCK,
+                6000,
+                20,
+                deriver,
+                "canonical"
+        );
+
+        MemoryFrameResult result = coordinator.retrieve(new MemoryFrameRequest(
+                "run-1", scope, "question"
+        ));
+
+        assertThat(result.frame().shortTermTurns())
+                .extracting(item -> item.content())
+                .containsExactly("同毫秒问题", "同毫秒回答");
+        // eventId>0 且 user<assistant(slot 有序)
+        List<ShortTermMemoryEntry> cached = shortTermStore.readRecent(scope, 40);
+        assertThat(cached).hasSize(2).allSatisfy(e -> assertThat(e.eventId()).isPositive());
+        assertThat(cached.get(0).eventId()).isLessThan(cached.get(1).eventId());
+    }
+
     private static ShortTermMemoryEntry shortTerm(
             long eventId,
             String eventKey,

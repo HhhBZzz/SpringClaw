@@ -239,7 +239,7 @@ public class ChatController {
         int safeLimit = Math.max(1, Math.min(limit, 100));
         String normalizedSessionKey = sessionKey.trim();
         String username = context.username().trim();
-        // 历史源切换(spec 2026-08-18 §3.4): canonical 非空 → 派生渲染+turn 归属越权校验;
+        // 历史源切换(spec 2026-08-18 §3.4): canonical 非空 → 派生渲染+turn 归属过滤;
         // 派生异常/空结果(纯存量会话)回退 legacy message_event 路径
         if ("canonical".equals(conversationHistorySource) && conversationHistoryDeriver != null) {
             List<ConversationTurn> turns = null;
@@ -250,14 +250,18 @@ public class ChatController {
                         normalizedSessionKey, ex.getMessage());
             }
             if (turns != null && !turns.isEmpty()) {
-                boolean owned = turns.stream().anyMatch(turn -> username.equals(turn.userId()));
-                if (!owned) {
-                    throw new BusinessException(40315, "无权查看该会话历史");
-                }
-                List<ChatHistoryMessage> messages = turns.stream()
-                        .map(this::turnToHistoryMessage)
+                // 渲染范围与 legacy 对齐:只回当前用户自己的 turn(共享 sessionKey 会话
+                // 不串用户内容);归属过滤后为空可能是窗口化漏接(请求者的 turn 在窗口外),
+                // 不直接 403——落 legacy 计数校验仲裁
+                List<ConversationTurn> ownedTurns = turns.stream()
+                        .filter(turn -> username.equals(turn.userId()))
                         .toList();
-                return ApiResponse.success(new ChatHistoryResponse(normalizedSessionKey, messages));
+                if (!ownedTurns.isEmpty()) {
+                    List<ChatHistoryMessage> messages = ownedTurns.stream()
+                            .map(this::turnToHistoryMessage)
+                            .toList();
+                    return ApiResponse.success(new ChatHistoryResponse(normalizedSessionKey, messages));
+                }
             }
         }
         long sessionChatEvents = messageEventService.countSessionEvents(normalizedSessionKey, null, null, "CHAT");

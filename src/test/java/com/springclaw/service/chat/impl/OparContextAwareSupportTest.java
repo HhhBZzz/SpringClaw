@@ -123,8 +123,9 @@ class OparContextAwareSupportTest {
         OparContextAwareSupport canonicalSupport = new OparContextAwareSupport(
                 conversationHistoryService, messageEventService, localFilesystemService,
                 deriver, "canonical");
+        // 窗口语义钉住: 与 legacy 同为最近 4 条
         org.mockito.Mockito.when(deriver.deriveFull(org.mockito.Mockito.eq("s1"),
-                        org.mockito.Mockito.anyInt()))
+                        org.mockito.Mockito.eq(4)))
                 .thenReturn(java.util.List.of(
                         com.springclaw.runtime.history.ConversationTurn.canonicalUntruncated(
                                 com.springclaw.runtime.history.ConversationTurn.Role.ASSISTANT,
@@ -171,6 +172,61 @@ class OparContextAwareSupportTest {
         assertThat(result).isNotNull();
         assertThat(result.route()).isEqualTo("FILE_CONFIRMATION_MULTIPLE");
         assertThat(result.fallbackAnswer()).contains("legacy-report.xlsx");
+    }
+
+    @org.junit.jupiter.api.Test
+    void legacyPathTakesNewestAssistantCandidatesFirst() {
+        // legacy 方向修复钉住(2026-08-18): listSessionEvents 降序返回,从最新一条
+        // ASSISTANT 开始取候选——两条都带候选时必须命中较新者
+        MessageEvent newer = new MessageEvent();
+        newer.setRole("ASSISTANT");
+        newer.setEventType("CHAT");
+        newer.setContent("[REFLECT] 找到了这些文件：\n1. newer-report.xlsx\n2. newer-summary.docx");
+        MessageEvent older = new MessageEvent();
+        older.setRole("ASSISTANT");
+        older.setEventType("CHAT");
+        older.setContent("[REFLECT] 找到了这些文件：\n1. older-report.xlsx\n2. older-summary.docx");
+        org.mockito.Mockito.when(messageEventService.listSessionEvents(
+                        org.mockito.Mockito.eq("s1"), org.mockito.Mockito.isNull(),
+                        org.mockito.Mockito.eq("CHAT"), org.mockito.Mockito.eq(4),
+                        org.mockito.Mockito.eq(false)))
+                .thenReturn(java.util.List.of(newer, older));
+
+        LocalSkillFallbackService.LocalSkillResult result =
+                support.tryContextAwareLocalResult(context("好"));
+
+        assertThat(result).isNotNull();
+        assertThat(result.route()).isEqualTo("FILE_CONFIRMATION_MULTIPLE");
+        assertThat(result.fallbackAnswer()).contains("newer-report.xlsx");
+    }
+
+    @org.junit.jupiter.api.Test
+    void canonicalSourceFallsBackToLegacyFileCandidatesWhenDeriverReturnsEmpty() {
+        // 空回退腿(spec §5.3): canonical 无记录(纯存量会话)→ legacy 候选路径
+        com.springclaw.runtime.history.ConversationHistoryDeriver deriver =
+                org.mockito.Mockito.mock(com.springclaw.runtime.history.ConversationHistoryDeriver.class);
+        OparContextAwareSupport canonicalSupport = new OparContextAwareSupport(
+                conversationHistoryService, messageEventService, localFilesystemService,
+                deriver, "canonical");
+        org.mockito.Mockito.when(deriver.deriveFull(org.mockito.Mockito.eq("s1"),
+                        org.mockito.Mockito.eq(4)))
+                .thenReturn(java.util.List.of());
+        MessageEvent legacyAssistant = new MessageEvent();
+        legacyAssistant.setRole("ASSISTANT");
+        legacyAssistant.setEventType("CHAT");
+        legacyAssistant.setContent("[REFLECT] 找到了这些文件：\n1. legacy-only.xlsx\n2. legacy-second.docx");
+        org.mockito.Mockito.when(messageEventService.listSessionEvents(
+                        org.mockito.Mockito.eq("s1"), org.mockito.Mockito.isNull(),
+                        org.mockito.Mockito.eq("CHAT"), org.mockito.Mockito.eq(4),
+                        org.mockito.Mockito.eq(false)))
+                .thenReturn(java.util.List.of(legacyAssistant));
+
+        LocalSkillFallbackService.LocalSkillResult result =
+                canonicalSupport.tryContextAwareLocalResult(context("好"));
+
+        assertThat(result).isNotNull();
+        assertThat(result.route()).isEqualTo("FILE_CONFIRMATION_MULTIPLE");
+        assertThat(result.fallbackAnswer()).contains("legacy-only.xlsx");
     }
 
     private AssembledContext context(String question) {

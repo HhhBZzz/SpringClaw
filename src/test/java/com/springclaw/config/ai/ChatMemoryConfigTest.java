@@ -68,7 +68,8 @@ class ChatMemoryConfigTest {
         // 内容提取与 legacy 对齐(USER 剥 OBSERVE 信封)
         MessageEventService messageEventService = mock(MessageEventService.class);
         ConversationHistoryDeriver deriver = mock(ConversationHistoryDeriver.class);
-        when(deriver.deriveFull(eq("session-1"), anyInt())).thenReturn(List.of(
+        // 窗口语义钉住: memoryWindowMessages = max(2, 8*2) = 16
+        when(deriver.deriveFull(eq("session-1"), eq(16))).thenReturn(List.of(
                 ConversationTurn.canonicalUntruncated(ConversationTurn.Role.USER,
                         "[OBSERVE] # 当前问题\n第1轮问题\n\n# 短期会话上下文（事件流）\n...",
                         "r1", "api", "u1", Instant.parse("2026-08-18T00:00:01Z")),
@@ -100,6 +101,23 @@ class ChatMemoryConfigTest {
         List<Message> messages = chatMemory.get("session-1");
 
         assertThat(messages).hasSize(4);
+        assertThat(messages.get(0).getText()).isEqualTo("第1轮问题");
+    }
+
+    @Test
+    void canonicalSourceFallsBackToLegacyWhenDeriverReturnsEmpty() {
+        // 空回退腿(spec §5.3): 纯存量会话 canonical 无记录 → legacy 读
+        MessageEventService messageEventService = mock(MessageEventService.class);
+        ConversationHistoryDeriver deriver = mock(ConversationHistoryDeriver.class);
+        when(deriver.deriveFull(anyString(), anyInt())).thenReturn(List.of());
+        when(messageEventService.listSessionEvents("session-1", null, "CHAT", 32, false))
+                .thenReturn(buildDescendingChatEvents(1));
+
+        ChatMemory chatMemory = new ChatMemoryConfig()
+                .messageEventChatMemory(messageEventService, 8, deriver, "canonical");
+        List<Message> messages = chatMemory.get("session-1");
+
+        assertThat(messages).hasSize(2);
         assertThat(messages.get(0).getText()).isEqualTo("第1轮问题");
     }
 }

@@ -63,8 +63,8 @@ class ConversationHistoryEquivalenceTest {
                 .contains("- USER: 第二问")
                 .contains("- ASSISTANT: 第二答");
         assertThat(legacyContext.split("\n"))
-                .as("legacy 路径产出相同对话行集合")
-                .containsExactlyInAnyOrder(canonicalContext.split("\n"));
+                .as("legacy 路径产出相同对话行序列(含顺序)")
+                .containsExactly(canonicalContext.split("\n"));
         // 溯源:canonical 行来自两个 run
         assertThat(deriver.derive("s1", 16))
                 .extracting(ConversationTurn::runId)
@@ -109,8 +109,8 @@ class ConversationHistoryEquivalenceTest {
                 .contains("- USER: 删除那个文件")
                 .contains("- ASSISTANT: 该操作需要确认:删除 report.xlsx?");
         assertThat(legacyContext.split("\n"))
-                .as("suspension 场景两路对话行集合一致")
-                .containsExactlyInAnyOrder(canonicalContext.split("\n"));
+                .as("suspension 场景两路对话行序列一致(含顺序)")
+                .containsExactly(canonicalContext.split("\n"));
     }
 
     private String persistRun(RunCoordinator coordinator, String sessionKey,

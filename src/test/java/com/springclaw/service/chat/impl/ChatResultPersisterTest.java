@@ -228,9 +228,13 @@ class ChatResultPersisterTest {
         verify(agentSessionService).persistUserMessage(
                 eq(context.session()), eq(context.effectiveUserMessage()), anyString());
         verify(messageEventService).append(argThat((MessageEventWrite write) ->
-                write.eventKey().equals("chat:" + context.requestId() + ":user")));
+                write.eventKey().equals("chat:" + context.requestId() + ":user")
+                        && context.effectiveUserMessage().equals(write.content())));
+        // suspension legacy 行内容钉住: 原文(截断 1600 内),无 [REFLECT] 前缀——
+        // 与 canonical SUSPENDED 载荷(answer=原文)的对账基准
         verify(messageEventService).append(argThat((MessageEventWrite write) ->
-                write.eventKey().equals("chat:" + context.requestId() + ":suspension")));
+                write.eventKey().equals("chat:" + context.requestId() + ":suspension")
+                        && "请确认".equals(write.content())));
         verify(memoryExtractionTrigger, never()).afterTerminalPersistence(anyString(), anyString());
     }
 

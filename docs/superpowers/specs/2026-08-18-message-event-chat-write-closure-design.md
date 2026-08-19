@@ -179,3 +179,16 @@ springclaw.runtime.message-event-chat-write-enabled: ${SPRINGCLAW_RUNTIME_MESSAG
 - 翻转前置条件(§3.6)不变:TerminalMemoryExtractionService 仍 legacy 单源(默认关闭),
   诊断行合成未实现——两者是 write-enabled=false 生产翻转前的登记项。
 
+### 审查修复批(2026-08-18,三路审查+逐条对抗核实后落地)
+
+| 发现 | 处置 |
+|---|---|
+| /history canonical 渲染范围扩为全会话 turn(共享 sessionKey 跨用户可见) | **已修**: 归属过滤(username==turn.userId)后才渲染,范围与 legacy 对齐;过滤后为空不直接 403,落 legacy 计数仲裁(同时消除窗口化误拒) |
+| /history canonical 越权校验只看最近窗口,窗口外参与者误拒 403 | **已修**: 同上,归属过滤空→legacy 仲裁;post-flip 窗口外漏接退化为空页(不泄内容),登记为窗口语义边界 |
+| 文件候选 legacy 扫描方向与注释相反(实取窗口内最旧 ASSISTANT) | **已修 legacy 方向**(既有 bug): 两路统一取最新;行为变化方向=修复 |
+| /history 两路窗口位置相反(canonical 最新 N 条 / legacy 最早 N 条) | **登记**: canonical 最新 N 为正确方向(聊天历史要近期消息),legacy 最早 N 系既有缺陷,回退路径保持原样不动 |
+| MemoryCoordinator 合成 eventId(≈7e12)与 shadow 写实 id(≈1e6)混用同一 Redis zset | **登记为已知边界**: 主路径(canonical 对账成功)不读缓存不受影响;canonical→legacy 回退/回滚时合成条目靠 TTL 过期自愈,期间缓存兜底序可能含新旧两套 eventKey 条目(内容近似重复,budget/去重兜底) |
+| suspension 等价性对账忽略顺序、legacy 侧为手工 fixture | **已加固**: 两处对账改 containsExactly 顺序敏感;persister 测试钉住 legacy suspension 行内容(原文无 [REFLECT],1600 截断内) |
+| MemoryCoordinator 合成 entry 不变式无测试(content≤4000/slot 有序/eventId>0) | **已补** 2 测试(截断走大预算直通、同毫秒 slot 序+eventId 正数断言) |
+| 4 路读路径缺"空回退"测试腿、计数路径缺异常腿、limit 参数 anyInt 过宽 | **已补**:/history 空回退、ChatMemory 空回退、计数异常回退、文件候选空回退;limit stub 全部精确化(4000/100/400/16/4) |
+

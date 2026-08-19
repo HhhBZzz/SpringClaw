@@ -454,8 +454,9 @@ class OparContextAwareSupport {
         }
         List<MessageEvent> recentEvents = messageEventService.listSessionEvents(
                 sessionKey, null, "CHAT", 4, false);
-        // 从最近的开始找第一条 ASSISTANT 事件
-        for (int i = recentEvents.size() - 1; i >= 0; i--) {
+        // ascending=false 返回 id 倒序(最新在前),从头扫=从最近开始找第一条 ASSISTANT 事件
+        // (2026-08-18 修复:此前从尾部起扫,实际命中窗口内最旧一条,与 canonical 路径相反)
+        for (int i = 0; i < recentEvents.size(); i++) {
             MessageEvent event = recentEvents.get(i);
             if ("ASSISTANT".equalsIgnoreCase(event.getRole())) {
                 String raw = event.getContent();

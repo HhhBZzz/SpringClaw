@@ -35,8 +35,14 @@ class ConversationHistoryServiceTest {
 
     @Test
     void canonicalSourceReadsFromDeriverAndUnwrapsObserveEnvelope() {
-        // T5d(spec 2026-08-18 §3.4): canonical 源直读派生器,且与 legacy 一样剥 [OBSERVE] 信封
-        when(deriver.deriveFull(eq("s1"), anyInt())).thenReturn(List.of(
+        // T5d(spec 2026-08-18 §3.4): canonical 源直读派生器,且与 legacy 一样剥 [OBSERVE] 信封。
+        // limit 语义钉住: findFirst 传 2000*2=4000(USER 占半凑满),findLatest 传 50*2=100
+        when(deriver.deriveFull(eq("s1"), eq(4000))).thenReturn(List.of(
+                userTurn("[OBSERVE] # 当前问题\n你都有什么功能？\n\n# 短期会话上下文（事件流）\n- SYSTEM: ...",
+                        "r1", Instant.parse("2026-08-18T00:00:01Z")),
+                userTurn("第二个问题", "r2", Instant.parse("2026-08-18T00:01:00Z"))
+        ));
+        when(deriver.deriveFull(eq("s1"), eq(100))).thenReturn(List.of(
                 userTurn("[OBSERVE] # 当前问题\n你都有什么功能？\n\n# 短期会话上下文（事件流）\n- SYSTEM: ...",
                         "r1", Instant.parse("2026-08-18T00:00:01Z")),
                 userTurn("第二个问题", "r2", Instant.parse("2026-08-18T00:01:00Z"))
@@ -68,7 +74,8 @@ class ConversationHistoryServiceTest {
 
     @Test
     void canonicalSourceCountsUserTurns() {
-        when(deriver.derive(eq("s1"), anyInt())).thenReturn(List.of(
+        // 计数窗口语义钉住: derive(eq(400))——CANONICAL_COUNT_LIMIT
+        when(deriver.derive(eq("s1"), eq(400))).thenReturn(List.of(
                 userTurn("q1", "r1", Instant.parse("2026-08-18T00:00:01Z")),
                 ConversationTurn.canonical(ConversationTurn.Role.ASSISTANT, "a1", "r1",
                         "api", "u1", Instant.parse("2026-08-18T00:00:02Z")),
@@ -77,6 +84,15 @@ class ConversationHistoryServiceTest {
 
         assertThat(canonicalService().countRememberedUserQuestions("s1")).isEqualTo(2L);
         verify(messageEventService, never()).countSessionEvents(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void canonicalCountFallsBackToLegacyWhenDeriverThrows() {
+        // 计数路径异常回退腿(spec §5.3)
+        when(deriver.derive(anyString(), anyInt())).thenThrow(new IllegalStateException("store down"));
+        when(messageEventService.countSessionEvents("s1", "USER", "CHAT")).thenReturn(6L);
+
+        assertThat(canonicalService().countRememberedUserQuestions("s1")).isEqualTo(6L);
     }
 
     @Test

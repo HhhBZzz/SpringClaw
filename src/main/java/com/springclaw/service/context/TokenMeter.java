@@ -1,5 +1,7 @@
 package com.springclaw.service.context;
 
+import org.springframework.stereotype.Component;
+
 /**
  * 请求前 token 估算器(dsh ctx.tokenMeter 的 SpringClaw 对应物)。
  *
@@ -11,6 +13,7 @@ package com.springclaw.service.context;
  * (BPE 对英文代码/文本的平均压缩比;中文 token 化普遍 1 字≥1 token)。
  * 只需相对正确(预算比较),无需绝对精确。</p>
  */
+@Component
 public class TokenMeter {
 
     /** 估算文本 token 数(CJK 1:1,其余 4:1)。 */

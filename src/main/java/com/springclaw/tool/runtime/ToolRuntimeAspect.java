@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.springclaw.common.util.TextUtils;
 import com.springclaw.common.exception.BusinessException;
 import com.springclaw.service.auth.ToolPermissionService;
+import com.springclaw.service.context.ledger.LedgerToolRecorder;
 import com.springclaw.service.proposal.ApprovedProposalContext;
 import com.springclaw.service.proposal.PendingToolApprovalException;
 import com.springclaw.service.proposal.ToolInvocationProposal;
@@ -22,6 +23,7 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -117,13 +119,16 @@ public class ToolRuntimeAspect {
                     return ToolInvocationPipeline.GuardDecision.proceed();
                 })
                 // execute:read 旧路径(canonical emit + proceed)/write proposal 分支;
-                // String 结果超预算免模型剪枝(头/尾保留+marker,dsh tool-result-pruner)
+                // String 结果超预算免模型剪枝(头/尾保留+marker,dsh tool-result-pruner);
+                // 原生账本路径顺带入账(spec 2026-11-09 §3.4,步末由引擎伪造消息对)
                 .onExecute(inv -> {
                     Object result = requiresProposal
                             ? executeWriteWithProposal(joinPoint, approvedOrNull(), genericToolName,
                                     simpleClass, inv.args(), riskLevel)
                             : proceedWithTimeline(joinPoint, context, inv.toolName());
-                    return pruneIfString(result);
+                    Object pruned = pruneIfString(result);
+                    recordToLedger(signature, inv.args(), pruned);
+                    return pruned;
                 })
                 // complete:审计收尾(SUCCESS/FAILED)+ PENDING_APPROVAL 透传
                 .onComplete((inv, outcome) -> {
@@ -154,6 +159,43 @@ public class ToolRuntimeAspect {
             return toolResultPruner.prune(text);
         }
         return result;
+    }
+
+    /**
+     * 工具执行入原生账本记录器(recorder 缺席时静默跳过——非原生路径/
+     * reactor 线程执行的工具不记录,不报错)。
+     */
+    private void recordToLedger(MethodSignature signature, Object[] args, Object prunedResult) {
+        LedgerToolRecorder recorder = ToolExecutionContextHolder.getLedgerRecorder();
+        if (recorder == null) {
+            return;
+        }
+        recorder.record(resolveLedgerToolName(signature), argsJson(args), resultText(prunedResult));
+    }
+
+    /** 账本用的模型可见工具名:@Tool 注解 name 优先,否则方法名。 */
+    private String resolveLedgerToolName(MethodSignature signature) {
+        org.springframework.ai.tool.annotation.Tool anno =
+                signature.getMethod().getAnnotation(org.springframework.ai.tool.annotation.Tool.class);
+        if (anno != null && StringUtils.hasText(anno.name())) {
+            return anno.name();
+        }
+        return signature.getName();
+    }
+
+    private String argsJson(Object[] args) {
+        if (args == null || args.length == 0) {
+            return "[]";
+        }
+        try {
+            return OBJECT_MAPPER.writeValueAsString(args);
+        } catch (Exception ignored) {
+            return java.util.Arrays.deepToString(args);
+        }
+    }
+
+    private String resultText(Object result) {
+        return result == null ? "null" : String.valueOf(result);
     }
 
     private Object proceedWithTimeline(ProceedingJoinPoint joinPoint, ToolExecutionContext context,

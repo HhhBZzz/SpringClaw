@@ -264,9 +264,17 @@ springclaw:
     # 写侧双轨收口(spec 2026-08-18 §3.5): false=停写 USER/ASSISTANT CHAT 行(canonical 为唯一事实源);
     # 翻转前置条件见 spec §3.6。SYSTEM/TRACE/TOOL/审计/TASK 行不受此开关影响
     message-event-chat-write-enabled: ${SPRINGCLAW_RUNTIME_MESSAGE_EVENT_CHAT_WRITE_ENABLED:true}
+    # 原生消息账本(spec 2026-11-09): true=模型上下文走原生 messages(账本)路径;
+    # false 或账本装配失败 → 引擎回退 legacy 渲染文本 prompt
+    native-context-enabled: ${SPRINGCLAW_RUNTIME_NATIVE_CONTEXT_ENABLED:true}
   context:
     snapshot:
       factory-enabled: ${SPRINGCLAW_CONTEXT_SNAPSHOT_FACTORY_ENABLED:true}
+    # 账本预算与压缩(spec 2026-11-09 §3.6/§3.7):估算口径(TokenMeter CJK 感知)
+    token-budget-tokens: ${SPRINGCLAW_CONTEXT_TOKEN_BUDGET_TOKENS:24000}
+    compaction-enabled: ${SPRINGCLAW_CONTEXT_COMPACTION_ENABLED:true}
+    compaction-trigger-ratio: ${SPRINGCLAW_CONTEXT_COMPACTION_TRIGGER_RATIO:0.8}
+    compaction-keep-recent-messages: ${SPRINGCLAW_CONTEXT_COMPACTION_KEEP_RECENT_MESSAGES:6}
   memory:
     core:
       enabled: ${SPRINGCLAW_MEMORY_CORE_ENABLED:false}

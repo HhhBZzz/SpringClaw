@@ -7,6 +7,7 @@ import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.context.ContextInjection;
+import com.springclaw.service.context.ledger.RunMessageLedger;
 
 /**
  * 聊天请求的运行时上下文，封装了一次对话所需的所有元数据。
@@ -28,10 +29,35 @@ public record ChatContext(AgentSession session,
                           AgentDecision decision,
                           ContextInjection contextInjection,
                           ContextSnapshot contextSnapshot,
-                          AgentParadigm paradigm) {
+                          AgentParadigm paradigm,
+                          RunMessageLedger messageLedger) {
 
     public ChatContext {
         contextInjection = contextInjection == null ? ContextInjection.empty() : contextInjection;
+    }
+
+    // 兼容旧 18 参构造（无 messageLedger）:账本缺席时引擎走 legacy prompt
+    public ChatContext(AgentSession session,
+                       String channel,
+                       String userId,
+                       String roleCode,
+                       String userMessage,
+                       String effectiveUserMessage,
+                       String requestId,
+                       String systemPrompt,
+                       AssembledContext assembled,
+                       AiProviderService.ActiveChatClient activeClient,
+                       String executionMode,
+                       String routingReason,
+                       String responseMode,
+                       String intent,
+                       AgentDecision decision,
+                       ContextInjection contextInjection,
+                       ContextSnapshot contextSnapshot,
+                       AgentParadigm paradigm) {
+        this(session, channel, userId, roleCode, userMessage, effectiveUserMessage, requestId, systemPrompt,
+                assembled, activeClient, executionMode, routingReason, responseMode, intent, decision,
+                contextInjection, contextSnapshot, paradigm, null);
     }
 
     // 兼容旧 12 参构造（无 responseMode/intent/decision/contextInjection）

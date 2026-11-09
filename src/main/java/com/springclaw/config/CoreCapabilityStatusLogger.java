@@ -49,7 +49,10 @@ public class CoreCapabilityStatusLogger {
             off.add("db-persistence(消息事件持久化)");
         }
         if (!chatMemoryEnabled) {
-            off.add("chat-memory(Spring AI ChatMemory)");
+            // spec 2026-11-09:Spring AI ChatMemory advisor 不再是原生上下文的承载者——
+            // 原生消息账本(native-context-enabled,默认 true)已接替;此开关仅保留给
+            // 账本关闭时的 advisor 备选路径,不再计为降级项。
+            log.info("chat-memory advisor 未启用(默认):模型上下文由原生消息账本承载。");
         }
         if (!memoryCoreEnabled) {
             off.add("memory-core(核心记忆)");

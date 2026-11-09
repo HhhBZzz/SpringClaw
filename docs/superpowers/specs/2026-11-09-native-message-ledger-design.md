@@ -185,4 +185,29 @@ springclaw.context.compaction-keep-recent-messages: 6
 
 ## 附录 A: 实施结果
 
-(完成后回填)
+分支 `feat/native-context-ledger`(基于 main@54fa7134),5 commit,41 文件 +2071/-62。
+
+### 落地清单(按批次)
+
+| 批次 | 内容 | 关键文件 |
+|---|---|---|
+| P1 | RunMessageLedger(append/伪造工具消息对/pressure/replaceRange/markRunInitialized 幂等)、LedgerToolRecorder(步内收集,args 1200/结果 6000/32 条上限)、LedgerPromptSupport(native/legacy 双路,applyPrompt 显式 system)、ChatContext 增 messageLedger 组件(18 参兼容构造)、ChatContextFactory.canonical 装配(deriveFull 种子+记忆块置尾,失败 WARN 回退 null)、ToolRuntimeAspect 入账(@Tool name 优先)、TokenMeter @Component | service/context/ledger/*、ChatContextFactory、ToolRuntimeAspect |
+| P2 | BasicStream/ModelLedStream/SimplifiedOpar: applyPrompt 接入 + briefing 常量 + initRun 幂等;SimplifiedOpar legacy 重载保持调用方 systemPrompt 语义 | 三引擎 |
+| P3 | OparLoop(Plan/Act phase briefing+planResult/actOutput 入账,act 挂 recorder)、AutonomousLoop(每步 recorder→appendAssistantOutput,**跨步工具结果保留**)、ChatServiceImpl.streamReflectAnswer(reflect briefing+全量账本) | OparLoopEngine、AutonomousLoopEngine、ChatServiceImpl |
+| P4 | ReAct(稳定 system+Observation 入账)、Reflexion(尝试+反思教训入账)、PlanExecute(计划步+Observation)、MultiAgent(子任务+Worker 结果,账本 synchronized 支持跨线程);**TypedContextPromptRenderer.promptPrefix 在 native 模式返回空**(单点消除注入重复);四引擎旧签名兼容构造器,测试零改动 | 四引擎+Renderer |
+| P5 | LedgerCompactor(预算钳制 [2000,+∞)/ratio [0.3,0.99]/模型摘要降级硬截断)、RunEventType.context.compacted、RunCoordinator.contextCompacted、AgentLoopKernel 步前单点接线(ObjectProvider,缺席不阻塞)、AgentContextMetricsService.recordLedgerCompaction | LedgerCompactor、AgentLoopKernel |
+| P6 | ContextAssembler 正则抢救退役(looksLikeFileListing 等 4 函数删除,~90 行)、类注释降级为"展示投影层" | ContextAssembler |
+
+### 与设计的偏差(登记)
+
+1. **AgentRuntimeEngine 未迁移**:其两处模型调用是程序化 JSON 契约调用(证据反思器/摘要组装),prompt 全量由结构化产物构造、不含会话历史;接账本收益边际。列为后续候选,模式照 ReAct。
+2. **消息序契约微调**:ReAct 的 Observation 与 Reflexion 反思教训/PlanExecute 计划步/MultiAgent 子任务以 **user 消息**入账(文本协议范式的环境消息等价物),伪造 tool_use/tool_result 消息对仅用于原生工具引擎(Autonomous/OPAR-act)——文本协议下模型从未发出 tool_use,伪造反而失真。
+3. **压缩区间**:v1 压缩 [0, size-keepRecent)(含种子+记忆块),摘要指令强制保留任务目标;未做"种子豁免"(种子本身即历史,豁免会让压缩失效)。
+4. **ContextSnapshot 持久化格式未动**:账本是瞬态派生(每次 build 从 canonical 日志重派生),spec §3.2 的"挂 snapshot"改为"挂 ChatContext"——避免 RunState JSON 变更,回滚面更小。
+
+### 已知边界
+
+- 流式引擎(reactor 线程执行工具)读不到 ThreadLocal recorder→工具轮不入账(单发 run 无步间需求,降级为纯文本历史,不报错)。
+- 跨 run 工具轮不重建(种子仅 USER/ASSISTANT 原文)——TOOL_REQUESTED/SUCCEEDED 事件 payload 不含 args/结果,富化后可作 v2。
+- legacy 测试构造点注入 `new LedgerPromptSupport(false)`——既有 prompt 文本断言全部保留为 legacy 语义;native 路径由新增 5 个测试类(38 用例)覆盖。
+- 全量回归:Redis/MySQL 依赖的 6 个 @SpringBootTest 类在本机无服务环境下失败(基线 main 同样失败,已验证,非本改革回归)。

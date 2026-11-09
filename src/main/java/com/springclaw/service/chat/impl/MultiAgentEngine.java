@@ -73,11 +73,16 @@ public class MultiAgentEngine implements AgentEngine.StreamableAgentEngine {
 
     private static final Logger log = LoggerFactory.getLogger(MultiAgentEngine.class);
 
+    /** native 账本路径的 run briefing(legacy 等价物在各 render*Prompt 内)。 */
+    static final String MULTI_AGENT_BRIEFING = """
+            本次任务将由协调者分解为子任务并逐个执行,最后聚合为最终答案。""";
+
     private final AiProviderService aiProviderService;
     private final ToolOrchestrator toolOrchestrator;
     private final ModelTransportGuardService modelTransportGuardService;
     private final ModelCallExecutor modelCallExecutor;
     private final ConversationAdvisorSupport conversationAdvisorSupport;
+    private final LedgerPromptSupport ledgerPromptSupport;
     private final LocalExecutionSupport localExecutionSupport;
     private final ChatResponsePolicyService chatResponsePolicyService;
     private final SseEventBridge sseEventBridge;
@@ -102,6 +107,7 @@ public class MultiAgentEngine implements AgentEngine.StreamableAgentEngine {
                             ToolOrchestrator toolOrchestrator,
                             ModelTransportGuardService modelTransportGuardService,
                             ModelCallExecutor modelCallExecutor,
+                            LedgerPromptSupport ledgerPromptSupport,
                             ConversationAdvisorSupport conversationAdvisorSupport,
                             LocalExecutionSupport localExecutionSupport,
                             ChatResponsePolicyService chatResponsePolicyService,
@@ -116,6 +122,7 @@ public class MultiAgentEngine implements AgentEngine.StreamableAgentEngine {
         this.modelTransportGuardService = modelTransportGuardService;
         this.modelCallExecutor = modelCallExecutor;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
+        this.ledgerPromptSupport = ledgerPromptSupport;
         this.localExecutionSupport = localExecutionSupport;
         this.chatResponsePolicyService = chatResponsePolicyService;
         this.sseEventBridge = sseEventBridge;
@@ -124,6 +131,26 @@ public class MultiAgentEngine implements AgentEngine.StreamableAgentEngine {
         this.lifecycleObserver = lifecycleObserver;
         this.explicitToolExecutioner = explicitToolExecutioner;
         this.maxAgents = Math.max(1, Math.min(maxAgents, 8));
+    }
+
+    /** 兼容旧构造(无 ledgerPromptSupport):legacy prompt 路径。 */
+    public MultiAgentEngine(AiProviderService aiProviderService,
+                            ToolOrchestrator toolOrchestrator,
+                            ModelTransportGuardService modelTransportGuardService,
+                            ModelCallExecutor modelCallExecutor,
+                            ConversationAdvisorSupport conversationAdvisorSupport,
+                            LocalExecutionSupport localExecutionSupport,
+                            ChatResponsePolicyService chatResponsePolicyService,
+                            SseEventBridge sseEventBridge,
+                            ChatResultPersister chatResultPersister,
+                            ChatGuardService chatGuardService,
+                            RunLifecycleObserver lifecycleObserver,
+                            ExplicitToolExecutioner explicitToolExecutioner,
+                            int maxAgents) {
+        this(aiProviderService, toolOrchestrator, modelTransportGuardService, modelCallExecutor,
+                new LedgerPromptSupport(false), conversationAdvisorSupport, localExecutionSupport,
+                chatResponsePolicyService, sseEventBridge, chatResultPersister, chatGuardService,
+                lifecycleObserver, explicitToolExecutioner, maxAgents);
     }
 
     @Override
@@ -273,6 +300,8 @@ public class MultiAgentEngine implements AgentEngine.StreamableAgentEngine {
 
         try (ToolExecutionContextHolder.Scope scope = ToolExecutionContextHolder.open(toolContext)) {
             ToolExecutionContextHolder.setTracker(tracker); // 主线程也置共享 tracker(防御性,decompose/aggregate 不调工具)
+            // native 账本 briefing(幂等;legacy 路径 no-op)
+            ledgerPromptSupport.initRun(ctx, MULTI_AGENT_BRIEFING);
 
             // 1. 分解
             List<SubTask> decomposed = decompose(ctx, tools, activeClient);
@@ -393,6 +422,13 @@ public class MultiAgentEngine implements AgentEngine.StreamableAgentEngine {
             boolean hasAction = explicitToolExecutioner.hasActionLine(thought);
             String observation = hasAction
                     ? explicitToolExecutioner.execute(thought, tools, requestId) : "";
+            if (ledgerPromptSupport.nativeAvailable(ctx)) {
+                ctx.messageLedger().appendUser("[子任务] " + (task == null ? "" : task.description()));
+                ctx.messageLedger().appendAssistant(thought);
+                if (StringUtils.hasText(observation)) {
+                    ctx.messageLedger().appendUser("Observation:\n" + observation);
+                }
+            }
             return new WorkerResult(task, thought, observation, false);
         } catch (Exception ex) {
             log.warn("Multi-Agent Worker 失败: requestId={}, task={}, reason={}",
@@ -428,9 +464,11 @@ public class MultiAgentEngine implements AgentEngine.StreamableAgentEngine {
                     // 手动循环主路径:不挂 .tools()——LLM 文本输出 Thought + Action,Worker 下方
                     // ExplicitToolExecutioner 解析并手动执行工具(对齐 Reflexion/PlanExecute 的 LLM 调用模式)。
                     var resp = conversationAdvisorSupport.apply(
-                                    c.chatClient().prompt()
-                                            .system(systemPrompt)
-                                            .user(TypedContextPromptRenderer.question(ctx)),
+                                    ledgerPromptSupport.applyPrompt(
+                                            c.chatClient().prompt(),
+                                                    systemPrompt,
+                                                    ctx,
+                                                    TypedContextPromptRenderer.question(ctx)),
                                     sessionKey,
                                     ctx.userId())
                             .call()
@@ -600,9 +638,11 @@ public class MultiAgentEngine implements AgentEngine.StreamableAgentEngine {
                     true,
                     c -> {
                         var response = conversationAdvisorSupport.apply(
-                                        c.chatClient().prompt()
-                                                .system(systemPrompt)
-                                                .user(TypedContextPromptRenderer.question(ctx)),
+                                        ledgerPromptSupport.applyPrompt(
+                                                c.chatClient().prompt(),
+                                                        systemPrompt,
+                                                        ctx,
+                                                        TypedContextPromptRenderer.question(ctx)),
                                         ctx.assembled() == null ? "" : ctx.assembled().sessionKey(),
                                         ctx.userId())
                                 .call()
@@ -646,9 +686,11 @@ public class MultiAgentEngine implements AgentEngine.StreamableAgentEngine {
                     true,
                     c -> {
                         var resp = conversationAdvisorSupport.apply(
-                                        c.chatClient().prompt()
-                                                .system(systemPrompt)
-                                                .user(TypedContextPromptRenderer.question(ctx)),
+                                        ledgerPromptSupport.applyPrompt(
+                                                c.chatClient().prompt(),
+                                                        systemPrompt,
+                                                        ctx,
+                                                        TypedContextPromptRenderer.question(ctx)),
                                         sessionKey,
                                         ctx.userId())
                                 .call()

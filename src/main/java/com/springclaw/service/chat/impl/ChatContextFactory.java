@@ -11,20 +11,27 @@ import com.springclaw.runtime.bridge.LegacyContextViewAdapter;
 import com.springclaw.runtime.bridge.RunStateContextSnapshotRequestFactory;
 import com.springclaw.runtime.contract.ContextSnapshot;
 import com.springclaw.runtime.contract.ContextSnapshotFactory;
+import com.springclaw.runtime.history.ConversationHistoryDeriver;
+import com.springclaw.runtime.history.ConversationTurn;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.agent.AgentDecision;
 import com.springclaw.service.agent.AgentDecisionRequest;
 import com.springclaw.service.agent.AgentDecisionService;
 import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.service.auth.AuthService;
+import com.springclaw.service.chat.ConversationEventTextSupport;
 import com.springclaw.service.context.AssembledContext;
 import com.springclaw.service.context.ContextAssembler;
 import com.springclaw.service.context.ContextInjection;
+import com.springclaw.service.context.TokenMeter;
+import com.springclaw.service.context.ledger.RunMessageLedger;
 import com.springclaw.service.prompt.SoulPromptService;
 import com.springclaw.service.session.AgentSessionService;
 import com.springclaw.service.skill.SkillDefinition;
 import com.springclaw.service.skill.SkillService;
 import com.springclaw.service.skill.impl.SkillRegistryService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -34,6 +41,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -41,6 +49,8 @@ import java.util.stream.Stream;
  */
 @Component
 public class ChatContextFactory {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatContextFactory.class);
 
     private final AiProviderService aiProviderService;
     private final SoulPromptService soulPromptService;
@@ -59,6 +69,10 @@ public class ChatContextFactory {
             runStateContextSnapshotRequestFactoryProvider;
     private final ObjectProvider<CanonicalContextSnapshotResolver>
             canonicalContextSnapshotResolverProvider;
+    private final ObjectProvider<ConversationHistoryDeriver> conversationHistoryDeriverProvider;
+    private final TokenMeter tokenMeter;
+    private final boolean nativeContextEnabled;
+    private final int ledgerSeedMessages;
     private final boolean contextSnapshotFactoryEnabled;
     private final String configuredAgentMode;
     private final boolean routingAutoUpgradeEnabled;
@@ -79,6 +93,10 @@ public class ChatContextFactory {
                               ObjectProvider<AcceptedRunContextResolver> acceptedRunContextResolverProvider,
                               ObjectProvider<RunStateContextSnapshotRequestFactory> runStateContextSnapshotRequestFactoryProvider,
                               ObjectProvider<CanonicalContextSnapshotResolver> canonicalContextSnapshotResolverProvider,
+                              ObjectProvider<ConversationHistoryDeriver> conversationHistoryDeriverProvider,
+                              TokenMeter tokenMeter,
+                              @org.springframework.beans.factory.annotation.Value("${springclaw.runtime.native-context-enabled:true}") boolean nativeContextEnabled,
+                              @org.springframework.beans.factory.annotation.Value("${springclaw.chat.memory-window-size:8}") int ledgerSeedWindowTurns,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.context.snapshot.factory-enabled:true}") boolean contextSnapshotFactoryEnabled,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.agent-mode:simplified}") String configuredAgentMode,
                               @org.springframework.beans.factory.annotation.Value("${springclaw.chat.routing.auto-upgrade-enabled:true}") boolean routingAutoUpgradeEnabled) {
@@ -98,6 +116,10 @@ public class ChatContextFactory {
         this.runStateContextSnapshotRequestFactoryProvider =
                 runStateContextSnapshotRequestFactoryProvider;
         this.canonicalContextSnapshotResolverProvider = canonicalContextSnapshotResolverProvider;
+        this.conversationHistoryDeriverProvider = conversationHistoryDeriverProvider;
+        this.tokenMeter = tokenMeter == null ? new TokenMeter() : tokenMeter;
+        this.nativeContextEnabled = nativeContextEnabled;
+        this.ledgerSeedMessages = Math.max(2, Math.min(ledgerSeedWindowTurns, 20) * 2);
         this.contextSnapshotFactoryEnabled = contextSnapshotFactoryEnabled;
         this.configuredAgentMode = configuredAgentMode;
         this.routingAutoUpgradeEnabled = routingAutoUpgradeEnabled;
@@ -131,7 +153,56 @@ public class ChatContextFactory {
                 emptyProvider(),
                 emptyProvider(),
                 emptyProvider(),
+                emptyProvider(),
+                null,
                 false,
+                8,
+                false,
+                configuredAgentMode,
+                routingAutoUpgradeEnabled
+        );
+    }
+
+    /** 兼容旧 18 参构造(无账本依赖):原生账本路径缺席,引擎走 legacy prompt。 */
+    public ChatContextFactory(AiProviderService aiProviderService,
+                              SoulPromptService soulPromptService,
+                              AgentSessionService agentSessionService,
+                              AuthService authService,
+                              SkillService skillService,
+                              SkillRegistryService skillRegistryService,
+                              ContextAssembler contextAssembler,
+                              ChatRoutingStateService chatRoutingStateService,
+                              ChatRoutingPolicyService chatRoutingPolicyService,
+                              AgentDecisionService agentDecisionService,
+                              ObjectProvider<ContextSnapshotFactory> contextSnapshotFactoryProvider,
+                              ObjectProvider<LegacyContextViewAdapter> legacyContextViewAdapterProvider,
+                              ObjectProvider<AcceptedRunContextResolver> acceptedRunContextResolverProvider,
+                              ObjectProvider<RunStateContextSnapshotRequestFactory> runStateContextSnapshotRequestFactoryProvider,
+                              ObjectProvider<CanonicalContextSnapshotResolver> canonicalContextSnapshotResolverProvider,
+                              boolean contextSnapshotFactoryEnabled,
+                              String configuredAgentMode,
+                              boolean routingAutoUpgradeEnabled) {
+        this(
+                aiProviderService,
+                soulPromptService,
+                agentSessionService,
+                authService,
+                skillService,
+                skillRegistryService,
+                contextAssembler,
+                chatRoutingStateService,
+                chatRoutingPolicyService,
+                agentDecisionService,
+                contextSnapshotFactoryProvider,
+                legacyContextViewAdapterProvider,
+                acceptedRunContextResolverProvider,
+                runStateContextSnapshotRequestFactoryProvider,
+                canonicalContextSnapshotResolverProvider,
+                emptyProvider(),
+                null,
+                false,
+                8,
+                contextSnapshotFactoryEnabled,
                 configuredAgentMode,
                 routingAutoUpgradeEnabled
         );
@@ -232,8 +303,99 @@ public class ChatContextFactory {
                 planning.decision(),
                 view.injection(),
                 snapshot,
-                request.paradigm()
+                request.paradigm(),
+                buildMessageLedger(accepted, snapshot)
         );
+    }
+
+    /**
+     * 原生账本装配(spec 2026-11-09 §3.2):种子(deriveFull 原文历史)+
+     * 记忆块(MemoryBank/语义召回/程序化规则,单条 user 消息)。
+     * 装配失败(deriver 抛错等)返回 null——该请求引擎走 legacy prompt,
+     * WARN 可见,不静默。
+     */
+    private RunMessageLedger buildMessageLedger(AcceptedRunContext accepted, ContextSnapshot snapshot) {
+        if (!nativeContextEnabled) {
+            return null;
+        }
+        ConversationHistoryDeriver deriver = conversationHistoryDeriverProvider == null
+                ? null : conversationHistoryDeriverProvider.getIfAvailable();
+        if (deriver == null) {
+            return null;
+        }
+        try {
+            RunMessageLedger ledger = new RunMessageLedger(accepted.runId(), tokenMeter);
+            for (ConversationTurn turn : deriver.deriveFull(
+                    accepted.sessionKey(), ledgerSeedMessages)) {
+                appendTurn(ledger, turn);
+            }
+            String memoryBlock = renderMemoryBlock(snapshot);
+            if (StringUtils.hasText(memoryBlock)) {
+                ledger.appendUser(memoryBlock);
+            }
+            return ledger;
+        } catch (Exception ex) {
+            log.warn("原生账本装配失败,该请求回退 legacy prompt: runId={}, reason={}",
+                    accepted.runId(), ex.getMessage());
+            return null;
+        }
+    }
+
+    /** 种子映射:剥信封提取,与 MessageEventChatMemory.toChatMessage 语义一致。 */
+    private static void appendTurn(RunMessageLedger ledger, ConversationTurn turn) {
+        if (turn == null || !StringUtils.hasText(turn.content())) {
+            return;
+        }
+        switch (turn.role()) {
+            case USER -> {
+                String question = ConversationEventTextSupport.extractUserQuestion(turn.content());
+                if (StringUtils.hasText(question)) {
+                    ledger.appendUser(question);
+                }
+            }
+            case ASSISTANT -> {
+                String answer = ConversationEventTextSupport.extractAssistantAnswer(turn.content());
+                if (StringUtils.hasText(answer)) {
+                    ledger.appendAssistant(answer);
+                }
+            }
+            default -> {
+                // SYSTEM 诊断摘要不入账本(账本只承载对话语义)
+            }
+        }
+    }
+
+    /** 记忆块:查询相关检索内容置尾(前缀=system+历史保持稳定,适配前缀缓存)。 */
+    private static String renderMemoryBlock(ContextSnapshot snapshot) {
+        if (snapshot == null) {
+            return "";
+        }
+        StringBuilder block = new StringBuilder();
+        if (StringUtils.hasText(snapshot.memoryBankText())) {
+            block.append("# 项目记忆(Memory Bank)\n").append(snapshot.memoryBankText().strip());
+        }
+        appendList(block, "# 长期语义记忆(同会话优先)", snapshot.semanticRecallItems());
+        appendList(block, "# 程序化记忆(规则/经验)", snapshot.activeLearningRules());
+        if (block.isEmpty()) {
+            return "";
+        }
+        return "以下是检索到的长期记忆,仅供辅助参考,不能编造不存在的历史:\n\n" + block;
+    }
+
+    private static void appendList(StringBuilder block, String title, List<String> items) {
+        if (items == null || items.isEmpty()) {
+            return;
+        }
+        String joined = items.stream()
+                .filter(item -> item != null && !item.isBlank())
+                .collect(Collectors.joining("\n"));
+        if (joined.isBlank()) {
+            return;
+        }
+        if (block.length() > 0) {
+            block.append("\n\n");
+        }
+        block.append(title).append("\n").append(joined);
     }
 
     private ChatContext buildLegacy(

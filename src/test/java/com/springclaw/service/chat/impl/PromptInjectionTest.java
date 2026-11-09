@@ -95,6 +95,7 @@ class PromptInjectionTest {
         BasicStreamEngine engine = new BasicStreamEngine(
                 mock(ModelCallExecutor.class),
                 mock(ConversationAdvisorSupport.class),
+                new LedgerPromptSupport(false),
                 mock(ModelTransportGuardService.class),
                 mock(ChatResponsePolicyService.class),
                 mock(com.springclaw.service.usage.LlmUsageRecordService.class),
@@ -115,6 +116,7 @@ class PromptInjectionTest {
         BasicStreamEngine engine = new BasicStreamEngine(
                 mock(ModelCallExecutor.class),
                 mock(ConversationAdvisorSupport.class),
+                new LedgerPromptSupport(false),
                 mock(ModelTransportGuardService.class),
                 mock(ChatResponsePolicyService.class),
                 mock(com.springclaw.service.usage.LlmUsageRecordService.class),
@@ -145,6 +147,7 @@ class PromptInjectionTest {
                 mock(ModelCallExecutor.class),
                 mock(OparContextAwareSupport.class),
                 mock(ConversationAdvisorSupport.class),
+                new LedgerPromptSupport(false),
                 mock(ChatResponsePolicyService.class),
                 mock(LocalExecutionSupport.class)
         );
@@ -164,6 +167,7 @@ class PromptInjectionTest {
                 mock(ModelCallExecutor.class),
                 mock(OparContextAwareSupport.class),
                 mock(ConversationAdvisorSupport.class),
+                new LedgerPromptSupport(false),
                 mock(ChatResponsePolicyService.class),
                 mock(LocalExecutionSupport.class)
         );
@@ -180,6 +184,7 @@ class PromptInjectionTest {
     void modelLedStreamEngine_prependsInjection() {
         ModelLedStreamEngine engine = new ModelLedStreamEngine(
                 mock(ConversationAdvisorSupport.class),
+                new LedgerPromptSupport(false),
                 mock(ModelTransportGuardService.class),
                 mock(ChatResponsePolicyService.class),
                 mock(com.springclaw.service.usage.LlmUsageRecordService.class),
@@ -200,6 +205,7 @@ class PromptInjectionTest {
     void modelLedStreamEngine_rendersTypedSnapshotWhenCanonicalContextIsAvailable() {
         ModelLedStreamEngine engine = new ModelLedStreamEngine(
                 mock(ConversationAdvisorSupport.class),
+                new LedgerPromptSupport(false),
                 mock(ModelTransportGuardService.class),
                 mock(ChatResponsePolicyService.class),
                 mock(com.springclaw.service.usage.LlmUsageRecordService.class),
@@ -228,6 +234,8 @@ class PromptInjectionTest {
                 mock(ModelTransportGuardService.class),
                 mock(ModelCallExecutor.class),
                 mock(ConversationAdvisorSupport.class),
+
+                new LedgerPromptSupport(false),
                 mock(LocalExecutionSupport.class),
                 mock(ChatResponsePolicyService.class),
                 mock(SseEventBridge.class),
@@ -252,6 +260,8 @@ class PromptInjectionTest {
                 mock(ModelTransportGuardService.class),
                 mock(ModelCallExecutor.class),
                 mock(ConversationAdvisorSupport.class),
+
+                new LedgerPromptSupport(false),
                 mock(LocalExecutionSupport.class),
                 mock(ChatResponsePolicyService.class),
                 mock(SseEventBridge.class),

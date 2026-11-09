@@ -26,6 +26,8 @@ public final class RuntimeEngineTestFactory {
                 mock(OparContextAwareSupport.class),
                 mock(OparPromptSupport.class),
                 mock(ConversationAdvisorSupport.class),
+
+                new LedgerPromptSupport(false),
                 mock(LocalExecutionSupport.class),
                 mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class),
                 new com.springclaw.service.agent.kernel.AgentLoopKernel(
@@ -48,6 +50,7 @@ public final class RuntimeEngineTestFactory {
                 mock(ModelCallExecutor.class),
                 mock(OparContextAwareSupport.class),
                 mock(ConversationAdvisorSupport.class),
+                new LedgerPromptSupport(false),
                 mock(ChatResponsePolicyService.class),
                 mock(LocalExecutionSupport.class)
         );

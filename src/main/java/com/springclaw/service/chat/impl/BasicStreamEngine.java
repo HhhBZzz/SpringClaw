@@ -34,6 +34,7 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
 
     private final ModelCallExecutor modelCallExecutor;
     private final ConversationAdvisorSupport conversationAdvisorSupport;
+    private final LedgerPromptSupport ledgerPromptSupport;
     private final ModelTransportGuardService modelTransportGuardService;
     private final ChatResponsePolicyService chatResponsePolicyService;
     private final LlmUsageRecordService llmUsageRecordService;
@@ -44,8 +45,15 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
     private final RunLifecycleObserver lifecycleObserver;
     private final boolean basicStreamingEnabled;
 
+    /** native 账本路径的 briefing(legacy 等价物在 renderBasicChatPrompt 内)。 */
+    static final String BASIC_BRIEFING = """
+            直接回答用户问题，保持中文自然、完整、有重点。
+            这是普通聊天路径：不要调用工具，不要输出内部阶段名，不要提到路由、OPAR、兜底或实现细节。
+            如果问题本身需要外部文件、网页、项目源码或实时数据，简洁说明需要进入 Agent 工具链路。""";
+
     public BasicStreamEngine(ModelCallExecutor modelCallExecutor,
                              ConversationAdvisorSupport conversationAdvisorSupport,
+                             LedgerPromptSupport ledgerPromptSupport,
                              ModelTransportGuardService modelTransportGuardService,
                              ChatResponsePolicyService chatResponsePolicyService,
                              LlmUsageRecordService llmUsageRecordService,
@@ -57,6 +65,7 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
                              @Value("${springclaw.chat.basic-streaming-enabled:true}") boolean basicStreamingEnabled) {
         this.modelCallExecutor = modelCallExecutor;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
+        this.ledgerPromptSupport = ledgerPromptSupport;
         this.modelTransportGuardService = modelTransportGuardService;
         this.chatResponsePolicyService = chatResponsePolicyService;
         this.llmUsageRecordService = llmUsageRecordService;
@@ -119,10 +128,13 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
         AtomicBoolean finished = new AtomicBoolean(false);
 
         try {
+            ledgerPromptSupport.initRun(context, BASIC_BRIEFING);
             Disposable disposable = conversationAdvisorSupport.apply(
-                            streamClient.chatClient().prompt()
-                                    .system(context.systemPrompt())
-                                    .user(renderBasicChatPrompt(context)),
+                            ledgerPromptSupport.applyPrompt(
+                                    streamClient.chatClient().prompt(),
+                                    context.systemPrompt(),
+                                    context,
+                                    renderBasicChatPrompt(context)),
                             context.assembled().sessionKey(),
                             context.assembled().userId())
                     .stream()
@@ -215,6 +227,7 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
     @Override
     public ChatExecutionResult execute(ChatContext ctx, AgentEngine.FallbackResponder fallbackResponder) {
         try {
+            ledgerPromptSupport.initRun(ctx, BASIC_BRIEFING);
             ModelCallExecutor.ModelCallResult<String> result = modelCallExecutor.executeChat(
                     ctx.activeClient(),
                     "basic-answer",
@@ -227,9 +240,11 @@ public class BasicStreamEngine implements AgentEngine.StreamableAgentEngine {
                     true,
                     client -> {
                         var response = conversationAdvisorSupport.apply(
-                                        client.chatClient().prompt()
-                                                .system(ctx.systemPrompt())
-                                                .user(renderBasicChatPrompt(ctx)),
+                                        ledgerPromptSupport.applyPrompt(
+                                                client.chatClient().prompt(),
+                                                ctx.systemPrompt(),
+                                                ctx,
+                                                renderBasicChatPrompt(ctx)),
                                         ctx.assembled().sessionKey(),
                                         ctx.assembled().userId())
                                 .call()

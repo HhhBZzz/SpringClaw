@@ -197,4 +197,52 @@ class OparPromptSupport {
     private static String observe(AssembledContext context) {
         return context == null ? "" : context.observePrompt();
     }
+
+    // === native 账本路径的 phase briefing(spec 2026-11-09 §3.5) ===
+    // 问题/历史/观察已由账本消息承载,phase 消息只携带指令与阶段产物;
+    // legacy 全量渲染版本保留在上面(renderPlanPrompt/renderActionPrompt/renderReflectPrompt)。
+
+    /** native:Plan 阶段指令(结构化格式要求仍需随消息携带)。 */
+    String renderPlanBriefing(int stepNo, String structuredFormat) {
+        return """
+                [PLAN · Step %d] 你是 Agent Planner，请根据当前问题与会话历史，判断是否已经可以回答，或是否需要继续行动。
+                要求：
+                1) 简单问候、解释型问题、无需查证的问题，优先直接 READY；
+                2) 只有在确实需要工具、检索或实时信息时才 CONTINUE；
+                3) 总结 1-3 个最小必要步骤；
+                4) toolHints 只写工具类别，不要写内部实现细节；
+                5) 输出必须严格遵循下面格式说明，不能附加额外文本。
+
+                输出格式说明：
+                %s""".formatted(stepNo, TextUtils.safe(structuredFormat));
+    }
+
+    /** native:Act 阶段指令(计划文本为上一 Phase 的账本产物)。 */
+    String renderActionBriefing(int stepNo, String plan) {
+        return """
+                [ACT · Step %d] 根据以下计划执行当前步骤的行动。
+                如果计划需要工具，请调用工具并基于工具结果输出行动结论；
+                如果不需要工具，直接给出行动结论。
+                当用户未提供明确文件路径时，优先使用 WORKSPACE 检索再决定是否读写文件。
+                对于“项目里有没有某个类/配置/文件/实现”的问题，必须先用 WORKSPACE 工具找证据，再回答。
+                输出只保留“本步行动结果”，不要输出额外的身份说明。
+
+                计划：
+                %s""".formatted(stepNo, TextUtils.safe(plan));
+    }
+
+    /** native:Reflect 阶段指令(各步计划/行动与工具结果已在账本历史中)。 */
+    String renderReflectBriefing() {
+        return """
+                [REFLECT] 请基于以上完整对话历史（用户问题、各步计划与行动结果、工具返回），直接给用户一个自然、简洁、有帮助的最终答复。
+                输出规范（严格遵守）：
+                1) 用自然语言对话，不要复制粘贴原始数据行
+                2) 不要加"结论："、"依据："等标题前缀，直接回答
+                3) 如果是价格查询，用一句话总结：品种 + 当前价格（USD/CNY）+ 涨跌幅
+                4) 如果是天气查询，用一句话总结：城市 + 天气 + 温度 + 体感建议
+                5) 如果是分析/审查类，先说结论要点，再展开
+                6) 如果证据不足，简要说明并建议怎么改问
+                7) 绝对不要出现：工具名、执行路径、exitCode、qualityScore、verification、来源API名
+                8) 中文输出，简洁直接""";
+    }
 }

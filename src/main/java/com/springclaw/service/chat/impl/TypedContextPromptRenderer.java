@@ -22,6 +22,11 @@ final class TypedContextPromptRenderer {
         if (ctx == null) {
             return "";
         }
+        // native 账本路径(spec 2026-11-09):注入块(问题/历史/记忆)由账本消息承载,
+        // 不再重复进入 prompt 文本——legacy 渲染仅回退时使用。
+        if (ctx.messageLedger() != null) {
+            return "";
+        }
         ContextSnapshot snapshot = ctx.contextSnapshot();
         if (snapshot == null) {
             return ctx.contextInjection().renderForPrompt();

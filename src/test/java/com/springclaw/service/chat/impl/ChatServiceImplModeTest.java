@@ -439,6 +439,7 @@ class ChatServiceImplModeTest {
             return new BasicStreamEngine(
                     modelCallExecutor,
                     conversationAdvisorSupport,
+                    new LedgerPromptSupport(false),
                     modelTransportGuardService,
                     chatResponsePolicyService,
                     llmUsageRecordService,
@@ -455,6 +456,7 @@ class ChatServiceImplModeTest {
         private ModelLedStreamEngine modelLedStreamEngine(boolean modelLedStreamingEnabled) {
             return new ModelLedStreamEngine(
                     conversationAdvisorSupport,
+                    new LedgerPromptSupport(false),
                     modelTransportGuardService,
                     chatResponsePolicyService,
                     llmUsageRecordService,

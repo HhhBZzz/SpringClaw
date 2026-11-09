@@ -44,6 +44,7 @@ class OparLoopEngineDecisionTest {
                 contextAwareSupport,
                 promptSupport,
                 mock(ConversationAdvisorSupport.class),
+                new LedgerPromptSupport(false),
                 localExecutionSupport,
                 lifecycleObserver,
                 new com.springclaw.service.agent.kernel.AgentLoopKernel(
@@ -101,6 +102,7 @@ class OparLoopEngineDecisionTest {
                 mock(OparContextAwareSupport.class),
                 new OparPromptSupport(),
                 mock(ConversationAdvisorSupport.class),
+                new LedgerPromptSupport(false),
                 localExecutionSupport,
                 mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class),
                 new com.springclaw.service.agent.kernel.AgentLoopKernel(

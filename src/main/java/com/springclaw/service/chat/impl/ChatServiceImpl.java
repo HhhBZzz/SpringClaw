@@ -73,6 +73,7 @@ public class ChatServiceImpl implements ChatService {
     private final ToolInvocationProposalService proposalService;
     private final RunLifecycleObserver lifecycleObserver;
     private final RunIdentityFactory runIdentityFactory;
+    private final LedgerPromptSupport ledgerPromptSupport;
     private final boolean modelLedStreamingEnabled;
     private final boolean basicStreamingEnabled;
     private LocalFileWriteProposalService localFileWriteProposalService;
@@ -100,6 +101,7 @@ public class ChatServiceImpl implements ChatService {
                            ToolInvocationProposalService proposalService,
                            RunLifecycleObserver lifecycleObserver,
                            RunIdentityFactory runIdentityFactory,
+                           LedgerPromptSupport ledgerPromptSupport,
                            @Value("${springclaw.chat.model-led-streaming-enabled:false}") boolean modelLedStreamingEnabled,
                            @Value("${springclaw.chat.basic-streaming-enabled:true}") boolean basicStreamingEnabled) {
         this.aiProviderService = aiProviderService;
@@ -122,6 +124,8 @@ public class ChatServiceImpl implements ChatService {
         this.proposalService = proposalService;
         this.lifecycleObserver = lifecycleObserver;
         this.runIdentityFactory = runIdentityFactory;
+        this.ledgerPromptSupport = ledgerPromptSupport == null
+                ? new LedgerPromptSupport(false) : ledgerPromptSupport;
         this.modelLedStreamingEnabled = modelLedStreamingEnabled;
         this.basicStreamingEnabled = basicStreamingEnabled;
     }
@@ -129,6 +133,38 @@ public class ChatServiceImpl implements ChatService {
     @Autowired(required = false)
     void setLocalFileWriteProposalService(LocalFileWriteProposalService localFileWriteProposalService) {
         this.localFileWriteProposalService = localFileWriteProposalService;
+    }
+
+    /** 兼容旧 22 参构造(无 ledgerPromptSupport):legacy prompt 路径。 */
+    public ChatServiceImpl(AiProviderService aiProviderService,
+                           ChatGuardService chatGuardService,
+                           OparLoopEngine oparLoopEngine,
+                           SimplifiedOparEngine simplifiedOparEngine,
+                           ChatResponsePolicyService chatResponsePolicyService,
+                           ModelTransportGuardService modelTransportGuardService,
+                           LlmUsageRecordService llmUsageRecordService,
+                           ConversationAdvisorSupport conversationAdvisorSupport,
+                           ChatContextFactory chatContextFactory,
+                           ChatResultPersister chatResultPersister,
+                           MetaGuardExecutor metaGuardExecutor,
+                           ToolOrchestrator toolOrchestrator,
+                           AgentActionProposalService actionProposalService,
+                           AgentRuntimeEngine agentRuntimeEngine,
+                           EngineSelector engineSelector,
+                           LocalExecutionSupport localExecutionSupport,
+                           SseEventBridge sseEventBridge,
+                           ToolInvocationProposalService proposalService,
+                           RunLifecycleObserver lifecycleObserver,
+                           RunIdentityFactory runIdentityFactory,
+                           boolean modelLedStreamingEnabled,
+                           boolean basicStreamingEnabled) {
+        this(aiProviderService, chatGuardService, oparLoopEngine, simplifiedOparEngine,
+                chatResponsePolicyService, modelTransportGuardService, llmUsageRecordService,
+                conversationAdvisorSupport, chatContextFactory, chatResultPersister,
+                metaGuardExecutor, toolOrchestrator, actionProposalService, agentRuntimeEngine,
+                engineSelector, localExecutionSupport, sseEventBridge, proposalService,
+                lifecycleObserver, runIdentityFactory, null,
+                modelLedStreamingEnabled, basicStreamingEnabled);
     }
 
     @Autowired(required = false)
@@ -160,7 +196,7 @@ public class ChatServiceImpl implements ChatService {
                 chatResponsePolicyService, modelTransportGuardService, llmUsageRecordService,
                 conversationAdvisorSupport, chatContextFactory, chatResultPersister,
                 metaGuardExecutor, null, null, null, null, null, null, null, null,
-                new DefaultRunIdentityFactory(), false, true);
+                new DefaultRunIdentityFactory(), null, false, true);
     }
 
     @Override
@@ -553,11 +589,17 @@ public class ChatServiceImpl implements ChatService {
         StringBuilder fullAnswer = new StringBuilder();
         AiProviderService.ActiveChatClient reflectClient = aiProviderService.activeClient();
         String reflectPrompt = oparLoopEngine.renderReflectPrompt(context, executionResult.plan(), executionResult.action());
+        // native:reflect 指令入账本,各步计划/行动与工具结果由账本历史承载
+        if (ledgerPromptSupport.nativeAvailable(context)) {
+            context.messageLedger().appendUser(oparLoopEngine.renderNativeReflectBriefing());
+        }
         final org.springframework.ai.chat.model.ChatResponse[] latestStreamResponse = new org.springframework.ai.chat.model.ChatResponse[1];
         Disposable disposable = conversationAdvisorSupport.apply(
-                        reflectClient.chatClient().prompt()
-                                .system(context.systemPrompt())
-                                .user(reflectPrompt),
+                        ledgerPromptSupport.applyPrompt(
+                                reflectClient.chatClient().prompt(),
+                                context.systemPrompt(),
+                                context,
+                                reflectPrompt),
                         context.assembled().sessionKey(),
                         context.assembled().userId())
                 .stream()

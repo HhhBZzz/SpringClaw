@@ -31,8 +31,15 @@ public class SimplifiedOparEngine implements AgentEngine {
     private final ModelCallExecutor modelCallExecutor;
     private final OparContextAwareSupport contextAwareSupport;
     private final ConversationAdvisorSupport conversationAdvisorSupport;
+    private final LedgerPromptSupport ledgerPromptSupport;
     private final ChatResponsePolicyService chatResponsePolicyService;
     private final LocalExecutionSupport localExecutionSupport;
+
+    /** native 账本路径的 briefing(legacy 等价物在 renderUserPrompt 内)。 */
+    static final String SIMPLIFIED_BRIEFING = """
+            直接回答用户问题。
+            如果仍需要更多工具，你可以自行决定调用合适的工具；如果不需要工具，就直接给出最终答案。
+            不要输出阶段名、计划过程、内部系统说明。""";
 
     @org.springframework.beans.factory.annotation.Autowired
     public SimplifiedOparEngine(AiProviderService aiProviderService,
@@ -43,6 +50,7 @@ public class SimplifiedOparEngine implements AgentEngine {
                                 ModelCallExecutor modelCallExecutor,
                                 OparContextAwareSupport contextAwareSupport,
                                 ConversationAdvisorSupport conversationAdvisorSupport,
+                                LedgerPromptSupport ledgerPromptSupport,
                                 ChatResponsePolicyService chatResponsePolicyService,
                                 LocalExecutionSupport localExecutionSupport) {
         this.aiProviderService = aiProviderService;
@@ -53,6 +61,7 @@ public class SimplifiedOparEngine implements AgentEngine {
         this.modelCallExecutor = modelCallExecutor;
         this.contextAwareSupport = contextAwareSupport;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
+        this.ledgerPromptSupport = ledgerPromptSupport;
         this.chatResponsePolicyService = chatResponsePolicyService;
         this.localExecutionSupport = localExecutionSupport;
     }
@@ -173,6 +182,9 @@ public class SimplifiedOparEngine implements AgentEngine {
                 null
         );
         try (ToolExecutionContextHolder.Scope ignored = ToolExecutionContextHolder.open(toolContext)) {
+            if (chatContext != null) {
+                ledgerPromptSupport.initRun(chatContext, SIMPLIFIED_BRIEFING);
+            }
             ModelCallExecutor.ModelCallResult<String> result = modelCallExecutor.executeChat(
                     activeClient,
                     "simplified-answer",
@@ -184,11 +196,11 @@ public class SimplifiedOparEngine implements AgentEngine {
                     ),
                     true,
                     client -> {
-                        var requestSpec = client.chatClient().prompt()
-                                .system(systemPrompt)
-                                .user(chatContext == null
-                                        ? renderUserPrompt(injection, assembled.question())
-                                        : renderUserPrompt(chatContext));
+                        var requestSpec = ledgerPromptSupport.applyPrompt(
+                                client.chatClient().prompt(),
+                                systemPrompt,
+                                chatContext,
+                                renderUserPrompt(injection, assembled.question()));
                         if (tools != null && tools.length > 0) {
                             requestSpec = requestSpec.tools(tools);
                         }

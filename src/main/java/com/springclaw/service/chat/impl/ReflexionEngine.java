@@ -67,11 +67,17 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
 
     private static final Logger log = LoggerFactory.getLogger(ReflexionEngine.class);
 
+    /** native 账本路径的 run briefing(legacy 等价物在各 render*Prompt 内)。 */
+    static final String REFLEXION_BRIEFING = """
+            请以 Reflexion(尝试→反思→改进)方式完成上面的任务:先给出尝试答案,
+            系统会评估并给出反思教训;教训会累积进入后续轮次,持续改进。""";
+
     private final AiProviderService aiProviderService;
     private final ToolOrchestrator toolOrchestrator;
     private final ModelTransportGuardService modelTransportGuardService;
     private final ModelCallExecutor modelCallExecutor;
     private final ConversationAdvisorSupport conversationAdvisorSupport;
+    private final LedgerPromptSupport ledgerPromptSupport;
     private final LocalExecutionSupport localExecutionSupport;
     private final ChatResponsePolicyService chatResponsePolicyService;
     private final SseEventBridge sseEventBridge;
@@ -95,6 +101,7 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
                            ToolOrchestrator toolOrchestrator,
                            ModelTransportGuardService modelTransportGuardService,
                            ModelCallExecutor modelCallExecutor,
+                           LedgerPromptSupport ledgerPromptSupport,
                            ConversationAdvisorSupport conversationAdvisorSupport,
                            LocalExecutionSupport localExecutionSupport,
                            ChatResponsePolicyService chatResponsePolicyService,
@@ -110,6 +117,7 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
         this.modelTransportGuardService = modelTransportGuardService;
         this.modelCallExecutor = modelCallExecutor;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
+        this.ledgerPromptSupport = ledgerPromptSupport;
         this.localExecutionSupport = localExecutionSupport;
         this.chatResponsePolicyService = chatResponsePolicyService;
         this.sseEventBridge = sseEventBridge;
@@ -119,6 +127,27 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
         this.explicitToolExecutioner = explicitToolExecutioner;
         this.loopKernel = loopKernel;
         this.maxReflections = Math.max(1, Math.min(maxReflections, 5));
+    }
+
+    /** 兼容旧构造(无 ledgerPromptSupport):legacy prompt 路径。 */
+    public ReflexionEngine(AiProviderService aiProviderService,
+                           ToolOrchestrator toolOrchestrator,
+                           ModelTransportGuardService modelTransportGuardService,
+                           ModelCallExecutor modelCallExecutor,
+                           ConversationAdvisorSupport conversationAdvisorSupport,
+                           LocalExecutionSupport localExecutionSupport,
+                           ChatResponsePolicyService chatResponsePolicyService,
+                           SseEventBridge sseEventBridge,
+                           ChatResultPersister chatResultPersister,
+                           ChatGuardService chatGuardService,
+                           RunLifecycleObserver lifecycleObserver,
+                           ExplicitToolExecutioner explicitToolExecutioner,
+                           com.springclaw.service.agent.kernel.AgentLoopKernel loopKernel,
+                           int maxReflections) {
+        this(aiProviderService, toolOrchestrator, modelTransportGuardService, modelCallExecutor,
+                new LedgerPromptSupport(false), conversationAdvisorSupport, localExecutionSupport,
+                chatResponsePolicyService, sseEventBridge, chatResultPersister, chatGuardService,
+                lifecycleObserver, explicitToolExecutioner, loopKernel, maxReflections);
     }
 
     @Override
@@ -254,6 +283,9 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
         try (ToolExecutionContextHolder.Scope scope = ToolExecutionContextHolder.open(toolContext)) {
             ToolExecutionContextHolder.setTracker(tracker);
 
+            // native 账本 briefing(幂等;legacy 路径 no-op)
+            ledgerPromptSupport.initRun(ctx, REFLEXION_BRIEFING);
+
             // 循环骨架(步进/step 边界事件/空产出守护/max-steps 兜底)下沉 AgentLoopKernel,
             // 引擎只表达 Reflexion 差异:Actor 尝试 → Reflector 自评 → memory 累积。
             com.springclaw.service.agent.kernel.AgentLoopKernel.LoopOutcome<String> outcome =
@@ -386,6 +418,12 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
             // RX-T4 M1:raw 最终答案(用户可读的 clean 文本)。Actor 调工具 → 用 Observation 作本轮答案;
             // 纯文本作答(无 Action)→ 用 thought 原文。只进 reflect;attemptTrace 只进 action(轨迹)。
             s.lastAnswer = hasAction ? observation : thought;
+            if (ledgerPromptSupport.nativeAvailable(ctx)) {
+                ctx.messageLedger().appendAssistant(thought);
+                if (StringUtils.hasText(observation)) {
+                    ctx.messageLedger().appendUser("Observation:\n" + observation);
+                }
+            }
 
             if (emitter != null) {
                 try {
@@ -441,6 +479,9 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
 
             // 未完成 → lesson 累积进 memory,注入下一轮 Actor(Reflexion 自我纠错闭环)
             s.memory += "\n尝试 " + attempt + " 反思: " + reflection.lesson();
+            if (ledgerPromptSupport.nativeAvailable(ctx)) {
+                ctx.messageLedger().appendUser("[反思 · 尝试 " + attempt + "] " + reflection.lesson());
+            }
             return s;
         }
 
@@ -474,9 +515,11 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
                 // 手动循环主路径:不挂 .tools()——LLM 文本输出 Thought + Action,
                 // ExplicitToolExecutioner 解析并手动执行工具(对齐 ReAct/PlanExecute)。
                 var resp = conversationAdvisorSupport.apply(
-                                client.chatClient().prompt()
-                                        .system(systemPrompt)
-                                        .user(TypedContextPromptRenderer.question(ctx)),
+                                ledgerPromptSupport.applyPrompt(
+                                        client.chatClient().prompt(),
+                                                systemPrompt,
+                                                ctx,
+                                                TypedContextPromptRenderer.question(ctx)),
                                 sessionKey,
                                 ctx.userId())
                         .call()
@@ -511,9 +554,11 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
                     // 手动循环主路径:不挂 .tools()——LLM 文本输出 Thought + Action,循环下方
                     // ExplicitToolExecutioner 解析并手动执行工具(对齐 ReAct/PlanExecute 的 LLM 调用模式)。
                     var resp = conversationAdvisorSupport.apply(
-                                    c.chatClient().prompt()
-                                            .system(systemPrompt)
-                                            .user(TypedContextPromptRenderer.question(ctx)),
+                                    ledgerPromptSupport.applyPrompt(
+                                            c.chatClient().prompt(),
+                                                    systemPrompt,
+                                                    ctx,
+                                                    TypedContextPromptRenderer.question(ctx)),
                                     sessionKey,
                                     ctx.userId())
                             .call()
@@ -546,9 +591,11 @@ public class ReflexionEngine implements AgentEngine.StreamableAgentEngine {
                     allowFailover,
                     c -> {
                         var response = conversationAdvisorSupport.apply(
-                                        c.chatClient().prompt()
-                                                .system(systemPrompt)
-                                                .user(TypedContextPromptRenderer.question(ctx)),
+                                        ledgerPromptSupport.applyPrompt(
+                                                c.chatClient().prompt(),
+                                                        systemPrompt,
+                                                        ctx,
+                                                        TypedContextPromptRenderer.question(ctx)),
                                         sessionKey,
                                         ctx.userId())
                                 .call()

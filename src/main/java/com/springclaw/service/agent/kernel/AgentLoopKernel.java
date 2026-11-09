@@ -3,8 +3,11 @@ package com.springclaw.service.agent.kernel;
 import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.service.chat.impl.ChatContext;
 import com.springclaw.service.chat.impl.ModelCallExecutor;
+import com.springclaw.service.context.ledger.LedgerCompactor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -18,6 +21,9 @@ import java.util.List;
  * <p>已迁移引擎(Phase 2):ReAct/Reflexion/PlanExecute/AutonomousLoop/OparLoop,
  * 各以私有内部类实现 {@link LoopSpec} 表达差异;step 事件的唯一发射点在本类
  * runLoop(引擎不再内联 beginStep)。</p>
+ *
+ * <p>账本压缩(spec 2026-11-09 §3.6)挂在步进前——所有 kernel 引擎单点受益;
+ * compactor 缺席(测试/关停)时跳过。</p>
  */
 @Slf4j
 @Component
@@ -26,6 +32,9 @@ public class AgentLoopKernel {
 
     private final ModelCallExecutor modelCallExecutor;
     private final RunLifecycleObserver lifecycleObserver;
+
+    @Autowired(required = false)
+    private ObjectProvider<LedgerCompactor> ledgerCompactorProvider;
 
     /** D 段:模型调用骨架(failover/事件富化已由 ModelCallExecutor 承担)。 */
     public <T> ModelCallExecutor.ModelCallResult<T> callModel(KernelCall<T> call)
@@ -50,6 +59,7 @@ public class AgentLoopKernel {
         S state = spec.initState(chat);
         List<KernelResult<T>> steps = new ArrayList<>();
         for (int stepIndex = 0; stepIndex < spec.maxSteps(); stepIndex++) {
+            compactLedgerIfNeeded(chat);
             RunLifecycleObserver.StepScope scope =
                     lifecycleObserver.beginStep(requestId, stepIndex, spec.stepKind());
             try (scope) {
@@ -76,6 +86,22 @@ public class AgentLoopKernel {
         }
         // H 段 max-steps 兜底:非异常退出,按已达上限返回
         return new LoopOutcome<>(steps, false, "MAX_STEPS_REACHED", false, state);
+    }
+
+    /** 步前账本压缩(spec 2026-11-09 §3.6);compactor 缺席或异常均不阻塞步进。 */
+    private void compactLedgerIfNeeded(ChatContext chat) {
+        if (ledgerCompactorProvider == null) {
+            return;
+        }
+        LedgerCompactor compactor = ledgerCompactorProvider.getIfAvailable();
+        if (compactor == null) {
+            return;
+        }
+        try {
+            compactor.compactIfNeeded(chat);
+        } catch (RuntimeException ex) {
+            log.warn("步前账本压缩异常(忽略,继续步进): reason={}", ex.getMessage());
+        }
     }
 
     /** N 段:终局答案组装(基于终局 state)。 */

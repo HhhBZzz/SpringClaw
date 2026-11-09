@@ -43,6 +43,7 @@ class SimplifiedOparEngineTest {
                 modelCallExecutor,
                 contextAwareSupport,
                 conversationAdvisorSupport,
+                new LedgerPromptSupport(false),
                 mock(ChatResponsePolicyService.class),
                 localExecutionSupport
         );
@@ -117,6 +118,7 @@ class SimplifiedOparEngineTest {
                 modelCallExecutor,
                 contextAwareSupport,
                 conversationAdvisorSupport,
+                new LedgerPromptSupport(false),
                 chatResponsePolicyService,
                 localExecutionSupport
         );

@@ -153,6 +153,8 @@ class EngineSelectorTest {
                 mock(OparContextAwareSupport.class),
                 mock(OparPromptSupport.class),
                 mock(ConversationAdvisorSupport.class),
+
+                new LedgerPromptSupport(false),
                 mock(LocalExecutionSupport.class),
                 mock(com.springclaw.runtime.bridge.RunLifecycleObserver.class),
                 new com.springclaw.service.agent.kernel.AgentLoopKernel(

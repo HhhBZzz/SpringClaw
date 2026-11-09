@@ -38,6 +38,8 @@ class AutonomousLoopEngineStepBoundaryTest {
                 guard,
                 executor,
                 mock(ConversationAdvisorSupport.class),
+
+                new LedgerPromptSupport(false),
                 mock(LocalExecutionSupport.class),
                 mock(ChatResponsePolicyService.class),
                 mock(SseEventBridge.class),

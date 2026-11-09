@@ -60,6 +60,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
     private final ModelTransportGuardService modelTransportGuardService;
     private final ModelCallExecutor modelCallExecutor;
     private final ConversationAdvisorSupport conversationAdvisorSupport;
+    private final LedgerPromptSupport ledgerPromptSupport;
     private final LocalExecutionSupport localExecutionSupport;
     private final ChatResponsePolicyService chatResponsePolicyService;
     private final SseEventBridge sseEventBridge;
@@ -75,6 +76,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
                                 ModelTransportGuardService modelTransportGuardService,
                                 ModelCallExecutor modelCallExecutor,
                                 ConversationAdvisorSupport conversationAdvisorSupport,
+                                LedgerPromptSupport ledgerPromptSupport,
                                 LocalExecutionSupport localExecutionSupport,
                                 ChatResponsePolicyService chatResponsePolicyService,
                                 SseEventBridge sseEventBridge,
@@ -89,6 +91,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
         this.modelTransportGuardService = modelTransportGuardService;
         this.modelCallExecutor = modelCallExecutor;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
+        this.ledgerPromptSupport = ledgerPromptSupport;
         this.localExecutionSupport = localExecutionSupport;
         this.chatResponsePolicyService = chatResponsePolicyService;
         this.sseEventBridge = sseEventBridge;
@@ -241,6 +244,8 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
         try (ToolExecutionContextHolder.Scope scope = ToolExecutionContextHolder.open(toolContext)) {
             // 将 tracker 注册到线程上下文，让 WorkspaceEditToolPack 的 @Tool 方法可以记录
             ToolExecutionContextHolder.setTracker(tracker);
+            // native 账本 briefing(幂等;legacy 路径 no-op)
+            ledgerPromptSupport.initRun(ctx, renderAutonomousBriefing(riskLevel));
 
             // 循环骨架(步进/step 边界事件/空产出守护/max-steps 兜底)下沉 AgentLoopKernel,
             // 引擎只表达 Autonomous 差异:.tools() 原生工具往返 + TASK_COMPLETE/TASK_FAILED 标记判定。
@@ -251,9 +256,11 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
 
             // 清理 tracker
             ToolExecutionContextHolder.clearTracker();
+            ToolExecutionContextHolder.clearLedgerRecorder();
 
         } catch (Exception ex) {
             ToolExecutionContextHolder.clearTracker();
+            ToolExecutionContextHolder.clearLedgerRecorder();
             log.warn("自主循环执行失败: requestId={}, reason={}", requestId, ex.getMessage());
             LocalSkillFallbackService.LocalSkillResult fallback = localExecutionSupport.tryFallback(assembled.question(), localFallbackEnabled);
             return new ChatExecutionResult(
@@ -364,6 +371,14 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
 
             final String systemPrompt = ctx.systemPrompt();
             final String promptForStep = s.prompt;
+            // native:每步挂新 recorder,本步工具执行入账;legacy 为 null
+            final com.springclaw.service.context.ledger.LedgerToolRecorder stepRecorder;
+            if (ledgerPromptSupport.nativeAvailable(ctx)) {
+                stepRecorder = new com.springclaw.service.context.ledger.LedgerToolRecorder();
+                ToolExecutionContextHolder.setLedgerRecorder(stepRecorder);
+            } else {
+                stepRecorder = null;
+            }
             ModelCallExecutor.ModelCallResult<String> callResult;
             try {
                 callResult = loopCtx.kernel().callModel(new KernelCall<>(
@@ -377,9 +392,11 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
                         ),
                         allowFailover,
                         client -> {
-                            var requestSpec = client.chatClient().prompt()
-                                    .system(systemPrompt)
-                                    .user(promptForStep);
+                            var requestSpec = ledgerPromptSupport.applyPrompt(
+                                    client.chatClient().prompt(),
+                                    systemPrompt,
+                                    ctx,
+                                    promptForStep);
                             if (tools != null && tools.length > 0) {
                                 requestSpec = requestSpec.tools(tools);
                             }
@@ -399,6 +416,17 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
             }
             s.activeClient = callResult.client(); // failover 后更新
             s.prompt = callResult.value(); // evaluate 若判 continue 会重渲染覆盖
+            // native:本步工具记录伪造入账 + 步文本入账(跨步工具结果保留的关键路径)
+            if (stepRecorder != null) {
+                ToolExecutionContextHolder.clearLedgerRecorder();
+                java.util.List<com.springclaw.service.context.ledger.ToolRecord> stepRecords =
+                        new java.util.ArrayList<>(stepRecorder.drain());
+                if (stepRecorder.isOverflowed()) {
+                    ctx.messageLedger().appendUser("（本步工具调用超出账本记录上限，部分调用未入历史。）");
+                    stepRecorder.resetOverflow();
+                }
+                ctx.messageLedger().appendAssistantOutput(stepRecords, callResult.value());
+            }
             return s;
         }
 
@@ -459,6 +487,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
                 String rejectionHint = tracker.renderFakeCompletionRejection(riskLevel);
                 s.prompt = renderAutonomousPrompt(ctx, tools,
                         buildStepHistory(stepSummaries) + "\n\n" + rejectionHint, riskLevel);
+                nativeAppendHint(ctx, rejectionHint);
                 if (emitter != null) {
                     try {
                         sseEventBridge.sendTrace(emitter, ctx, "假完成拦截",
@@ -490,6 +519,7 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
                         + "不要只用纯文本描述你做了什么。";
                 s.prompt = renderAutonomousPrompt(ctx, tools,
                         buildStepHistory(stepSummaries) + "\n\n" + toolHint, riskLevel);
+                nativeAppendHint(ctx, toolHint);
                 return KernelResult.continuing(null);
             }
 
@@ -508,6 +538,41 @@ public class AutonomousLoopEngine implements AgentEngine.StreamableAgentEngine {
     }
 
     // === Prompt 渲染 ===
+
+    /** native:步间提示注入(legacy 重渲染路径的账本等价物)。 */
+    private void nativeAppendHint(ChatContext ctx, String hint) {
+        if (ledgerPromptSupport.nativeAvailable(ctx) && StringUtils.hasText(hint)) {
+            ctx.messageLedger().appendUser(hint);
+        }
+    }
+
+    /**
+     * native 账本路径的 run briefing:renderAutonomousPrompt 的指令核心,
+     * 去除问题/历史/工具清单(账本与 .tools() 原生挂载已承载)。
+     */
+    String renderAutonomousBriefing(String riskLevel) {
+        return """
+                # SpringClaw 自主 Agent 执行循环
+
+                你是一个自主执行 Agent，可以自主决定每一步做什么来完成任务。
+                工具已通过原生工具协议挂载，每一步自主选择调用哪个工具。
+                观察工具输出后，自主判断下一步是继续操作还是任务已完成。
+
+                # 完成规则
+                %s
+
+                # 执行规则
+                1. 每一步自主决定调用哪个工具——先读、再改、再验证，按需组合
+                2. 调用工具后仔细观察输出结果，根据结果决定下一步
+                3. 修改代码前先读取文件确认当前内容，避免盲目修改
+                4. 修改代码后用 workspaceRunCommand 验证（编译检查、跑测试）
+                5. 如果验证失败，读取错误信息，再次修改，循环直到成功
+                6. 任务完成后，在回答开头标记 TASK_COMPLETE 并给出简要总结
+                7. 任务无法完成时，在回答开头标记 TASK_FAILED 并说明原因
+                8. 不要输出空内容，每一步都要有实际操作或判断
+                9. 重要：不要只用纯文本描述你做了什么——必须实际调用工具执行操作
+                """.formatted(renderCompletionRule(riskLevel));
+    }
 
     String renderAutonomousPrompt(ChatContext ctx, Object[] tools, String history, String riskLevel) {
         String toolList = renderToolList(tools);

@@ -336,6 +336,8 @@ class RuntimeRouteCharacterizationTest {
                     modelTransportGuardService,
                     mock(ModelCallExecutor.class),
                     mock(ConversationAdvisorSupport.class),
+
+                    new LedgerPromptSupport(false),
                     mock(LocalExecutionSupport.class),
                     mock(ChatResponsePolicyService.class),
                     mock(SseEventBridge.class),

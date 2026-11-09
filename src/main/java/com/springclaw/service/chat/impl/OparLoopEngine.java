@@ -8,6 +8,7 @@ import com.springclaw.runtime.bridge.RunLifecycleObserver;
 import com.springclaw.runtime.contract.AgentParadigm;
 import com.springclaw.service.chat.LocalSkillFallbackService;
 import com.springclaw.service.context.AssembledContext;
+import com.springclaw.service.context.ledger.LedgerToolRecorder;
 import com.springclaw.tool.runtime.ToolExecutionContext;
 import com.springclaw.tool.runtime.ToolExecutionContextHolder;
 import com.springclaw.tool.runtime.ToolOrchestrator;
@@ -38,6 +39,7 @@ public class OparLoopEngine implements AgentEngine {
     private final OparContextAwareSupport contextAwareSupport;
     private final OparPromptSupport promptSupport;
     private final ConversationAdvisorSupport conversationAdvisorSupport;
+    private final LedgerPromptSupport ledgerPromptSupport;
     private final LocalExecutionSupport localExecutionSupport;
     private final RunLifecycleObserver lifecycleObserver;
     private final com.springclaw.service.agent.kernel.AgentLoopKernel loopKernel;
@@ -45,6 +47,12 @@ public class OparLoopEngine implements AgentEngine {
     private final boolean localFallbackEnabled;
     private final boolean localFallbackFirst;
     private final int maxAgentSteps;
+
+    /** native 账本路径的 run briefing(legacy 等价物在 OparPromptSupport 全量渲染内)。 */
+    static final String OPAR_BRIEFING = """
+            你将以 OPAR(Observe-Plan-Act-Reflect)方式完成本次任务：
+            每一步先判断是否已有足够信息直接回答(READY)，否则继续收集(CONTINUE)并按计划调用工具行动。
+            会话历史、项目记忆与工具结果都在消息历史中，按需引用，不要编造。""";
 
     public OparLoopEngine(AiProviderService aiProviderService,
                           ToolOrchestrator toolOrchestrator,
@@ -55,6 +63,7 @@ public class OparLoopEngine implements AgentEngine {
                           OparContextAwareSupport contextAwareSupport,
                           OparPromptSupport promptSupport,
                           ConversationAdvisorSupport conversationAdvisorSupport,
+                          LedgerPromptSupport ledgerPromptSupport,
                           LocalExecutionSupport localExecutionSupport,
                           RunLifecycleObserver lifecycleObserver,
                           com.springclaw.service.agent.kernel.AgentLoopKernel loopKernel,
@@ -70,6 +79,7 @@ public class OparLoopEngine implements AgentEngine {
         this.contextAwareSupport = contextAwareSupport;
         this.promptSupport = promptSupport;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
+        this.ledgerPromptSupport = ledgerPromptSupport;
         this.localExecutionSupport = localExecutionSupport;
         this.lifecycleObserver = lifecycleObserver;
         this.loopKernel = loopKernel;
@@ -217,6 +227,9 @@ public class OparLoopEngine implements AgentEngine {
 
         String observePrompt = assembled.observePrompt();
         List<AgentStep> steps = new ArrayList<>();
+        if (chatContext != null) {
+            ledgerPromptSupport.initRun(chatContext, OPAR_BRIEFING);
+        }
         // 循环骨架(步进/step 边界事件/max-steps 兜底)下沉 AgentLoopKernel,
         // 引擎只表达 OPAR 差异:每步 Plan+Act 双模型调用与 ready/降级终止判定。
         com.springclaw.service.agent.kernel.AgentLoopKernel.LoopOutcome<String> outcome =
@@ -365,6 +378,11 @@ public class OparLoopEngine implements AgentEngine {
         return promptSupport.renderReflectPrompt(context, plan, action);
     }
 
+    /** native:Reflect 阶段指令(各步产物与工具结果已在账本历史中)。 */
+    public String renderNativeReflectBriefing() {
+        return promptSupport.renderReflectBriefing();
+    }
+
     public String renderMetaRepairPrompt(AssembledContext context, String plan, String action, String badAnswer) {
         return promptSupport.renderMetaRepairPrompt(context, plan, action, badAnswer);
     }
@@ -413,6 +431,8 @@ public class OparLoopEngine implements AgentEngine {
                             stepNo,
                             planOutputConverter.getFormat()
                     );
+            // native:phase 指令入账本,历史由账本承载(legacy 全量渲染仅作回退)
+            nativeAppendPlanPhase(chatContext, stepNo, planOutputConverter.getFormat());
             ModelCallExecutor.ModelCallResult<PlanResult> callResult = modelCallExecutor.executeChat(
                     activeClient,
                     "plan",
@@ -425,9 +445,11 @@ public class OparLoopEngine implements AgentEngine {
                     true,
                     client -> {
                         var response = conversationAdvisorSupport.apply(
-                                        client.chatClient().prompt()
-                                                .system(systemPrompt)
-                                                .user(planPrompt),
+                                        ledgerPromptSupport.applyPrompt(
+                                                client.chatClient().prompt(),
+                                                systemPrompt,
+                                                chatContext,
+                                                planPrompt),
                                         assembled.sessionKey(),
                                         assembled.userId())
                                 .call()
@@ -438,6 +460,7 @@ public class OparLoopEngine implements AgentEngine {
                         );
                     }
             );
+            nativeAppendPlanResult(chatContext, stepNo, callResult.value());
             return new PlanCallResult(normalizePlanResult(callResult.value(), !history.isEmpty()), callResult.client(), false);
         } catch (Exception ex) {
             log.warn("Plan 阶段失败，sessionKey={}, reason={}", assembled.sessionKey(), ex.getMessage());
@@ -480,6 +503,8 @@ public class OparLoopEngine implements AgentEngine {
             String actionPrompt = chatContext == null
                     ? promptSupport.renderActionPrompt(assembled, plan.planText(), renderedHistory, stepNo)
                     : promptSupport.renderActionPrompt(chatContext, plan.planText(), renderedHistory, stepNo);
+            // native:act phase 指令入账本 + 工具记录器挂载(步末伪造 tool_use/result 消息对)
+            LedgerToolRecorder actRecorder = nativeBeginActPhase(chatContext, stepNo, plan.planText());
             ModelCallExecutor.ModelCallResult<String> callResult = modelCallExecutor.executeChat(
                     activeClient,
                     "action",
@@ -491,9 +516,11 @@ public class OparLoopEngine implements AgentEngine {
                     ),
                     allowFailover,
                     client -> {
-                        var requestSpec = client.chatClient().prompt()
-                                .system(systemPrompt)
-                                .user(actionPrompt);
+                        var requestSpec = ledgerPromptSupport.applyPrompt(
+                                client.chatClient().prompt(),
+                                systemPrompt,
+                                chatContext,
+                                actionPrompt);
                         if (tools != null && tools.length > 0) {
                             requestSpec = requestSpec.tools(tools);
                         }
@@ -509,6 +536,7 @@ public class OparLoopEngine implements AgentEngine {
                         );
                     }
             );
+            nativeEndActPhase(chatContext, actRecorder, callResult.value());
             return new ActionCallResult(new ActionResult(safe(callResult.value()), false), callResult.client());
         } catch (Exception ex) {
             log.warn("Act 阶段失败，sessionKey={}, reason={}", assembled.sessionKey(), ex.getMessage());
@@ -520,6 +548,50 @@ public class OparLoopEngine implements AgentEngine {
                     activeClient
             );
         }
+    }
+
+    // === native 账本 phase 助手(spec 2026-11-09 §3.5):legacy 路径下全部 no-op ===
+
+    private void nativeAppendPlanPhase(ChatContext chatContext, int stepNo, String structuredFormat) {
+        if (chatContext == null || !ledgerPromptSupport.nativeAvailable(chatContext)) {
+            return;
+        }
+        chatContext.messageLedger().appendUser(promptSupport.renderPlanBriefing(stepNo, structuredFormat));
+    }
+
+    private void nativeAppendPlanResult(ChatContext chatContext, int stepNo, PlanResult plan) {
+        if (chatContext == null || !ledgerPromptSupport.nativeAvailable(chatContext) || plan == null) {
+            return;
+        }
+        chatContext.messageLedger().appendAssistant("[PLAN · Step " + stepNo + "] "
+                + safe(plan.getStatus()) + " " + safe(plan.getSummary()) + "\n" + safe(plan.planText()));
+    }
+
+    /** native:act phase 开始——phase 指令入账本 + 工具记录器挂载;legacy 返回 null。 */
+    private LedgerToolRecorder nativeBeginActPhase(ChatContext chatContext, int stepNo, String planText) {
+        if (chatContext == null || !ledgerPromptSupport.nativeAvailable(chatContext)) {
+            return null;
+        }
+        chatContext.messageLedger().appendUser(promptSupport.renderActionBriefing(stepNo, planText));
+        LedgerToolRecorder recorder = new LedgerToolRecorder();
+        ToolExecutionContextHolder.setLedgerRecorder(recorder);
+        return recorder;
+    }
+
+    /** native:act phase 结束——工具记录伪造入账 + 行动文本入账;recorder 为 null 时 no-op。 */
+    private void nativeEndActPhase(ChatContext chatContext, LedgerToolRecorder recorder, String actionText) {
+        if (recorder == null) {
+            return;
+        }
+        ToolExecutionContextHolder.clearLedgerRecorder();
+        java.util.List<com.springclaw.service.context.ledger.ToolRecord> records =
+                new ArrayList<>(recorder.drain());
+        if (recorder.isOverflowed()) {
+            chatContext.messageLedger().appendUser(
+                    "（本步工具调用超出账本记录上限，部分调用未入历史。）");
+            recorder.resetOverflow();
+        }
+        chatContext.messageLedger().appendAssistantOutput(records, actionText);
     }
 
     private PlanResult normalizePlanResult(PlanResult rawResult, boolean hasHistory) {

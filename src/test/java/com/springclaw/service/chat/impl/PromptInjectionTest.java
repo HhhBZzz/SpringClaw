@@ -234,6 +234,8 @@ class PromptInjectionTest {
                 mock(ModelTransportGuardService.class),
                 mock(ModelCallExecutor.class),
                 mock(ConversationAdvisorSupport.class),
+
+                new LedgerPromptSupport(false),
                 mock(LocalExecutionSupport.class),
                 mock(ChatResponsePolicyService.class),
                 mock(SseEventBridge.class),
@@ -258,6 +260,8 @@ class PromptInjectionTest {
                 mock(ModelTransportGuardService.class),
                 mock(ModelCallExecutor.class),
                 mock(ConversationAdvisorSupport.class),
+
+                new LedgerPromptSupport(false),
                 mock(LocalExecutionSupport.class),
                 mock(ChatResponsePolicyService.class),
                 mock(SseEventBridge.class),

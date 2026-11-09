@@ -68,11 +68,17 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
 
     private static final Logger log = LoggerFactory.getLogger(PlanExecuteEngine.class);
 
+    /** native 账本路径的 run briefing(legacy 等价物在各 render*Prompt 内)。 */
+    static final String PLAN_EXECUTE_BRIEFING = """
+            请以 Plan-Execute(先规划再执行)方式完成上面的任务:系统先生成结构化计划,
+            再逐步执行;执行偏差会触发重规划。""";
+
     private final AiProviderService aiProviderService;
     private final ToolOrchestrator toolOrchestrator;
     private final ModelTransportGuardService modelTransportGuardService;
     private final ModelCallExecutor modelCallExecutor;
     private final ConversationAdvisorSupport conversationAdvisorSupport;
+    private final LedgerPromptSupport ledgerPromptSupport;
     private final LocalExecutionSupport localExecutionSupport;
     private final ChatResponsePolicyService chatResponsePolicyService;
     private final SseEventBridge sseEventBridge;
@@ -97,6 +103,7 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
                              ToolOrchestrator toolOrchestrator,
                              ModelTransportGuardService modelTransportGuardService,
                              ModelCallExecutor modelCallExecutor,
+                             LedgerPromptSupport ledgerPromptSupport,
                              ConversationAdvisorSupport conversationAdvisorSupport,
                              LocalExecutionSupport localExecutionSupport,
                              ChatResponsePolicyService chatResponsePolicyService,
@@ -112,6 +119,7 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
         this.modelTransportGuardService = modelTransportGuardService;
         this.modelCallExecutor = modelCallExecutor;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
+        this.ledgerPromptSupport = ledgerPromptSupport;
         this.localExecutionSupport = localExecutionSupport;
         this.chatResponsePolicyService = chatResponsePolicyService;
         this.sseEventBridge = sseEventBridge;
@@ -121,6 +129,27 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
         this.explicitToolExecutioner = explicitToolExecutioner;
         this.loopKernel = loopKernel;
         this.maxReplan = Math.max(0, Math.min(maxReplan, 5));
+    }
+
+    /** 兼容旧构造(无 ledgerPromptSupport):legacy prompt 路径。 */
+    public PlanExecuteEngine(AiProviderService aiProviderService,
+                             ToolOrchestrator toolOrchestrator,
+                             ModelTransportGuardService modelTransportGuardService,
+                             ModelCallExecutor modelCallExecutor,
+                             ConversationAdvisorSupport conversationAdvisorSupport,
+                             LocalExecutionSupport localExecutionSupport,
+                             ChatResponsePolicyService chatResponsePolicyService,
+                             SseEventBridge sseEventBridge,
+                             ChatResultPersister chatResultPersister,
+                             ChatGuardService chatGuardService,
+                             RunLifecycleObserver lifecycleObserver,
+                             ExplicitToolExecutioner explicitToolExecutioner,
+                             com.springclaw.service.agent.kernel.AgentLoopKernel loopKernel,
+                             int maxReplan) {
+        this(aiProviderService, toolOrchestrator, modelTransportGuardService, modelCallExecutor,
+                new LedgerPromptSupport(false), conversationAdvisorSupport, localExecutionSupport,
+                chatResponsePolicyService, sseEventBridge, chatResultPersister, chatGuardService,
+                lifecycleObserver, explicitToolExecutioner, loopKernel, maxReplan);
     }
 
     @Override
@@ -254,6 +283,9 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
 
         try (ToolExecutionContextHolder.Scope scope = ToolExecutionContextHolder.open(toolContext)) {
             ToolExecutionContextHolder.setTracker(tracker);
+
+            // native 账本 briefing(幂等;legacy 路径 no-op)
+            ledgerPromptSupport.initRun(ctx, PLAN_EXECUTE_BRIEFING);
 
             // 外层 replan 循环骨架(步进/step 边界事件/max-steps 兜底)下沉 AgentLoopKernel;
             // 内层 Execute 逐步留在 nextStep 内部(一步 replan = 内部子序列,不发独立 step 事件,
@@ -414,6 +446,13 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
                 String observation = hasAction
                         ? explicitToolExecutioner.execute(thought, tools, requestId) : "";
                 executedSteps.add(new ExecuteStep(step, thought, observation));
+                if (ledgerPromptSupport.nativeAvailable(ctx)) {
+                    ctx.messageLedger().appendUser("[执行计划步骤] " + step);
+                    ctx.messageLedger().appendAssistant(thought);
+                    if (StringUtils.hasText(observation)) {
+                        ctx.messageLedger().appendUser("Observation:\n" + observation);
+                    }
+                }
                 history += buildStepHistory(step, thought, observation, stepIndex);
 
                 if (emitter != null) {
@@ -542,9 +581,11 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
                     // 手动循环主路径:不挂 .tools()——LLM 文本输出 Thought + Action,
                     // 循环下方 ExplicitToolExecutioner 解析并手动执行工具(对齐 ReActEngine L268-282)。
                     var resp = conversationAdvisorSupport.apply(
-                                    c.chatClient().prompt()
-                                            .system(systemPrompt)
-                                            .user(TypedContextPromptRenderer.question(ctx)),
+                                    ledgerPromptSupport.applyPrompt(
+                                            c.chatClient().prompt(),
+                                                    systemPrompt,
+                                                    ctx,
+                                                    TypedContextPromptRenderer.question(ctx)),
                                     sessionKey,
                                     ctx.userId())
                             .call()
@@ -818,9 +859,11 @@ public class PlanExecuteEngine implements AgentEngine.StreamableAgentEngine {
                     true,
                     c -> {
                         var response = conversationAdvisorSupport.apply(
-                                        c.chatClient().prompt()
-                                                .system(systemPrompt)
-                                                .user(TypedContextPromptRenderer.question(ctx)),
+                                        ledgerPromptSupport.applyPrompt(
+                                                c.chatClient().prompt(),
+                                                        systemPrompt,
+                                                        ctx,
+                                                        TypedContextPromptRenderer.question(ctx)),
                                         ctx.assembled() == null ? "" : ctx.assembled().sessionKey(),
                                         ctx.userId())
                                 .call()

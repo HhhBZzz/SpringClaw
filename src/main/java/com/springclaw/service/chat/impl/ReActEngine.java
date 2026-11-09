@@ -75,6 +75,7 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
     private final ModelTransportGuardService modelTransportGuardService;
     private final ModelCallExecutor modelCallExecutor;
     private final ConversationAdvisorSupport conversationAdvisorSupport;
+    private final LedgerPromptSupport ledgerPromptSupport;
     private final LocalExecutionSupport localExecutionSupport;
     private final ChatResponsePolicyService chatResponsePolicyService;
     private final SseEventBridge sseEventBridge;
@@ -90,6 +91,7 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
                        ModelTransportGuardService modelTransportGuardService,
                        ModelCallExecutor modelCallExecutor,
                        ConversationAdvisorSupport conversationAdvisorSupport,
+                       LedgerPromptSupport ledgerPromptSupport,
                        LocalExecutionSupport localExecutionSupport,
                        ChatResponsePolicyService chatResponsePolicyService,
                        SseEventBridge sseEventBridge,
@@ -104,6 +106,7 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
         this.modelTransportGuardService = modelTransportGuardService;
         this.modelCallExecutor = modelCallExecutor;
         this.conversationAdvisorSupport = conversationAdvisorSupport;
+        this.ledgerPromptSupport = ledgerPromptSupport;
         this.localExecutionSupport = localExecutionSupport;
         this.chatResponsePolicyService = chatResponsePolicyService;
         this.sseEventBridge = sseEventBridge;
@@ -113,6 +116,27 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
         this.explicitToolExecutioner = explicitToolExecutioner;
         this.loopKernel = loopKernel;
         this.maxReactSteps = Math.max(1, Math.min(maxReactSteps, 15));
+    }
+
+    /** 兼容旧构造(无 ledgerPromptSupport):legacy prompt 路径。 */
+    public ReActEngine(AiProviderService aiProviderService,
+                       ToolOrchestrator toolOrchestrator,
+                       ModelTransportGuardService modelTransportGuardService,
+                       ModelCallExecutor modelCallExecutor,
+                       ConversationAdvisorSupport conversationAdvisorSupport,
+                       LocalExecutionSupport localExecutionSupport,
+                       ChatResponsePolicyService chatResponsePolicyService,
+                       SseEventBridge sseEventBridge,
+                       ChatResultPersister chatResultPersister,
+                       ChatGuardService chatGuardService,
+                       RunLifecycleObserver lifecycleObserver,
+                       ExplicitToolExecutioner explicitToolExecutioner,
+                       AgentLoopKernel loopKernel,
+                       int maxReactSteps) {
+        this(aiProviderService, toolOrchestrator, modelTransportGuardService, modelCallExecutor,
+                conversationAdvisorSupport, new LedgerPromptSupport(false), localExecutionSupport,
+                chatResponsePolicyService, sseEventBridge, chatResultPersister, chatGuardService,
+                lifecycleObserver, explicitToolExecutioner, loopKernel, maxReactSteps);
     }
 
     @Override
@@ -248,6 +272,8 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
             // tracker 注册到线程上下文,WorkspaceEditToolPack / ScriptSkillToolPack 的 @Tool
             // 方法经 ToolRuntimeAspect 时上报到这里(对齐 AutonomousLoopEngine L235)。
             ToolExecutionContextHolder.setTracker(tracker);
+            // native 账本 briefing(幂等;legacy 路径 no-op)
+            ledgerPromptSupport.initRun(ctx, REACT_BRIEFING);
 
             // 循环骨架(步进/step 边界事件/空产出守护/max-steps 兜底)下沉 AgentLoopKernel,
             // 引擎只表达 ReAct 差异:每步一次模型调用 + Action 解析执行 + 终止判定。
@@ -350,7 +376,10 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
                 }
             }
 
-            final String systemPrompt = renderReActPrompt(ctx, tools, s.history, riskLevel);
+            // native:稳定 system(协议指令+工具+完成规则,无历史);legacy:每步全量渲染(历史嵌 system)
+            final String systemPrompt = ledgerPromptSupport.nativeAvailable(ctx)
+                    ? renderReActStableSystem(tools, riskLevel)
+                    : renderReActPrompt(ctx, tools, s.history, riskLevel);
             final AssembledContext assembled = ctx.assembled();
             ModelCallExecutor.ModelCallResult<String> callResult;
             try {
@@ -365,9 +394,11 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
                         ),
                         allowFailover,
                         client -> {
-                            var req = client.chatClient().prompt()
-                                    .system(systemPrompt)
-                                    .user(TypedContextPromptRenderer.question(ctx));
+                            var req = ledgerPromptSupport.applyPrompt(
+                                    client.chatClient().prompt(),
+                                    systemPrompt,
+                                    ctx,
+                                    TypedContextPromptRenderer.question(ctx));
                             // 手动循环主路径:不挂 .tools()——LLM 按 ReAct 协议文本输出
                             // Thought + Action,下方 ExplicitToolExecutioner 解析并手动执行工具
                             // (经典 ReAct 多步可见循环,所有模型一致)。
@@ -418,6 +449,13 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
             }
 
             s.history = buildReActHistory(steps);
+            // native:Thought/Action 文本 + Observation 以消息入账(append-only,替代重渲染历史)
+            if (ledgerPromptSupport.nativeAvailable(ctx)) {
+                ctx.messageLedger().appendAssistant(thought);
+                if (StringUtils.hasText(observation)) {
+                    ctx.messageLedger().appendUser("Observation:\n" + observation);
+                }
+            }
 
             // 终止判定:本轮无工具调用(纯最终答案)。read 直接完成;write/side_effect/
             // dangerous 必须校验 tracker 工具证据(假完成守护,对齐 AutonomousLoop L309-345)。
@@ -442,6 +480,9 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
                     } catch (Exception ignored) {}
                 }
                 s.history = buildReActHistory(steps) + "\n\n" + rejection;
+                if (ledgerPromptSupport.nativeAvailable(ctx)) {
+                    ctx.messageLedger().appendUser(rejection);
+                }
                 return KernelResult.continuing(null);
             }
             return KernelResult.continuing(null);
@@ -556,6 +597,36 @@ public class ReActEngine implements AgentEngine.StreamableAgentEngine {
      * 工具列表 + 完成规则 + 历史,差异在协议——ReAct 要求模型按 Thought/Action/Observation 输出,
      * 引擎解析 Action 调工具,把 Observation 回灌下一轮。</p>
      */
+    /** native 账本路径的 run briefing(协议框架;细则在稳定 system 中)。 */
+    static final String REACT_BRIEFING = """
+            请以 ReAct(Thought-Action-Observation)协议完成上面的任务。
+            每一步输出 Thought 与 Action(或最终答案);工具结果会以 Observation 消息返回到对话历史。""";
+
+    /**
+     * native:稳定 system(协议指令+工具清单+完成规则)——不含注入/问题/历史
+     * (账本消息已承载),跨步不变,保前缀缓存。
+     */
+    String renderReActStableSystem(Object[] tools, String riskLevel) {
+        return """
+                你是 ReAct Agent,按 Thought-Action-Observation 循环推理。
+
+                # 推理协议
+                每一步:先输出 Thought(简短推理:分析现状、决定下一步),再决定:
+                  - 调用一个工具 → 输出一行 Action: 工具名(参数名="值", ...),例如 Action: search(query="Spring AI")
+                    工具会被引擎执行,结果作为下一步的 Observation;若工具无参数则写 Action: 工具名()
+                  - 或已得到最终答案 → 直接输出最终答案(不输出 Action 视为完成)
+
+                # 可用工具
+                %s
+
+                # 完成规则
+                %s
+
+                # 现在输出下一步的 Thought(与 Action 或最终答案):
+                """.formatted(ToolReflectionSupport.renderToolList(tools),
+                renderReActCompletionRule(riskLevel));
+    }
+
     String renderReActPrompt(ChatContext ctx, Object[] tools, String history, String riskLevel) {
         String template = """
                 {{INJECTION}}你是 ReAct Agent,按 Thought-Action-Observation 循环推理。

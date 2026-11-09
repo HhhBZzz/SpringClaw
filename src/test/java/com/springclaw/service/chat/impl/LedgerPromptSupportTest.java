@@ -56,7 +56,7 @@ class LedgerPromptSupportTest {
         ChatContext ctx = contextWithLedger(ledger);
 
         ChatClient.ChatClientRequestSpec spec = mockSpec();
-        support.applyPrompt(spec, ctx, "legacy 渲染文本");
+        support.applyPrompt(spec, null, ctx, "legacy 渲染文本");
 
         verify(spec).system("SOUL");
         verify(spec).messages(ledger.view());
@@ -71,7 +71,7 @@ class LedgerPromptSupportTest {
         ChatContext ctx = contextWithLedger(ledger);
 
         ChatClient.ChatClientRequestSpec spec = mockSpec();
-        support.applyPrompt(spec, ctx, "legacy 渲染文本");
+        support.applyPrompt(spec, null, ctx, "legacy 渲染文本");
 
         verify(spec).system("SOUL");
         verify(spec).user("legacy 渲染文本");
@@ -84,12 +84,12 @@ class LedgerPromptSupportTest {
 
         // 账本缺席(装配失败回退)
         ChatClient.ChatClientRequestSpec specAbsent = mockSpec();
-        support.applyPrompt(specAbsent, contextWithLedger(null), "legacy 文本");
+        support.applyPrompt(specAbsent, null, contextWithLedger(null), "legacy 文本");
         verify(specAbsent).user("legacy 文本");
 
         // 账本为空(无种子无 briefing)不发送空 messages
         ChatClient.ChatClientRequestSpec specEmpty = mockSpec();
-        support.applyPrompt(specEmpty, contextWithLedger(new RunMessageLedger("r", new TokenMeter())), "legacy 文本");
+        support.applyPrompt(specEmpty, null, contextWithLedger(new RunMessageLedger("r", new TokenMeter())), "legacy 文本");
         verify(specEmpty).user("legacy 文本");
     }
 

@@ -8,6 +8,7 @@ import com.springclaw.service.agent.EngineSelector;
 import com.springclaw.service.ai.AiProviderService;
 import com.springclaw.service.chat.impl.AutonomousLoopEngine;
 import com.springclaw.service.chat.impl.BasicStreamEngine;
+import com.springclaw.service.chat.impl.LedgerPromptSupport;
 import com.springclaw.service.chat.impl.ChatContext;
 import com.springclaw.service.chat.impl.ChatResponsePolicyService;
 import com.springclaw.service.chat.impl.ChatResultPersister;
@@ -311,6 +312,7 @@ class RuntimeRouteCharacterizationTest {
             basicStreamEngine = new BasicStreamEngine(
                     mock(ModelCallExecutor.class),
                     mock(ConversationAdvisorSupport.class),
+                    new LedgerPromptSupport(false),
                     modelTransportGuardService,
                     mock(ChatResponsePolicyService.class),
                     mock(LlmUsageRecordService.class),
@@ -347,6 +349,7 @@ class RuntimeRouteCharacterizationTest {
             );
             modelLedStreamEngine = new ModelLedStreamEngine(
                     mock(ConversationAdvisorSupport.class),
+                    new LedgerPromptSupport(false),
                     modelTransportGuardService,
                     mock(ChatResponsePolicyService.class),
                     mock(LlmUsageRecordService.class),

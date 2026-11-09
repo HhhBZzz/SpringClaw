@@ -36,6 +36,7 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
     private static final Logger log = LoggerFactory.getLogger(ModelLedStreamEngine.class);
 
     private final ConversationAdvisorSupport conversationAdvisorSupport;
+    private final LedgerPromptSupport ledgerPromptSupport;
     private final ModelTransportGuardService modelTransportGuardService;
     private final ChatResponsePolicyService chatResponsePolicyService;
     private final LlmUsageRecordService llmUsageRecordService;
@@ -47,7 +48,16 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
     private final RunLifecycleObserver lifecycleObserver;
     private final boolean modelLedStreamingEnabled;
 
+    /** native 账本路径的 briefing(legacy 等价物在 renderModelLedPrompt 内)。 */
+    static final String MODEL_LED_BRIEFING = """
+            请像成熟 Agent 一样完成这次请求：
+            - 需要查项目、文件、网页、天气、脚本 skill 时，优先调用可用工具拿证据。
+            - 工具结果只是证据，最终回答要由你组织成完整中文回复。
+            - 不要输出内部阶段名、route、OPAR、兜底、本地工具等实现词。
+            - 回答要有结论、依据和下一步；如果信息不足，明确说明还缺什么。""";
+
     public ModelLedStreamEngine(ConversationAdvisorSupport conversationAdvisorSupport,
+                                LedgerPromptSupport ledgerPromptSupport,
                                 ModelTransportGuardService modelTransportGuardService,
                                 ChatResponsePolicyService chatResponsePolicyService,
                                 LlmUsageRecordService llmUsageRecordService,
@@ -59,6 +69,7 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
                                 RunLifecycleObserver lifecycleObserver,
                                 @Value("${springclaw.chat.model-led-streaming-enabled:false}") boolean modelLedStreamingEnabled) {
         this.conversationAdvisorSupport = conversationAdvisorSupport;
+        this.ledgerPromptSupport = ledgerPromptSupport;
         this.modelTransportGuardService = modelTransportGuardService;
         this.chatResponsePolicyService = chatResponsePolicyService;
         this.llmUsageRecordService = llmUsageRecordService;
@@ -130,6 +141,7 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
                         false
                 );
             }
+            ledgerPromptSupport.initRun(ctx, MODEL_LED_BRIEFING);
             ModelCallExecutor.ModelCallResult<String> result = modelCallExecutor.executeChat(
                     client,
                     "model-led-blocking",
@@ -138,9 +150,11 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
                             ctx.assembled().channel(), ctx.assembled().userId()),
                     true,
                     activeClient -> {
-                        var requestSpec = activeClient.chatClient().prompt()
-                                .system(ctx.systemPrompt())
-                                .user(renderModelLedPrompt(ctx));
+                        var requestSpec = ledgerPromptSupport.applyPrompt(
+                                activeClient.chatClient().prompt(),
+                                ctx.systemPrompt(),
+                                ctx,
+                                renderModelLedPrompt(ctx));
                         if (tools != null && tools.length > 0) {
                             requestSpec = requestSpec.tools(tools);
                         }
@@ -216,9 +230,12 @@ public class ModelLedStreamEngine implements AgentEngine.StreamableAgentEngine {
             Object[] tools = toolOrchestrator == null
                     ? new Object[0]
                     : toolOrchestrator.selectAgentTools(context.channel(), context.userId(), context.decision());
-            var requestSpec = streamClient.chatClient().prompt()
-                    .system(context.systemPrompt())
-                    .user(renderModelLedPrompt(context));
+            ledgerPromptSupport.initRun(context, MODEL_LED_BRIEFING);
+            var requestSpec = ledgerPromptSupport.applyPrompt(
+                    streamClient.chatClient().prompt(),
+                    context.systemPrompt(),
+                    context,
+                    renderModelLedPrompt(context));
             if (tools != null && tools.length > 0) {
                 requestSpec = requestSpec.tools(tools);
             }

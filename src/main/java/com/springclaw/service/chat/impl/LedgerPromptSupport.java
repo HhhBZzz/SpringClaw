@@ -32,32 +32,41 @@ public class LedgerPromptSupport {
     /**
      * run 初始化:把 briefing(范式指令)与当前问题合并为账本首条任务消息。
      * 账本在 ChatContextFactory 已完成种子(历史+记忆块),此处只追加任务;
-     * 引擎在循环开始前调用一次,legacy 路径 no-op。
+     * 幂等——stream 失败 fallback 重入 execute 时不会重复追加。
+     * legacy 路径 no-op。
      */
     public void initRun(ChatContext ctx, String briefing) {
         if (!nativeAvailable(ctx)) {
+            return;
+        }
+        RunMessageLedger ledger = ctx.messageLedger();
+        if (!ledger.markRunInitialized()) {
             return;
         }
         String question = TypedContextPromptRenderer.question(ctx);
         String combined = StringUtils.hasText(briefing)
                 ? briefing.strip() + "\n\n# 任务\n" + (question == null ? "" : question.strip())
                 : (question == null ? "" : question.strip());
-        ctx.messageLedger().appendUser(combined);
+        ledger.appendUser(combined);
     }
 
     /**
      * 应用 prompt:native → messages(账本);legacy → user(引擎渲染文本)。
-     * 引擎每步调用;步间演化通过账本 append 表达,legacyPrompt 仅回退时使用。
+     * systemPrompt 由引擎传入(legacy 重载路径的 system 可能来自调用方而非 ctx);
+     * 空白时回退 ctx.systemPrompt()。引擎每步调用;步间演化通过账本 append 表达,
+     * legacyPrompt 仅回退时使用。
      */
     public ChatClient.ChatClientRequestSpec applyPrompt(
             ChatClient.ChatClientRequestSpec spec,
+            String systemPrompt,
             ChatContext ctx,
             String legacyPrompt) {
+        String system = StringUtils.hasText(systemPrompt) ? systemPrompt : systemOf(ctx);
         RunMessageLedger ledger = ctx == null ? null : ctx.messageLedger();
         if (nativeContextEnabled && ledger != null && ledger.size() > 0) {
-            return spec.system(systemOf(ctx)).messages(ledger.view());
+            return spec.system(system).messages(ledger.view());
         }
-        return spec.system(systemOf(ctx)).user(legacyPrompt == null ? "" : legacyPrompt);
+        return spec.system(system).user(legacyPrompt == null ? "" : legacyPrompt);
     }
 
     private static String systemOf(ChatContext ctx) {

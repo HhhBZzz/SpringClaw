@@ -28,10 +28,25 @@ public final class RunMessageLedger {
     private final List<Message> messages = new ArrayList<>();
     private final AtomicInteger callSeq = new AtomicInteger();
     private volatile int cachedTokens;
+    private boolean runInitialized;
 
     public RunMessageLedger(String runId, TokenMeter tokenMeter) {
         this.runId = runId == null ? "" : runId;
         this.tokenMeter = tokenMeter == null ? new TokenMeter() : tokenMeter;
+    }
+
+    /** run 任务消息是否已初始化(briefing+问题)。 */
+    public synchronized boolean isRunInitialized() {
+        return runInitialized;
+    }
+
+    /** 标记初始化;重复调用返回 false(幂等,fallback 重入防重复 briefing)。 */
+    public synchronized boolean markRunInitialized() {
+        if (runInitialized) {
+            return false;
+        }
+        runInitialized = true;
+        return true;
     }
 
     public String runId() {

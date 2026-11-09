@@ -48,6 +48,7 @@ public final class RuntimeEngineTestFactory {
                 mock(ModelCallExecutor.class),
                 mock(OparContextAwareSupport.class),
                 mock(ConversationAdvisorSupport.class),
+                new LedgerPromptSupport(false),
                 mock(ChatResponsePolicyService.class),
                 mock(LocalExecutionSupport.class)
         );

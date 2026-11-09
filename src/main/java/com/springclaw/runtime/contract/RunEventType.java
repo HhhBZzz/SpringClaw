@@ -36,6 +36,7 @@ public enum RunEventType {
     TURN_COMPLETED("turn.completed"),
     ASSISTANT_ANSWER("assistant.answer"),
     VERIFICATION_STARTED("verification.started"),
+    CONTEXT_COMPACTED("context.compacted"),
     MEMORY_EXTRACTED("memory.extracted"),
     REFLECTED("reflect.completed"),
     ANSWER_COMPOSED("answer.composed"),

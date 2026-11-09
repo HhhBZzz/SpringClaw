@@ -258,6 +258,19 @@ public final class RunCoordinator {
                 Map.of("answer", nullToEmpty(answer), "answerKind", nullToEmpty(answerKind)));
     }
 
+    /**
+     * 上下文压缩(spec 2026-11-09 §3.6):observation 级事件,不改状态机——
+     * 压缩发生在步间,run 仍处 RUNNING。
+     */
+    public RunEvent contextCompacted(String runId, String method, int beforeTokens,
+                                     int afterTokens, int droppedMessages, Instant at) {
+        return appendStructuredObservation(runId, RunEventType.CONTEXT_COMPACTED, at, 0,
+                Map.of("method", nullToEmpty(method),
+                        "beforeTokens", Math.max(0, beforeTokens),
+                        "afterTokens", Math.max(0, afterTokens),
+                        "droppedMessages", Math.max(0, droppedMessages)));
+    }
+
     public RunState verifying(String runId, Instant at) {
         RunState current = require(runId);
         return commit(
